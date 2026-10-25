@@ -171,17 +171,20 @@ func (f *Factory) providerStatus(p string) string {
 
 func (f *Factory) providerAvailable(p string) bool { return f.providerStatus(p) == "available" }
 
-// handleAgents lists the agent choices, whether each is available here, and who reviews.
+// handleAgents lists the agent choices, whether each is available here, remaining usage, and who reviews.
 func (f *Factory) handleAgents(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		AgentChoice
-		Available bool   `json:"available"`
-		Status    string `json:"status"`
+		Available bool       `json:"available"`
+		Status    string     `json:"status"`
+		Usage     AgentUsage `json:"usage"`
 	}
+	usages := f.providerUsages()
 	rows := []row{}
 	for _, a := range AgentChoices {
-		st := f.providerStatus(a.providerID())
-		rows = append(rows, row{a, st == "available", st})
+		p := a.providerID()
+		st := f.providerStatus(p)
+		rows = append(rows, row{a, st == "available", st, usages[p]})
 	}
 	writeJSON(w, 200, map[string]any{"agents": rows, "default": defaultAgent, "reviewer": ReviewerModel})
 }

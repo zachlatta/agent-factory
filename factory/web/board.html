@@ -59,6 +59,15 @@ main{padding:12px 16px 80px;overflow-x:auto}
 .tier.architecture{background:#fbefff;color:var(--purple)}
 .tier.routine{background:#eef1f4;color:var(--mute)}
 .tiers{font-size:12px;margin:6px 0 10px;display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:baseline}
+.ausage{margin:4px 0 8px;border:1px solid var(--line);border-radius:6px;background:#f6f8fa;font-size:12px}
+.ausage .arow{display:grid;grid-template-columns:minmax(110px,1.1fr) 1fr auto;gap:8px;align-items:center;padding:4px 8px;border-top:1px solid #eaeef2;cursor:pointer}
+.ausage .arow:first-child{border-top:0}
+.ausage .arow.on{background:#ddf4ff}
+.ausage .arow.off{opacity:.5;cursor:default}
+.ausage .abar{display:inline-flex;align-items:center;gap:4px;margin-right:8px}
+.ausage .abar i{display:inline-block;width:36px;height:6px;border-radius:3px;background:#dce1e7;overflow:hidden}
+.ausage .abar i b{display:block;height:100%;background:var(--green)}
+.ausage .abar i b.mid{background:var(--amber)}.ausage .abar i b.low{background:var(--red)}
 .kids{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px}
 .kid{font-size:10.5px;padding:0 5px;border-radius:4px;background:#eef1f4;color:var(--mute)}
 .kid.reviewer{background:#fbefff;color:var(--purple)}
@@ -194,6 +203,7 @@ dialog h3{margin:0 0 8px}
   <div class="tiers" id="nTiers"></div>
   <label class="sub">Repo</label><br><select id="nRepo" style="width:100%;margin-bottom:8px"></select>
   <label class="sub">Agent (plans and builds it)</label><br><select id="nAgent" style="width:100%"></select>
+  <div class="ausage" id="nAgentUsage"></div>
   <div class="sub" id="nAgentNote" style="margin:2px 0 8px;min-height:1em"></div>
   <label class="sub">What should it do?</label>
   <input id="nFocus" placeholder="Focus path for Suggest ideas (optional), e.g. factory/web" style="width:100%;margin-bottom:8px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
@@ -220,8 +230,29 @@ function toast(t){ const e=$('toast'); e.textContent=t; e.style.display='block';
 let AG = {agents:[], default:'opus'}; // GET /api/agents: who can plan and build a card
 async function loadAgents(){ try{ AG = await (await fetch('api/agents')).json(); }catch(e){} }
 const agentLabel = id => (AG.agents.find(a=>a.id===id)||{}).label || id;
+function inTime(iso){ if(!iso) return ''; const h=(Date.parse(iso)-Date.now())/3600000; if(h<=0) return 'soon'; if(h<24) return Math.ceil(h)+'h'; return Math.round(h/24)+'d'; }
 function agentOptions(selected){
-  return AG.agents.map(a=>`<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)} · ${esc(a.plan)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`).join('');
+  return AG.agents.map(a=>{
+    const u = a.usage && a.usage.summary ? ' — '+a.usage.summary : '';
+    return `<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)} · ${esc(a.plan)}${esc(u)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`;
+  }).join('');
+}
+function agentUsageHtml(selected, selId){
+  return AG.agents.map(a=>{
+    const u = a.usage || {}, ws = u.windows || [];
+    const bars = ws.length ? ws.map(w=>{
+      const p = w.remainingPct ?? 0, cls = p<=20?'low':p<=50?'mid':'';
+      const rst = w.resetsAt ? ` (resets in ${inTime(w.resetsAt)})` : '';
+      return `<span class="abar" title="${esc(w.label+' remaining'+rst)}"><i><b class="${cls}" style="width:${p}%"></b></i><b>${p}%</b> ${esc(w.label)} left</span>`;
+    }).join('') : `<span class="sub">${esc(u.summary||'usage unknown')}</span>`;
+    const meta = !a.available ? 'not available: '+a.status : (u.extra || (u.updatedAt ? 'as of '+ago(u.updatedAt) : a.plan));
+    return `<div class="arow ${a.id===selected?'on':''} ${a.available?'':'off'}" onclick="pickAgent('${esc(selId)}','${esc(a.id)}')">
+      <div><b>${esc(a.label)}</b> · <span class="sub">${esc(a.plan)}</span></div><div>${bars}</div><div class="sub">${esc(meta)}</div></div>`;
+  }).join('');
+}
+function pickAgent(selId, id){
+  const a = AG.agents.find(x=>x.id===id); if(!a || !a.available) return;
+  const el = $(selId); if(!el) return; el.value = id; el.dispatchEvent(new Event('change'));
 }
 function agentNote(id){ const a = AG.agents.find(x=>x.id===id); return a&&a.note ? 'Note: '+a.note : ''; }
 // Banner: a factory deploy that failed (GET /api/deploy, written by the deployer) or Paseo unreadable.
@@ -466,10 +497,15 @@ function fillPanel(c, fresh){
   if(c.idea && fresh && !(c.idea.id in briefs)){ briefs[c.idea.id] = null;
     fetch('api/logs/'+c.idea.id).then(r=>r.json()).then(j=>{ briefs[c.idea.id] = (j.idea&&j.idea.request)||'';
       if(sel===c.id) $('pIdea').innerHTML = ideaHtml(c, isIdea); }); }
-  if(isIdea){ $('pActs').innerHTML = `
-    <select id="pAgent" title="Agent that plans and builds it">${agentOptions((c.idea&&c.idea.agent)||AG.default)}</select>
+  if(isIdea){
+    const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : ((c.idea&&c.idea.agent)||AG.default);
+    $('pActs').innerHTML = `
+    <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
     <button class="primary" onclick="act('approve',{agent:$('pAgent').value})" title="Start planning it now, past the daily cap">Start now</button>
-    <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>`;
+    <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>
+    <div class="ausage" id="pAgentUsage" style="width:100%">${agentUsageHtml(curAg,'pAgent')}</div>`;
+    $('pAgent').onchange = ()=>{ $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
+    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v=$('pAgent').value; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); } });
   } else if(c.routing) $('pActs').innerHTML = `
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
@@ -520,12 +556,12 @@ async function act(a, extra={}){
   setTimeout(load, 1500); }
 $('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; toast('Sent'); setTimeout(load,1500); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
-$('newBtn').onclick = async()=>{ await loadAgents(); $('nAgent').innerHTML = agentOptions(AG.default); $('nAgentNote').textContent = agentNote(AG.default); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); $('newDlg').showModal(); };
+$('newBtn').onclick = async()=>{ await loadAgents(); $('nAgent').innerHTML = agentOptions(AG.default); $('nAgentUsage').innerHTML = agentUsageHtml(AG.default,'nAgent'); $('nAgentNote').textContent = agentNote(AG.default); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); $('newDlg').showModal(); };
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
   try{ const r=await post('scout',{repo:$('nRepo').value, focus:$('nFocus').value.trim()}); toast('Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
   try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
-$('nAgent').onchange = ()=>{ $('nAgentNote').textContent = agentNote($('nAgent').value); };
+$('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
 ['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
 phone.addEventListener('change', render);
 $('activity').onclick=()=>$('activity').classList.toggle('open');

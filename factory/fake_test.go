@@ -169,6 +169,7 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	f.Now = func() time.Time { return t0 }
 	f.Sleep = func(time.Duration) {}
 	f.GitOut = func(context.Context, string, ...string) (string, error) { return "", fmt.Errorf("no git in tests") }
+	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
 	f.SetAgents(agents)
 	return f, p
 }

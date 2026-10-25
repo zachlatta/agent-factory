@@ -88,6 +88,7 @@ type Factory struct {
 	GitOut      func(ctx context.Context, dir string, args ...string) (string, error) // same, returns stdout
 	Sleep       func(time.Duration)                                                   // waits between archive retries
 	Scan        func(ctx context.Context, dir, rng string) ([]scan.Hit, error)        // secret scan of a commit range (guard.go)
+	Usage       func(ctx context.Context, provider string) AgentUsage                 // remaining subscription usage per provider
 	kick        chan struct{}
 
 	mu      sync.Mutex
@@ -103,8 +104,10 @@ type Factory struct {
 	// Paseo wrote the archive cannot make the card look live again.
 	archivedNow map[string]time.Time
 
-	provMu sync.Mutex
-	prov   providers // Paseo provider status, for the agent choices
+	provMu  sync.Mutex
+	prov    providers // Paseo provider status, for the agent choices
+	usageMu sync.Mutex
+	usage   usageCache
 
 	peerCache peerCache           // git and request reads for /api/peers
 	vis       map[string]visEntry // owner/repo -> cached visibility
@@ -127,6 +130,7 @@ func New(cfg Config, p Paseo) *Factory {
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), errs: map[string]string{},
 		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}}
 	f.Scan = f.runScan
+	f.Usage = f.readProviderUsage
 	return f
 }
 
