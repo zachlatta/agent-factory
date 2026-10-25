@@ -1,0 +1,11 @@
+# Runs agent-factory-deploy.service a minute after each run ends (and 2 minutes after boot).
+[Unit]
+Description=Agent factory deployer, every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

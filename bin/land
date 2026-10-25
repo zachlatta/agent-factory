@@ -1,0 +1,29 @@
+#!/bin/sh
+# Land HEAD on main: fetch, rebase, secret scan, vet and test, push HEAD:main. Retries a rejected
+# push (other agents push main too). Never pass --no-verify: the pre-push hook scans again.
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+if [ -n "$(git status --porcelain)" ]; then
+	echo "land: uncommitted changes; commit or drop them first" >&2
+	exit 1
+fi
+for try in 1 2 3 4 5; do
+	git fetch -q origin main
+	git rebase -q origin/main
+	if [ -z "$(git rev-list origin/main..HEAD)" ]; then
+		echo "land: nothing to land"
+		exit 0
+	fi
+	bin/scan origin/main..HEAD
+	go vet ./...
+	go test ./...
+	if git push -q origin HEAD:main; then
+		echo "land: pushed $(git rev-parse --short HEAD) to main"
+		exit 0
+	fi
+	echo "land: push rejected (try $try), retrying" >&2
+	sleep $((try * 3))
+done
+echo "land: gave up after 5 tries" >&2
+exit 1

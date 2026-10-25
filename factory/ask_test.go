@@ -1,0 +1,184 @@
+package factory
+
+import (
+	"strings"
+	"testing"
+)
+
+func actionIDs(a *Ask) string {
+	var ids []string
+	for _, x := range a.Actions {
+		ids = append(ids, x.ID)
+	}
+	return strings.Join(ids, ",")
+}
+
+func TestAskFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		a       Agent
+		title   string
+		from    string
+		actions string
+	}{
+		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}),
+			"Approve this plan?", "builder", "approve,reply,close"},
+		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
+			"Approve landing?", "builder", "approve,reply,close"},
+		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
+			"Approve landing?", "reviewer", "approve,reply,close"},
+		{"rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
+			"Reviews didn't settle: your call on the code", "builder", "recommend,reply,approve,close"},
+		{"escalated", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),
+			"A reviewer needs your decision", "builder", "reply,recommend,close"},
+		{"no verdict", card("c", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}),
+			"The review didn't finish properly", "reviewer", "rerun,reply,close"},
+		{"writing its brief", func() Agent {
+			a := card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"})
+			a.Status = "running"
+			return a
+		}(), "Writing a summary for you…", "builder", "stop"},
+		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}),
+			"Reviewer thinks this isn't needed", "reviewer", "close,reply"},
+		{"landing unverified", card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"}),
+			"Landing didn't reach main", "builder", "reply,done"},
+		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}},
+			"Finished: read the result", "builder", "done,reply"},
+		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}},
+			"Waiting on you: permission", "builder", "reply,done"},
+		{"rework cap on a plan", card("c", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "plan changes"}),
+			"Reviews didn't settle: your call on the plan", "builder", "recommend,reply,approve,close"},
+		{"stuck", card("c", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}),
+			"Stuck in Building: nothing is queued", "builder", "rerun,reply,done,close"},
+		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),
+			"Moved here by hand", "builder", "reply,done"},
+	}
+	for _, c := range cases {
+		cards := BuildBoard([]Agent{c.a}, nil, t0)
+		ask := cards[0].Ask
+		if ask == nil {
+			t.Errorf("%s: no ask", c.name)
+			continue
+		}
+		if ask.Title != c.title || ask.From != c.from || actionIDs(ask) != c.actions || ask.Why == "" {
+			t.Errorf("%s: ask = %+v (actions %s)", c.name, ask, actionIDs(ask))
+		}
+	}
+	// a plan at the rework cap is built as it is, not landed; code is landed as it is
+	plan := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "plan changes"})}, nil, t0)[0].Ask
+	if plan.Actions[2].Label != btnBuildAsIs {
+		t.Errorf("plan rework cap approve label = %q", plan.Actions[2].Label)
+	}
+	code := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"})}, nil, t0)[0].Ask
+	if code.Actions[2].Label != btnLandAsIs {
+		t.Errorf("code rework cap approve label = %q", code.Actions[2].Label)
+	}
+	// only Needs Zach cards carry an ask
+	if BuildBoard([]Agent{card("c", map[string]string{labelStage: "building"})}, nil, t0)[0].Ask != nil {
+		t.Error("building card has an ask")
+	}
+}
+
+func TestLastMessage(t *testing.T) {
+	logs := "[User] do it\nold answer\n[User] Plan approved\n[Thought] hmm\n[Bash] ls\nHere is the plan:\n- one\n\nTIER: low\nVERDICT: approve\n[Thought] done\n"
+	if got := lastMessage(logs); got != "Here is the plan:\n- one" {
+		t.Errorf("lastMessage = %q", got)
+	}
+}
+
+func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote})
+	r := reviewer("r1", "c1", "code")
+	r.Labels[labelPrefix+labelApplied] = "1"
+	f, p := newTestFactory(t)
+	p.logs["r1"] = "[User] review\n- test missing at a.go:3\nVERDICT: changes"
+	p.logs["c1"] = "[User] go\nI built it."
+	f.SetAgents([]Agent{c, r})
+	got, _ := f.card("c1")
+	if got.Ask == nil || got.Ask.Detail != "- test missing at a.go:3" {
+		t.Errorf("reviewer detail = %+v", got.Ask)
+	}
+	// cached: no new logs call while nothing changed
+	n := len(p.calls)
+	f.SetAgents([]Agent{c, r})
+	if len(p.calls) != n {
+		t.Errorf("detail refetched without activity: %v", p.calls[n:])
+	}
+}
+
+func TestArchitecturePlanAsksBuilderForSummary(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+		reviewer("r1", "c1", "plan"))
+	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
+	f.ApplyVerdict(f.agent("r1"))
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "short version for Zach") || strings.Contains(msgs[0], "Build it now") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
+func TestReplyToPlanSendsItBackToPlanning(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelTier: "architecture"}))
+	if _, err := f.Act("send", Body{ID: "c1", Message: "skip the tests rename"}); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStage] != "plan" || l[labelAwaiting] != "" || l[labelSince] == "" {
+		t.Errorf("labels = %v", l)
+	}
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "skip the tests rename") ||
+		!strings.Contains(msgs[0], "whole revised plan") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
+func TestDoneMovesCardToDoneWithoutArchiving(t *testing.T) {
+	f, p := newTestFactory(t, Agent{ID: "c1", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}})
+	if _, err := f.Act("done", Body{ID: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "landed" || l[labelNote] != "marked done by Zach" {
+		t.Errorf("labels = %v", l)
+	}
+	if p.called("archive", "c1") {
+		t.Error("done must not archive")
+	}
+}
+
+func TestAskDetailFromClaudeSession(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"})
+	c.Provider, c.SessionID, c.Cwd = "claude", "s1", "/w/c1"
+	f, p := newTestFactory(t)
+	lines := []string{
+		`{"type":"user","message":{"content":"Plan approved.\nReviewer notes:\n- Scope: nothing unasked-for"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Now the tests."},{"type":"thinking","thinking":"hmm"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u","content":"ok"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"I added --dry-run.\n\n**Tests:** pass.\nTIER: low"}]}}`,
+	}
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s1.jsonl", strings.Join(lines, "\n")+"\n")
+	p.logs["c1"] = "[User] Plan approved.\n- Scope: nothing unasked-for\nI added --dry-run."
+	f.SetAgents([]Agent{c})
+	got, _ := f.card("c1")
+	if got.Ask.Detail != "I added --dry-run.\n\n**Tests:** pass." {
+		t.Errorf("detail = %q", got.Ask.Detail)
+	}
+}
+
+func TestAskDetailJoinsAReplySplitOverBlocks(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"})
+	c.Provider, c.SessionID, c.Cwd = "claude", "s1", "/w/c1"
+	f, _ := newTestFactory(t)
+	lines := []string{
+		`{"type":"user","message":{"content":"go"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Checking."},{"type":"tool_use","id":"u","name":"Bash","input":{}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u","content":"ok"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Part one."}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"Part two.\nTIER: low"}]}}`,
+	}
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s1.jsonl", strings.Join(lines, "\n")+"\n")
+	f.SetAgents([]Agent{c})
+	got, _ := f.card("c1")
+	if got.Ask.Detail != "Part one.\n\nPart two." {
+		t.Errorf("detail = %q", got.Ask.Detail)
+	}
+}

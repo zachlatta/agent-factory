@@ -1,0 +1,3 @@
+#!/bin/sh
+# This repo is public: scan what is about to be committed (and the commit's author email).
+exec "$(git rev-parse --show-toplevel)/bin/scan" --staged

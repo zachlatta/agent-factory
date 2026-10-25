@@ -1,0 +1,7 @@
+# gitleaks config for this repo: gitleaks' own credential rules. The factory scans with the copy on
+# origin/main, so a change to this file only takes effect after it lands (and Zach approves it).
+# Hostnames, emails and the like are checked by factory/scan, not here.
+title = "agent-factory"
+
+[extend]
+useDefault = true

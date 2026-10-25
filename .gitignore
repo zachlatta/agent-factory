@@ -1,0 +1,5 @@
+# local config and state never belong here (see AGENTS.md)
+.env
+.env.*
+*.local
+/factory.bin

@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent factory</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1f2328;--mute:#656d76;--line:#d8dee4;--green:#1a7f37;--amber:#9a6700;--red:#cf222e;--blue:#0969da;--purple:#8250df}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+h1{font-size:17px;margin:0 8px 0 0}
+.sub{color:var(--mute);font-size:12px}
+.err{color:var(--red);font-size:12px}
+input,select,textarea,button{font:inherit}
+input[type=search]{padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:180px}
+select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+button{padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:#f6f8fa;cursor:pointer}
+button:hover{background:#eef1f4}
+button.primary{background:var(--green);border-color:var(--green);color:#fff}
+button.danger{color:var(--red)}
+button:disabled{opacity:.45;cursor:default}
+.counts{display:flex;gap:6px;flex-wrap:wrap}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;background:#eef1f4;color:var(--mute)}
+.pill b{color:var(--ink)}
+.pill.zach{background:#fff8c5}
+main{padding:12px 16px 80px;overflow-x:auto}
+.grid{display:grid;grid-template-columns:150px repeat(var(--cols),minmax(210px,1fr));gap:0;min-width:calc(150px + var(--cols)*210px)}
+.colhead{position:sticky;top:0;background:var(--bg);padding:6px 8px;font-weight:600;font-size:12.5px;border-bottom:2px solid var(--line)}
+.colhead small{display:block;font-weight:400;color:var(--mute);font-size:11px}
+.colhead.gate{border-bottom-color:var(--purple)}
+.colhead.zach{border-bottom-color:var(--amber)}
+.lane{padding:10px 8px;border-top:1px solid var(--line);font-weight:600;font-size:13px}
+.lane small{display:block;color:var(--mute);font-weight:400;font-size:11px;word-break:break-all}
+.cell{border-top:1px solid var(--line);border-left:1px dashed #e4e8ec;padding:6px;min-height:56px}
+.cell.over{background:#ddf4ff}
+.cell.gate{background:#fbf7ff}
+.cell.zachc{background:#fffdf0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 8px;margin-bottom:6px;cursor:pointer;box-shadow:0 1px 0 rgba(31,35,40,.04)}
+.card:hover{border-color:#afb8c1}
+.card.sel{outline:2px solid var(--blue)}
+.card .t{font-weight:600;font-size:13px;display:flex;gap:6px;align-items:flex-start}
+.card .m{color:var(--mute);font-size:11.5px;margin-top:2px}
+.dot{width:8px;height:8px;border-radius:50%;background:#afb8c1;flex:none;margin-top:5px}
+.dot.running{background:var(--green);animation:p 1.6s infinite}
+.dot.attn{background:var(--amber)}
+.dot.arch{background:#d0d7de}
+@keyframes p{50%{opacity:.35}}
+.flag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;margin:3px 3px 0 0;background:#ffebe9;color:var(--red)}
+.flag.v{background:#dafbe1;color:var(--green)}
+.flag.vc{background:#fff8c5;color:var(--amber)}
+.flag.note{background:#ddf4ff;color:var(--blue)}
+.flag.agent{background:#f3e8ff;color:#6f42c1}
+.tier{display:inline-block;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;margin:3px 3px 0 0;text-transform:uppercase;letter-spacing:.02em}
+.tier.low{background:#dafbe1;color:var(--green)}
+.tier.risky{background:#fff1e5;color:#bc4c00}
+.tier.architecture{background:#fbefff;color:var(--purple)}
+.tier.routine{background:#eef1f4;color:var(--mute)}
+.tiers{font-size:12px;margin:6px 0 10px;display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:baseline}
+.kids{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px}
+.kid{font-size:10.5px;padding:0 5px;border-radius:4px;background:#eef1f4;color:var(--mute)}
+.kid.reviewer{background:#fbefff;color:var(--purple)}
+.kid.running{font-weight:600}
+.more{font-size:12px;color:var(--blue);cursor:pointer;padding:2px}
+aside{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.08);z-index:10;display:none;flex-direction:column}
+aside.open{display:flex}
+aside .hd{padding:14px 16px;border-bottom:1px solid var(--line)}
+aside .hd h2{font-size:16px;margin:0 30px 4px 0}
+aside .x{position:absolute;right:12px;top:10px;border:0;background:none;font-size:20px}
+aside .bd{padding:12px 16px;overflow:auto;flex:1}
+.kv{display:grid;grid-template-columns:90px 1fr;gap:2px 10px;font-size:12.5px;margin-bottom:10px}
+.kv div:nth-child(odd){color:var(--mute)}
+.kv code{font-size:11.5px;word-break:break-all}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.stagebar{display:flex;gap:2px;margin:8px 0}
+.stagebar span{flex:1;height:5px;border-radius:2px;background:#eaeef2}
+.stagebar span.on{background:var(--blue)}
+.stagebar span.done{background:#8cc4ff}
+pre.logs{white-space:pre-wrap;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:46vh;overflow:auto}
+textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:6px;padding:6px}
+dialog{border:1px solid var(--line);border-radius:10px;padding:16px;width:min(560px,94vw)}
+dialog h3{margin:0 0 8px}
+#activity{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);font:11.5px/1.4 ui-monospace,Menlo,monospace;color:var(--mute);max-height:22px;overflow:hidden;padding:3px 16px;cursor:pointer;z-index:4}
+#activity.open{max-height:40vh;overflow:auto}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;display:none;z-index:20}
+.help{font-size:12px;color:var(--mute);margin:4px 0 10px}
+/* Needs Zach: what each card asks of him */
+.ask{margin-top:8px;border-top:1px solid #f0e6c0;padding-top:8px;cursor:default}
+.ask .q{font-weight:700;font-size:14px;color:#7d4e00}
+.ask .why{font-size:12px;color:var(--mute);margin:2px 0 6px}
+.ask .from{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;margin-top:6px}
+.ask .detail{font-size:13px;line-height:1.45;background:#fbfaf5;border:1px solid #eee6cc;border-radius:6px;padding:6px 9px;max-height:11em;overflow:hidden;position:relative}
+.ask .detail.full{max-height:none}
+.ask .detail:not(.full)::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2.5em;background:linear-gradient(transparent,#fbfaf5)}
+.ask .detail p{margin:.3em 0}.ask .detail ul,.ask .detail ol{margin:.3em 0;padding-left:1.3em}
+.ask .detail code{font-size:12px;background:#f0eee6;padding:0 3px;border-radius:3px}
+.ask .detail pre{white-space:pre-wrap;font-size:12px}
+.ask .detail.empty{color:var(--mute);font-style:italic}
+.ask .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ask .btns button{padding:7px 12px}
+.ask textarea{margin-top:6px;min-height:64px}
+.ask .qs{margin-top:8px}.ask .qq{margin-top:8px}
+.ask .qt{font-weight:600;font-size:13px}
+.ask .opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.ask .opt{padding:7px 11px;border-radius:16px;text-align:left}
+.ask .opt.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.ask input.other{width:100%;margin-top:6px;box-sizing:border-box}
+.ask button.yes{color:#1a7f37}.ask button.no{color:#b42318}
+.zachc .card{border-color:#e7d38a}
+/* Ideas: what each one proposes, in plain words */
+.card .sum{font-size:12.5px;line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card .sum.none{color:var(--mute)}
+.idea h4{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;margin:12px 0 3px}
+.idea .lead{font-size:15px;line-height:1.45}
+.idea .lead.none{font-size:13px;color:var(--mute);font-style:italic}
+.idea .md{font-size:13px;line-height:1.5}
+.idea .md p{margin:.3em 0}.idea .md ul,.idea .md ol{margin:.3em 0;padding-left:1.3em}
+.idea .md code{font-size:12px;background:#f0f2f4;padding:0 3px;border-radius:3px;word-break:break-word}
+.idea .md pre{white-space:pre-wrap;font-size:12px}
+.idea .next{font-size:12.5px;background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:6px 9px;margin-top:12px}
+.idea .brief{background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:6px 9px;max-height:9em;overflow:hidden;position:relative}
+.idea .brief.full{max-height:none}
+.idea .brief:not(.full)::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2.5em;background:linear-gradient(transparent,#f6f8fa)}
+.idea.started{border:1px solid var(--line);border-radius:8px;padding:2px 10px 10px;margin:10px 0}
+.banner{background:#ffebe9;border-bottom:1px solid #ffcecb;color:var(--red);padding:8px 16px;font-size:13px}
+.banner div+div{margin-top:4px}
+.banner details{color:var(--ink);margin-top:4px}
+.banner pre{white-space:pre-wrap;font-size:11.5px;max-height:14em;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin:4px 0 0}
+/* phone: one column at a time, picked from the stage tabs */
+.tabs{display:none}
+@media (max-width:760px){
+  header{padding:8px 10px;gap:6px}
+  header .counts,#group,#host,label.sub,#errors,#updated,header>span[style]{display:none}
+  h1{font-size:16px;margin:0}
+  #q{flex:1;width:auto;min-width:0}
+  #newBtn{padding:5px 10px}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:8px 10px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:51px;z-index:4;scrollbar-width:none}
+  .tabs button{flex:none;border-radius:99px;font-size:13px;padding:5px 11px;white-space:nowrap}
+  .tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .tabs button.zach:not(.on){background:#fff8c5}
+  main{padding:8px 10px 60px}
+  .grid{display:block;min-width:0}
+  .plane{font-weight:600;font-size:12px;color:var(--mute);margin:12px 2px 6px;text-transform:uppercase;letter-spacing:.03em}
+  .card{padding:10px 11px;margin-bottom:8px}
+  .card .t{font-size:14.5px}
+  .card .m{font-size:12.5px}
+  .empty{color:var(--mute);text-align:center;padding:40px 10px}
+  aside{width:100%}
+  aside .x{font-size:28px;top:6px}
+  .acts button{padding:8px 12px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent factory</h1>
+  <span class="sub" id="updated">loading…</span>
+  <span class="err" id="errors"></span>
+  <div class="counts" id="counts"></div>
+  <span style="flex:1"></span>
+  <input type="search" id="q" placeholder="Filter cards">
+  <select id="group"><option value="repo">Lanes: where it lands</option><option value="host">Lanes: host</option><option value="source">Lanes: source</option><option value="none">One board</option></select>
+  <select id="host"><option value="">All hosts</option></select>
+  <label class="sub"><input type="checkbox" id="showLanded"> all done</label>
+  <label class="sub"><input type="checkbox" id="showKids"> sub-agents</label>
+  <button class="primary" id="newBtn">+ New card</button>
+</header>
+<div class="banner" id="banner" hidden></div>
+<nav class="tabs" id="tabs"></nav>
+<main><div class="grid" id="grid"></div></main>
+
+<aside id="panel">
+  <button class="x" onclick="closePanel()">×</button>
+  <div class="hd"><h2 id="pTitle"></h2><div class="sub" id="pSub"></div><div class="stagebar" id="pBar"></div></div>
+  <div class="bd">
+    <div id="pFlags"></div>
+    <div class="kv" id="pKv"></div>
+    <div class="idea" id="pIdea"></div>
+    <div class="acts" id="pActs"></div>
+    <textarea id="pMsg" placeholder="Send a message to this agent (it resumes the session)"></textarea>
+    <div class="acts"><button id="pSend">Send message</button>
+      <select id="pMove"></select><button id="pMoveBtn">Move</button></div>
+    <a class="primary" id="pOpen" style="display:block;text-align:center;padding:8px;border-radius:8px;background:var(--blue);color:#fff;text-decoration:none;font-weight:600;margin:12px 0 4px">Open full transcript and chat →</a>
+    <h4 style="margin:14px 0 6px" id="pLogsHd">Latest messages</h4>
+    <pre class="logs" id="pLogs">…</pre>
+  </div>
+</aside>
+
+<dialog id="newDlg">
+  <h3>New card</h3>
+  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, an Opus 5.5 agent first picks the repo it belongs in (or asks you in Needs Zach if it truly can't tell). The agent you pick (Opus 5.5 unless you choose another) writes a plan in its own worktree and then builds it; reviewers are always Opus 5.5. A reviewer checks the plan and sets the tier, which decides how much review it gets:</div>
+  <div class="tiers" id="nTiers"></div>
+  <label class="sub">Repo</label><br><select id="nRepo" style="width:100%;margin-bottom:8px"></select>
+  <label class="sub">Agent (plans and builds it)</label><br><select id="nAgent" style="width:100%"></select>
+  <div class="sub" id="nAgentNote" style="margin:2px 0 8px;min-height:1em"></div>
+  <label class="sub">What should it do?</label>
+  <input id="nFocus" placeholder="Focus path for Suggest ideas (optional), e.g. factory/web" style="width:100%;margin-bottom:8px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+  <textarea id="nReq" style="min-height:120px" placeholder="e.g. Add a dry-run flag to bin/land that prints what it would push"></textarea>
+  <div class="acts" style="justify-content:flex-end"><button id="nScout" title="A read-only agent looks through this repo and past sessions and suggests up to 3 ideas">Suggest ideas</button><span style="flex:1"></span><button onclick="newDlg.close()">Cancel</button><button class="primary" id="nGo">Start planning</button></div>
+</dialog>
+
+<div id="activity" title="Factory activity (click to expand)"></div>
+<div id="toast"></div>
+
+<script>
+let B = {cards: [], stages: []}, sel = null, dragId = null; const open_ = new Set();
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// lane names and landing notes per repo come from host config (GET /api/lanes): some repos are private
+let LANES = {'(no repo)':{name:'no repo (home dir)'},'auto':{name:'auto (picking a repo)'}};
+const LANE_NAMES = new Proxy({}, {get:(_,k)=>(LANES[k]||{}).name});
+const LANDS = new Proxy({}, {get:(_,k)=>(LANES[k]||{}).lands});
+async function loadLanes(){ try{ Object.assign(LANES, await (await fetch('api/lanes')).json()); }catch(e){} }
+
+function ago(iso){ if(!iso) return ''; const s=(Date.now()-Date.parse(iso))/1000; if(s<90) return 'just now'; if(s<3600) return Math.round(s/60)+' min ago'; if(s<86400) return Math.round(s/3600)+' h ago'; return Math.round(s/86400)+' d ago'; }
+function toast(t){ const e=$('toast'); e.textContent=t; e.style.display='block'; clearTimeout(e._t); e._t=setTimeout(()=>e.style.display='none',3500); }
+
+let AG = {agents:[], default:'opus'}; // GET /api/agents: who can plan and build a card
+async function loadAgents(){ try{ AG = await (await fetch('api/agents')).json(); }catch(e){} }
+const agentLabel = id => (AG.agents.find(a=>a.id===id)||{}).label || id;
+function agentOptions(selected){
+  return AG.agents.map(a=>`<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)} · ${esc(a.plan)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`).join('');
+}
+function agentNote(id){ const a = AG.agents.find(x=>x.id===id); return a&&a.note ? 'Note: '+a.note : ''; }
+// Banner: a factory deploy that failed (GET /api/deploy, written by the deployer) or Paseo unreadable.
+async function loadDeploy(){
+  let D = {};
+  try{ D = await (await fetch('api/deploy')).json(); }catch(e){}
+  const rows = [], f = D.state && D.state.failed, s7 = r => esc(String(r||'?').slice(0,7));
+  if(f){
+    const kept = (f.stage==='health'||f.stage==='install') ? 'rolled back' : 'not deployed';
+    const next = f.nextTry ? 'next try '+new Date(f.nextTry).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})
+      : 'no more automatic tries: land a fix, or run factory-deploy -retry';
+    rows.push(`<div><b>Deploy of ${s7(f.rev)} failed</b> (${esc(f.stage)}, attempt ${esc(f.attempts)}), ${kept}; running ${s7(D.running)}; ${next}.`+
+      `<details><summary>Log</summary><pre>${esc(f.log)}</pre></details></div>`);
+  }
+  Object.entries(B.errors||{}).forEach(([h,e]) => rows.push(`<div><b>Can't read Paseo on ${esc(h)}:</b> ${esc(e.slice(0,200))}</div>`));
+  const b = $('banner'), html = rows.join('');
+  if(b.dataset.html !== html){ b.dataset.html = html; b.innerHTML = html; }
+  b.hidden = !rows.length;
+}
+async function load(){
+  try{
+    const r = await fetch('api/board'); B = await r.json();
+  }catch(e){ $('updated').textContent='server unreachable'; return; }
+  $('updated').textContent = 'live · updated ' + ago(B.updated);
+  $('errors').textContent = Object.entries(B.errors||{}).map(([h,e])=>h+': '+e.slice(0,80)).join(' · ');
+  loadDeploy();
+  const hs=$('host'); if(hs.options.length===1) B.hosts.forEach(h=>hs.add(new Option(h,h)));
+  const nr=$('nRepo'); if(!nr.options.length){ nr.add(new Option('Auto: best match (recommended)','auto')); B.repos.forEach(r=>nr.add(new Option(r,r))); }
+  $('activity').innerHTML = (B.log||[]).slice().reverse().map(esc).join('<br>') || 'No factory activity yet.';
+  if(!askOpen.size && !(document.activeElement && document.activeElement.tagName==='TEXTAREA')) render();
+  if(sel) fillPanel(B.cards.find(c=>c.id===sel), false);
+}
+
+function visible(){
+  const q=$('q').value.toLowerCase(), h=$('host').value;
+  return B.cards.filter(c => (!h||c.host===h) && (!q || (c.title+' '+c.repo+' '+c.short+' '+c.source).toLowerCase().includes(q)));
+}
+
+function laneKey(c){ const g=$('group').value; return g==='none'?'All agents':g==='host'?c.host:g==='source'?c.source:c.repo; }
+
+const phone = matchMedia('(max-width:760px)');
+let tab = null;
+function renderPhone(cards){
+  const stages = B.stages, counts = {};
+  cards.forEach(c=>counts[c.stage]=(counts[c.stage]||0)+1);
+  if(!tab) tab = counts.zach ? 'zach' : 'building';
+  $('tabs').innerHTML = stages.map(s=>`<button class="${s[0]===tab?'on':''} ${s[0]==='zach'?'zach':''}" data-s="${s[0]}">${esc(s[1])} ${counts[s[0]]||0}</button>`).join('');
+  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ tab=b.dataset.s; render(); scrollTo(0,0); });
+  const on = $('tabs').querySelector('.on');
+  if(on && on.dataset.s !== renderPhone.shown){ renderPhone.shown = on.dataset.s; on.scrollIntoView({inline:'center', block:'nearest'}); }
+  const cs = cards.filter(c=>c.stage===tab).sort((a,b)=>(b.lastActivityAt||'').localeCompare(a.lastActivityAt||''));
+  const lanes = {}; cs.forEach(c=>(lanes[laneKey(c)] ||= []).push(c));
+  const st = stages.find(s=>s[0]===tab);
+  let h = `<div class="help">${esc(st?st[2]:'')}</div>`;
+  Object.entries(lanes).sort((a,b)=>b[1].length-a[1].length).forEach(([k,lc],i)=>{
+    const cap = tab==='landed' && !open_.has('p'+i+tab) ? 5 : 1e9;
+    h += `<div class="plane">${esc(LANE_NAMES[k]||k)} · ${lc.length}</div>` + lc.slice(0,cap).map(cardHtml).join('')
+      + (lc.length>cap ? `<div class="more" onclick="open_.add('p${i}${tab}');render()">+${lc.length-cap} more</div>` : '');
+  });
+  if(!cs.length) h += '<div class="empty">Nothing here.</div>';
+  const g=$('grid'); g.innerHTML = h;
+  g.querySelectorAll('.card').forEach(el=>{ el.onclick=()=>openPanel(el.dataset.id); el.draggable=false; });
+}
+
+function render(){
+  if(phone.matches) return renderPhone(visible());
+  $('tabs').innerHTML = '';
+  const cards = visible(), stages = B.stages;
+  const counts = {}; cards.forEach(c=>counts[c.stage]=(counts[c.stage]||0)+1);
+  $('counts').innerHTML = stages.filter(s=>s[0]!=='landed').map(s=>`<span class="pill ${s[0]==='zach'?'zach':''}">${s[1]} <b>${counts[s[0]]||0}</b></span>`).join('') + `<span class="pill">Done 12h <b>${counts.landed||0}</b></span>`;
+  const lanes = {};
+  cards.forEach(c => (lanes[laneKey(c)] ||= []).push(c));
+  const order = Object.keys(lanes).sort((a,b)=>{
+    const live = k => lanes[k].filter(c=>c.stage!=='landed').length;
+    return live(b)-live(a) || lanes[b].length-lanes[a].length;
+  });
+  const g=$('grid'); g.style.setProperty('--cols', stages.length);
+  g.style.gridTemplateColumns = '150px ' + stages.map(s=>s[0]==='zach'?'minmax(340px,2.2fr)':'minmax(180px,1fr)').join(' ');
+  let h = '<div class="colhead"></div>' + stages.map(s=>`<div class="colhead ${s[0].includes('review')?'gate':''} ${s[0]==='zach'?'zach':''}" title="${esc(s[2])}">${esc(s[1])}<small>${esc(s[2])}</small></div>`).join('');
+  for(const k of order){
+    const lc = lanes[k];
+    h += `<div class="lane">${esc(LANE_NAMES[k]||k)}<small>${esc(LANDS[k]||($('group').value==='repo'?k:''))}</small><small>${lc.filter(c=>c.stage!=='landed').length} open · ${lc.filter(c=>c.stage==='landed').length} landed</small></div>`;
+    for(const s of stages){
+      let cs = lc.filter(c=>c.stage===s[0]).sort((a,b)=>(b.lastActivityAt||'').localeCompare(a.lastActivityAt||''));
+      let more = '';
+      const ck=k+'|'+s[0], cap = s[0]==='landed' ? ($('showLanded').checked?1e9:4) : (open_.has(ck)?1e9:6);
+      if(cs.length>cap){ more=`<div class="more" onclick="${s[0]==='landed'?"$('showLanded').click()":`open_.add('${esc(ck).replace(/'/g,"")}');render()`}">+${cs.length-cap} more</div>`; cs=cs.slice(0,cap); }
+      h += `<div class="cell ${s[0].includes('review')?'gate':''} ${s[0]==='zach'?'zachc':''}" data-stage="${s[0]}">${cs.map(cardHtml).join('')}${more}</div>`;
+    }
+  }
+  g.innerHTML = h;
+  g.querySelectorAll('.card').forEach(el=>{
+    el.onclick=()=>openPanel(el.dataset.id);
+    el.ondblclick=()=>{ location.href='t/'+el.dataset.id; };
+    el.ondragstart=e=>{dragId=el.dataset.id; e.dataTransfer.effectAllowed='move';};
+  });
+  g.querySelectorAll('.cell').forEach(el=>{
+    el.ondragover=e=>{e.preventDefault(); el.classList.add('over');};
+    el.ondragleave=()=>el.classList.remove('over');
+    el.ondrop=e=>{e.preventDefault(); el.classList.remove('over'); if(dragId) move(dragId, el.dataset.stage);};
+  });
+}
+
+function cardHtml(c){
+  const dot = c.archivedAt?'arch':c.status==='running'?'running':(c.flags.length?'attn':'');
+  const v = c.verdict ? `<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>` : '';
+  const note = c.note && !c.ask ? `<span class="flag note">${esc(c.note)}</span>` : '';
+  const r = (c.rounds.plan||c.rounds.code) ? `<span class="kid">rounds p${c.rounds.plan}/c${c.rounds.code}</span>` : '';
+  let kids = c.children.filter(k=>k.role==='reviewer' || $('showKids').checked);
+  const hidden = c.children.length - kids.length;
+  const kh = kids.slice(-6).map(k=>`<span class="kid ${k.role} ${k.status==='running'&&!k.archived?'running':''}">${k.role==='reviewer'?(k.kind||'')+' review'+(k.verdict?': '+esc(k.verdict):k.status==='running'?' (running)':''):esc((k.title||k.short).slice(0,22))}</span>`).join('');
+  return `<div class="card ${sel===c.id?'sel':''}" draggable="true" data-id="${c.id}">
+    <div class="t"><span class="dot ${dot}"></span><span>${esc(c.title)}</span></div>
+    ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
+    <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${esc(c.host)} · ${esc(c.source)} · ${ago(c.lastActivityAt)}${hidden?` · ${hidden} sub-agent${hidden>1?'s':''}`:''}</div>
+    <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
+    ${(kh||r)?`<div class="kids">${r}${kh}</div>`:''}
+    ${c.ask?askHtml(c):''}
+  </div>`;
+}
+
+const md = s => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(s||'', {gfm:true})) : `<pre>${esc(s)}</pre>`;
+function askHtml(c){
+  const a = c.ask, qs = a.questions||[], box = !c.routing; // the reply box is always open, except on repo pickers
+  const detail = a.detail ? `<div class="detail ${askFull.has(c.id)?'full':''}" id="d-${c.id}">${md(a.detail)}</div>
+      <div class="more" onclick="event.stopPropagation(); askFull.has('${c.id}')?askFull.delete('${c.id}'):askFull.add('${c.id}'); render()">${askFull.has(c.id)?'Show less':'Show all'}</div>`
+    : `<div class="detail empty">${c.status==='running'?'The agent is writing it now…':'No message yet. Open the transcript.'}</div>`;
+  const picks = askPicks[c.id]||{};
+  const quiz = qs.length ? `<div class="qs">${qs.map((q,qi)=>`<div class="qq"><div class="qt">${qs.length>1?(qi+1)+'. ':''}${esc(q.text)}</div>
+      <div class="opts">${q.options.map((o,oi)=>`<button class="opt ${picks[qi]===oi?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},${oi})">${esc(o)}</button>`).join('')}
+        <button class="opt ${picks[qi]==='o'?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},'o')">Other…</button></div>
+      <input class="other" id="o-${c.id}-${qi}" placeholder="Your own answer" style="display:${picks[qi]==='o'?'block':'none'}" oninput="askOpen.add('${c.id}')"></div>`).join('')}
+    <div class="btns"><button class="${a.actions.some(x=>x.id==='approve')?'':'primary'}" onclick="askAnswers('${c.id}')">Send answers</button></div></div>` : '';
+  // with questions, approving sends the answers along; without, the box's Yes/No answer the ask
+  const acts = a.actions.map((x,i)=>[x,i]).filter(([x])=>!(box && x.id==='reply'));
+  const hint = (a.actions.find(x=>x.id==='reply')||{}).hint || 'Message to the agent';
+  return `<div class="ask" onclick="event.stopPropagation()">
+    <div class="q">${esc(a.title)}</div>
+    <div class="why">${esc(a.why)}</div>
+    <div class="from">${a.from==='reviewer'?'Reviewer says':'Agent says'}</div>
+    ${detail}
+    ${quiz}
+    <div class="btns">${acts.map(([x,i])=>`<button class="${x.primary||withAnswers(a,x)?'primary':''} ${x.id==='close'?'danger':''}" onclick="askAct('${c.id}',${i})">${esc(withAnswers(a,x)?x.label+' with these answers':x.label)}</button>`).join('')}
+      <button onclick="location.href='t/${c.id}'">Transcript</button></div>
+    ${c.routing?`<div id="p-${c.id}" style="display:none"><select style="width:100%;margin:6px 0">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select>
+      <div class="btns"><button class="primary" onclick="askRepo('${c.id}')">Start there</button></div></div>`:''}
+    <div id="r-${c.id}" style="display:${box?'block':'none'}"><textarea placeholder="${esc(qs.length?'Anything else (optional; sent on its own)':hint)}" oninput="askOpen.add('${c.id}')"></textarea>
+      <div class="btns"><button class="primary" onclick="askSend('${c.id}')">Send</button>
+        ${!qs.length&&a.yes?`<button class="yes" onclick="askYesNo('${c.id}',true)">Yes</button><button class="no" onclick="askYesNo('${c.id}',false)">No</button>`:''}</div></div>
+  </div>`;
+}
+const askOpen = new Set(), askFull = new Set(), askPicks = {};
+// withAnswers: this approve button also sends Zach's picks (plan or landing approval). On a brief, "as it is"
+// ignores the open points, so answers go by Send answers instead.
+const withAnswers = (a, x) => (a.questions||[]).length>0 && x.id==='approve' && !x.repo && !a.actions.some(y=>y.id==='recommend');
+function askPick(id, qi, oi){
+  const p = askPicks[id] = askPicks[id]||{}; p[qi] = oi; askOpen.add(id);
+  const card = document.querySelector(`.card[data-id="${id}"]`); if(!card) return;
+  card.querySelectorAll(`.opt[data-q="${qi}"]`).forEach((b,k)=>b.classList.toggle('on', k===(oi==='o'?b.parentNode.children.length-1:oi)));
+  const o = $('o-'+id+'-'+qi); o.style.display = oi==='o'?'block':'none'; if(oi==='o') o.focus();
+}
+// answersText is Zach's picks as one message that quotes each question, or '' if none is answered
+function answersText(id){
+  const c = B.cards.find(x=>x.id===id), p = askPicks[id]||{}; const out = [];
+  (c.ask.questions||[]).forEach((q,qi)=>{
+    const ans = p[qi]==='o' ? ($('o-'+id+'-'+qi).value.trim()) : (p[qi]!==undefined ? q.options[p[qi]] : '');
+    if(ans) out.push(`${qi+1}. ${q.text}\n   → ${ans}`);
+  });
+  return out.length ? "Zach's answers:\n"+out.join('\n') : '';
+}
+function askDone(id, msg){ askOpen.delete(id); delete askPicks[id]; toast(msg); setTimeout(load, 1200); }
+async function askAnswers(id){
+  const m = answersText(id); if(!m){ toast('Pick an answer first'); return; }
+  await post('send', {id, message:m}); askDone(id, 'Answers sent');
+}
+async function askAct(id, i){
+  const c = B.cards.find(x=>x.id===id); const x = c.ask.actions[i];
+  if(x.id==='reply'){ const r=document.getElementById('r-'+id); r.style.display='block'; askOpen.add(id);
+    const t=r.querySelector('textarea'); t.placeholder=x.hint||''; t.focus(); return; }
+  if(x.id==='pickrepo'){ const r=document.getElementById('p-'+id); r.style.display='block'; askOpen.add(id); return; }
+  if(x.id==='close' && !confirm('Drop this card? The agent is archived.')) return;
+  const body = {id}; if(x.repo) body.repo = x.repo;
+  if(withAnswers(c.ask, x)){ const m = answersText(id); if(m) body.message = m; }
+  await post(x.id, body); askDone(id, x.label+': done');
+}
+// askYesNo answers a card with no questions: c.ask.yes / c.ask.no say what each button does (ask.go yesNo)
+async function askYesNo(id, yes){
+  const c = B.cards.find(x=>x.id===id), t = document.querySelector('#r-'+id+' textarea'), m = t.value.trim();
+  const what = yes ? c.ask.yes : c.ask.no;
+  if(what==='changes'){
+    if(!m){ t.placeholder='What should change? Write it here, then press No again.'; t.focus(); return; }
+    await post('send', {id, message:m}); t.value=''; askDone(id, 'Sent back with changes'); return;
+  }
+  if(what==='say'){ await post('send', {id, message:(yes?'Yes.':'No.')+(m?'\n\n'+m:'')}); t.value=''; askDone(id, yes?'Said yes':'Said no'); return; }
+  const i = c.ask.actions.findIndex(x=>x.id===what); if(i>=0) await askAct(id, i);
+}
+async function askRepo(id){
+  const repo = document.querySelector('#p-'+id+' select').value;
+  await post('approve', {id, repo}); toast('Starting in '+repo); askOpen.delete(id); setTimeout(load, 1200);
+}
+async function askSend(id){
+  const t = document.querySelector('#r-'+id+' textarea'); const m = t.value.trim(); if(!m) return;
+  await post('send', {id, message:m}); t.value=''; askOpen.delete(id); toast('Sent'); setTimeout(load, 1200);
+}
+
+async function post(action, body){
+  const r = await fetch('api/'+action, {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify(body)});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok){ toast('Failed: '+(j.error||r.status)); throw new Error(j.error); }
+  return j;
+}
+async function move(id, stage){ const c=B.cards.find(x=>x.id===id); if(!c||c.stage===stage) return;
+  if(stage==='landed' && !confirm('Move to Done archives this agent in Paseo. Continue?')) return;
+  await post('stage',{id,stage}); toast('Moved to '+B.stages.find(s=>s[0]===stage)[1]); c.stage=stage; render(); }
+
+function openPanel(id){ sel=id; fillPanel(B.cards.find(c=>c.id===id), true); render(); }
+function closePanel(){ sel=null; $('panel').classList.remove('open'); render(); }
+
+function fillPanel(c, fresh){
+  if(!c){ closePanel(); return; }
+  $('panel').classList.add('open');
+  $('pTitle').textContent = c.title;
+  $('pOpen').href = 't/' + c.id;
+  $('pSub').textContent = `${c.short} · ${c.host} · ${c.source} · ${c.status}${c.archivedAt?' (archived)':''}`;
+  const idx = B.stages.findIndex(s=>s[0]===c.stage);
+  $('pBar').innerHTML = B.stages.map((s,i)=>`<span title="${esc(s[1])}" class="${i===idx?'on':i<idx?'done':''}"></span>`).join('');
+  $('pFlags').innerHTML = c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('') + (c.verdict?`<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>`:'') + (c.note?`<span class="flag note">${esc(c.note)}</span>`:'');
+  const kv = [['Column', (B.stages[idx]||[])[1] + (c.labelled?'':' (from Paseo status)')],
+    ['Tier', c.tier ? c.tier + ': ' + ((B.tiers||{})[c.tier]||'') : 'not set yet (the plan review sets it)'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
+    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Reviews', `plan ${c.rounds.plan} · code ${c.rounds.code} (cap 3 each)`],
+    ['Sub-agents', c.children.map(k=>`${k.role==='reviewer'?k.kind+' review':k.title||k.short} (${k.archived?'archived':k.status}${k.verdict?', '+k.verdict:''})`).join('; ')||'none'],
+    ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
+  $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
+  const busy = c.status==='running';
+  const isIdea = c.id.startsWith('idea-');
+  $('pMsg').style.display = isIdea ? 'none' : '';
+  $('pSend').parentElement.style.display = isIdea ? 'none' : '';
+  $('pOpen').style.display = isIdea ? 'none' : 'block';
+  $('pKv').style.display = $('pLogsHd').style.display = $('pLogs').style.display = isIdea ? 'none' : '';
+  $('pIdea').className = 'idea' + (c.idea && !isIdea ? ' started' : '');
+  $('pIdea').innerHTML = c.idea ? ideaHtml(c, isIdea) : '';
+  if(c.idea && fresh && !(c.idea.id in briefs)){ briefs[c.idea.id] = null;
+    fetch('api/logs/'+c.idea.id).then(r=>r.json()).then(j=>{ briefs[c.idea.id] = (j.idea&&j.idea.request)||'';
+      if(sel===c.id) $('pIdea').innerHTML = ideaHtml(c, isIdea); }); }
+  if(isIdea){ $('pActs').innerHTML = `
+    <select id="pAgent" title="Agent that plans and builds it">${agentOptions((c.idea&&c.idea.agent)||AG.default)}</select>
+    <button class="primary" onclick="act('approve',{agent:$('pAgent').value})" title="Start planning it now, past the daily cap">Start now</button>
+    <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>`;
+  } else if(c.routing) $('pActs').innerHTML = `
+    <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
+    <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
+  else $('pActs').innerHTML = `
+    <button onclick="act('review',{kind:'plan'})" title="A fresh Opus agent tries to find fault with the plan">Review plan</button>
+    <button onclick="act('review',{kind:'code'})" title="A fresh Opus agent reviews the diff, read-only">${busy?'Review when idle':'Review code'}</button>
+    ${c.awaiting==='plan'
+      ? `<button class="primary" onclick="act('approve')" title="Architecture plan: let it build. Code review still runs before it lands">Approve plan &amp; build</button>`
+      : `<button class="primary" onclick="act('approve')" title="Tell the agent to land it">Approve &amp; land</button>`}
+    <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
+    <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
+  const mv=$('pMove'); mv.innerHTML = B.stages.map(s=>`<option value="${s[0]}" ${s[0]===c.stage?'selected':''}>${s[1]}</option>`).join('');
+  if(fresh){ $('pMsg').value=''; $('pLogs').textContent='loading…';
+    fetch('api/logs/'+c.id).then(r=>r.json()).then(j=>{ if(sel===c.id) $('pLogs').textContent = (j.text||j.error||'').trim().split('\n').slice(-120).join('\n') || '(no text yet)'; $('pLogs').scrollTop=1e9; }); }
+}
+// ideaHtml: an idea as Zach reviews it: what it proposes, why, how to tell it worked, what happens next,
+// and the builder's technical brief (fetched on open, folded).
+const briefs = {}, briefFull = new Set();
+const mdIdea = s => md(String(s||'').replace(/~/g, '\\~')); // "~200 lines" is not strikethrough
+function ideaHtml(c, isIdea){
+  const i = c.idea, caps = B.caps||{};
+  const tier = c.tier ? `<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span> ${esc((B.tiers||{})[c.tier]||'')}`
+    : 'No tier guess yet; the plan review sets it.';
+  const brief = briefs[i.id];
+  const next = isIdea ? `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line':esc('number '+i.queue+' in line')}.
+      The factory starts ideas on its own, up to ${caps.ideaWip||2} at a time and ${caps.ideaDaily||5} a day, unless you dismiss it.
+      Each one is then planned and reviewed like any card; this tier decides how much review it gets. <b>Start now</b> skips the line.</div>` : '';
+  return `${isIdea?'':'<h4>Started from this idea</h4>'}
+    <h4>What it proposes</h4>
+    ${i.summary?`<div class="lead">${esc(i.summary)}</div>`:'<div class="lead none">No summary (suggested before ideas had one). Read Why and the technical brief.</div>'}
+    <h4>Why</h4><div class="md">${i.why?mdIdea(i.why):'<i>Not given.</i>'}</div>
+    ${i.doneWhen?`<h4>Done when</h4><div class="md">${mdIdea(i.doneWhen)}</div>`:''}
+    <h4>Tier</h4><div class="md">${tier}</div>
+    <h4>Suggested by</h4><div class="md">${esc(i.by||'agent')}, ${ago(i.createdAt)}</div>
+    ${next}
+    <h4>Technical brief for the builder</h4>
+    ${brief==null?'<div class="md">loading…</div>':!brief?'<div class="md"><i>None.</i></div>'
+      :`<div class="brief md ${briefFull.has(i.id)?'full':''}">${mdIdea(brief)}</div>
+      <div class="more" onclick="briefFull.has('${i.id}')?briefFull.delete('${i.id}'):briefFull.add('${i.id}'); fillPanel(B.cards.find(c=>c.id===sel), false)">${briefFull.has(i.id)?'Show less':'Show all'}</div>`}`;
+}
+async function act(a, extra={}){
+  const c = B.cards.find(x=>x.id===sel)||{};
+  const r = await post(a, {id:sel, ...extra});
+  toast(r.queued?'Review queued: starts when the agent goes idle'
+    : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Plan approved: agent is building':'Approved: agent is landing it')
+    : a+' done');
+  if(c.id&&c.id.startsWith('idea-')) closePanel();
+  setTimeout(load, 1500); }
+$('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; toast('Sent'); setTimeout(load,1500); };
+$('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
+$('newBtn').onclick = async()=>{ await loadAgents(); $('nAgent').innerHTML = agentOptions(AG.default); $('nAgentNote').textContent = agentNote(AG.default); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); $('newDlg').showModal(); };
+$('nScout').onclick = async()=>{ $('nScout').disabled=true;
+  try{ const r=await post('scout',{repo:$('nRepo').value, focus:$('nFocus').value.trim()}); toast('Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
+$('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
+  try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
+$('nAgent').onchange = ()=>{ $('nAgentNote').textContent = agentNote($('nAgent').value); };
+['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
+phone.addEventListener('change', render);
+$('activity').onclick=()=>$('activity').classList.toggle('open');
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePanel(); });
+Promise.all([loadAgents(), loadLanes()]).then(load); setInterval(load, 10000);
+</script>
+</body>
+</html>

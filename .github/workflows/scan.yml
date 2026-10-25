@@ -1,0 +1,31 @@
+# Backstop after a push: by the time this runs, the push is public. The checks that stop a leak
+# run before it (pre-commit and pre-push hooks, bin/land, and the factory's own scan). This one
+# has no private rules, so it catches credentials and generic leaks only.
+name: scan and test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Install gitleaks (pinned, checksum checked)
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tgz -C /usr/local/bin gitleaks
+      - name: Secret scan of all history (gitleaks, generic patterns, commit emails)
+        run: go run ./cmd/factory scan -config .gitleaks.toml HEAD
+      - run: go vet ./...
+      - run: go test -race ./...

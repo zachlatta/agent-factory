@@ -1,0 +1,26 @@
+# systemd user unit for the agent factory (enable lingering for the user so it runs without a login).
+# Deployed from the repo's main by agent-factory-deploy (first install: ./install.sh).
+# Logs: journalctl --user -u agent-factory
+[Unit]
+Description=Agent factory: Kanban board and review gates on Paseo
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Host settings, outside any repo: FACTORY_BOARD_URL, FACTORY_DEFAULT_REPO, FACTORY_GUARDED_REPOS,
+# FACTORY_PRIVATE_RULES, and PATH (it must reach paseo, node, git and gitleaks). See README.md.
+EnvironmentFile=-%h/.config/agent-factory/env
+ExecStart=%h/.local/share/agent-factory/factory -port 7478
+Restart=always
+RestartSec=30
+# Agents run under the Paseo daemon, not this unit, so stopping the board never stops an agent.
+KillMode=mixed
+# On stop the factory finishes the card move it is on and the requests in flight.
+TimeoutStopSec=300
+
+[Install]
+WantedBy=default.target

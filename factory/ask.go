@@ -1,0 +1,406 @@
+package factory
+
+import (
+	"regexp"
+	"strings"
+)
+
+// Ask says, for a card in Needs Zach, what Zach is being asked, why, what to read (Detail, from the
+// builder's or the reviewer's last message), and which buttons answer it.
+type Ask struct {
+	Title   string   `json:"title"`
+	Why     string   `json:"why"`
+	From    string   `json:"from"` // builder or reviewer: whose last message is Detail
+	Detail  string   `json:"detail"`
+	Actions []Action `json:"actions"`
+	// Questions are the QUESTION: blocks in the agent's last reply (ParseQuestions), shown as choices.
+	Questions []Question `json:"questions,omitempty"`
+	// Yes and No say what the board's Yes and No buttons do when there are no Questions (then Zach
+	// gets a free-form reply and a Yes/No pair): an action id
+	// ("approve", "close"), "changes" (send the typed text as the change request; it needs text), or
+	// "say" (send "Yes."/"No." plus any typed text). Empty means no Yes/No button.
+	Yes string `json:"yes,omitempty"`
+	No  string `json:"no,omitempty"`
+}
+
+// Question is one multiple-choice question an agent asks Zach. He can also write his own answer.
+type Question struct {
+	Text    string   `json:"text"`
+	Options []string `json:"options"`
+}
+
+// Action is one button. ID is the POST /api/<id> action ("reply" posts to send with the typed text).
+type Action struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Primary bool   `json:"primary,omitempty"`
+	Hint    string `json:"hint,omitempty"` // placeholder for the reply box
+	Repo    string `json:"repo,omitempty"` // approve on a repo picker: start the card in this repo
+}
+
+func act(id, label string) Action { return Action{ID: id, Label: label} }
+func primary(id, label string) Action {
+	return Action{ID: id, Label: label, Primary: true}
+}
+func reply(label, hint string) Action { return Action{ID: "reply", Label: label, Hint: hint} }
+
+// askFor builds the Ask for a Needs Zach card, with its Yes/No meaning.
+func askFor(c Card, a Agent) *Ask {
+	ask := baseAsk(c, a)
+	if ask == nil {
+		return nil
+	}
+	ask.Yes, ask.No = yesNo(ask)
+	return ask
+}
+
+// yesNo maps the board's Yes/No buttons onto the ask, by its buttons. A brief (rework cap or escalation)
+// gets Yes = go with the builder's recommendation; a yes/no question (primary approve or close) gets
+// that action; both send No as a change request. An open-ended ask sends Yes or No as a reply. Asks
+// whose answer is Stop, Re-run or a repo, and finished cards, get none.
+func yesNo(ask *Ask) (string, string) {
+	has := func(id string) bool {
+		for _, x := range ask.Actions {
+			if x.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("stop") || has("rerun") || has("pickrepo") || ask.Title == finishedTitle:
+		return "", ""
+	case has("recommend"):
+		return "recommend", "changes"
+	}
+	for _, x := range ask.Actions {
+		if x.Primary && (x.ID == "approve" || x.ID == "close") {
+			return x.ID, "changes"
+		}
+	}
+	return "say", "say"
+}
+
+const finishedTitle = "Finished: read the result"
+const repoTitle = "Which repo should this start in?"
+
+// baseAsk builds the Ask for a Needs Zach card from its labels and Paseo attention state.
+func baseAsk(c Card, a Agent) *Ask {
+	if c.Stage != "zach" {
+		return nil
+	}
+	note := a.L(labelNote)
+	switch {
+	case a.Status == "running" && stalledFlag(c) == "":
+		// a builder writing its brief or plan summary for Zach (sent along with the move here)
+		return &Ask{Title: "Writing a summary for you…", From: "builder",
+			Why:     "The agent is writing what it needs from you. It shows here when it is done.",
+			Actions: []Action{act("stop", "Stop it")}}
+	case a.Status == "running":
+		// a factory card shown here because it stalled (BuildBoard); its labels still name its column
+		return &Ask{Title: "Running, but no activity for " + strings.TrimPrefix(stalledFlag(c), "stalled "), From: "builder",
+			Why:     "The agent has been quiet a long time. It may be on a slow step or hung. Stop it, or send it a message.",
+			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
+	case a.L(labelAwaiting) == "repo":
+		return repoAsk(note, a.L(labelCandidates))
+	case note == "stuck":
+		from := a.L(labelStuckFrom)
+		return &Ask{Title: "Stuck in " + stageName(from) + ": nothing is queued", From: "builder",
+			Why: stuckWhy[from] + ". The factory had no next step for it, so it moved here. The agent's last message is below.",
+			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"),
+				act("done", "Mark done"), act("close", "Drop it")}}
+	case a.L(labelAwaiting) == "plan":
+		return &Ask{Title: "Approve this plan?", From: "builder",
+			Why: "It is an architecture change, so nothing gets built until you OK the plan. A code review still runs before it lands.",
+			Actions: []Action{primary("approve", "Approve plan & build"),
+				reply("Send back with changes", "What should change in the plan?"), act("close", "Drop it")}}
+	case strings.HasPrefix(note, "public repo: scan passed"):
+		return &Ask{Title: "Approve landing?", From: "reviewer",
+			Why: "This repo is public, so landing publishes it. Code review passed and the factory's secret scan found nothing. " +
+				"Read the diff for anything private a scan can't spot, then approve.",
+			Actions: []Action{primary("approve", "Approve & publish"),
+				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
+	case strings.HasPrefix(note, "secret scan"):
+		return &Ask{Title: "Secret scan stopped this landing", From: "builder",
+			Why: "This repo is public. The factory's scan " + strings.TrimPrefix(note, "secret scan ") +
+				". Nothing was published. Ask the agent to remove it (rewrite its own unpushed commits), then approve to scan again.",
+			Actions: []Action{{ID: "reply", Label: "Tell it to fix", Primary: true, Hint: "e.g. remove it and rewrite your commits"}, act("approve", "Scan again & land"), act("close", "Drop it")}}
+	case strings.HasPrefix(note, "public repo: finished without review"):
+		return &Ask{Title: "Pushed to a public repo without review", From: "builder",
+			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
+				strings.TrimPrefix(note, "public repo: finished without review"),
+			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
+	case strings.HasPrefix(note, "review found an architecture change"):
+		return &Ask{Title: "Approve landing?", From: "reviewer",
+			Why: "The code passed review, but the reviewer found it changes the architecture, which needs your OK.",
+			Actions: []Action{primary("approve", "Approve & land"),
+				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
+	case strings.HasPrefix(note, "review passed"):
+		return &Ask{Title: "Approve landing?", From: "builder",
+			Why: "Another agent reviewed the work and passed it. This card was sent to review by hand, so you decide whether it lands.",
+			Actions: []Action{primary("approve", "Approve & land"),
+				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
+	case note == noVerdictNote:
+		return &Ask{Title: "The review didn't finish properly", From: "reviewer",
+			Why: "The reviewer stopped without a verdict, so the factory can't tell whether the work passed. " +
+				"Its last message is below. Re-running starts a fresh review.",
+			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
+	case note == "rework cap reached" || note == "reviewer escalated":
+		return briefAsk(a)
+	case a.L(labelVerdict) == "close":
+		return &Ask{Title: "Reviewer thinks this isn't needed", From: "reviewer",
+			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
+			Actions: []Action{primary("close", "Close it"), reply("Keep going", "Why it is still needed")}}
+	case note == "landing not verified":
+		return &Ask{Title: "Landing didn't reach main", From: "builder",
+			Why:     "The agent finished landing, but its commit is not on origin/main. Its last message is below.",
+			Actions: []Action{reply("Tell it to retry", "e.g. rebase and run bin/land again"), act("done", "It's fine, mark done")}}
+	case a.L(labelStage) == "zach":
+		return &Ask{Title: "Moved here by hand", From: "builder",
+			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",
+			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
+	case a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished":
+		return &Ask{Title: "Waiting on you: " + a.AttentionReason, From: "builder",
+			Why:     "The agent stopped and is waiting for you. Open the transcript to see the prompt, or reply.",
+			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
+	}
+	return &Ask{Title: finishedTitle, From: "builder",
+		Why:     "The agent finished and you haven't looked at it yet. Its final answer is below.",
+		Actions: []Action{primary("done", "Got it, mark done"), reply("Reply", "Follow-up for the agent")}}
+}
+
+// repoAsk is the question for a repo picker in Needs Zach: which repo the card starts in.
+func repoAsk(note, candidates string) *Ask {
+	ask := &Ask{Title: repoTitle, From: "builder",
+		Why: "The factory could not tell which repo this belongs in. Pick one and the card starts planning there. The picker's reasoning is below."}
+	switch note {
+	case "routing failed":
+		ask.Why = "A repo was picked, but starting the card there failed (the reason is in the factory log). Pick a repo to try again."
+	case "routing interrupted":
+		ask.Why = "The factory restarted while starting this card. Check the board for a card that already started; if there is none, pick a repo."
+	}
+	for _, r := range strings.Split(candidates, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			ask.Actions = append(ask.Actions, Action{ID: "approve", Label: "Start in " + r, Primary: len(ask.Actions) == 0, Repo: r})
+		}
+	}
+	ask.Actions = append(ask.Actions, Action{ID: "pickrepo", Label: "Other repo…", Primary: len(ask.Actions) == 0},
+		reply("Reply", "e.g. it's about the PDW Android app"), act("close", "Drop it"))
+	return ask
+}
+
+// noVerdictNote marks a card whose reviewer ended without a VERDICT line.
+const noVerdictNote = "reviewer gave no verdict"
+
+// Button labels on brief cards. briefMsg describes each button by these exact labels.
+const (
+	btnRecommend    = "Go with its recommendations"
+	btnRecommendOne = "Go with its recommendation"
+	btnBuildAsIs    = "Build the plan as it is"
+	btnLandAsIs     = "Land as it is"
+	btnTell         = "Tell it what to do"
+	btnAnswer       = "Answer"
+	btnDrop         = "Drop it"
+)
+
+const briefWhy = "Below is the builder's summary: what's unresolved, what it recommends, and what each button does. " +
+	"The reviewer's full notes are on its card."
+
+// briefAsk is the Ask for a card that reached the rework cap or was escalated by its reviewer. The builder was
+// sent briefMsg, so Detail is its brief, and the buttons are the ones the brief describes.
+func briefAsk(a Agent) *Ask {
+	plan := planPending(a) && strings.HasPrefix(a.L(labelVerdict), "plan")
+	if a.L(labelNote) == "reviewer escalated" {
+		return &Ask{Title: "A reviewer needs your decision", From: "builder", Why: briefWhy,
+			Actions: []Action{{ID: "reply", Label: btnAnswer, Primary: true, Hint: "Your decision"},
+				act("recommend", btnRecommendOne), act("close", btnDrop)}}
+	}
+	asIs, what := btnLandAsIs, "code"
+	if plan {
+		asIs, what = btnBuildAsIs, "plan"
+	}
+	return &Ask{Title: "Reviews didn't settle: your call on the " + what, From: "builder", Why: briefWhy,
+		Actions: []Action{primary("recommend", btnRecommend), reply(btnTell, "e.g. ignore the second point, fix the first"),
+			act("approve", asIs), act("close", btnDrop)}}
+}
+
+func stalledFlag(c Card) string {
+	for _, fl := range c.Flags {
+		if strings.HasPrefix(fl, "stalled ") {
+			return fl
+		}
+	}
+	return ""
+}
+
+func stageName(id string) string {
+	for _, st := range Stages {
+		if st[0] == id {
+			return st[1]
+		}
+	}
+	return id
+}
+
+var tagLine = regexp.MustCompile(`^\[[A-Z][A-Za-z_ -]{0,30}\]`)
+var trailer = regexp.MustCompile(`(?i)^\s*\**\s*(TIER|VERDICT):`)
+
+// lastMessage is the agent's last reply in `paseo logs --filter text` output: the untagged lines
+// after the last [User] line, without [Thought]/tool lines or the TIER/VERDICT trailer.
+func lastMessage(logs string) string {
+	lines := strings.Split(logs, "\n")
+	start := 0
+	for i, l := range lines {
+		if strings.HasPrefix(l, "[User]") {
+			start = i + 1
+		}
+	}
+	var out []string
+	for _, l := range lines[start:] {
+		if tagLine.MatchString(l) || trailer.MatchString(l) {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+type detailKey struct {
+	src  string // agent id the text came from
+	last string // its lastActivityAt when fetched
+}
+
+// fillAsks adds Detail to each Needs Zach card's Ask from the builder's or its latest reviewer's
+// last message. Fetches only when that agent has new activity.
+func (f *Factory) fillAsks(cards []Card, agents []Agent) {
+	byID := map[string]Agent{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	for n := range cards {
+		ask := cards[n].Ask
+		if ask == nil {
+			continue
+		}
+		src := cards[n].ID
+		if ask.From == "reviewer" {
+			for _, k := range cards[n].Children {
+				if k.Role == "reviewer" {
+					src = k.ID // children are oldest first, so this ends on the latest
+				}
+			}
+		}
+		a := byID[src]
+		key := detailKey{src, iso(a.LastActivityAt)}
+		f.mu.Lock()
+		cached, ok := f.details[cards[n].ID]
+		f.mu.Unlock()
+		if ok && cached.key == key {
+			ask.Detail, ask.Questions = cached.text, cached.questions
+			continue
+		}
+		text, err := f.lastReply(a)
+		if err != nil {
+			continue
+		}
+		// parse the whole reply: questions often close a long plan, past the Detail cut
+		text, ask.Questions = ParseQuestions(text)
+		ask.Detail = trunc(text, 6000)
+		f.mu.Lock()
+		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions}
+		f.mu.Unlock()
+	}
+}
+
+type detailEntry struct {
+	key       detailKey
+	text      string
+	questions []Question
+}
+
+// When an agent needs Zach's input it can ask multiple-choice questions, and he can always write his
+// own answer instead. Agents write each question as a block:
+//
+//	QUESTION: Where should it live?
+//	- Keep it where it is (recommended)
+//	- New repo
+var (
+	questionLine = regexp.MustCompile(`^\s*\**QUESTION:\**\s*(.+?)\s*$`)
+	optionLine   = regexp.MustCompile(`^\s*(?:[-*]|\d{1,2}[.)]|[A-Fa-f][.)])\s+(.+?)\s*$`)
+)
+
+const maxQuestions, maxOptions = 4, 6
+
+// ParseQuestions takes the QUESTION: blocks (2 or more options) out of an agent's reply and returns
+// the rest of the text and the questions, at most 4 with 6 options each. A block with fewer than 2
+// options stays in the text.
+func ParseQuestions(text string) (string, []Question) {
+	lines := strings.Split(text, "\n")
+	var out []string
+	var qs []Question
+	for i := 0; i < len(lines); i++ {
+		m := questionLine.FindStringSubmatch(lines[i])
+		if m == nil || len(qs) == maxQuestions {
+			out = append(out, lines[i])
+			continue
+		}
+		q := Question{Text: strings.Trim(m[1], "* ")}
+		j := i + 1
+		for j < len(lines) && strings.TrimSpace(lines[j]) == "" && len(q.Options) == 0 {
+			j++ // a blank line between the question and its options
+		}
+		for ; j < len(lines); j++ {
+			o := optionLine.FindStringSubmatch(lines[j])
+			if o == nil {
+				break
+			}
+			if len(q.Options) < maxOptions {
+				q.Options = append(q.Options, o[1])
+			}
+		}
+		if len(q.Options) < 2 {
+			out = append(out, lines[i])
+			continue
+		}
+		qs = append(qs, q)
+		i = j - 1
+	}
+	return strings.TrimSpace(strings.Join(out, "\n")), qs
+}
+
+// lastReply is agent a's last reply to a message. Claude session files mark who said what;
+// `paseo logs` text cannot tell a multi-line message to the agent from its answer, so it is
+// only the fallback for other providers.
+func (f *Factory) lastReply(a Agent) (string, error) {
+	if a.Provider == "claude" && a.SessionID != "" {
+		res, err := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
+		if err == nil && !res.Fallback {
+			// the trailing run of text blocks: one reply can span several (a review written in parts)
+			var last []string
+			for _, e := range res.Events {
+				switch e.Kind {
+				case "user", "tool", "result":
+					last = nil
+				case "assistant":
+					last = append(last, e.Text)
+				}
+			}
+			return stripTrailer(strings.Join(last, "\n\n")), nil
+		}
+	}
+	text, err := f.lastText(a.ID, 120)
+	if err != nil {
+		return "", err
+	}
+	return lastMessage(text), nil
+}
+
+func stripTrailer(s string) string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		if !trailer.MatchString(l) {
+			out = append(out, l)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}

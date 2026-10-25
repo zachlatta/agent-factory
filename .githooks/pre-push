@@ -1,0 +1,16 @@
+#!/bin/sh
+# This repo is public and every push publishes: scan every commit the push would send.
+set -eu
+scan="$(git rev-parse --show-toplevel)/bin/scan"
+zero=0000000000000000000000000000000000000000
+while read -r _ local _ remote; do
+	[ "$local" = "$zero" ] && continue # deleting a ref publishes nothing
+	if [ "$remote" != "$zero" ]; then
+		rng="$remote..$local"
+	elif git rev-parse -q --verify origin/main >/dev/null; then
+		rng="origin/main..$local"
+	else
+		rng="$local" # first push: all of history
+	fi
+	"$scan" "$rng"
+done

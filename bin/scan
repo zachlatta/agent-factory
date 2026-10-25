@@ -1,0 +1,22 @@
+#!/bin/sh
+# Secret scan: bin/scan --staged | --tree | <range>. Exit 0 clean, 1 findings, 2 could not run.
+# Uses the installed factory binary (so a change cannot weaken the scan that checks it) and the
+# gitleaks config on origin/main. On a factory host (one with ~/.config/agent-factory/env) the
+# private rules file is required. Elsewhere it runs from source with the generic rules.
+set -eu
+root=$(git rev-parse --show-toplevel)
+bin="${FACTORY_BIN:-$HOME/.local/share/agent-factory/factory}"
+cfg=$(mktemp)
+trap 'rm -f "$cfg"' EXIT
+if git -C "$root" show origin/main:.gitleaks.toml >"$cfg" 2>/dev/null; then :; else cp "$root/.gitleaks.toml" "$cfg"; fi
+req=""
+[ -f "$HOME/.config/agent-factory/env" ] && req="-require-private"
+if [ -x "$bin" ]; then
+	# an install from before the scanner has no scan command (it would start the board instead)
+	if ! grep -aq 'agent-factory/factory/scan' "$bin"; then
+		echo "scan: $bin has no scan command; run ./install.sh from this repo first" >&2
+		exit 2
+	fi
+	exec "$bin" scan -C "$root" -config "$cfg" $req "$@"
+fi
+cd "$root" && exec go run ./cmd/factory scan -C "$root" -config "$cfg" $req "$@"

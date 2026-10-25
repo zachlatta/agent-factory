@@ -1,0 +1,16 @@
+# systemd user unit: one deployer run (cmd/factory-deploy), started every minute by
+# agent-factory-deploy.timer. It builds the repo's main when the factory's code changed, restarts the
+# factory, rolls back if the new one does not come up, and restarts a hung factory.
+# Logs: journalctl --user -u agent-factory-deploy. State: ~/.local/state/agent-factory/deploy.json
+[Unit]
+Description=Agent factory deployer: run the repo's main, roll back if it does not come up
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+# PATH must reach git, go, gitleaks and pdw (for the down alert): set it in the host env file.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.config/agent-factory/env
+ExecStart=%h/.local/share/agent-factory/factory-deploy
+# build, a restart that may wait out the factory's 300 s stop, 150 s of health checks, a rollback
+TimeoutStartSec=20min

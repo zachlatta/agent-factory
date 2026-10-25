@@ -1,0 +1,330 @@
+package factory
+
+import (
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// Act runs one board action (POST /api/<action>).
+func (f *Factory) Act(action string, b Body) (any, error) {
+	switch action {
+	case "new":
+		return f.newCard(b)
+	case "idea":
+		return f.addIdea(b)
+	case "scout":
+		return f.startScout(b.Repo, b.Focus)
+	case "land-review":
+		return f.startLandReview(b)
+	}
+	if strings.HasPrefix(b.ID, "idea-") {
+		switch action {
+		case "approve":
+			return f.startIdea(b.ID, "zach", b.Agent)
+		case "archive":
+			return ok, f.dismissIdea(b.ID)
+		}
+		return nil, errors.New("ideas can only be started or dismissed")
+	}
+	c, found := f.card(b.ID)
+	sub := false
+	if !found && (action == "send" || action == "stop" || action == "archive") {
+		// sub-agents and reviewers are not cards but can be messaged, stopped or archived
+		if a, okA := f.agentOK(b.ID); okA {
+			c, found, sub = Card{ID: a.ID, Host: a.Host, Status: a.Status, ArchivedAt: iso(a.ArchivedAt)}, true, true
+		}
+	}
+	if !found {
+		return nil, errors.New("unknown card")
+	}
+	now := iso(f.Now())
+	switch action {
+	case "stage":
+		if !validStage(b.Stage) {
+			return nil, errors.New("bad stage")
+		}
+		if b.Stage == "landed" && c.ArchivedAt == "" {
+			if err := f.archiveAgent(c.ID); err != nil {
+				return nil, err
+			}
+		}
+		return ok, f.setLabels(c.ID, map[string]string{labelStage: b.Stage, labelSince: now})
+	case "review":
+		kind := b.Kind
+		if kind != "plan" {
+			kind = "code"
+		}
+		if c.Status == "running" {
+			return map[string]bool{"queued": true}, f.setLabels(c.ID, map[string]string{labelAutoReview: kind, labelSince: now})
+		}
+		_, err := f.StartReview(c, kind)
+		return ok, err
+	case "send":
+		if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
+			return nil, errors.New("message is empty")
+		}
+		msg := strings.TrimSpace(b.Message)
+		if msg == "" {
+			msg = "(see attached)"
+		}
+		if c.Awaiting == "plan" {
+			// Zach's answer to an architecture plan: revise it, then plan review runs again
+			msg = "Zach read your plan and wants changes:\n\n" + msg + "\n\nRevise the plan, then restate the " +
+				"whole revised plan (not just the changes) and stop. Do not build yet."
+			files, err := f.chat(c.ID, msg, b.Attachments)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, map[string]string{
+				labelStage: "plan", labelAwaiting: "", labelSince: now, labelNote: "revising plan for Zach"})
+		}
+		if f.agent(c.ID).L(labelRouting) != "" {
+			msg += "\n\nPick the repo again and end with the REPO: line."
+		}
+		files, err := f.chat(c.ID, "Message from Zach via the factory board:\n\n"+msg, b.Attachments)
+		if err != nil {
+			return nil, err
+		}
+		if a := f.agent(c.ID); !sub && c.ArchivedAt == "" && a.L(labelStage) != "" {
+			if err := f.setLabels(c.ID, replyLabels(a, now)); err != nil {
+				return nil, err
+			}
+		}
+		return map[string]any{"ok": true, "files": files}, nil
+	case "approve":
+		if a := f.agent(c.ID); a.L(labelRouting) != "" {
+			return ok, f.pickRepo(a, b.Repo)
+		}
+		answers := ""
+		if m := strings.TrimSpace(b.Message); m != "" {
+			// Zach approved and answered the card's questions in one step
+			answers = "\n\nZach's answers to your questions:\n" + m + "\n\n"
+		}
+		if c.Awaiting == "plan" || planPending(f.agent(c.ID)) {
+			if err := f.send(c.ID, buildMsg("Zach approved your plan."+answers, "(none)")); err != nil {
+				return nil, err
+			}
+			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
+				labelAwaiting: "", labelZachPlan: "approved", labelNote: "plan approved by Zach"})
+		}
+		msg := landMsg
+		if a, ok := f.agentOK(c.ID); ok {
+			msg = f.landMsgFor(a)
+		}
+		if f.guarded(c.Repo) {
+			// scan again: the card may have committed since its review
+			if note := f.scanNote(c.Cwd, ""); !scanPassed(note) {
+				return nil, errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
+			}
+		}
+		if err := f.send(c.ID, "Zach approved this on the factory board."+answers+" "+msg); err != nil {
+			return nil, err
+		}
+		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelNote: "approved by Zach"})
+	case "recommend":
+		// Zach accepts the builder's brief (rework cap or escalation): apply it, then code review as usual
+		if planPending(f.agent(c.ID)) {
+			if err := f.send(c.ID, "Zach accepts the recommendations in your brief. Revise the plan to match them, then "+
+				"build it as revised. Commit on your branch, do NOT land, and stop with a short summary. A code reviewer "+
+				"checks it next, and the factory lands it once the review passes."); err != nil {
+				return nil, err
+			}
+			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
+				labelAwaiting: "", labelZachPlan: "approved", labelDecided: "1", labelNote: "building with Zach's choices"})
+		}
+		if err := f.send(c.ID, "Zach accepts the recommendations in your brief. Apply them, commit on your branch, do NOT "+
+			"land, and stop with a short summary. A code reviewer checks it next, and the factory lands it once the "+
+			"review passes."); err != nil {
+			return nil, err
+		}
+		return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
+			labelDecided: "1", labelNote: "applying Zach's choices"})
+	case "rerun":
+		return ok, f.rerun(c)
+	case "done":
+		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landed", labelNote: "marked done by Zach"})
+	case "close":
+		if err := f.setLabels(c.ID, map[string]string{labelNote: "closed by Zach"}); err != nil {
+			return nil, err
+		}
+		return ok, f.dropAgent(c.ID)
+	case "archive":
+		return ok, f.dropAgent(c.ID)
+	case "stop":
+		_, err := f.paseo("stop", c.ID)
+		return ok, err
+	}
+	return nil, errors.New("unknown action")
+}
+
+var ok = map[string]bool{"ok": true}
+
+// dropAgent archives agent id and forgets its saved picker request, if any.
+func (f *Factory) dropAgent(id string) error {
+	if err := f.archiveAgent(id); err != nil {
+		return err
+	}
+	if f.agent(id).L(labelRouting) != "" {
+		return f.routes.del(id)
+	}
+	return nil
+}
+
+// planPending reports whether a board card's plan has not passed review or Zach yet. Its rework-cap
+// or escalation cards then mean "approve the plan", and Zach's replies go back to plan review.
+// A card in Done (say, a direct-track errand) has no plan pending.
+func planPending(a Agent) bool {
+	v, st := a.L(labelVerdict), a.L(labelStage)
+	return a.L(labelSource) == "board" && (st == "plan" || st == "plan-review" || st == "zach") && a.L(labelZachPlan) != "approved" && a.L(labelCodeRounds) == "" &&
+		!strings.HasPrefix(v, "plan approve") && !strings.HasPrefix(v, "plan nits") && !strings.HasPrefix(v, "code")
+}
+
+// replyLabels places a factory card after Zach replies to it, so its next move is queued once the
+// agent answers: a landing card stays in Landing (the landing check runs when it stops), a plan that
+// has not passed goes back to plan review, anything else gets a code review. Nothing is left in
+// Building with no move queued.
+func replyLabels(a Agent, now string) map[string]string {
+	switch {
+	case a.L(labelRouting) != "":
+		// a repo picker answers with a new REPO line, which the Tick routes again
+		return map[string]string{labelStage: "plan", labelSince: now, labelAwaiting: "", labelNote: "picking a repo"}
+	case a.L(labelStage) == "landing":
+		return map[string]string{labelStage: "landing", labelSince: now}
+	case planPending(a):
+		return map[string]string{labelStage: "plan", labelSince: now, labelNote: "revising plan for Zach"}
+	}
+	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code"}
+}
+
+// rerun restarts the step a stuck card left (factory.stuck-from): its review, or its landing.
+func (f *Factory) rerun(c Card) error {
+	if a := f.agent(c.ID); a.L(labelRouting) != "" {
+		return f.routeFromReply(a) // a picker's step is reading its REPO line, not a plan review
+	}
+	switch from := f.agent(c.ID).L(labelStuckFrom); from {
+	case "landing":
+		msg := landMsg
+		if f.guarded(c.Repo) {
+			if note := f.scanNote(c.Cwd, ""); !scanPassed(note) {
+				return errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
+			}
+			msg = guardedLandMsg
+		}
+		if err := f.send(c.ID, "The factory is re-running your landing. "+msg); err != nil {
+			return err
+		}
+		return f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run by Zach"})
+	case "plan", "plan-review", "building", "review":
+		kind := "code"
+		if from == "plan" || from == "plan-review" {
+			kind = "plan"
+		}
+		if c.Status == "running" {
+			return f.setLabels(c.ID, map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())})
+		}
+		_, err := f.StartReview(c, kind)
+		return err
+	}
+	return errors.New("this card is not stuck")
+}
+
+// newCard starts a planning agent in a fresh worktree of the chosen repo, or, for repo "auto", a
+// picker that chooses the repo first (route.go).
+func (f *Factory) newCard(b Body) (map[string]string, error) {
+	req := strings.TrimSpace(b.Request)
+	if req == "" {
+		return nil, errors.New("request is empty")
+	}
+	repo := b.Repo
+	if repo == "" {
+		repo = f.cfg.DefaultRepo
+	}
+	if repo == "" {
+		return nil, errors.New("no repo given, and no default repo (FACTORY_DEFAULT_REPO) is set")
+	}
+	title := b.Title
+	if title == "" {
+		title = strings.SplitN(req, "\n", 2)[0]
+	}
+	title = trunc(title, 70)
+	agent, err := f.resolveAgent(b.Agent)
+	if err != nil {
+		return nil, err
+	}
+	if repo == autoRepo {
+		return f.startPicker(b, req, title)
+	}
+	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", filepath.Join(f.cfg.Home, "dev", repo), "--title", title,
+		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),
+		"--label", labelArg(labelAgent, agent.ID))
+	if b.Origin == "idea" {
+		args = append(args, "--label", labelArg(labelOrigin, "idea"))
+	}
+	if tierRank(b.Tier) >= 0 {
+		args = append(args, "--label", labelArg(labelTier, b.Tier))
+	}
+	prompt := fmt.Sprintf(strings.ReplaceAll(newCardPrompt, "<errands>", f.errandsName()), req, repo, fellowPeersRule(f.cfg.Port, f.Peers("", repo).Text(f.cfg.Location)),
+		tierRules, wholeAppRule, questionRule)
+	if f.guarded(repo) {
+		prompt += publicCardNote
+	}
+	if t := strings.TrimSpace(b.Thread); t != "" {
+		args = append(args, "--label", gmailThreadLabel+"="+t)
+		prompt += newCardEmailNote(t)
+	}
+	args = append(args, "--background", "--quiet", prompt)
+	out, err := f.paseo(args...)
+	if err != nil {
+		return nil, err
+	}
+	id := lastLine(out)
+	f.logf("new card %s: %s", short(id), title)
+	f.poke()
+	return map[string]string{"id": id}, nil
+}
+
+var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+func safeName(name string) string {
+	n := strings.TrimLeft(trunc(unsafeName.ReplaceAllString(filepath.Base(name), "_"), 80), ".")
+	if n == "" {
+		return "file"
+	}
+	return n
+}
+
+// chat sends Zach's message. Every attachment is saved under ~/.paseo/factory-uploads/<id8>/ and
+// named in the message; images under 5 MB also go inline (paseo send --image).
+func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
+	var files, images []string
+	for _, a := range atts {
+		data, err := base64.StdEncoding.DecodeString(a.DataBase64)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %v", a.Name, err)
+		}
+		if len(data) > 25<<20 {
+			return nil, fmt.Errorf("%s is over 25 MB", a.Name)
+		}
+		dir := filepath.Join(f.cfg.Home, ".paseo/factory-uploads", id[:min(8, len(id))])
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
+		path := filepath.Join(dir, f.Now().Format("20060102-150405")+"-"+safeName(a.Name))
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return nil, err
+		}
+		files = append(files, path)
+		if strings.HasPrefix(a.Type, "image/") && len(data) < 5<<20 {
+			images = append(images, path)
+		}
+	}
+	if len(files) > 0 {
+		msg += "\n\nAttached files (saved on " + f.cfg.Host + "):\n- " + strings.Join(files, "\n- ")
+	}
+	return files, f.send(id, msg, images...)
+}
