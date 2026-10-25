@@ -224,10 +224,66 @@ func TestUsageFallbacksAndGemini(t *testing.T) {
 	if u := parseMuseUsage([]byte("{}"), t0); u.Summary != "usage unknown" {
 		t.Errorf("empty muse json = %+v", u)
 	}
+}
+
+const agyUsageJSON = `{"conversation_id":"","status":"SUCCESS","response":"","num_turns":0,"command":{"name":"usage","data":{"groups":[` +
+	`{"name":"Claude and GPT models","buckets":[{"id":"3p-weekly","window":"weekly","remaining_fraction":0.5,"reset_time":"2026-11-01T23:35:13Z"},{"id":"3p-5h","window":"5h","remaining_fraction":0.1,"reset_time":"2026-10-26T04:35:13Z"}]},` +
+	`{"name":"Gemini Models","buckets":[{"id":"gemini-weekly","window":"weekly","remaining_fraction":0.9392,"reset_time":"2026-10-31T01:48:04Z"},{"id":"gemini-5h","window":"5h","remaining_fraction":0.7717,"reset_time":"2026-10-26T03:01:40.5Z"}]}]}}}`
+
+func TestParseAntigravityUsage(t *testing.T) {
+	u := parseAntigravityUsage([]byte(agyUsageJSON), t0)
+	if u.Summary != "94% 7d · 77% 5h left" {
+		t.Errorf("Summary = %q, want %q", u.Summary, "94% 7d · 77% 5h left")
+	}
+	want := []UsageWindow{
+		{Label: "7d", RemainingPct: 94, ResetsAt: "2026-10-31T01:48:04Z"},
+		{Label: "5h", RemainingPct: 77, ResetsAt: "2026-10-26T03:01:40Z"},
+	}
+	if fmt.Sprint(u.Windows) != fmt.Sprint(want) {
+		t.Errorf("Windows = %+v, want %+v", u.Windows, want)
+	}
+	if u.UpdatedAt != t0.UTC().Format(time.RFC3339) {
+		t.Errorf("UpdatedAt = %q", u.UpdatedAt)
+	}
+
+	for name, raw := range map[string]string{
+		"bad json":  "not json",
+		"failed":    strings.Replace(agyUsageJSON, `"SUCCESS"`, `"ERROR"`, 1),
+		"no gemini": strings.NewReplacer(`"Gemini Models"`, `"Other"`, `"gemini-`, `"other-`).Replace(agyUsageJSON),
+		"no groups": `{"status":"SUCCESS","command":{"data":{"groups":[]}}}`,
+	} {
+		if u := parseAntigravityUsage([]byte(raw), t0); u.Summary != "usage unknown" {
+			t.Errorf("%s = %+v, want usage unknown", name, u)
+		}
+	}
+}
+
+func TestReadAntigravityUsage(t *testing.T) {
 	f, _ := newTestFactory(t)
 	f.Usage = f.readProviderUsage
+
+	bin := t.TempDir()
+	log := filepath.Join(t.TempDir(), "agy.log")
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("PATH", bin)
 	if u := f.Usage(context.Background(), "antigravity"); u.Summary != "usage unknown" {
-		t.Errorf("antigravity = %+v, want usage unknown", u)
+		t.Errorf("no agy on PATH = %+v, want usage unknown", u)
+	}
+
+	script := "#!/bin/sh\necho \"$*\" > " + log + "\npwd >> " + log + "\nprintf '%s\\n' '" + agyUsageJSON + "'\n"
+	if err := os.WriteFile(filepath.Join(bin, "agy"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if u := f.Usage(context.Background(), "antigravity"); u.Summary != "94% 7d · 77% 5h left" {
+		t.Errorf("antigravity = %+v", u)
+	}
+	got, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-p /usage --output-format json\n" + os.TempDir() + "\n"
+	if string(got) != want {
+		t.Errorf("agy call = %q, want %q", got, want)
 	}
 }
 

@@ -213,6 +213,15 @@ func (f *Factory) readProviderUsage(ctx context.Context, provider string) AgentU
 		return parseClaudeUsage(out, f.Now())
 	case "codex":
 		return readCodexUsage(f.cfg.Home)
+	case "antigravity":
+		// A read-only slash command in print mode: no agent turn, no quota spent, no conversation.
+		cmd := exec.CommandContext(ctx, "agy", "-p", "/usage", "--output-format", "json")
+		cmd.Dir = os.TempDir()
+		out, err := cmd.Output()
+		if err != nil {
+			return unknownUsage()
+		}
+		return parseAntigravityUsage(out, f.Now())
 	case "muse":
 		out, err := exec.CommandContext(ctx, "muse", "usage", "--json").Output()
 		if err != nil {
@@ -448,5 +457,68 @@ func parseMuseUsage(raw []byte, now time.Time) AgentUsage {
 		Summary:   formatSummary(ws),
 		Windows:   ws,
 		UpdatedAt: updated,
+	}
+}
+
+// parseAntigravityUsage reads `agy -p /usage --output-format json`. Quota is pooled per model
+// group; Gemini models (Argon included) share the "Gemini Models" group's weekly and 5h limits.
+func parseAntigravityUsage(raw []byte, now time.Time) AgentUsage {
+	type bucket struct {
+		ID                string   `json:"id"`
+		Window            string   `json:"window"`
+		RemainingFraction *float64 `json:"remaining_fraction"`
+		ResetTime         string   `json:"reset_time"`
+	}
+	type group struct {
+		Name    string   `json:"name"`
+		Buckets []bucket `json:"buckets"`
+	}
+	var payload struct {
+		Status  string `json:"status"`
+		Command struct {
+			Data struct {
+				Groups []group `json:"groups"`
+			} `json:"data"`
+		} `json:"command"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Status != "SUCCESS" {
+		return unknownUsage()
+	}
+	var gem *group
+	for i := range payload.Command.Data.Groups {
+		g := &payload.Command.Data.Groups[i]
+		for _, b := range g.Buckets {
+			if strings.HasPrefix(b.ID, "gemini-") {
+				gem = g
+			}
+		}
+		if gem == nil && g.Name == "Gemini Models" {
+			gem = g
+		}
+		if gem != nil {
+			break
+		}
+	}
+	if gem == nil {
+		return unknownUsage()
+	}
+	labels := map[string]string{"weekly": "7d", "5h": "5h"}
+	var ws []UsageWindow
+	for _, label := range []string{"7d", "5h"} {
+		for _, b := range gem.Buckets {
+			if b.RemainingFraction == nil || labels[b.Window] != label {
+				continue
+			}
+			ws = append(ws, UsageWindow{Label: label, RemainingPct: remPct((1 - *b.RemainingFraction) * 100), ResetsAt: normISO(b.ResetTime)})
+			break
+		}
+	}
+	if len(ws) == 0 {
+		return unknownUsage()
+	}
+	return AgentUsage{
+		Summary:   formatSummary(ws),
+		Windows:   ws,
+		UpdatedAt: now.UTC().Format(time.RFC3339),
 	}
 }
