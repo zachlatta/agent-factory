@@ -201,7 +201,7 @@ come out better from one strong pass than from plan and review agents. On the
 direct track, do NOT write a plan: do the whole thing now, in one pass, as well as you can. Check
 every fact at its source, including anything that changed in the last day (a rebooked flight, a
 moved meeting: look at <errands> work items on origin/main from today). Deliver the result, record it in
-a <errands> work item, land it (commit, then bin/land), and end your final message with the line
+a <errands> work item, land it (commit, then land it the way that repo's AGENTS.md says), and end your final message with the line
 TRACK: direct
 The direct track commits only its own <errands> work item (work/...): no other files, no other repo.
 Anything else (code, config, infra, deletes, money, messages to anyone but Zach) is the build track:
@@ -223,8 +223,8 @@ Put the plan's open questions, and anything you need from Zach, in this form:
 %s
 `
 
-const landMsg = "Land it now the way this repo lands work (its AGENTS.md, often: commit, then bin/land). Land exactly the " +
-	"reviewed commits: no new commits or amends. If the rebase conflicts or anything must change, stop and say so " +
+const landMsg = "Land it now the way this repo lands work: read its AGENTS.md and README (and how recent commits reached " +
+	"main) and do that. Land exactly the reviewed commits: no new commits or amends. If the rebase conflicts or anything must change, stop and say so " +
 	"instead of landing. Verify it landed, then stop with a one-line summary. The agent factory deploys itself " +
 	"from its repo's main within a minute of landing (and rolls back if it does not come up): never run its install.sh " +
 	"to deploy."
@@ -846,7 +846,7 @@ func (f *Factory) stillStopped(a Agent) (bool, error) {
 }
 
 // landedOnMain reports whether the checkout at cwd has its HEAD on origin/main, and why not.
-// A failed fetch still checks the local origin/main: bin/land updates it when it pushes, and a
+// A failed fetch still checks the local origin/main: a landing push updates it, and a
 // stale ref only fails safe. With base (the card's starting HEAD), HEAD must also have moved: a
 // card that never committed is not landed. Not caught: cards from before factory.base, a worktree
 // fast-forwarded without a commit of its own, and uncommitted changes left in the worktree.

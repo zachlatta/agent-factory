@@ -154,7 +154,7 @@ func baseAsk(c Card, a Agent) *Ask {
 	case note == "landing not verified":
 		return &Ask{Title: "Landing didn't reach main", From: "builder",
 			Why:     "The agent finished landing, but its commit is not on origin/main. Its last message is below.",
-			Actions: []Action{reply("Tell it to retry", "e.g. rebase and run bin/land again"), act("done", "It's fine, mark done")}}
+			Actions: []Action{reply("Tell it to retry", "e.g. rebase and land it again"), act("done", "It's fine, mark done")}}
 	case a.L(labelStage) == "zach":
 		return &Ask{Title: "Moved here by hand", From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",

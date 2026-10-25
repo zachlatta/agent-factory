@@ -13,7 +13,7 @@ import (
 // own linked worktree, and git keeps a HEAD reflog per worktree, so the reflog holds only that card's
 // moves: its own commits show as "commit…" entries, while other agents' commits reach it only through
 // "rebase (pick)" or fast-forward entries. A range like base..HEAD would also hold those other
-// commits once bin/land has rebased (plan review, round 2).
+// commits once the landing has rebased (plan review, round 2).
 
 // reflogEntry is one HEAD reflog line: the commit HEAD moved to, and git's reason.
 type reflogEntry struct{ SHA, Subject string }
@@ -33,7 +33,7 @@ func (f *Factory) headReflog(ctx context.Context, dir string) ([]reflogEntry, er
 	return es, nil
 }
 
-// landingMoveRe matches the reflog entries a plain landing writes: bin/land's rebase (pick, start,
+// landingMoveRe matches the reflog entries a plain landing writes: its rebase (pick, start,
 // finish; also "pull … --rebase"), a checkout, a fast-forward, or the no-op reset an up-to-date
 // rebase records. Anything else after review (a commit, an amend, "rebase (continue)" after a
 // conflict fix, a real merge or reset) changed what lands.
