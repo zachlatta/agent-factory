@@ -80,6 +80,8 @@ type Factory struct {
 	p      Paseo
 	ideas  *IdeaStore
 	routes *RouteStore
+
+	hostMetrics hostSampler
 	// landReviews: landing reviews asked for by agents outside the card flow (landreview.go)
 	landReviews *LandReviewStore
 	GitHubAPI   string // base URL for repo visibility lookups

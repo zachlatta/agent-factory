@@ -162,6 +162,8 @@ dialog h3{margin:0 0 8px}
   aside .x{font-size:28px;top:6px}
   .acts button{padding:8px 12px}
 }
+#hostPreview{display:block;padding:7px 16px;background:#fff;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink);text-decoration:none;font-variant-numeric:tabular-nums}
+#hostPreview:hover{text-decoration:underline}#hostPreview[data-stale=true]{color:#b42318}
 </style>
 </head>
 <body>
@@ -178,6 +180,8 @@ dialog h3{margin:0 0 8px}
   <label class="sub"><input type="checkbox" id="showKids"> sub-agents</label>
   <button class="primary" id="newBtn">+ New card</button>
 </header>
+<a href="/host" id="hostPreview">Host metrics loading…</a>
+<script src="/host-metrics.js" defer></script>
 <div class="banner" id="banner" hidden></div>
 <nav class="tabs" id="tabs"></nav>
 <main><div class="grid" id="grid"></div></main>

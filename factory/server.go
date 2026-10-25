@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed web/board.html web/transcript.html
+//go:embed web/board.html web/transcript.html web/host.html web/host-metrics.js
 var web embed.FS
 
 // Handler serves the board, the transcript pages and the JSON API.
@@ -21,6 +21,9 @@ func (f *Factory) Handler() http.Handler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			b, _ := web.ReadFile("web/" + name)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if strings.HasSuffix(name, ".js") {
+				w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			}
 			w.Header().Set("Cache-Control", "no-store")
 			w.Write(b)
 		}
@@ -40,6 +43,9 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /api/transcript/{id}", gzipHandler(f.handleTranscript))
 	mux.HandleFunc("GET /api/logs/{id}", gzipHandler(f.handleLogs))
 	mux.HandleFunc("GET /api/land-review/{by}", gzipHandler(f.handleLandReview))
+	mux.HandleFunc("GET /host", page("host.html"))
+	mux.HandleFunc("GET /host-metrics.js", page("host-metrics.js"))
+	mux.HandleFunc("GET /api/host", f.handleHost)
 	mux.HandleFunc("POST /api/{action}", f.handleAction)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
