@@ -207,7 +207,6 @@ dialog h3{margin:0 0 8px}
   <div class="ausage" id="nAgentUsage"></div>
   <div class="sub" id="nAgentNote" style="margin:2px 0 8px;min-height:1em"></div>
   <label class="sub">What should it do?</label>
-  <input id="nFocus" placeholder="Focus path for Suggest ideas (optional), e.g. factory/web" style="width:100%;margin-bottom:8px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
   <textarea id="nReq" style="min-height:120px" placeholder="e.g. Add a dry-run flag to bin/land that prints what it would push"></textarea>
   <div class="acts" style="justify-content:flex-end"><button id="nScout" title="A read-only agent looks through this repo and past sessions and suggests up to 3 ideas">Suggest ideas</button><span style="flex:1"></span><button onclick="newDlg.close()">Cancel</button><button class="primary" id="nGo">Start planning</button></div>
 </dialog>
@@ -570,7 +569,7 @@ function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').in
 function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
 $('newBtn').onclick = ()=>{ fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4); };
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
-  try{ const r=await post('scout',{repo:$('nRepo').value, focus:$('nFocus').value.trim()}); toast('Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
+  try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast('Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
   try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
 $('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };

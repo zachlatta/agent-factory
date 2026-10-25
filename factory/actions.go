@@ -18,7 +18,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	case "idea":
 		return f.addIdea(b)
 	case "scout":
-		return f.startScout(b.Repo, b.Focus)
+		return f.startScout(b.Repo, b.Request)
 	case "land-review":
 		return f.startLandReview(b)
 	}

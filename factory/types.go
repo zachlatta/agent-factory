@@ -152,7 +152,6 @@ type Body struct {
 	Tier        string       `json:"tier"`
 	Origin      string       `json:"origin"`
 	Agent       string       `json:"agent"`  // AgentChoice id for a new card, an idea, or starting an idea
-	Focus       string       `json:"focus"`  // scout: only look at this path
 	Thread      string       `json:"thread"` // new card: zrl-bot Gmail thread to report in
 }
 

@@ -247,7 +247,7 @@ Then stop with a one-line list of what you submitted.
 `
 
 // startScout starts a read-only agent that suggests ideas for repo through POST /api/idea.
-func (f *Factory) startScout(repo, focus string) (map[string]string, error) {
+func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 	if repo == "" {
 		repo = f.cfg.DefaultRepo
 	}
@@ -258,9 +258,8 @@ func (f *Factory) startScout(repo, focus string) (map[string]string, error) {
 	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeAppRule,
 		f.cfg.Port, repo), "<repo>", repo)
 	title := "Scout: ideas for " + repo
-	if focus != "" {
-		prompt += "\nOnly look at " + focus + " (and what it calls); ideas outside it are out of scope.\n"
-		title += " (" + focus + ")"
+	if strings.TrimSpace(guidance) != "" {
+		prompt += "\nGuidance:\n" + guidance + "\n"
 	}
 	out, err := f.paseo(append(reviewerRunArgs(), "--cwd", cwd, "--title", trunc(title, 70),
 		"--label", labelArg(labelRole, "scout"), "--label", labelArg(labelSource, "board"), "--background", "--quiet", prompt)...)

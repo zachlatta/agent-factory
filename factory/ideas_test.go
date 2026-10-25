@@ -1,6 +1,8 @@
 package factory
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -116,19 +118,42 @@ func TestDailyCapResetsNextDay(t *testing.T) {
 	}
 }
 
-func TestScoutFocus(t *testing.T) {
-	f, p := newTestFactory(t)
-	if _, err := f.Act("scout", Body{Repo: "example/desk", Focus: "work/x"}); err != nil {
-		t.Fatal(err)
-	}
-	runs := p.runsWithLabel(labelArg(labelRole, "scout"))
-	if len(runs) != 1 || !strings.Contains(runs[0][len(runs[0])-1], "Only look at work/x") {
-		t.Fatalf("scout run = %v", runs)
-	}
-	prompt := runs[0][len(runs[0])-1]
-	if strings.Contains(prompt, "%!") || !strings.Contains(prompt, "localhost:7478/api/idea") ||
-		!strings.Contains(prompt, "fetch -q origin") || !strings.Contains(prompt, "localhost:7478/api/ideas") {
-		t.Errorf("bad scout prompt:\n%s", prompt)
+func TestScoutGuidance(t *testing.T) {
+	for _, guidance := range []string{"", "Find ways to speed up tests.\nPrioritize flaky cases and report 50% gains."} {
+		t.Run(guidance, func(t *testing.T) {
+			f, p := newTestFactory(t)
+			raw, err := json.Marshal(map[string]string{
+				"repo": "example/desk", "request": guidance, "focus": "legacy/path",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest("POST", "/api/scout", strings.NewReader(string(raw)))
+			req.Header.Set("X-Factory", "1")
+			rec := httptest.NewRecorder()
+			f.Handler().ServeHTTP(rec, req)
+			if rec.Code != 200 {
+				t.Fatalf("scout: %d %s", rec.Code, rec.Body)
+			}
+			runs := p.runsWithLabel(labelArg(labelRole, "scout"))
+			if len(runs) != 1 {
+				t.Fatalf("scout runs = %v", runs)
+			}
+			prompt := runs[0][len(runs[0])-1]
+			if guidance != "" && !strings.Contains(prompt, guidance) {
+				t.Error("scout prompt lost guidance")
+			}
+			if guidance == "" && strings.Contains(prompt, "Guidance:") {
+				t.Error("empty guidance added a prompt section")
+			}
+			if strings.Contains(strings.Join(runs[0], " "), "legacy/path") || strings.Contains(prompt, "Only look at") {
+				t.Error("legacy focus restricted the scout")
+			}
+			if strings.Contains(prompt, "%!") || !strings.Contains(prompt, "localhost:7478/api/idea") ||
+				!strings.Contains(prompt, "fetch -q origin") || !strings.Contains(prompt, "localhost:7478/api/ideas") {
+				t.Errorf("bad scout prompt:\n%s", prompt)
+			}
+		})
 	}
 }
 
