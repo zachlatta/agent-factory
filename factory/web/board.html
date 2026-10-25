@@ -68,6 +68,7 @@ main{padding:12px 16px 80px;overflow-x:auto}
 .ausage .abar i{display:inline-block;width:36px;height:6px;border-radius:3px;background:#dce1e7;overflow:hidden}
 .ausage .abar i b{display:block;height:100%;background:var(--green)}
 .ausage .abar i b.mid{background:var(--amber)}.ausage .abar i b.low{background:var(--red)}
+.ausage .arow.acct{cursor:default;background:#fff;padding-left:22px}
 .kids{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px}
 .kid{font-size:10.5px;padding:0 5px;border-radius:4px;background:#eef1f4;color:var(--mute)}
 .kid.reviewer{background:#fbefff;color:var(--purple)}
@@ -237,17 +238,24 @@ function agentOptions(selected){
     return `<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)} · ${esc(a.plan)}${esc(u)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`;
   }).join('');
 }
+function usageBars(u){
+  const ws = (u && u.windows) || [];
+  return ws.length ? ws.map(w=>{
+    const p = w.remainingPct ?? 0, cls = p<=20?'low':p<=50?'mid':'';
+    const rst = w.resetsAt ? ` (resets in ${inTime(w.resetsAt)})` : '';
+    return `<span class="abar" title="${esc(w.label+' remaining'+rst)}"><i><b class="${cls}" style="width:${p}%"></b></i><b>${p}%</b> ${esc(w.label)} left</span>`;
+  }).join('') : `<span class="sub">${esc((u && u.summary)||'usage unknown')}</span>`;
+}
 function agentUsageHtml(selected, selId){
   return AG.agents.map(a=>{
-    const u = a.usage || {}, ws = u.windows || [];
-    const bars = ws.length ? ws.map(w=>{
-      const p = w.remainingPct ?? 0, cls = p<=20?'low':p<=50?'mid':'';
-      const rst = w.resetsAt ? ` (resets in ${inTime(w.resetsAt)})` : '';
-      return `<span class="abar" title="${esc(w.label+' remaining'+rst)}"><i><b class="${cls}" style="width:${p}%"></b></i><b>${p}%</b> ${esc(w.label)} left</span>`;
-    }).join('') : `<span class="sub">${esc(u.summary||'usage unknown')}</span>`;
+    const u = a.usage || {};
     const meta = !a.available ? 'not available: '+a.status : (u.extra || (u.updatedAt ? 'as of '+ago(u.updatedAt) : a.plan));
+    const accts = (u.accounts && u.accounts.length>1) ? u.accounts.map(ac=>{
+      const ameta = ac.extra || (ac.updatedAt ? 'as of '+ago(ac.updatedAt) : '');
+      return `<div class="arow acct"><div>${esc(ac.label)}${ac.active?' · <span class="sub">active</span>':''}</div><div>${usageBars(ac)}</div><div class="sub">${esc(ameta)}</div></div>`;
+    }).join('') : '';
     return `<div class="arow ${a.id===selected?'on':''} ${a.available?'':'off'}" onclick="pickAgent('${esc(selId)}','${esc(a.id)}')">
-      <div><b>${esc(a.label)}</b> · <span class="sub">${esc(a.plan)}</span></div><div>${bars}</div><div class="sub">${esc(meta)}</div></div>`;
+      <div><b>${esc(a.label)}</b> · <span class="sub">${esc(a.plan)}</span></div><div>${usageBars(u)}</div><div class="sub">${esc(meta)}</div></div>` + accts;
   }).join('');
 }
 function pickAgent(selId, id){

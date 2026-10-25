@@ -42,7 +42,10 @@ The planner (the "Fellow") first picks a track:
   (`REPO: owner/name`); the card then starts there. If it can't tell, it asks in Needs Zach with
   buttons for its candidates (`factory/route.go`).
 - **Agent.** The builder can be any provider Paseo has (`factory/agents.go`: Opus, Codex, Gemini,
-  Muse); reviewers are always Opus. Providers that are not available are greyed out.
+  Muse); reviewers are always Opus. Providers that are not available are greyed out. The agent
+  pickers (New Task dialog and card panel) show each provider's remaining subscription usage;
+  for Claude, every account `cswap` reports is listed by account number, with the active one
+  marked.
 
 ### Ideas
 

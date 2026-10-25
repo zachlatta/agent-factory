@@ -31,6 +31,19 @@ type UsageWindow struct {
 
 // AgentUsage is the remaining subscription allowance for an agent choice's provider.
 type AgentUsage struct {
+	Summary   string         `json:"summary"`
+	Windows   []UsageWindow  `json:"windows,omitempty"`
+	Extra     string         `json:"extra,omitempty"`
+	UpdatedAt string         `json:"updatedAt,omitempty"`
+	Accounts  []AccountUsage `json:"accounts,omitempty"`
+}
+
+// AccountUsage is one account's remaining allowance, for providers whose
+// allowance is split across accounts. The label is the account's local
+// number only; no address or organization identifier is carried.
+type AccountUsage struct {
+	Label     string        `json:"label"`
+	Active    bool          `json:"active,omitempty"`
 	Summary   string        `json:"summary"`
 	Windows   []UsageWindow `json:"windows,omitempty"`
 	Extra     string        `json:"extra,omitempty"`
@@ -66,36 +79,56 @@ func formatSummary(ws []UsageWindow) string {
 	return strings.Join(parts, " · ") + " left"
 }
 
+// resetWindows copies ws and flips any window whose reset has passed back
+// to 100% remaining, reporting whether anything flipped.
+func resetWindows(ws []UsageWindow, now time.Time) ([]UsageWindow, bool) {
+	out := make([]UsageWindow, len(ws))
+	copy(out, ws)
+	reset := false
+	for i, w := range out {
+		if rt, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil && !now.Before(rt) {
+			out[i].RemainingPct = 100
+			out[i].ResetsAt = ""
+			reset = true
+		}
+	}
+	return out, reset
+}
+
+func ageExtra(extra, updatedAt string, now time.Time) string {
+	ts, err := time.Parse(time.RFC3339Nano, updatedAt)
+	if updatedAt == "" || err != nil {
+		return extra
+	}
+	age := "as of " + formatAge(now.Sub(ts))
+	if extra != "" {
+		return extra + " · " + age
+	}
+	return age
+}
+
 func withAge(u AgentUsage, now time.Time) AgentUsage {
 	if len(u.Windows) > 0 {
-		ws := make([]UsageWindow, len(u.Windows))
-		copy(ws, u.Windows)
-		reset := false
-		for i, w := range ws {
-			if rt, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil && !now.Before(rt) {
-				ws[i].RemainingPct = 100
-				ws[i].ResetsAt = ""
-				reset = true
-			}
-		}
-		if reset {
+		if ws, reset := resetWindows(u.Windows, now); reset {
 			u.Windows = ws
 			u.Summary = formatSummary(ws)
 		}
 	}
-	if u.UpdatedAt == "" {
-		return u
+	if len(u.Accounts) > 0 {
+		accts := make([]AccountUsage, len(u.Accounts))
+		copy(accts, u.Accounts)
+		for i := range accts {
+			if len(accts[i].Windows) > 0 {
+				if ws, reset := resetWindows(accts[i].Windows, now); reset {
+					accts[i].Windows = ws
+					accts[i].Summary = formatSummary(ws)
+				}
+			}
+			accts[i].Extra = ageExtra(accts[i].Extra, accts[i].UpdatedAt, now)
+		}
+		u.Accounts = accts
 	}
-	ts, err := time.Parse(time.RFC3339Nano, u.UpdatedAt)
-	if err != nil {
-		return u
-	}
-	age := "as of " + formatAge(now.Sub(ts))
-	if u.Extra != "" {
-		u.Extra += " · " + age
-	} else {
-		u.Extra = age
-	}
+	u.Extra = ageExtra(u.Extra, u.UpdatedAt, now)
 	return u
 }
 
@@ -175,8 +208,8 @@ func parseClaudeUsage(raw []byte, now time.Time) AgentUsage {
 		ResetsAt string  `json:"resetsAt"`
 	}
 	type acct struct {
+		Number         int    `json:"number"`
 		Active         bool   `json:"active"`
-		UsageStatus    string `json:"usageStatus"`
 		UsageFetchedAt string `json:"usageFetchedAt"`
 		Usage          struct {
 			FiveHour *win `json:"fiveHour"`
@@ -189,48 +222,55 @@ func parseClaudeUsage(raw []byte, now time.Time) AgentUsage {
 	if err := json.Unmarshal(raw, &payload); err != nil || len(payload.Accounts) == 0 {
 		return unknownUsage()
 	}
-	var pick *acct
-	overflow := 0
-	for i := range payload.Accounts {
-		a := &payload.Accounts[i]
-		if a.Active {
-			pick = a
-			continue
+	// Every account is listed, in account-number order. An account with no
+	// number keeps its place by list position.
+	type numbered struct {
+		num int
+		au  AccountUsage
+	}
+	rows := make([]numbered, len(payload.Accounts))
+	pick := 0
+	pickedActive := false
+	for i, a := range payload.Accounts {
+		if a.Active && !pickedActive {
+			pick, pickedActive = i, true
 		}
-		if a.UsageStatus == "ok" &&
-			(a.Usage.SevenDay == nil || a.Usage.SevenDay.Pct < 100) &&
-			(a.Usage.FiveHour == nil || a.Usage.FiveHour.Pct < 100) {
-			overflow++
+		num := a.Number
+		if num <= 0 {
+			num = i + 1
 		}
+		var ws []UsageWindow
+		if w := a.Usage.SevenDay; w != nil {
+			ws = append(ws, UsageWindow{Label: "7d", RemainingPct: remPct(w.Pct), ResetsAt: normISO(w.ResetsAt)})
+		}
+		if w := a.Usage.FiveHour; w != nil {
+			ws = append(ws, UsageWindow{Label: "5h", RemainingPct: remPct(w.Pct), ResetsAt: normISO(w.ResetsAt)})
+		}
+		updated := normISO(a.UsageFetchedAt)
+		if updated == "" && len(ws) > 0 {
+			updated = now.UTC().Format(time.RFC3339)
+		}
+		rows[i] = numbered{num, AccountUsage{
+			Label:     fmt.Sprintf("Claude #%d", num),
+			Active:    a.Active,
+			Summary:   formatSummary(ws),
+			Windows:   ws,
+			UpdatedAt: updated,
+		}}
 	}
-	if pick == nil {
-		pick = &payload.Accounts[0]
-	}
-	var ws []UsageWindow
-	if w := pick.Usage.SevenDay; w != nil {
-		ws = append(ws, UsageWindow{Label: "7d", RemainingPct: remPct(w.Pct), ResetsAt: normISO(w.ResetsAt)})
-	}
-	if w := pick.Usage.FiveHour; w != nil {
-		ws = append(ws, UsageWindow{Label: "5h", RemainingPct: remPct(w.Pct), ResetsAt: normISO(w.ResetsAt)})
-	}
-	if len(ws) == 0 {
-		return unknownUsage()
-	}
-	extra := ""
-	if overflow == 1 {
-		extra = "+1 overflow account"
-	} else if overflow > 1 {
-		extra = fmt.Sprintf("+%d overflow accounts", overflow)
-	}
-	updated := normISO(pick.UsageFetchedAt)
-	if updated == "" {
-		updated = now.UTC().Format(time.RFC3339)
+	// The top-level reading stays the active account's (the first account
+	// when none is flagged active), as before accounts were listed.
+	top := rows[pick].au
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].num < rows[j].num })
+	accounts := make([]AccountUsage, len(rows))
+	for i, r := range rows {
+		accounts[i] = r.au
 	}
 	return AgentUsage{
-		Summary:   formatSummary(ws),
-		Windows:   ws,
-		Extra:     extra,
-		UpdatedAt: updated,
+		Summary:   top.Summary,
+		Windows:   top.Windows,
+		UpdatedAt: top.UpdatedAt,
+		Accounts:  accounts,
 	}
 }
 

@@ -43,6 +43,27 @@ func TestParseClaudeUsage(t *testing.T) {
 					"sevenDay": {"pct": 23.0, "resetsAt": "2026-10-31T12:00:00Z"}
 				},
 				"usageFetchedAt": "2026-10-25T19:55:00Z"
+			},
+			{
+				"number": 3,
+				"email": "third@example.com",
+				"organizationName": "Third Org",
+				"organizationUuid": "org-secret-id-3",
+				"active": false,
+				"usageStatus": "ok",
+				"usage": {
+					"fiveHour": {"pct": 100.0, "resetsAt": "2026-10-26T01:00:00Z"},
+					"sevenDay": {"pct": 100.0, "resetsAt": "2026-11-01T12:00:00Z"}
+				},
+				"usageFetchedAt": "2026-10-25T19:58:00Z"
+			},
+			{
+				"email": "fourth@example.com",
+				"organizationName": "Fourth Org",
+				"organizationUuid": "org-secret-id-4",
+				"active": false,
+				"usageStatus": "stale",
+				"usage": {}
 			}
 		]
 	}`
@@ -54,14 +75,72 @@ func TestParseClaudeUsage(t *testing.T) {
 		u.Windows[1].Label != "5h" || u.Windows[1].RemainingPct != 46 {
 		t.Errorf("Windows = %+v", u.Windows)
 	}
-	if got := withAge(u, t0).Extra; got != "+1 overflow account · as of 5m ago" {
-		t.Errorf("withAge Extra = %q, want %q", got, "+1 overflow account · as of 5m ago")
+	if got := withAge(u, t0).Extra; got != "as of 5m ago" {
+		t.Errorf("withAge Extra = %q, want %q", got, "as of 5m ago")
+	}
+	if len(u.Accounts) != 4 {
+		t.Fatalf("Accounts = %+v, want 4 accounts", u.Accounts)
+	}
+	wantLabels := []string{"Claude #1", "Claude #2", "Claude #3", "Claude #4"}
+	wantLeft := [][]int{{59, 100}, {77, 46}, {0, 0}, nil}
+	for i, a := range u.Accounts {
+		if a.Label != wantLabels[i] {
+			t.Errorf("Accounts[%d].Label = %q, want %q", i, a.Label, wantLabels[i])
+		}
+		if a.Active != (i == 1) {
+			t.Errorf("Accounts[%d].Active = %v, want %v", i, a.Active, i == 1)
+		}
+		if len(a.Windows) != len(wantLeft[i]) {
+			t.Errorf("Accounts[%d].Windows = %+v", i, a.Windows)
+			continue
+		}
+		for j, p := range wantLeft[i] {
+			if a.Windows[j].RemainingPct != p {
+				t.Errorf("Accounts[%d].Windows[%d] = %+v, want %d%% left", i, j, a.Windows[j], p)
+			}
+		}
+	}
+	if got := u.Accounts[3].Summary; got != "usage unknown" {
+		t.Errorf("Accounts[3].Summary = %q, want usage unknown", got)
+	}
+	// Past an account's own reset, withAge flips only that window to 100%
+	// and leaves the cached reading untouched on repeated calls.
+	aged := withAge(u, time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC))
+	if got := aged.Accounts[0].Windows[0].RemainingPct; got != 100 {
+		t.Errorf("aged Accounts[0] 7d = %d%%, want 100 after its reset", got)
+	}
+	if got := u.Accounts[0].Windows[0].RemainingPct; got != 59 {
+		t.Errorf("withAge mutated the cached account: 7d = %d%%, want 59", got)
+	}
+	if again := withAge(u, t0); again.Accounts[0].Windows[0].RemainingPct != 59 {
+		t.Errorf("second withAge = %+v, want the un-aged reading", again.Accounts[0])
 	}
 	b, _ := json.Marshal(u)
-	for _, secret := range []string{"example.com", "Example Org", "Other Org", "org-secret-id"} {
+	for _, secret := range []string{"example.com", "Example Org", "Other Org", "Third Org", "Fourth Org", "org-secret-id"} {
 		if strings.Contains(string(b), secret) {
 			t.Errorf("serialized AgentUsage leaked %q: %s", secret, b)
 		}
+	}
+}
+
+func TestParseClaudeUsageSingleAndNoActive(t *testing.T) {
+	single := `{"accounts":[{"number":5,"active":false,"usageStatus":"ok",
+		"usage":{"sevenDay":{"pct":10.0}},"usageFetchedAt":"2026-10-25T19:59:00Z"}]}`
+	u := parseClaudeUsage([]byte(single), t0)
+	if u.Summary != "90% 7d left" || len(u.Accounts) != 1 ||
+		u.Accounts[0].Label != "Claude #5" || u.Accounts[0].Active {
+		t.Errorf("single account = %+v", u)
+	}
+
+	noActive := `{"accounts":[
+		{"number":2,"active":false,"usageStatus":"ok","usage":{"sevenDay":{"pct":20.0}}},
+		{"number":1,"active":false,"usageStatus":"ok","usage":{"sevenDay":{"pct":30.0}}}]}`
+	u = parseClaudeUsage([]byte(noActive), t0)
+	if u.Summary != "80% 7d left" {
+		t.Errorf("no active: Summary = %q, want the first account's 80%% 7d left", u.Summary)
+	}
+	if len(u.Accounts) != 2 || u.Accounts[0].Label != "Claude #1" || u.Accounts[1].Label != "Claude #2" {
+		t.Errorf("no active: Accounts = %+v, want number order", u.Accounts)
 	}
 }
 
@@ -154,11 +233,18 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 	f.Usage = func(_ context.Context, provider string) AgentUsage {
 		calls.Add(1)
 		p := int(pct.Load())
-		return AgentUsage{
+		u := AgentUsage{
 			Summary:   fmt.Sprintf("%s %d%% 7d left", provider, p),
 			Windows:   []UsageWindow{{Label: "7d", RemainingPct: p}},
 			UpdatedAt: now.UTC().Format(time.RFC3339),
 		}
+		if provider == "claude" {
+			u.Accounts = []AccountUsage{
+				{Label: "Claude #1", Summary: u.Summary, Windows: u.Windows, UpdatedAt: u.UpdatedAt},
+				{Label: "Claude #2", Active: true, Summary: u.Summary, Windows: u.Windows, UpdatedAt: u.UpdatedAt},
+			}
+		}
+		return u
 	}
 
 	callAPI := func() []struct {
@@ -189,6 +275,13 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 	for _, a := range agents {
 		if !strings.HasSuffix(a.Usage.Summary, "80% 7d left") || a.Usage.Extra != "as of just now" {
 			t.Errorf("%s usage = %+v", a.ID, a.Usage)
+		}
+		if a.ID == "opus" {
+			if len(a.Usage.Accounts) != 2 || a.Usage.Accounts[1].Label != "Claude #2" || !a.Usage.Accounts[1].Active {
+				t.Errorf("opus accounts = %+v, want both Claude accounts", a.Usage.Accounts)
+			}
+		} else if len(a.Usage.Accounts) != 0 {
+			t.Errorf("%s accounts = %+v, want none", a.ID, a.Usage.Accounts)
 		}
 	}
 	firstCalls := calls.Load()
