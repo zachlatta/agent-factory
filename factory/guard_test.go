@@ -87,7 +87,7 @@ func TestGuardedScanErrorFailsClosed(t *testing.T) {
 
 func TestGuardedApproveRescans(t *testing.T) {
 	c := publicCard("c1", map[string]string{labelStage: "zach", labelVerdict: "code approve", labelCodeRounds: "1",
-		labelNote: "public repo: scan passed, approve to land"})
+		labelNote: scanPassedNote})
 	f, p := newTestFactory(t, c)
 	fakeScan(f, []scan.Hit{{Rule: "email", File: "README.md", Line: 9}}, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err == nil {
@@ -235,5 +235,15 @@ func TestRunScanIgnoresCardsOwnScannerFiles(t *testing.T) {
 	f.cfg.PrivateRules = filepath.Join(t.TempDir(), "missing")
 	if _, err := f.runScan(context.Background(), wt, "origin/main..HEAD"); err == nil {
 		t.Error("ran without the private rules file")
+	}
+}
+
+// Paseo splits --label values at commas, which failed every update carrying such a note.
+func TestLabelValuesHaveNoCommas(t *testing.T) {
+	if got := labelArg(labelNote, "scan failed: a, b"); got != labelPrefix+"note=scan failed: a; b" {
+		t.Errorf("labelArg = %q", got)
+	}
+	if a := repoAsk("pick a repo", "a/x,b/y"); a == nil || len(a.Actions) < 2 {
+		t.Errorf("old comma-separated candidates not read: %+v", a)
 	}
 }

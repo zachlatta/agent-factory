@@ -175,7 +175,7 @@ func TestPickerAsksZachWhenUnsure(t *testing.T) {
 			if l[labelStage] != "zach" || l[labelAwaiting] != "repo" || l[labelNote] != "pick a repo" {
 				t.Errorf("labels = %v", l)
 			}
-			if name == "unsure" && l[labelCandidates] != "zachlatta/personal-data-warehouse,example/ops" {
+			if name == "unsure" && l[labelCandidates] != "zachlatta/personal-data-warehouse example/ops" {
 				t.Errorf("candidates = %q", l[labelCandidates])
 			}
 			if _, ok := f.routes.get("pk"); !ok {

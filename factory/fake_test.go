@@ -26,6 +26,16 @@ type fakePaseo struct {
 }
 
 func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
+	if len(args) > 1 && args[0] == "agent" && args[1] == "update" {
+		// like Paseo: --label takes comma-separated pairs, so a comma in a value splits it
+		for i := 2; i+1 < len(args); i++ {
+			if args[i] == "--label" {
+				if _, v, _ := strings.Cut(args[i+1], "="); strings.Contains(v, ",") {
+					return "", fmt.Errorf("paseo agent update: Error: Invalid label format: %s", v[strings.LastIndex(v, ",")+1:])
+				}
+			}
+		}
+	}
 	p.calls = append(p.calls, args)
 	switch args[0] {
 	case "logs":

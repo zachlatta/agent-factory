@@ -114,7 +114,7 @@ func (f *Factory) ownFilesOutside(cwd, prefix string) ([]string, error) {
 		return nil, err
 	}
 	if !linked {
-		return nil, errors.New("not a linked worktree, so its reflog is shared")
+		return nil, errors.New("not a linked worktree (its reflog is shared)")
 	}
 	es, err := f.headReflog(ctx, cwd)
 	if err != nil {

@@ -1,5 +1,7 @@
 package factory
 
+import "strings"
+
 // labelPrefix namespaces the factory's labels on Paseo agents (factory.<key>).
 const labelPrefix = "factory."
 
@@ -27,7 +29,7 @@ const (
 	labelTold       = "told"         // inbox cards: the Needs Zach note already emailed to Zach
 	labelRouting    = "routing"      // a repo picker: its card starts in the repo it names (route.go)
 	labelRouted     = "routed"       // a picker's new card id ("starting" while it is being started)
-	labelCandidates = "candidates"   // repos a picker could not choose between, comma-separated
+	labelCandidates = "candidates"   // repos a picker could not choose between, space-separated
 	labelDecided    = "zach-decided" // Zach ruled on the open review points (recommend): later reviews treat them as settled
 	labelReviewed   = "reviewed"     // the HEAD the last code review saw: landing must put exactly that on main
 	labelDirtyAsks  = "dirty-asks"   // times the builder was asked to commit before code review
@@ -35,7 +37,9 @@ const (
 )
 
 // labelArg is the `paseo --label` value that sets factory label k to v.
-func labelArg(k, v string) string { return labelPrefix + k + "=" + v }
+// labelArg is a factory label for `paseo --label`. Paseo reads --label as comma-separated k=v pairs,
+// so a comma in a value would split it and fail the whole update: commas become semicolons.
+func labelArg(k, v string) string { return labelPrefix + k + "=" + strings.ReplaceAll(v, ",", ";") }
 
 // roundsLabel is the label counting review rounds of kind ("plan" or "code").
 func roundsLabel(kind string) string {

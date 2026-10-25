@@ -82,11 +82,14 @@ func (f *Factory) scanNote(cwd, rng string) string {
 		f.logf("secret scan in %s found: %s", cwd, found)
 		return "secret scan failed: " + found
 	}
-	return "public repo: scan passed, approve to land"
+	return scanPassedNote
 }
 
 // scanPassed reports whether a scanNote is the clean one.
-func scanPassed(note string) bool { return note == "public repo: scan passed, approve to land" }
+func scanPassed(note string) bool { return note == scanPassedNote }
+
+// scanPassedNote has no comma: label values cannot hold one (labelArg).
+const scanPassedNote = "public repo: scan passed; approve to land"
 
 // runScan is the default Factory.Scan: this binary's scanner, the private rules file, and the
 // gitleaks config as it is on origin/main (never the card's own copy).

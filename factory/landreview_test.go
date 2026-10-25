@@ -150,12 +150,12 @@ func TestVisibility(t *testing.T) {
 	f, _ := newTestFactory(t)
 	f.GitHubAPI = srv.URL
 	for remote, want := range map[string]string{
-		"https://github.com/zachlatta/file-share.git": "public",
-		"git@github.com:zachlatta/file-share.git":     "public",
-		"https://github.com/zachlatta/private-notes":           "private",
-		"https://github.com/zachlatta/broken":         "unknown",
-		"/tmp/some/bare.git":                          "unknown",
-		"https://gitlab.com/zachlatta/private-notes.git":       "unknown",
+		"https://github.com/zachlatta/file-share.git":    "public",
+		"git@github.com:zachlatta/file-share.git":        "public",
+		"https://github.com/zachlatta/private-notes":     "private",
+		"https://github.com/zachlatta/broken":            "unknown",
+		"/tmp/some/bare.git":                             "unknown",
+		"https://gitlab.com/zachlatta/private-notes.git": "unknown",
 	} {
 		f.GitOut = gitStub(map[string]string{"remote get-url origin": remote + "\n"})
 		if got := f.visibility("/x"); got != want {
@@ -332,7 +332,7 @@ func TestDirectCardOutsideItsWorkItemGoesToZach(t *testing.T) {
 		{"work item only", "landed", "done in one pass", directOK},
 		{"changed bin/", "zach", "direct card changed files outside its work item without review: bin/land",
 			withAnswers(directOK, "show --name-only --format= aaa", "work/x/README.md\nbin/land\n")},
-		{"main checkout", "zach", "direct card scope not verified: not a linked worktree, so its reflog is shared",
+		{"main checkout", "zach", "direct card scope not verified: not a linked worktree (its reflog is shared)",
 			withAnswers(directOK, "rev-parse --path-format=absolute --git-dir --git-common-dir", "/r/.git\n/r/.git\n")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

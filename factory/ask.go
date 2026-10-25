@@ -179,7 +179,7 @@ func repoAsk(note, candidates string) *Ask {
 	case "routing interrupted":
 		ask.Why = "The factory restarted while starting this card. Check the board for a card that already started; if there is none, pick a repo."
 	}
-	for _, r := range strings.Split(candidates, ",") {
+	for _, r := range strings.FieldsFunc(candidates, func(c rune) bool { return c == ' ' || c == ',' || c == ';' }) {
 		if r = strings.TrimSpace(r); r != "" {
 			ask.Actions = append(ask.Actions, Action{ID: "approve", Label: "Start in " + r, Primary: len(ask.Actions) == 0, Repo: r})
 		}

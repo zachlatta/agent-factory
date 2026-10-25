@@ -202,7 +202,7 @@ func (f *Factory) routeFromReply(a Agent) error {
 	}
 	f.logf("%s could not pick a repo: asking Zach", short(a.ID))
 	return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelAwaiting: "repo", labelNote: "pick a repo",
-		labelCandidates: strings.Join(cands, ","), labelSince: iso(f.Now())})
+		labelCandidates: strings.Join(cands, " "), labelSince: iso(f.Now())})
 }
 
 // startRouted starts picker a's real card in repo, then archives the picker. The picker is claimed
