@@ -53,6 +53,7 @@ type AccountUsage struct {
 type usageCache struct {
 	byProvider map[string]AgentUsage
 	fetched    time.Time
+	refreshing chan struct{} // non-nil while a background refresh runs; closed when it lands
 }
 
 func unknownUsage() AgentUsage { return AgentUsage{Summary: "usage unknown"} }
@@ -132,23 +133,38 @@ func withAge(u AgentUsage, now time.Time) AgentUsage {
 	return u
 }
 
-// providerUsages returns remaining usage per provider, refreshing the cache when it is empty or
-// older than usageTTL, and computing each reading's "as of ..." age against now.
+// providerUsages returns remaining usage per provider from the cache, computing each
+// reading's "as of ..." age against now. It never waits for the usage commands (they take
+// seconds and this feeds the board and the new-card dialog): an empty or stale cache is
+// served as-is — "usage unknown" before the first fill — and refreshed in the background.
 func (f *Factory) providerUsages() map[string]AgentUsage {
 	now := f.Now()
 	f.usageMu.Lock()
-	defer f.usageMu.Unlock()
-	if f.usage.byProvider == nil || now.Sub(f.usage.fetched) >= usageTTL {
-		f.refreshUsage(now)
+	stale := f.usage.byProvider == nil || now.Sub(f.usage.fetched) >= usageTTL
+	if stale && f.usage.refreshing == nil {
+		done := make(chan struct{})
+		f.usage.refreshing = done
+		go f.refreshUsage(done)
 	}
 	out := make(map[string]AgentUsage, len(f.usage.byProvider))
 	for k, v := range f.usage.byProvider {
+		out[k] = v
+	}
+	f.usageMu.Unlock()
+	for _, a := range AgentChoices { // before the first fill: unknown, as a failed fetch reads
+		if _, ok := out[a.providerID()]; !ok {
+			out[a.providerID()] = unknownUsage()
+		}
+	}
+	for k, v := range out {
 		out[k] = withAge(v, now)
 	}
 	return out
 }
 
-func (f *Factory) refreshUsage(now time.Time) {
+// refreshUsage fetches every provider's usage (slow subprocesses; no lock held) and
+// stores the result, closing done to mark the refresh landed.
+func (f *Factory) refreshUsage(done chan struct{}) {
 	seen := map[string]bool{}
 	var provs []string
 	for _, a := range AgentChoices {
@@ -177,8 +193,12 @@ func (f *Factory) refreshUsage(now time.Time) {
 		}(p)
 	}
 	wg.Wait()
+	f.usageMu.Lock()
 	f.usage.byProvider = res
-	f.usage.fetched = now
+	f.usage.fetched = f.Now()
+	f.usage.refreshing = nil
+	close(done)
+	f.usageMu.Unlock()
 }
 
 func (f *Factory) readProviderUsage(ctx context.Context, provider string) AgentUsage {

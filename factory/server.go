@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"compress/gzip"
 	"embed"
 	"encoding/json"
 	"io"
@@ -24,24 +25,57 @@ func (f *Factory) Handler() http.Handler {
 			w.Write(b)
 		}
 	}
-	mux.HandleFunc("GET /{$}", page("board.html"))
-	mux.HandleFunc("GET /index.html", page("board.html"))
-	mux.HandleFunc("GET /t/{id}", page("transcript.html"))
-	mux.HandleFunc("GET /api/board", f.handleBoard)
-	mux.HandleFunc("GET /api/ideas", f.handleIdeas)
-	mux.HandleFunc("GET /api/peers", f.handlePeers)
-	mux.HandleFunc("GET /api/agents", f.handleAgents)
-	mux.HandleFunc("GET /api/lanes", f.handleLanes)
-	mux.HandleFunc("GET /api/health", f.handleHealth)
-	mux.HandleFunc("GET /api/deploy", f.handleDeploy)
-	mux.HandleFunc("GET /api/transcript/{id}", f.handleTranscript)
-	mux.HandleFunc("GET /api/logs/{id}", f.handleLogs)
-	mux.HandleFunc("GET /api/land-review/{by}", f.handleLandReview)
+	// Gzip is allowlisted per route, never a blanket wrapper: a new route is served
+	// plain unless it opts in here, so a future streaming route cannot stall behind it.
+	mux.HandleFunc("GET /{$}", gzipHandler(page("board.html")))
+	mux.HandleFunc("GET /index.html", gzipHandler(page("board.html")))
+	mux.HandleFunc("GET /t/{id}", gzipHandler(page("transcript.html")))
+	mux.HandleFunc("GET /api/board", gzipHandler(f.handleBoard))
+	mux.HandleFunc("GET /api/ideas", gzipHandler(f.handleIdeas))
+	mux.HandleFunc("GET /api/peers", gzipHandler(f.handlePeers))
+	mux.HandleFunc("GET /api/agents", gzipHandler(f.handleAgents))
+	mux.HandleFunc("GET /api/lanes", gzipHandler(f.handleLanes))
+	mux.HandleFunc("GET /api/health", gzipHandler(f.handleHealth))
+	mux.HandleFunc("GET /api/deploy", gzipHandler(f.handleDeploy))
+	mux.HandleFunc("GET /api/transcript/{id}", gzipHandler(f.handleTranscript))
+	mux.HandleFunc("GET /api/logs/{id}", gzipHandler(f.handleLogs))
+	mux.HandleFunc("GET /api/land-review/{by}", gzipHandler(f.handleLandReview))
 	mux.HandleFunc("POST /api/{action}", f.handleAction)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	})
 	return mux
+}
+
+// gzipHandler compresses h's response when the client accepts gzip. Only the routes
+// wrapped in Handler are compressed; Flush is forwarded so a flushing handler streams.
+func gzipHandler(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			h(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		h(gzipWriter{ResponseWriter: w, gz: gz}, r)
+	}
+}
+
+type gzipWriter struct {
+	http.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (g gzipWriter) Write(b []byte) (int, error) { return g.gz.Write(b) }
+
+// Flush pushes the buffered gzip stream and the underlying response out now.
+func (g gzipWriter) Flush() {
+	g.gz.Flush()
+	if f, ok := g.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

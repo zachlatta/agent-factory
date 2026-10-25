@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -101,41 +102,84 @@ func TestReviewersAndScoutsAlwaysUseOpus(t *testing.T) {
 func TestProviderStatusRefreshAndDiagnosticRateLimit(t *testing.T) {
 	f, p := newTestFactory(t)
 	p.providers["antigravity"] = "error"
-	count := func(verb string) int {
-		n := 0
-		for _, c := range p.calls {
-			if c[0] == "provider" && c[1] == verb {
-				n++
-			}
-		}
-		return n
-	}
+	count := func(verb string) int { return p.countCalls("provider", verb) }
+	// Reads serve the cache and refresh in the background: the first read (empty cache)
+	// reports unknown, and Paseo's answer shows up once the refresh lands.
 	if f.providerAvailable("antigravity") {
 		t.Fatal("antigravity available while Paseo says error")
 	}
-	if count("diagnostic") != 1 || count("ls") != 2 {
-		t.Errorf("first check: ls %d, diagnostic %d; want 2 and 1", count("ls"), count("diagnostic"))
-	}
+	waitFor(t, "first provider refresh", func() bool {
+		return count("ls") == 2 && count("diagnostic") == 1 && f.providerStatus("antigravity") == "error"
+	})
 	f.providerAvailable("antigravity") // cached: no new calls
 	if count("ls") != 2 {
 		t.Errorf("cached check listed again: ls %d", count("ls"))
 	}
 
-	now := t0.Add(6 * time.Minute) // list is stale, diagnostic is not due yet
-	f.Now = func() time.Time { return now }
+	// The fake clock is atomic: a background refresh may still be reading it.
+	var clock atomic.Value
+	clock.Store(t0.Add(6 * time.Minute)) // list is stale, diagnostic is not due yet
+	f.Now = func() time.Time { return clock.Load().(time.Time) }
 	f.providerAvailable("antigravity")
-	if count("ls") != 3 || count("diagnostic") != 1 {
+	waitFor(t, "stale provider refresh", func() bool { return count("ls") == 3 })
+	if count("diagnostic") != 1 {
 		t.Errorf("after 6 min: ls %d, diagnostic %d; want 3 and 1", count("ls"), count("diagnostic"))
 	}
 
-	now = t0.Add(31 * time.Minute) // diagnostic due again, and this time it fixes the provider
+	clock.Store(t0.Add(31 * time.Minute)) // diagnostic due again, and this time it fixes the provider
+	p.mu.Lock()
 	p.fixed["antigravity"] = true
-	if !f.providerAvailable("antigravity") {
-		t.Error("antigravity still unavailable after a diagnostic fixed it")
-	}
+	p.mu.Unlock()
+	f.providerAvailable("antigravity") // kicks the refresh; the fix lands in the background
+	waitFor(t, "diagnostic fix visible", func() bool { return f.providerAvailable("antigravity") })
 	if count("diagnostic") != 2 {
 		t.Errorf("diagnostic %d, want 2", count("diagnostic"))
 	}
+}
+
+// While a background provider refresh is stuck in a slow `paseo` call, cached reads
+// still answer at once (no lock is held across the call).
+func TestProviderStatusReadDoesNotWaitForRefresh(t *testing.T) {
+	f, p := newTestFactory(t)
+	if _, err := f.Act("new", Body{Request: "x"}); err != nil { // populates the provider cache
+		t.Fatal(err)
+	}
+	now := t0.Add(6 * time.Minute) // stale: the next read kicks a refresh
+	f.Now = func() time.Time { return now }
+	p.lsBlock = make(chan struct{})
+	before := p.lsCalls.Load()
+	done := make(chan string, 1)
+	go func() { done <- f.providerStatus("claude") }()
+	select {
+	case st := <-done:
+		if st != "available" {
+			t.Errorf("stale read = %q, want the cached %q", st, "available")
+		}
+	case <-time.After(2 * time.Second):
+		close(p.lsBlock)
+		t.Fatal("providerStatus waited for the background refresh")
+	}
+	waitFor(t, "refresh in flight", func() bool { return p.lsCalls.Load() > before })
+	close(p.lsBlock)
+}
+
+// Card creation waits for the first-ever provider list, but with a bound: a stuck
+// `paseo` call must turn into a clear error, not a hang.
+func TestResolveAgentWaitIsBounded(t *testing.T) {
+	f, p := newTestFactory(t)
+	p.lsBlock = make(chan struct{})
+	old := providerWaitTimeout
+	providerWaitTimeout = 100 * time.Millisecond
+	defer func() { providerWaitTimeout = old }()
+	start := time.Now()
+	_, err := f.resolveAgent("codex-astra")
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("resolveAgent error = %v, want a timeout", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("resolveAgent wait was not bounded: %v", time.Since(start))
+	}
+	close(p.lsBlock)
 }
 
 func TestIdeaCarriesItsAgent(t *testing.T) {
@@ -181,11 +225,6 @@ func TestBoardCardShowsAgent(t *testing.T) {
 func TestAgentsAPI(t *testing.T) {
 	f, p := newTestFactory(t)
 	p.providers["muse"] = "error"
-	rec := httptest.NewRecorder()
-	f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
-	if rec.Code != 200 {
-		t.Fatalf("status %d: %s", rec.Code, rec.Body)
-	}
 	var out struct {
 		Default  string `json:"default"`
 		Reviewer string `json:"reviewer"`
@@ -195,9 +234,23 @@ func TestAgentsAPI(t *testing.T) {
 			Status    string `json:"status"`
 		} `json:"agents"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
+	// Availability refreshes in the background: poll until Paseo's answer is served.
+	waitFor(t, "agents availability", func() bool {
+		rec := httptest.NewRecorder()
+		f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+		if rec.Code != 200 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range out.Agents {
+			if a.Status == "unknown" {
+				return false
+			}
+		}
+		return len(out.Agents) == len(AgentChoices)
+	})
 	if out.Default != "opus" || out.Reviewer != ReviewerModel || len(out.Agents) != len(AgentChoices) {
 		t.Errorf("got %+v", out)
 	}

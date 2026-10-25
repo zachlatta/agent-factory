@@ -211,6 +211,7 @@ func (f *Factory) Run(ctx context.Context) {
 			f.Tick()
 			f.Refresh()
 			f.providerStatus("claude") // keeps the provider list fresh (re-read every providerListTTL)
+			f.providerUsages()         // same for agent usage: warmed here, never on the request path
 		}
 		f.loopDone()
 		select {

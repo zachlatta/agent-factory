@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent factory</title>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--ink:#1f2328;--mute:#656d76;--line:#d8dee4;--green:#1a7f37;--amber:#9a6700;--red:#cf222e;--blue:#0969da;--purple:#8250df}
 *{box-sizing:border-box}
@@ -564,7 +564,11 @@ async function act(a, extra={}){
   setTimeout(load, 1500); }
 $('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; toast('Sent'); setTimeout(load,1500); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
-$('newBtn').onclick = async()=>{ await loadAgents(); $('nAgent').innerHTML = agentOptions(AG.default); $('nAgentUsage').innerHTML = agentUsageHtml(AG.default,'nAgent'); $('nAgentNote').textContent = agentNote(AG.default); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); $('newDlg').showModal(); };
+function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').innerHTML = agentOptions(v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
+// The dialog opens from the cached agent list at once; right after a factory restart the
+// server may still be fetching availability/usage, so refill until they land (bounded).
+function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
+$('newBtn').onclick = ()=>{ fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4); };
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
   try{ const r=await post('scout',{repo:$('nRepo').value, focus:$('nFocus').value.trim()}); toast('Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
@@ -574,7 +578,12 @@ $('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').inner
 phone.addEventListener('change', render);
 $('activity').onclick=()=>$('activity').classList.toggle('open');
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePanel(); });
-Promise.all([loadAgents(), loadLanes()]).then(load); setInterval(load, 10000);
+// The board renders at once; agents and lanes fill in when they arrive (lane names and
+// agent labels have fallbacks until then). Deferred CDN scripts have run by
+// DOMContentLoaded, so re-render then for markdown.
+load(); loadAgents().then(render); loadLanes().then(render);
+document.addEventListener('DOMContentLoaded', ()=>{ render(); if(sel) fillPanel(B.cards.find(c=>c.id===sel), false); });
+setInterval(load, 10000);
 </script>
 </body>
 </html>

@@ -1,7 +1,11 @@
 package factory
 
 import (
+	"compress/gzip"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,5 +118,146 @@ func TestServerRoutesEveryAskAction(t *testing.T) {
 	}
 	if p.labels("c1")[labelDecided] != "1" || len(p.runsWithLabel(labelArg(labelReviewOf, "c2"))) != 1 {
 		t.Errorf("calls = %v", p.calls)
+	}
+}
+
+// Gzip covers only the allowlisted GET routes; anything else (actions today, a future
+// streaming route) is served plain unless it opts in.
+func TestGzipAllowlist(t *testing.T) {
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "plan"}))
+	h := f.Handler()
+	get := func(path string, gz bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		if gz {
+			req.Header.Set("Accept-Encoding", "gzip")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, path := range []string{"/", "/api/board", "/api/agents"} {
+		rec := get(path, true)
+		if rec.Code != 200 || rec.Header().Get("Content-Encoding") != "gzip" {
+			t.Errorf("%s: code %d, encoding %q", path, rec.Code, rec.Header().Get("Content-Encoding"))
+			continue
+		}
+		r, err := gzip.NewReader(rec.Body)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		plain, err := io.ReadAll(r)
+		if err != nil || len(plain) == 0 {
+			t.Errorf("%s: gzip round-trip failed (err %v)", path, err)
+		} else if path == "/api/agents" { // its body changes as background refreshes land
+			if !strings.Contains(string(plain), `"agents"`) {
+				t.Errorf("%s: decoded body = %s", path, plain)
+			}
+		} else if string(plain) != get(path, false).Body.String() {
+			t.Errorf("%s: gzip round-trip mismatch", path)
+		}
+		if rec.Body.Len() >= len(plain) {
+			t.Errorf("%s: gzipped %d bytes, plain %d; want smaller", path, rec.Body.Len(), len(plain))
+		}
+	}
+	// No Accept-Encoding, no gzip; POST actions are never gzipped.
+	if rec := get("/", false); rec.Header().Get("Content-Encoding") != "" {
+		t.Errorf("plain GET / encoded %q", rec.Header().Get("Content-Encoding"))
+	}
+	req := httptest.NewRequest("POST", "/api/idea", strings.NewReader(`{"request":"x","by":"test"}`))
+	req.Header.Set("X-Factory", "1")
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Errorf("POST /api/idea encoded %q", rec.Header().Get("Content-Encoding"))
+	}
+}
+
+// A handler behind the gzip writer that flushes must stream: the first chunk reaches
+// the client before the handler returns. Guards any future streaming route that opts in.
+func TestGzipFlushStreams(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "first")
+		w.(http.Flusher).Flush()
+		<-release
+		io.WriteString(w, "second")
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL, nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("encoding %q", resp.Header.Get("Content-Encoding"))
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 5)
+		n, _ := io.ReadFull(gz, buf)
+		got <- string(buf[:n])
+	}()
+	select {
+	case s := <-got:
+		if s != "first" {
+			t.Errorf("first chunk = %q", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first chunk did not stream before the handler returned")
+	}
+	close(release)
+	rest, _ := io.ReadAll(gz)
+	if string(rest) != "second" {
+		t.Errorf("rest = %q", rest)
+	}
+}
+
+func benchFactory(b *testing.B, cards int) *Factory {
+	b.Helper()
+	p := &fakePaseo{logs: map[string]string{}, archived: map[string]bool{}, status: map[string]string{},
+		busy: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
+		cwd: map[string]string{}, unknown: map[string]bool{}}
+	f := New(Config{Host: "host1", Home: b.TempDir(), StateDir: b.TempDir(), DefaultRepo: "example/desk"}, p)
+	f.Now = func() time.Time { return t0 }
+	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
+	var agents []Agent
+	for i := range cards {
+		agents = append(agents, card(fmt.Sprintf("c%d", i), map[string]string{labelStage: "plan"}))
+	}
+	f.SetAgents(agents)
+	return f
+}
+
+func BenchmarkHandleBoard(b *testing.B) {
+	f := benchFactory(b, 200)
+	h := f.Handler()
+	for b.Loop() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+		if rec.Code != 200 {
+			b.Fatal(rec.Code)
+		}
+	}
+}
+
+func BenchmarkHandleAgents(b *testing.B) {
+	f := benchFactory(b, 0)
+	if _, err := f.resolveAgent("opus"); err != nil { // warm the provider cache, as Run does
+		b.Fatal(err)
+	}
+	h := f.Handler()
+	for b.Loop() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/agents", nil))
+		if rec.Code != 200 {
+			b.Fatal(rec.Code)
+		}
 	}
 }

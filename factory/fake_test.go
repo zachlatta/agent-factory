@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -11,6 +13,9 @@ import (
 // fakePaseo records every paseo CLI call and answers `logs`, `run`, `inspect` and `archive` from
 // canned data. inspect reports archived[id] and status[id] (default: not archived, idle).
 type fakePaseo struct {
+	mu         sync.Mutex // guards the fields below; background refreshes call Run concurrently
+	lsCalls    atomic.Int32
+	lsBlock    chan struct{} // when non-nil, `provider ls` waits for it to close
 	calls      [][]string
 	logs       map[string]string
 	runs       int
@@ -26,6 +31,14 @@ type fakePaseo struct {
 }
 
 func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
+	if len(args) > 1 && args[0] == "provider" && args[1] == "ls" {
+		p.lsCalls.Add(1)
+		if p.lsBlock != nil {
+			<-p.lsBlock
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if len(args) > 1 && args[0] == "agent" && args[1] == "update" {
 		// like Paseo: --label takes comma-separated pairs, so a comma in a value splits it
 		for i := 2; i+1 < len(args); i++ {
@@ -87,8 +100,37 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 	return "", nil
 }
 
+// countCalls counts recorded calls whose first two words match ("" matches any word).
+// Safe while a background refresh is running; the other accessors are not.
+func (p *fakePaseo) countCalls(a, b string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, c := range p.calls {
+		if len(c) >= 2 && (a == "" || c[0] == a) && (b == "" || c[1] == b) {
+			n++
+		}
+	}
+	return n
+}
+
+// waitFor polls cond until it holds or the deadline passes. For background-refresh tests.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
 // verbs returns the paseo verbs called on id, in order (`agent update` counts as "update").
 func (p *fakePaseo) verbs(id string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	var out []string
 	for _, c := range p.calls {
 		switch {
@@ -103,6 +145,8 @@ func (p *fakePaseo) verbs(id string) []string {
 
 // labels merges every `agent update <id> --label k=v` sent for id (factory. prefix removed).
 func (p *fakePaseo) labels(id string) map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	out := map[string]string{}
 	for _, c := range p.calls {
 		if len(c) < 3 || c[0] != "agent" || c[1] != "update" || c[2] != id {
@@ -120,6 +164,8 @@ func (p *fakePaseo) labels(id string) map[string]string {
 
 // sent returns the messages sent to id with `paseo send`.
 func (p *fakePaseo) sent(id string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	var out []string
 	for _, c := range p.calls {
 		if c[0] == "send" && len(c) >= 2 && c[len(c)-2] == id {
@@ -130,6 +176,8 @@ func (p *fakePaseo) sent(id string) []string {
 }
 
 func (p *fakePaseo) called(verb, id string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, c := range p.calls {
 		if c[0] == verb && len(c) > 1 && c[1] == id {
 			return true
@@ -140,6 +188,8 @@ func (p *fakePaseo) called(verb, id string) bool {
 
 // runsWithLabel returns `paseo run` calls carrying the given label.
 func (p *fakePaseo) runsWithLabel(label string) [][]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	var out [][]string
 	for _, c := range p.calls {
 		if c[0] != "run" {

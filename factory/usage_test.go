@@ -268,10 +268,17 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 		return out.Agents
 	}
 
+	// First read: the cache is empty, so the API answers with "usage unknown" at once and
+	// refreshes in the background; the fetched values show up on a following read.
 	agents := callAPI()
 	if len(agents) != len(AgentChoices) {
 		t.Fatalf("len(agents) = %d, want %d", len(agents), len(AgentChoices))
 	}
+	waitFor(t, "usage refresh", func() bool { return calls.Load() == 4 }) // 4 distinct providers across the 5 AgentChoices
+	waitFor(t, "usage visible", func() bool {
+		agents = callAPI()
+		return strings.HasSuffix(agents[0].Usage.Summary, "80% 7d left")
+	})
 	for _, a := range agents {
 		if !strings.HasSuffix(a.Usage.Summary, "80% 7d left") || a.Usage.Extra != "as of just now" {
 			t.Errorf("%s usage = %+v", a.ID, a.Usage)
@@ -285,9 +292,6 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 		}
 	}
 	firstCalls := calls.Load()
-	if firstCalls != 4 { // 4 distinct providers across the 5 AgentChoices
-		t.Errorf("first calls = %d, want 4", firstCalls)
-	}
 
 	// Within 5m TTL: cached (no new calls), and age updates dynamically from UpdatedAt.
 	now = t0.Add(3 * time.Minute)
@@ -299,14 +303,53 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 		t.Errorf("cached age at +3m = %q, want %q", got, "as of 3m ago")
 	}
 
-	// Past 5m TTL: refreshes synchronously before returning so stale hours-old values are never shown.
+	// Past 5m TTL: the read returns the stale values and kicks a background refresh;
+	// the new values replace them once it lands.
 	now = t0.Add(2 * time.Hour)
 	pct.Store(65)
 	agents = callAPI()
+	if !strings.HasSuffix(agents[0].Usage.Summary, "80% 7d left") {
+		t.Errorf("stale read = %+v, want the previous 80%% values", agents[0].Usage)
+	}
+	waitFor(t, "stale refresh visible", func() bool {
+		agents = callAPI()
+		return strings.HasSuffix(agents[0].Usage.Summary, "65% 7d left")
+	})
 	if got := calls.Load(); got != firstCalls+4 {
 		t.Errorf("after stale refresh calls = %d, want %d", got, firstCalls+4)
 	}
-	if !strings.HasSuffix(agents[0].Usage.Summary, "65% 7d left") || agents[0].Usage.Extra != "as of just now" {
+	if agents[0].Usage.Extra != "as of just now" {
 		t.Errorf("after stale refresh usage = %+v", agents[0].Usage)
 	}
+}
+
+// A slow usage command must not delay /api/agents (it gates the board and the new-card dialog).
+func TestAgentsAPIDoesNotWaitForUsage(t *testing.T) {
+	f, _ := newTestFactory(t)
+	release := make(chan struct{})
+	f.Usage = func(_ context.Context, provider string) AgentUsage {
+		<-release
+		return AgentUsage{Summary: provider + " 50% 7d left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 50}}}
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+		done <- rec
+	}()
+	select {
+	case rec := <-done:
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "usage unknown") {
+			t.Errorf("first response = %d %s, want 200 with usage unknown", rec.Code, rec.Body)
+		}
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("/api/agents waited for the usage commands")
+	}
+	close(release)
+	waitFor(t, "usage after release", func() bool {
+		rec := httptest.NewRecorder()
+		f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+		return strings.Contains(rec.Body.String(), "50% 7d left")
+	})
 }
