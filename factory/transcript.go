@@ -33,6 +33,7 @@ type Event struct {
 	Text   string         `json:"text,omitempty"`
 	ID     string         `json:"id,omitempty"`
 	Name   string         `json:"name,omitempty"`
+	Native string         `json:"native,omitempty"` // the provider's own tool name, when Name is mapped
 	Input  map[string]any `json:"input,omitempty"`
 	Images []Image        `json:"images,omitempty"`
 	Error  bool           `json:"error,omitempty"`
@@ -48,6 +49,7 @@ type Transcript struct {
 	Events   []Event `json:"events"`
 	Next     int     `json:"next"`
 	Fallback bool    `json:"fallback,omitempty"`
+	Replace  bool    `json:"replace,omitempty"` // Events is the whole transcript, not lines after `after`
 	Provider string  `json:"provider,omitempty"`
 	Path     string  `json:"path,omitempty"`
 }
@@ -61,44 +63,115 @@ func capText(s string) string {
 	return s
 }
 
-// ReadTranscript reads a Claude agent's full session file (~/.claude/projects/<cwd>/<session>.jsonl),
-// which has every message, thinking block, full tool input and output, and image; `paseo logs`
-// truncates those. Other providers return Fallback. after is a line offset for incremental polling.
+// ReadTranscript reads an agent's own session file, which has every message, thinking block, full
+// tool input and output, and image; `paseo logs` truncates those and keeps nothing once an agent is
+// archived. Each provider has its reader (transcript_providers.go for all but Claude). after is a
+// line offset for incremental polling; a reader whose file changes in place sets Replace and sends
+// everything each time. With no file, or nothing readable in it yet, it returns Fallback.
 func ReadTranscript(home string, src TranscriptSource, after int) (Transcript, error) {
-	if src.Provider != "claude" || src.SessionID == "" {
-		return Transcript{Fallback: true, Provider: src.Provider, Events: []Event{}}, nil
+	var (
+		res Transcript
+		err error
+		ok  bool
+	)
+	id := nativeSessionID(src.SessionID)
+	switch {
+	case id == "":
+	case src.Provider == "claude":
+		res, ok, err = readClaude(home, src.Cwd, id, after)
+	case src.Provider == "codex":
+		res, ok, err = readCodex(home, id, after)
+	case src.Provider == "antigravity":
+		res, ok, err = readAntigravity(home, id)
+	case src.Provider == "muse":
+		res, ok, err = readMuse(home, id, after)
 	}
-	dir := strings.NewReplacer("/", "-", ".", "-").Replace(src.Cwd)
-	path := filepath.Join(home, ".claude/projects", dir, src.SessionID+".jsonl")
-	if _, err := os.Stat(path); err != nil {
-		hits, _ := filepath.Glob(filepath.Join(home, ".claude/projects/*", src.SessionID+".jsonl"))
-		if len(hits) == 0 {
-			return Transcript{Fallback: true, Provider: "claude", Events: []Event{}}, nil
+	if err != nil {
+		return res, err
+	}
+	if !ok || (len(res.Events) == 0 && (after == 0 || res.Replace)) {
+		return Transcript{Fallback: true, Replace: true, Provider: src.Provider, Events: []Event{}}, nil
+	}
+	res.Provider = src.Provider
+	return res, nil
+}
+
+var plainID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// nativeSessionID is the provider's own session id from Paseo's persistence.sessionId: plain for
+// Claude and Codex, `plugin:{"version":1,"data":{"conversationId"|"sessionId":...}}` for plugin
+// providers. It is "" unless the id is a plain token, since it becomes part of a file path.
+func nativeSessionID(raw string) string {
+	if js, ok := strings.CutPrefix(raw, "plugin:"); ok {
+		var p struct {
+			Data struct{ ConversationID, SessionID string }
 		}
-		path = hits[0]
+		if json.Unmarshal([]byte(js), &p) != nil {
+			return ""
+		}
+		raw = p.Data.ConversationID
+		if raw == "" {
+			raw = p.Data.SessionID
+		}
 	}
+	if !plainID.MatchString(raw) {
+		return ""
+	}
+	return raw
+}
+
+// firstFile is the first existing path of patterns (globs allowed), or "".
+func firstFile(patterns ...string) string {
+	for _, p := range patterns {
+		hits, _ := filepath.Glob(p)
+		if len(hits) > 0 {
+			return hits[0]
+		}
+	}
+	return ""
+}
+
+// scanLines calls fn for each line of path after line number after, and returns the last line number.
+func scanLines(path string, after int, fn func(n int, line []byte)) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Transcript{}, err
+		return after, err
 	}
 	defer f.Close()
-	res := Transcript{Events: []Event{}, Next: after, Path: path, Provider: "claude"}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 256<<20)
-	n := 0
+	n, next := 0, after
 	for sc.Scan() {
 		n++
 		if n <= after {
 			continue
 		}
-		res.Next = n
+		next = n
+		fn(n, sc.Bytes())
+	}
+	if err := sc.Err(); err != nil && !errors.Is(err, bufio.ErrTooLong) {
+		return next, err
+	}
+	return next, nil
+}
+
+// readClaude reads ~/.claude/projects/<cwd>/<session>.jsonl.
+func readClaude(home, cwd, id string, after int) (Transcript, bool, error) {
+	dir := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
+	path := firstFile(filepath.Join(home, ".claude/projects", dir, id+".jsonl"),
+		filepath.Join(home, ".claude/projects/*", id+".jsonl"))
+	if path == "" {
+		return Transcript{}, false, nil
+	}
+	res := Transcript{Events: []Event{}, Path: path}
+	next, err := scanLines(path, after, func(n int, line []byte) {
 		var d struct {
 			Type, Timestamp     string
 			IsSidechain, IsMeta bool
 			Message             struct{ Content json.RawMessage }
 		}
-		if json.Unmarshal(sc.Bytes(), &d) != nil || (d.Type != "user" && d.Type != "assistant") || d.IsSidechain {
-			continue
+		if json.Unmarshal(line, &d) != nil || (d.Type != "user" && d.Type != "assistant") || d.IsSidechain {
+			return
 		}
 		var blocks []map[string]any
 		var s string
@@ -114,11 +187,9 @@ func ReadTranscript(home string, src TranscriptSource, after int) (Transcript, e
 				res.Events = append(res.Events, ev)
 			}
 		}
-	}
-	if err := sc.Err(); err != nil && !errors.Is(err, bufio.ErrTooLong) {
-		return res, err
-	}
-	return res, nil
+	})
+	res.Next = next
+	return res, true, err
 }
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }

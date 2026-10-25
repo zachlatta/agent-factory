@@ -368,11 +368,11 @@ func ParseQuestions(text string) (string, []Question) {
 	return strings.TrimSpace(strings.Join(out, "\n")), qs
 }
 
-// lastReply is agent a's last reply to a message. Claude session files mark who said what;
-// `paseo logs` text cannot tell a multi-line message to the agent from its answer, so it is
-// only the fallback for other providers.
+// lastReply is agent a's last reply to a message. Session files mark who said what; `paseo logs`
+// text cannot tell a multi-line message to the agent from its answer, so it is only the fallback
+// when there is no session file to read.
 func (f *Factory) lastReply(a Agent) (string, error) {
-	if a.Provider == "claude" && a.SessionID != "" {
+	if a.SessionID != "" {
 		res, err := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
 		if err == nil && !res.Fallback {
 			// the trailing run of text blocks: one reply can span several (a review written in parts)

@@ -206,7 +206,7 @@ function toolLine(t){
     case 'TodoWrite': { const td=i.todos||[]; return `${td.filter(x=>x.status==='completed').length}/${td.length} done`; }
     case 'Agent': case 'Task': return i.description || short(i.prompt);
     case 'Skill': return i.skill || '';
-    default: return i.summary || i.description || i.command || i.query || short(JSON.stringify(i), 120);
+    default: return i.summary || i.description || i.toolSummary || (typeof i.command === 'string' ? short(i.command) : '') || i.query || short(JSON.stringify(i), 120);
   }
 }
 function diffHtml(a, b){
@@ -228,6 +228,7 @@ function toolBody(t){
   else if (t.name === 'Write') h += `<div class="lbl">${esc(i.file_path)}</div><pre class="code">${esc(i.content)}</pre>`;
   else if (t.name === 'TodoWrite') h += `<ul class="todo">${(i.todos||[]).map(x=>`<li>${x.status==='completed'?'☑':x.status==='in_progress'?'◐':'☐'} ${esc(x.content)}</li>`).join('')}</ul>`;
   else if ((t.name === 'Agent' || t.name === 'Task') && i.prompt) h += `<div class="lbl">prompt</div><div class="md">${md(i.prompt)}</div>`;
+  else if (Object.keys(i).length === 1 && typeof i.command === 'string') h += `<pre class="code">${esc(i.command)}</pre>`;
   else if (Object.keys(i).length) h += `<div class="lbl">input</div><pre class="code">${esc(JSON.stringify(i, null, 2))}</pre>`;
   const r = results[t.id];
   if (r) {
@@ -240,7 +241,7 @@ function imgHtml(im){ return im.missing ? '<div class="sub">[image too large to 
 function toolHtml(t){
   const r = results[t.id];
   const st = r ? (r.error ? '<span class="st bad">✗</span>' : '<span class="st ok">✓</span>') : (t.id ? '<span class="st wait">…</span>' : '');
-  return `<details class="tool ${r&&r.error?'err':''}" data-k="${esc(t.id||'')}"><summary><span class="nm">${esc(t.name)}</span><span class="ln">${esc(toolLine(t))}</span>${st}</summary><div class="body" data-lazy="1"></div></details>`;
+  return `<details class="tool ${r&&r.error?'err':''}" data-k="${esc(t.id||'')}"><summary><span class="nm">${esc(t.name)}${t.native?` <small class="sub" title="the agent's own tool name">${esc(t.native)}</small>`:''}</span><span class="ln">${esc(toolLine(t))}</span>${st}</summary><div class="body" data-lazy="1"></div></details>`;
 }
 
 // ------------------------------------------------------------- render
@@ -361,7 +362,9 @@ async function poll(){
     const r = await fetch(`../api/transcript/${AID}?after=${next}`);
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
-    if (j.fallback) { events = j.events; } else if (j.events.length) { events = events.concat(j.events); }
+    // replace: the whole transcript (a summary log, or a session whose steps change in place); the
+    // first poll after one restarts at line 0, so it replaces too
+    if (j.replace || (meta && meta.replace)) { events = j.events; } else if (j.events.length) { events = events.concat(j.events); }
     next = j.next; meta = j;
     // drop optimistic bubbles once the real message shows up
     pending = pending.filter(p => !events.some(e => e.kind === 'user' && Date.parse(e.ts) >= p.at - 5000 && (e.text||'').includes(p.text.slice(0, 40))) && Date.now() - p.at < 120000);

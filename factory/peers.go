@@ -1,12 +1,8 @@
 package factory
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -287,7 +283,7 @@ func (f *Factory) peerHead(cwd string, now time.Time) string {
 // peerRequest is Zach's request from a board card's first message (the Fellow prompt's "Zach's
 // request:" block), cut to peerRequestCap; "" for other cards, whose title says what they do.
 func (f *Factory) peerRequest(a Agent) string {
-	if a.ID == "" || a.Provider != "claude" || a.SessionID == "" {
+	if a.ID == "" || a.SessionID == "" {
 		return ""
 	}
 	pc := &f.peerCache
@@ -310,40 +306,17 @@ func (f *Factory) peerRequest(a Agent) string {
 	return r
 }
 
-// firstRequest reads the first user message of a Claude session file. ok is false when the file or
-// the message is not there yet.
+// firstRequest reads the first user message of the agent's session file. ok is false when the file
+// or the message is not there yet. The result is cached, so the file is read once per card.
 func firstRequest(home string, a Agent) (string, bool) {
-	dir := strings.NewReplacer("/", "-", ".", "-").Replace(a.Cwd)
-	path := filepath.Join(home, ".claude/projects", dir, a.SessionID+".jsonl")
-	fh, err := os.Open(path)
-	if err != nil {
+	res, err := ReadTranscript(home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
+	if err != nil || res.Fallback {
 		return "", false
 	}
-	defer fh.Close()
-	sc := bufio.NewScanner(fh)
-	sc.Buffer(make([]byte, 1<<20), 64<<20)
-	for n := 0; n < 50 && sc.Scan(); n++ {
-		var d struct {
-			Type    string
-			Message struct{ Content json.RawMessage }
+	for _, e := range res.Events {
+		if e.Kind == "user" && strings.TrimSpace(e.Text) != "" {
+			return requestOf(e.Text), true
 		}
-		if json.Unmarshal(sc.Bytes(), &d) != nil || d.Type != "user" {
-			continue
-		}
-		var text string
-		if json.Unmarshal(d.Message.Content, &text) != nil {
-			var blocks []struct{ Type, Text string }
-			json.Unmarshal(d.Message.Content, &blocks)
-			for _, b := range blocks {
-				if b.Type == "text" {
-					text += b.Text
-				}
-			}
-		}
-		if systemText.MatchString(text) || strings.TrimSpace(text) == "" {
-			continue
-		}
-		return requestOf(text), true
 	}
 	return "", false
 }

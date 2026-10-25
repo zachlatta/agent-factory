@@ -113,8 +113,8 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return
 		}
-		all := parseLogs(text)
-		res.Events, res.Next = all[min(after, len(all)):], len(all)
+		// the summary log has no stable line numbers: send all of it each time
+		res.Events, res.Next = parseLogs(text), 0
 	}
 	c, isCard := f.card(a.ID)
 	var parent map[string]string
@@ -127,8 +127,8 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.mu.Unlock()
-	out := map[string]any{"events": res.Events, "next": res.Next, "fallback": res.Fallback, "provider": res.Provider,
-		"stages": Stages, "parent": parent, "card": nil,
+	out := map[string]any{"events": res.Events, "next": res.Next, "fallback": res.Fallback, "replace": res.Replace,
+		"provider": res.Provider, "stages": Stages, "parent": parent, "card": nil,
 		"agent": map[string]any{"id": a.ID, "host": a.Host, "title": a.Title, "status": a.Status,
 			"archivedAt": iso(a.ArchivedAt), "cwd": a.Cwd, "repo": a.Repo, "branch": a.Branch, "model": a.Model,
 			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": a.Labels}}

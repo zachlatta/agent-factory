@@ -158,6 +158,10 @@ Cards can start in any checkout under `~/dev/<owner>/<repo>`.
 - `factory/route.go`: Repo Auto. `factory/agents.go`: the agent choices.
 - `factory/board.go`, `collect.go`, `ask.go`, `ideas.go`, `inbox.go`, `actions.go`,
   `transcript.go`, `server.go`; the board and transcript pages are in `factory/web/`.
+- `factory/transcript.go`, `transcript_providers.go`: the transcript page reads each agent's own
+  session file (Claude `~/.claude/projects`, Codex `~/.codex/sessions`, Antigravity
+  `~/.gemini/antigravity-cli/brain`, Muse `~/.local/share/muse/sessions`), and `paseo logs` only
+  when there is none.
 - Tests sit beside the code, with a fake `paseo` (`factory/fake_test.go`).
 
 ## License
