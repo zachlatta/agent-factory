@@ -40,9 +40,11 @@ type AgentUsage struct {
 
 // AccountUsage is one account's remaining allowance, for providers whose
 // allowance is split across accounts. The label is the account's local
-// number only; no address or organization identifier is carried.
+// number; the account email is carried for display, but no organization
+// name or identifier is.
 type AccountUsage struct {
 	Label     string        `json:"label"`
+	Email     string        `json:"email,omitempty"`
 	Active    bool          `json:"active,omitempty"`
 	Summary   string        `json:"summary"`
 	Windows   []UsageWindow `json:"windows,omitempty"`
@@ -229,6 +231,7 @@ func parseClaudeUsage(raw []byte, now time.Time) AgentUsage {
 	}
 	type acct struct {
 		Number         int    `json:"number"`
+		Email          string `json:"email"`
 		Active         bool   `json:"active"`
 		UsageFetchedAt string `json:"usageFetchedAt"`
 		Usage          struct {
@@ -272,6 +275,7 @@ func parseClaudeUsage(raw []byte, now time.Time) AgentUsage {
 		}
 		rows[i] = numbered{num, AccountUsage{
 			Label:     fmt.Sprintf("Claude #%d", num),
+			Email:     a.Email,
 			Active:    a.Active,
 			Summary:   formatSummary(ws),
 			Windows:   ws,

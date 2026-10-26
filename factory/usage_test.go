@@ -82,10 +82,14 @@ func TestParseClaudeUsage(t *testing.T) {
 		t.Fatalf("Accounts = %+v, want 4 accounts", u.Accounts)
 	}
 	wantLabels := []string{"Claude #1", "Claude #2", "Claude #3", "Claude #4"}
+	wantEmails := []string{"user@example.com", "other@example.com", "third@example.com", "fourth@example.com"}
 	wantLeft := [][]int{{59, 100}, {77, 46}, {0, 0}, nil}
 	for i, a := range u.Accounts {
 		if a.Label != wantLabels[i] {
 			t.Errorf("Accounts[%d].Label = %q, want %q", i, a.Label, wantLabels[i])
+		}
+		if a.Email != wantEmails[i] {
+			t.Errorf("Accounts[%d].Email = %q, want %q", i, a.Email, wantEmails[i])
 		}
 		if a.Active != (i == 1) {
 			t.Errorf("Accounts[%d].Active = %v, want %v", i, a.Active, i == 1)
@@ -116,7 +120,8 @@ func TestParseClaudeUsage(t *testing.T) {
 		t.Errorf("second withAge = %+v, want the un-aged reading", again.Accounts[0])
 	}
 	b, _ := json.Marshal(u)
-	for _, secret := range []string{"example.com", "Example Org", "Other Org", "Third Org", "Fourth Org", "org-secret-id"} {
+	// The account email is shown; organization names and ids are not.
+	for _, secret := range []string{"Example Org", "Other Org", "Third Org", "Fourth Org", "org-secret-id"} {
 		if strings.Contains(string(b), secret) {
 			t.Errorf("serialized AgentUsage leaked %q: %s", secret, b)
 		}
@@ -128,8 +133,11 @@ func TestParseClaudeUsageSingleAndNoActive(t *testing.T) {
 		"usage":{"sevenDay":{"pct":10.0}},"usageFetchedAt":"2026-10-25T19:59:00Z"}]}`
 	u := parseClaudeUsage([]byte(single), t0)
 	if u.Summary != "90% 7d left" || len(u.Accounts) != 1 ||
-		u.Accounts[0].Label != "Claude #5" || u.Accounts[0].Active {
+		u.Accounts[0].Label != "Claude #5" || u.Accounts[0].Active || u.Accounts[0].Email != "" {
 		t.Errorf("single account = %+v", u)
+	}
+	if b, _ := json.Marshal(u.Accounts[0]); strings.Contains(string(b), `"email"`) {
+		t.Errorf("account without an email serialized one: %s", b)
 	}
 
 	noActive := `{"accounts":[
