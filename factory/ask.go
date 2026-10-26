@@ -82,6 +82,7 @@ func yesNo(ask *Ask) (string, string) {
 }
 
 const finishedTitle = "Finished: read the result"
+const handTitle = "Moved here by hand"
 const repoTitle = "Which repo should this start in?"
 
 // baseAsk builds the Ask for a Needs Zach card from its labels and Paseo attention state.
@@ -166,7 +167,7 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why:     "The agent finished landing, but its commit is not on origin/main. Its last message is below.",
 			Actions: []Action{reply("Tell it to retry", "e.g. rebase and land it again"), act("done", "It's fine, mark done")}}
 	case a.L(labelStage) == "zach":
-		return &Ask{Title: "Moved here by hand", From: "builder",
+		return &Ask{Title: handTitle, From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
 	case a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished":
@@ -310,14 +311,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent) {
 		if ask == nil {
 			continue
 		}
-		src := cards[n].ID
-		if ask.From == "reviewer" {
-			for _, k := range cards[n].Children {
-				if k.Role == "reviewer" {
-					src = k.ID // children are oldest first, so this ends on the latest
-				}
-			}
-		}
+		src := askSource(cards[n], ask)
 		a := byID[src]
 		key := detailKey{src, iso(a.LastActivityAt)}
 		f.mu.Lock()

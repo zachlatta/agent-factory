@@ -26,7 +26,10 @@ const (
 	labelAgent      = "agent"        // the AgentChoice id that plans and builds the card
 	labelBase       = "base"         // the worktree's HEAD when the card was first seen: its own commits come after
 	labelStuckFrom  = "stuck-from"   // the column a stuck card left for Needs Zach
-	labelTold       = "told"         // inbox cards: the Needs Zach note already emailed to Zach
+	labelTold       = "told"         // the Needs Zach note already emailed to Zach (mail.go)
+	labelZachThread = "zach-thread"  // cards with no gmail-thread: the zrl-bot thread the factory emails Zach in
+	labelAnswered   = "answered"     // the last email reply from Zach applied to the card (answer.go)
+	labelWriting    = "writing"      // when the builder was asked to write Zach a summary: his email waits for it
 	labelRouting    = "routing"      // a repo picker: its card starts in the repo it names (route.go)
 	labelRouted     = "routed"       // a picker's new card id ("starting" while it is being started)
 	labelCandidates = "candidates"   // repos a picker could not choose between, space-separated

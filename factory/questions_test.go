@@ -132,7 +132,6 @@ func TestApproveCarriesZachsAnswers(t *testing.T) {
 }
 
 func TestPromptsTeachQuestionFormat(t *testing.T) {
-	f, _ := newTestFactory(t)
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	for name, p := range map[string]string{
 		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeAppRule, questionRule),
@@ -140,7 +139,6 @@ func TestPromptsTeachQuestionFormat(t *testing.T) {
 		"code review": ReviewPrompt(c, "code", 7478, "unknown"),
 		"brief":       briefMsg("code", true, "notes", briefAsk(card("c1", map[string]string{labelNote: "reviewer escalated"}))),
 		"summary":     summaryMsg,
-		"email":       f.emailZachMsg(card("c1", map[string]string{gmailThreadLabel: "t1"}), "approve the plan"),
 	} {
 		if !strings.Contains(p, "QUESTION:") {
 			t.Errorf("%s prompt does not teach the QUESTION: format", name)

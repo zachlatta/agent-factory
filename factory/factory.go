@@ -37,6 +37,7 @@ type Config struct {
 	Guarded      []string // public repos: scanned before landing; only Zach's own cards land without his approval (guard.go)
 	PrivateRules string   // file of private scan patterns (hostnames and the like), never in a repo
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
+	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't
 }
 
 func (c *Config) defaults() {
@@ -91,16 +92,20 @@ type Factory struct {
 	Sleep       func(time.Duration)                                                   // waits between archive retries
 	Scan        func(ctx context.Context, dir, rng string) ([]scan.Hit, error)        // secret scan of a commit range (guard.go)
 	Usage       func(ctx context.Context, provider string) AgentUsage                 // remaining subscription usage per provider
+	Mail        Mailer                                                                // zrl-bot mailbox for Needs Zach email; nil = none (mail.go)
 	kick        chan struct{}
 
-	mu      sync.Mutex
-	list    []Agent
-	cards   []Card
-	updated time.Time
-	errs    map[string]string
-	log     []string
-	details map[string]detailEntry // Needs Zach card id -> fetched Ask detail
-	routing map[string]bool        // pickers whose card is being started now (route.go)
+	mu        sync.Mutex
+	list      []Agent
+	cards     []Card
+	updated   time.Time
+	errs      map[string]string
+	log       []string
+	details   map[string]detailEntry // Needs Zach card id -> fetched Ask detail
+	routing   map[string]bool        // pickers whose card is being started now (route.go)
+	mailRetry map[string]time.Time   // card id -> no Needs Zach email before this (a send failed)
+	mailProbe mailProbe              // last mailbox check, for /api/health
+	once      map[string]string      // log lines written once (noteOnce)
 	// archivedNow: agents the board archived, and when. Applied over every snapshot until Paseo's
 	// files show the archive (or archiveMarkTTL passes), so a Refresh that read an agent file before
 	// Paseo wrote the archive cannot make the card look live again.
@@ -130,7 +135,8 @@ func New(cfg Config, p Paseo) *Factory {
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), errs: map[string]string{},
-		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}}
+		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, mailRetry: map[string]time.Time{},
+		once: map[string]string{}}
 	f.Scan = f.runScan
 	f.Usage = f.readProviderUsage
 	return f

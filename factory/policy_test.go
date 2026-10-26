@@ -689,27 +689,6 @@ func TestEscalationAsksBuilderForBriefQuotingReviewer(t *testing.T) {
 	}
 }
 
-func TestInboxBriefIsEmailedOnce(t *testing.T) {
-	labels := map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "2", labelSource: "email"}
-	f, p := newTestFactory(t)
-	c := card("c1", labels)
-	c.Labels[gmailThreadLabel] = "th1"
-	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", "code", "changes", p)})
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	msgs := p.sent("c1")
-	if l[labelTold] != "rework cap reached" || len(msgs) != 1 || !strings.Contains(msgs[0], "th1") ||
-		!strings.Contains(msgs[0], "/api/recommend") || !strings.Contains(msgs[0], "/api/approve") {
-		t.Errorf("labels = %v sent = %v", l, msgs)
-	}
-	// the Needs Zach rule does not email him again
-	f.SetAgents([]Agent{withLabels(c, l)})
-	f.Tick()
-	if n := len(p.sent("c1")); n != 1 {
-		t.Errorf("emailed %d times", n)
-	}
-}
-
 func TestRecommendAppliesTheBrief(t *testing.T) {
 	// plan at the cap: revise to the recommendations, build, code review next
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",

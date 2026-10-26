@@ -46,16 +46,18 @@ func main() {
 	guarded := flag.String("guarded", os.Getenv("FACTORY_GUARDED_REPOS"), "comma-separated public repos to scan before landing (env FACTORY_GUARDED_REPOS; default the factory's own repo)")
 	lanes := flag.String("lanes", os.Getenv("FACTORY_LANES"), "JSON file of board lane names per repo (env FACTORY_LANES; default ~/.config/agent-factory/lanes.json)")
 	private := flag.String("private-rules", os.Getenv("FACTORY_PRIVATE_RULES"), "file of private scan patterns (env FACTORY_PRIVATE_RULES; default ~/.config/agent-factory/denylist)")
+	zachEmail := flag.String("zach-email", os.Getenv("FACTORY_ZACH_EMAIL"), "address cards with no email thread email Zach at (env FACTORY_ZACH_EMAIL)")
 	tick := flag.Bool("tick", true, "run the pipeline; -tick=false only serves the board (deploy canary)")
 	flag.Parse()
 
 	cfg := factory.Config{Host: host, Home: home, StateDir: *state, Port: *port, BoardURL: *boardURL,
-		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick}
+		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail}
 	if *guarded != "" {
 		cfg.Guarded = splitList(*guarded)
 	}
 	factory.InboxSource, factory.InboxAnchorRole = os.Getenv("FACTORY_INBOX_SOURCE"), os.Getenv("FACTORY_INBOX_ANCHOR_ROLE")
 	f := factory.New(cfg, factory.CLI{})
+	f.Mail = factory.PDWMailer{}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))

@@ -318,6 +318,12 @@ async function load(){
   $('activity').innerHTML = (B.log||[]).slice().reverse().map(esc).join('<br>') || 'No factory activity yet.';
   if(!askOpen.size && !(document.activeElement && document.activeElement.tagName==='TEXTAREA' && $('grid').contains(document.activeElement))) render();
   if(sel) fillPanel(B.cards.find(c=>c.id===sel), false);
+  openFromHash();
+}
+// a link to board#<card id> (the Needs Zach email's Open board button) opens that card once it loads
+function openFromHash(){
+  const id=decodeURIComponent(location.hash.slice(1));
+  if(id && B.cards.some(c=>c.id===id)){ history.replaceState(null,'',location.pathname+location.search); openPanel(id); }
 }
 
 function visible(){

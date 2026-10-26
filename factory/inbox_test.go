@@ -65,49 +65,6 @@ func TestBoardCardLandMessageHasNoEmail(t *testing.T) {
 	}
 }
 
-func TestInboxCardTellsZachOncePerWait(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "zach", labelSource: "email", labelNote: "rework cap reached"})
-	f, p := newTestFactory(t, c)
-	f.Tick()
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "rework cap reached") || !strings.Contains(msgs[0], "/api/approve") {
-		t.Fatalf("sent = %v", msgs)
-	}
-	if l := p.labels("c1"); l[labelTold] != "rework cap reached" {
-		t.Errorf("labels = %v", l)
-	}
-	c.Labels[labelPrefix+labelTold] = "rework cap reached"
-	f2, p2 := newTestFactory(t, c)
-	f2.Tick()
-	if msgs := p2.sent("c1"); len(msgs) != 0 {
-		t.Errorf("told twice: %v", msgs)
-	}
-}
-
-func TestBoardCardInNeedsZachSendsNothing(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}))
-	f.Tick()
-	if msgs := p.sent("c1"); len(msgs) != 0 {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
-func TestInboxArchitecturePlanIsEmailedOnce(t *testing.T) {
-	f, p := newTestFactory(t, inboxCard("c1", map[string]string{labelStage: "plan-review", labelSource: "email"}),
-		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelTold] != l[labelNote] {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "reply_to_message") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
 func TestNewCardCanCarryEmailThread(t *testing.T) {
 	f, p := newTestFactory(t)
 	if _, err := f.Act("new", Body{Request: "fix the thing", Repo: "zachlatta/zrl-bot-email-control", Thread: "t9"}); err != nil {

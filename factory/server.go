@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sort"
@@ -210,7 +211,7 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 var actions = map[string]bool{"new": true, "idea": true, "scout": true, "stage": true, "review": true, "send": true,
 	"approve": true, "recommend": true, "rerun": true, "stop": true, "archive": true, "done": true, "close": true,
-	"land-review": true}
+	"land-review": true, "answer": true}
 
 func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 	// a custom header blocks cross-site form posts (browsers can't add one without CORS)
@@ -238,7 +239,14 @@ func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 	res, err := f.Act(action, b)
 	if err != nil {
 		f.logf("action %s %s failed: %v", action, short(b.ID), err)
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		code := 400
+		switch {
+		case errors.Is(err, ErrNoCard):
+			code = 404 // answer: the dispatcher falls back to its own handling
+		case errors.Is(err, ErrNotWaiting):
+			code = 409
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	f.logf("action %s %s ok", action, short(b.ID))

@@ -21,6 +21,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		return f.startScout(b.Repo, b.Request)
 	case "land-review":
 		return f.startLandReview(b)
+	case "answer":
+		return f.answerByEmail(b)
 	}
 	if strings.HasPrefix(b.ID, "idea-") {
 		switch action {
@@ -72,6 +74,11 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if msg == "" {
 			msg = "(see attached)"
 		}
+		via := "Message from Zach via the factory board:\n\n"
+		if b.Via == "email" {
+			// his email reply, as a follow-up block so the card's request and reviewer prompts show it
+			msg, via = f.emailFollowUp(msg), "Zach answered by email while the card waited on him:\n\n"
+		}
 		if c.Awaiting == "plan" {
 			// Zach's answer to an architecture plan: revise it, then plan review runs again
 			msg = "Zach read your plan and wants changes:\n\n" + msg + "\n\nRevise the plan, then restate the " +
@@ -86,7 +93,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
 		}
-		files, err := f.chat(c.ID, "Message from Zach via the factory board:\n\n"+msg, b.Attachments)
+		files, err := f.chat(c.ID, via+msg, b.Attachments)
 		if err != nil {
 			return nil, err
 		}

@@ -28,6 +28,7 @@ type Health struct {
 	RefreshErr     string `json:"refreshErr,omitempty"`
 	TickRunningFor string `json:"tickRunningFor,omitempty"`
 	LastLoopDone   string `json:"lastLoopDone,omitempty"`
+	Mail           string `json:"mail,omitempty"` // last mailbox check: "ok" or its error; never fails the check (mail.go)
 	Live           bool   `json:"live"`
 	OK             bool   `json:"ok"`
 }
@@ -61,7 +62,10 @@ func (f *Factory) Health() Health {
 	refreshErr := f.errs[f.cfg.Host]
 	f.mu.Unlock()
 
-	h := Health{Rev: f.cfg.Rev, Refreshed: refreshed, RefreshErr: refreshErr, Live: true}
+	f.mu.Lock()
+	mailStatus := f.mailProbe.status
+	f.mu.Unlock()
+	h := Health{Rev: f.cfg.Rev, Refreshed: refreshed, RefreshErr: refreshErr, Live: true, Mail: mailStatus}
 	if !started.IsZero() {
 		h.Started = iso(started)
 	}

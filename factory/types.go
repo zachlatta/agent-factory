@@ -157,8 +157,11 @@ type Body struct {
 	By          string       `json:"by"`
 	Tier        string       `json:"tier"`
 	Origin      string       `json:"origin"`
-	Agent       string       `json:"agent"`  // AgentChoice id for a new card, an idea, or starting an idea
-	Thread      string       `json:"thread"` // new card: zrl-bot Gmail thread to report in
+	Agent       string       `json:"agent"`      // AgentChoice id for a new card, an idea, or starting an idea
+	Thread      string       `json:"thread"`     // new card: zrl-bot Gmail thread to report in; answer: the reply's thread
+	MessageID   string       `json:"message_id"` // answer: Zach's reply
+	Text        string       `json:"text"`       // answer: the reply's text
+	Via         string       `json:"-"`          // "email": an answer by email (answer.go), not the board
 }
 
 type Attachment struct {

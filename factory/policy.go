@@ -371,26 +371,6 @@ func recommendDoes(ask *Ask) string {
 	return "apply it, then a code review runs before it lands"
 }
 
-// briefEmail tells an inbox card to email Zach its brief and how to act on his answer.
-func (f *Factory) briefEmail(a Agent, ask *Ask) string {
-	var b strings.Builder
-	b.WriteString("\n\nZach follows this card by email. After the brief, email it to him: " + emailHow(emailThread(a)) +
-		". Include " + f.boardLink() + " and tell him he can answer in words. If he answers by email:\n")
-	cmd := "curl -s -X POST -H 'X-Factory: 1' -d '{\"id\":\"" + a.ID + "\"}' http://127.0.0.1:7478/api/"
-	for _, x := range ask.Actions {
-		switch x.ID {
-		case "recommend":
-			b.WriteString("- He accepts your recommendations: run `" + cmd + "recommend` as your last command and stop.\n")
-		case "approve":
-			b.WriteString("- He says go ahead as it is (\"" + x.Label + "\"): run `" + cmd + "approve` as your last command and stop.\n")
-		case "close":
-			b.WriteString("- He drops it: run `" + cmd + "close` as your last command and stop.\n")
-		}
-	}
-	b.WriteString("- Anything else: do what he says, then stop with a short summary.")
-	return b.String()
-}
-
 // ApplyVerdict moves a card after its reviewer finished. Runs once per reviewer (factory.applied).
 func (f *Factory) ApplyVerdict(rev Agent) error {
 	target, kind := rev.L(labelReviewOf), rev.L(labelReviewKind)
@@ -468,15 +448,11 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	switch {
 	case (verdict == "approve" || verdict == "nits") && kind == "plan":
 		if tier == "architecture" && !zachOK {
-			note, msg := "architecture: approve the plan to build", summaryMsg
-			if emailThread(t) != "" {
-				// told now, so the Needs Zach rule does not email him a second time
-				labels[labelTold] = note
-				msg += " Then email Zach the summary and ask him to approve: " + emailHow(emailThread(t)) +
-					". Approve and drop work as in this note:\n\n" + f.emailZachMsg(t, note)
-			}
-			if err = set(labelStage, "zach", labelVerdict, "plan "+verdict, labelAwaiting, "plan", labelNote, note); err == nil {
-				err = f.send(target, msg)
+			// the factory emails Zach the summary once the builder has written it (mailZach)
+			note := "architecture: approve the plan to build"
+			if err = set(labelStage, "zach", labelVerdict, "plan "+verdict, labelAwaiting, "plan", labelNote, note,
+				labelWriting, now); err == nil {
+				err = f.send(target, summaryMsg)
 			}
 		} else {
 			if err = set(labelStage, "building", labelVerdict, "plan "+verdict, labelSince, now, labelAutoReview, "code"); err == nil {
@@ -547,11 +523,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		next.Status = "idle"
 		ask := briefAsk(next)
 		msg := briefMsg(kind, verdict == "escalate", notes, ask)
-		if th := emailThread(t); th != "" {
-			labels[labelTold] = why // told now, so the Needs Zach rule does not email him a second time
-			msg += f.briefEmail(t, ask)
-		}
-		if err = set(labelStage, "zach"); err == nil {
+		if err = set(labelStage, "zach", labelWriting, now); err == nil {
 			err = f.send(target, msg)
 		}
 	}
@@ -672,6 +644,7 @@ func (f *Factory) Tick() {
 	if err := f.tickIdeas(); err != nil {
 		f.logf("idea error: %v", err)
 	}
+	f.probeMail()
 }
 
 func (f *Factory) tickAgent(a Agent, now time.Time) error {
@@ -693,6 +666,12 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	routing := a.L(labelRouting) != ""
 	if a.L(labelStage) == "plan" && a.L(labelSource) == "board" && a.L(labelBase) == "" && !routing && !a.archived() {
 		f.recordBase(a)
+	}
+	if st := a.L(labelStage); st != "" && st != "zach" && a.L(labelTold) != "" && !a.archived() {
+		// left Needs Zach: the next wait is emailed even if its note is the same
+		if err := f.setLabels(a.ID, map[string]string{labelTold: ""}); err != nil {
+			return err
+		}
 	}
 	if !a.stopped() {
 		return nil
@@ -752,15 +731,11 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		f.logf("%s finished landing", short(a.ID))
 		return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "landed"})
-	case a.L(labelStage) == "zach" && emailThread(a) != "" && a.L(labelTold) != waitNote(a):
+	case a.L(labelStage) == "zach" && f.Mail != nil && a.L(labelTold) != waitNote(a) && mailable(c.Ask):
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
-		f.logf("%s waits on Zach (%s): asking it to email him", short(a.ID), waitNote(a))
-		if err := f.setLabels(a.ID, map[string]string{labelTold: waitNote(a)}); err != nil {
-			return err
-		}
-		return f.send(a.ID, f.emailZachMsg(a, waitNote(a)))
+		return f.mailZach(a, c)
 	}
 	return f.checkStuck(a, now)
 }
@@ -843,7 +818,7 @@ func (f *Factory) recordBase(a Agent) {
 	}
 }
 
-// waitNote says why a Needs Zach card waits; inbox cards email it to him once per note.
+// waitNote says why a Needs Zach card waits; Zach is emailed it once per note (mail.go).
 func waitNote(a Agent) string {
 	if n := a.L(labelNote); n != "" {
 		return n

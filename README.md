@@ -69,7 +69,40 @@ card) instead of doing it in its card; agents started before this rule do not ha
 
 An email dispatcher (not in this repo) can start agents as cards with labels
 `factory.source=email|voice` and `gmail-thread=<id>`. Those cards follow the same tracks and
-report back in their email thread when they land or need a person.
+report back in their email thread when they land.
+
+### Needs Zach email
+
+Every card that waits in Needs Zach is emailed to Zach once per wait reason, by the factory itself
+through the zrl-bot mailbox (`pdw call zrl_bot_email_control__*`, `factory/mail.go`). The email
+carries what the board's ask shows: the title and why, the card and repo, the full last message of
+the builder or reviewer (the plan, brief or findings), its questions numbered with lettered
+options, the words he can reply with, and an Open board button that opens the card.
+
+- Inbox cards answer in their own thread. Other cards start one thread to `FACTORY_ZACH_EMAIL` on
+  their first wait (`factory.zach-thread`); later waits reply in it.
+- `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
+  A wait where the builder was just asked for a summary or brief (`factory.writing`) is emailed
+  once it has written it (at most 10 minutes later).
+- Not emailed: cards moved to Needs Zach by hand, finished cards, and cards with no thread when
+  `FACTORY_ZACH_EMAIL` is unset. A failed send is retried after 5 minutes; a timed-out one is
+  not, since it may have gone out.
+- `/api/health` reports the last mailbox check as `mail`; it never fails the health check.
+
+Replies: the email dispatcher checks the sender, then posts his reply to
+`POST /api/answer` (`thread`, `message_id`, `text`; 404 when no card has the thread, 409 when the
+card is not waiting). Quoted text and signatures are cut first. Only a whole reply from these lists
+acts:
+
+| Reply | Does |
+| --- | --- |
+| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or recommend |
+| `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
+| `1B 2A` (only numbers and letters of the email's questions) | answers them, with the Yes button when it approves |
+
+Anything else goes to the agent as his instructions, written as a follow-up email block. Each
+message is applied once (`factory.answered`), and the factory confirms what it did in one line in
+the thread. An emailed approve of a public-repo landing still runs the secret scan first.
 
 #### Prompt blocks parsed from email cards
 
@@ -179,7 +212,8 @@ approve, 2 on changes, 3 when Zach must decide.
 | `FACTORY_LANES` | `-lanes` | board lane names per repo, `{"owner/repo": {"name": "...", "lands": "..."}}` (default `~/.config/agent-factory/lanes.json`) |
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
-| `PATH` | | must reach `paseo`, `node`, `git` and `gitleaks` |
+| `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
+| `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks` and `pdw` (logged in) |
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>`.
 
