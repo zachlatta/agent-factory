@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/mail"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -436,6 +438,9 @@ func (e *peerRequest) update(read *atomic.Int64) {
 		for _, ev := range claudeLineEvents(n, line) {
 			e.take(ev)
 		}
+		if text, ok := queuedPrompt(line); ok {
+			e.take(Event{Kind: "user", Text: text})
+		}
 	}
 	e.size, e.mtime = st.Size(), st.ModTime()
 }
@@ -451,7 +456,41 @@ func (e *peerRequest) take(ev Event) {
 		e.req.Base = requestOf(ev.Text)
 		return
 	}
-	e.req.FollowUps = append(e.req.FollowUps, followUpsOf(ev.Text)...)
+	for _, fu := range followUpsOf(ev.Text) {
+		if !slices.Contains(e.req.FollowUps, fu) { // a queued message may also be saved as a user line
+			e.req.FollowUps = append(e.req.FollowUps, fu)
+		}
+	}
+}
+
+// queuedPrompt is the text of a message that reached a Claude agent mid-turn: Claude Code saves it
+// as an "attachment" line of type "queued_command", not as a user line. Its prompt is a string or
+// a list of text blocks.
+func queuedPrompt(line []byte) (string, bool) {
+	var d struct {
+		Type        string
+		IsSidechain bool
+		Attachment  struct {
+			Type   string
+			Prompt json.RawMessage
+		}
+	}
+	if json.Unmarshal(line, &d) != nil || d.Type != "attachment" || d.IsSidechain || d.Attachment.Type != "queued_command" {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(d.Attachment.Prompt, &s) == nil {
+		return s, true
+	}
+	var blocks []struct{ Type, Text string }
+	json.Unmarshal(d.Attachment.Prompt, &blocks)
+	var texts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			texts = append(texts, b.Text)
+		}
+	}
+	return strings.Join(texts, "\n"), len(texts) > 0
 }
 
 // requestOf cuts Zach's request out of a card's first prompt: the board's "Zach's request:" block,

@@ -52,6 +52,18 @@ func sessionLine(text string, toolResult bool) []byte {
 	return append(line, '\n')
 }
 
+// queuedLine is a message that reached a busy Claude agent: an attachment line, its prompt a
+// string or (blocks) a list of text blocks.
+func queuedLine(text string, blocks bool) []byte {
+	var prompt any = text
+	if blocks {
+		prompt = []map[string]any{{"type": "text", "text": text}}
+	}
+	line, _ := json.Marshal(map[string]any{"type": "attachment",
+		"attachment": map[string]any{"type": "queued_command", "prompt": prompt, "commandMode": "prompt"}})
+	return append(line, '\n')
+}
+
 func writeSession(t *testing.T, home, cwd, id string, lines ...[]byte) string {
 	t.Helper()
 	dir := filepath.Join(home, ".claude/projects", strings.NewReplacer("/", "-", ".", "-").Replace(cwd))
@@ -142,6 +154,23 @@ func TestPeersEmailCardWithFollowUps(t *testing.T) {
 	}
 	if txt := p.Text(f.cfg.Location); !strings.Contains(txt, "  Request: "+want) {
 		t.Errorf("text brief lacks the request line:\n%s", txt)
+	}
+}
+
+// TestPeersFollowUpsQueuedMidTurn: a follow-up that arrives while the agent works is saved as a
+// queued command, in either prompt form; one saved both ways counts once.
+func TestPeersFollowUpsQueuedMidTurn(t *testing.T) {
+	a := reqCard("em6", "email")
+	f, _ := newTestFactory(t, a)
+	second := fakeFollowUp("Sun, 25 Oct 2026 20:30:00 -0400", "Two coats, please.")
+	writeSession(t, f.cfg.Home, a.Cwd, a.SessionID,
+		sessionLine(fakeEmailPrompt, false),
+		queuedLine(fakeFollowUp("Sun, 25 Oct 2026 20:01:00 -0400", "Make it green instead."), false),
+		queuedLine(second, true),
+		sessionLine(second, false))
+	r := f.cardRequest(a)
+	if len(r.FollowUps) != 2 || r.FollowUps[0].Text != "Make it green instead." || r.FollowUps[1].Text != "Two coats, please." {
+		t.Errorf("follow-ups = %+v", r.FollowUps)
 	}
 }
 
