@@ -168,6 +168,47 @@ console.log(JSON.stringify([
 	}
 }
 
+func TestBoardPageTimeline(t *testing.T) {
+	page := boardPage(t)
+	const begin, end = "// timeline: begin", "// timeline: end"
+	i, j := strings.Index(page, begin), strings.Index(page, end)
+	if i < 0 || j < i {
+		t.Fatal("no timeline markers in the page")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := `const B = {stages: [['zach','Needs Zach'],['plan','Plan'],['building','Building'],['landed','Done']]};` + "\n" +
+		page[i:j] + `
+clock = iso => iso.slice(11, 16);
+console.log(JSON.stringify([
+  timeline({
+    stages: [{stage:'plan', secs:120}, {stage:'zach', secs:300}, {stage:'building', secs:180}],
+    zachSecs: 300,
+    totalSecs: 600,
+  }),
+  timeline({
+    stages: [{stage:'plan', secs:120}, {stage:'zach', secs:300}, {stage:'building', secs:180}, {stage:'landed', start:'2026-10-26T14:10:00Z'}],
+    zachSecs: 300,
+    totalSecs: 600,
+  }),
+  timeline({
+    stages: [{stage:'plan', secs:120}, {stage:'zach', secs:180}, {stage:'building', secs:240}, {stage:'zach', secs:120}, {stage:'landed', start:'2026-10-26T14:11:00Z'}],
+    zachSecs: 300,
+    totalSecs: 660,
+  }),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `["Plan 2m · Needs Zach 5m · Building 3m · 10m so far","Plan 2m · Needs Zach 5m · Building 3m · done 14:10 · 10m in all","Plan 2m · Needs Zach 3m · Building 4m · Needs Zach 2m · done 14:11 · 11m in all · 5m waiting on Zach"]`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("timeline = %s, want %s", got, want)
+	}
+}
+
 // Opening a card or its transcript marks it seen. The call is quiet: a read-only canary answers
 // 403, and that must not toast, so it does not go through post().
 func TestPagesMarkSeen(t *testing.T) {
