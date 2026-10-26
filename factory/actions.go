@@ -257,7 +257,11 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		return nil, err
 	}
 	if repo == autoRepo {
-		return f.startPicker(b, req, title)
+		r := Route{Request: req, Title: title, Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: b.Agent}
+		if tierRank(b.Tier) >= 0 {
+			r.Tier = b.Tier
+		}
+		return f.startPicker(r)
 	}
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", filepath.Join(f.cfg.Home, "dev", repo), "--title", title,
 		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),

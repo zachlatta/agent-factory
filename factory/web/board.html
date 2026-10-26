@@ -574,7 +574,7 @@ function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').in
 function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
 $('newBtn').onclick = ()=>{ fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4); };
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
-  try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast('Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
+  try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast($('nRepo').value==='auto' ? 'Picking a repo, then the Scout starts: ideas show up in Ideas' : 'Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
   try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
 $('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };

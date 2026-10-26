@@ -366,3 +366,93 @@ func TestParseRepo(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoScoutStartsPicker(t *testing.T) {
+	f, p := newTestFactory(t)
+	withRepos(t, f, "example/desk", "example/ops")
+	res, err := f.Act("scout", Body{Repo: "auto", Request: "Find ways to make backups faster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.runsWithLabel(labelArg(labelRole, "scout"))); n != 0 {
+		t.Errorf("scout started before a repo was picked: %d", n)
+	}
+	runs := runArgs(p)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %v", runs)
+	}
+	r := runs[0]
+	if argAfter(r, "--cwd") != filepath.Join(f.cfg.Home, "dev") || !slices.Contains(r, labelArg(labelRouting, "1")) {
+		t.Errorf("picker not started in ~/dev: %v", r)
+	}
+	if !strings.HasPrefix(argAfter(r, "--title"), "Scout: Find ways to make backups faster") {
+		t.Errorf("picker title = %q", argAfter(r, "--title"))
+	}
+	prompt := r[len(r)-1]
+	for _, want := range []string{"Find ways to make backups faster", "Suggest ideas", "REPO: unsure"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	rt, ok := f.routes.get(res.(map[string]string)["id"])
+	if !ok || !rt.Scout || rt.Request != "Find ways to make backups faster" || rt.Agent != "" || rt.Tier != "" {
+		t.Errorf("saved route = %+v, %v", rt, ok)
+	}
+}
+
+func TestAutoScoutNeedsGuidance(t *testing.T) {
+	f, p := newTestFactory(t)
+	withRepos(t, f, "example/desk")
+	_, err := f.Act("scout", Body{Repo: "auto", Request: "  "})
+	if err == nil || !strings.Contains(err.Error(), "say what ideas you want") {
+		t.Errorf("err = %v", err)
+	}
+	if n := len(runArgs(p)); n != 0 {
+		t.Errorf("runs = %d, want 0", n)
+	}
+}
+
+func TestScoutPickerStartsScoutInNamedRepo(t *testing.T) {
+	f, p := newTestFactory(t, picker("pk", nil))
+	withRepos(t, f, "example/desk", "example/ops")
+	f.routes.put("pk", Route{Request: "Find ways to make backups faster", Title: "Scout: Find ways", Scout: true})
+	p.logs["pk"] = "[User] prompt\nBackups live in ops.\nREPO: example/ops"
+	f.Tick()
+	runs := runArgs(p)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %v", runs)
+	}
+	r := runs[0]
+	if !slices.Contains(r, labelArg(labelRole, "scout")) || argAfter(r, "--cwd") != filepath.Join(f.cfg.Home, "dev", "example/ops") {
+		t.Errorf("scout not started in ops: %v", r)
+	}
+	if slices.Contains(r, "--new-workspace") || slices.Contains(r, labelArg(labelStage, "plan")) {
+		t.Errorf("a card was started instead of a scout: %v", r)
+	}
+	if !strings.Contains(r[len(r)-1], "Guidance:\nFind ways to make backups faster") {
+		t.Error("scout lost the guidance")
+	}
+	if !p.archived["pk"] {
+		t.Error("picker not archived")
+	}
+	if _, ok := f.routes.get("pk"); ok {
+		t.Error("route not deleted")
+	}
+}
+
+func TestApproveScoutPickerStartsScout(t *testing.T) {
+	a := picker("pk", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelNote: "pick a repo"})
+	f, p := newTestFactory(t, a)
+	withRepos(t, f, "example/desk", "example/ops")
+	f.routes.put("pk", Route{Request: "speed", Title: "Scout: speed", Scout: true})
+	if _, err := f.Act("approve", Body{ID: "pk", Repo: "example/desk"}); err != nil {
+		t.Fatal(err)
+	}
+	runs := p.runsWithLabel(labelArg(labelRole, "scout"))
+	if len(runs) != 1 || argAfter(runs[0], "--cwd") != filepath.Join(f.cfg.Home, "dev", "example/desk") {
+		t.Errorf("scout runs = %v", runs)
+	}
+	if !p.archived["pk"] {
+		t.Error("picker not archived")
+	}
+}

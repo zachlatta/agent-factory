@@ -252,7 +252,10 @@ func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 		repo = f.cfg.DefaultRepo
 	}
 	if repo == autoRepo {
-		return nil, errors.New("pick a repo for Suggest ideas")
+		if strings.TrimSpace(guidance) == "" {
+			return nil, errors.New("Suggest ideas with Repo Auto needs a prompt: pick a repo, or say what ideas you want")
+		}
+		return f.startPicker(Route{Request: guidance, Title: trunc("Scout: "+strings.SplitN(strings.TrimSpace(guidance), "\n", 2)[0], 70), Scout: true})
 	}
 	cwd := filepath.Join(f.cfg.Home, "dev", repo)
 	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeAppRule,

@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// Repo picking: a new card can start without a repo; the factory finds the best one, and asks Zach
-// only when it truly can't tell.
+// Repo picking: a new card or a Scout (Suggest ideas) can start without a repo; the factory finds
+// the best one, and asks Zach only when it truly can't tell.
 //
 // A New card with repo "auto" starts a read-only picker card (factory.routing) in ~/dev. When it
 // stops, its last reply names a repo (REPO: owner/name) and the factory starts the real card there
@@ -33,6 +33,7 @@ type Route struct {
 	Origin    string    `json:"origin,omitempty"`
 	Tier      string    `json:"tier,omitempty"`
 	Agent     string    `json:"agent,omitempty"` // AgentChoice id for the real card ("" = default)
+	Scout     bool      `json:"scout,omitempty"` // start a Scout (Suggest ideas) with Request as guidance, not a card
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -153,8 +154,13 @@ func readmeLine(dir string) string {
 	return trunc(strings.Join(parts, ": "), 200)
 }
 
-// startPicker starts the repo picker for a New card with repo "auto" and saves the request for it.
-func (f *Factory) startPicker(b Body, req, title string) (map[string]string, error) {
+// scoutPickRequest is what a picker reads for a Scout: where the ideas would land, not the errand repo.
+const scoutPickRequest = `Suggest ideas: a read-only Scout will look for up to 3 improvements to make. Pick the repo
+those improvements would change. Zach's guidance for the Scout:
+`
+
+// startPicker starts the repo picker for a New card or Scout with repo "auto" and saves r for it.
+func (f *Factory) startPicker(r Route) (map[string]string, error) {
 	dev := filepath.Join(f.cfg.Home, "dev")
 	var list []string
 	for _, r := range f.Repos() {
@@ -168,9 +174,13 @@ func (f *Factory) startPicker(b Body, req, title string) (map[string]string, err
 	if def == "" {
 		def = "the default repo"
 	}
+	req := r.Request
+	if r.Scout {
+		req = scoutPickRequest + req
+	}
 	prompt := fmt.Sprintf(strings.ReplaceAll(pickerPrompt, "<default repo>", def), req, dev, strings.Join(list, "\n"))
 	out, err := f.paseo("run", "--provider", ReviewerModel, "--thinking", "low", "--mode", "bypassPermissions",
-		"--cwd", dev, "--title", title,
+		"--cwd", dev, "--title", r.Title,
 		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"),
 		"--label", labelArg(labelRouting, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--background", "--quiet", prompt)
@@ -178,14 +188,11 @@ func (f *Factory) startPicker(b Body, req, title string) (map[string]string, err
 		return nil, err
 	}
 	id := lastLine(out)
-	r := Route{Request: req, Title: title, Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: b.Agent, CreatedAt: f.Now()}
-	if tierRank(b.Tier) >= 0 {
-		r.Tier = b.Tier
-	}
+	r.CreatedAt = f.Now()
 	if err := f.routes.put(id, r); err != nil {
 		return nil, fmt.Errorf("picker %s started, but saving its request failed: %v", short(id), err)
 	}
-	f.logf("new card %s: picking a repo for %s", short(id), title)
+	f.logf("new card %s: picking a repo for %s", short(id), r.Title)
 	f.poke()
 	return map[string]string{"id": id}, nil
 }
@@ -239,11 +246,17 @@ func (f *Factory) startRouted(a Agent, repo string) error {
 		release()
 		return err
 	}
-	res, err := f.newCard(Body{Request: r.Request, Repo: repo, Title: r.Title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent})
+	var res map[string]string
+	var err error
+	if r.Scout {
+		res, err = f.startScout(repo, r.Request)
+	} else {
+		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: r.Title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent})
+	}
 	if err != nil {
 		return failed(err)
 	}
-	f.logf("%s routed to %s: card %s", short(a.ID), repo, short(res["id"]))
+	f.logf("%s routed to %s: %s", short(a.ID), repo, short(res["id"]))
 	return f.finishRouted(a.ID, res["id"], repo)
 }
 
