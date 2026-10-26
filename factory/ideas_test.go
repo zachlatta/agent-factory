@@ -513,3 +513,57 @@ console.log(JSON.stringify({card: cardHtml(c), panel: ideaHtml(c, true)}));
 		}
 	}
 }
+
+func TestStartIdeaRepoOverride(t *testing.T) {
+	f, p := newTestFactory(t)
+	withRepos(t, f, "example/desk", "example/ops")
+
+	// Explicit repo override starts the card in that repo and saves it on i.Repo.
+	i, err := f.addIdea(Body{Request: "Rotate backup keys", Title: "rotate keys", Repo: "example/desk", Summary: "Rotate keys"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("approve", Body{ID: i.ID, Repo: "example/ops"}); err != nil {
+		t.Fatal(err)
+	}
+	runs := p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(runs) != 1 || argAfter(runs[0], "--cwd") != filepath.Join(f.cfg.Home, "dev", "example/ops") {
+		t.Fatalf("idea run = %v", runs)
+	}
+	if got := f.ideas.List()[0]; got.Repo != "example/ops" || got.Status != "started" {
+		t.Errorf("started idea = %+v", got)
+	}
+
+	// Repo "auto" starts a picker with the idea's request and note, then links the routed card back to the idea.
+	j, err := f.addIdea(Body{Request: "Update ops runbook", Title: "ops runbook", Repo: "example/desk", Summary: "Runbook update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.Act("approve", Body{ID: j.ID, Repo: "auto", Message: "Belongs in example/ops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkID := res.(map[string]string)["id"]
+	pickers := p.runsWithLabel(labelArg(labelRouting, "1"))
+	if len(pickers) != 1 || !strings.Contains(pickers[0][len(pickers[0])-1], "Belongs in example/ops") {
+		t.Fatalf("picker runs = %v", pickers)
+	}
+	if got := f.ideas.List()[1]; got.Repo != "example/desk" || got.Card != pkID {
+		t.Errorf("while picking, idea = %+v", got)
+	}
+	f.SetAgents([]Agent{picker(pkID, nil)})
+	storeLog(t, f, p, pkID, "[User] prompt\nREPO: example/ops")
+	f.Tick()
+	runs = p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(runs) != 2 || argAfter(runs[1], "--cwd") != filepath.Join(f.cfg.Home, "dev", "example/ops") {
+		t.Fatalf("routed idea runs = %v", runs)
+	}
+	got := f.ideas.List()[1]
+	if got.Repo != "example/ops" || got.Card == pkID || got.Card == "" {
+		t.Errorf("after routing, idea = %+v", got)
+	}
+	cards := BuildBoard([]Agent{card(got.Card, map[string]string{labelStage: "plan", labelOrigin: "idea"})}, f.ideas.List(), t0)
+	if len(cards) != 1 || cards[0].Idea == nil || cards[0].Idea.ID != j.ID || cards[0].Idea.Summary != "Runbook update" {
+		t.Errorf("routed card on board = %+v", cards)
+	}
+}

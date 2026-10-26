@@ -35,7 +35,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	if strings.HasPrefix(b.ID, "idea-") {
 		switch action {
 		case "approve":
-			return f.startIdea(b.ID, "zach", b.Agent, b.Message, b.Thinking)
+			return f.startIdea(b.ID, "zach", b.Repo, b.Agent, b.Message, b.Thinking)
 		case "archive":
 			return ok, f.dismissIdea(b.ID)
 		}

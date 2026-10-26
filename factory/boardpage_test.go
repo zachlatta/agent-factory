@@ -313,6 +313,59 @@ func TestPagesMarkSeen(t *testing.T) {
 	}
 }
 
+func TestBoardPageIdeaRepoPicker(t *testing.T) {
+	page := boardPage(t)
+	for _, want := range []string{
+		`const curRepo = ($('pRepo')&&!fresh) ? $('pRepo').value : (c.repo||'auto');`,
+		`<select id="pRepo" title="Repo where this idea runs">${repoOptions(curRepo)}</select>`,
+		`<select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>`,
+		`act('approve',{repo:$('pRepo').value, agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("board page missing %q", want)
+		}
+	}
+	if strings.Index(page, `id="pRepo"`) > strings.Index(page, `id="pAgent"`) {
+		t.Error("#pRepo should appear beside (before) #pAgent on idea cards")
+	}
+	if selRules := cssRules(page, "select"); len(selRules) == 0 || !strings.Contains(selRules[0], "max-width:100%") {
+		t.Errorf("select CSS should include max-width:100%% so panel pickers fit phone width: %v", selRules)
+	}
+	const begin, end = "// repoOptions: begin", "// repoOptions: end"
+	i, j := strings.Index(page, begin), strings.Index(page, end)
+	if i < 0 || j < i {
+		t.Fatal("no repoOptions markers in the page")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	sStart, sEnd := strings.Index(page, "<script>\n"), strings.LastIndex(page, "</script>")
+	if sStart < 0 || sEnd <= sStart {
+		t.Fatal("missing inline <script> in board page")
+	}
+	chk := exec.Command(node, "--check")
+	chk.Stdin = strings.NewReader(page[sStart+len("<script>\n") : sEnd])
+	if out, err := chk.CombinedOutput(); err != nil {
+		t.Fatalf("board script syntax check: %v\n%s", err, out)
+	}
+	script := `const esc = s => String(s ?? ''); let B = {repos: ['example/desk', 'example/ops']};` + "\n" +
+		page[i:j] + `
+console.log(JSON.stringify([
+  repoOptions('example/ops'),
+  repoOptions('auto'),
+  repoOptions('example/other'),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `["<option value=\"example/desk\" >example/desk</option><option value=\"example/ops\" selected>example/ops</option><option value=\"auto\" >Auto: pick repo</option>","<option value=\"example/desk\" >example/desk</option><option value=\"example/ops\" >example/ops</option><option value=\"auto\" selected>Auto: pick repo</option>","<option value=\"example/other\" selected>example/other</option><option value=\"example/desk\" >example/desk</option><option value=\"example/ops\" >example/ops</option><option value=\"auto\" >Auto: pick repo</option>"]`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("repoOptions = %s, want %s", got, want)
+	}
+}
+
 func TestBoardPageAgentPickerFollowsSuggestedDefault(t *testing.T) {
 	page := boardPage(t)
 	for _, want := range []string{

@@ -136,13 +136,14 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	return idea, nil
 }
 
-// startIdea turns a waiting idea into a planning card. When Zach starts it, agent (his pick in the
-// panel) wins, else the idea's suggested agent. The factory's own starts (by "auto") clear the
-// idea's suggested agent so newCard uses the usage-balanced auto-suggestion.
+// startIdea turns a waiting idea into a planning card. When Zach starts it, repo and agent (his
+// picks in the panel) win, else the idea's own repo and suggested agent. The factory's own starts
+// (by "auto") clear the idea's suggested agent so newCard uses the usage-balanced auto-suggestion.
 // note is Zach's own changes typed before starting; it follows the brief and overrides it.
-func (f *Factory) startIdea(id, by, agent, note, thinking string) (map[string]string, error) {
+func (f *Factory) startIdea(id, by, repo, agent, note, thinking string) (map[string]string, error) {
 	var res map[string]string
 	var startErr error
+	repo = strings.TrimSpace(repo)
 	note = trunc(strings.TrimSpace(note), 4000)
 	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for n := range ideas {
@@ -159,18 +160,24 @@ func (f *Factory) startIdea(id, by, agent, note, thinking string) (map[string]st
 			}
 			switch {
 			case by == "auto":
-				agent, thinking = "", ""
+				repo, agent, thinking = i.Repo, "", ""
 			case agent == "":
 				agent = i.Agent
 				if thinking == "" {
 					thinking = i.Thinking
 				}
 			}
-			r, err := f.newCard(Body{Request: req, Repo: i.Repo, Title: i.Title, Origin: "idea", Tier: i.Tier, Agent: agent, Thinking: thinking})
+			if repo == "" {
+				repo = i.Repo
+			}
+			r, err := f.newCard(Body{Request: req, Repo: repo, Title: i.Title, Origin: "idea", Tier: i.Tier, Agent: agent, Thinking: thinking})
 			if err != nil {
 				i.Error, i.ErrorAt = trunc(strings.TrimSpace(err.Error()), 300), f.Now()
 				startErr = err
 				return ideas, nil
+			}
+			if repo != autoRepo {
+				i.Repo = repo
 			}
 			i.Status, i.Card, i.StartedAt, i.StartedBy, i.Note = "started", r["id"], f.Now(), by, note
 			i.Error, i.ErrorAt = "", time.Time{}
@@ -335,7 +342,7 @@ func (f *Factory) tickIdeas() error {
 		if inFlight[i.Repo] >= caps.InFlight || startedToday[i.Repo] >= caps.Daily {
 			continue
 		}
-		if _, err := f.startIdea(i.ID, "auto", "", "", ""); err != nil {
+		if _, err := f.startIdea(i.ID, "auto", "", "", "", ""); err != nil {
 			return err
 		}
 		f.logf("started idea %s in %s (%d/%d in flight, %d/%d today)", i.ID, i.Repo, inFlight[i.Repo]+1,

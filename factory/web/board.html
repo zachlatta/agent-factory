@@ -16,7 +16,7 @@ h1{font-size:17px;margin:0 8px 0 0}
 .err{color:var(--red);font-size:12px}
 input,select,textarea,button{font:inherit}
 input[type=search]{padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:180px}
-select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;max-width:100%}
 button{padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:#f6f8fa;cursor:pointer}
 button:hover{background:#eef1f4}
 button.primary{background:var(--green);border-color:var(--green);color:#fff}
@@ -408,6 +408,14 @@ function fillThinking(id, agentID, selected){
   el.value = value; el.dataset.agent = agentID;
 }
 // thinkingPicker: end
+// repoOptions: begin
+function repoOptions(selected){
+  const rs = [...(B.repos||[])];
+  if(selected && selected!=='auto' && !rs.includes(selected)) rs.unshift(selected);
+  return rs.map(r=>`<option value="${esc(r)}" ${r===selected?'selected':''}>${esc(r)}</option>`).join('')
+    + `<option value="auto" ${selected==='auto'?'selected':''}>Auto: pick repo</option>`;
+}
+// repoOptions: end
 function usageBars(u){
   const ws = (u && u.windows) || [];
   return ws.length ? ws.map(w=>{
@@ -896,13 +904,15 @@ function fillPanel(c, fresh){
     fetch('api/logs/'+c.idea.id).then(r=>r.json()).then(j=>{ briefs[c.idea.id] = (j.idea&&j.idea.request)||'';
       if(sel===c.id) $('pIdea').innerHTML = ideaHtml(c, isIdea); }); }
   if(isIdea){
+    const curRepo = ($('pRepo')&&!fresh) ? $('pRepo').value : (c.repo||'auto');
     const picked = ($('pAgent')&&!fresh) ? $('pAgent').dataset.picked : '';
     const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : ((c.idea&&c.idea.agent)||AG.default);
     const curThinking = ($('pThinking')&&!fresh) ? $('pThinking').value : ((c.idea&&c.idea.thinking)||'');
     $('pActs').innerHTML = `
+    <select id="pRepo" title="Repo where this idea runs">${repoOptions(curRepo)}</select>
     <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
     <div id="pThinkingRow" style="width:100%" hidden><label class="sub" for="pThinking">Thinking level</label><br><select id="pThinking" style="width:100%"></select></div>
-    <button class="primary" onclick="act('approve',{agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
+    <button class="primary" onclick="act('approve',{repo:$('pRepo').value, agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
     <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>
     <div class="ausage" id="pAgentUsage" style="width:100%">${agentUsageHtml(curAg,'pAgent')}</div>`;
     fillThinking('pThinking',curAg,curThinking);

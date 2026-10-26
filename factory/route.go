@@ -278,6 +278,16 @@ func (f *Factory) finishRouted(id, card, repo string) error {
 	if err := f.archiveAgent(id); err != nil {
 		return err
 	}
+	if err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
+		for n := range ideas {
+			if ideas[n].Card == id {
+				ideas[n].Card, ideas[n].Repo = card, repo
+			}
+		}
+		return ideas, nil
+	}); err != nil {
+		return err
+	}
 	return f.routes.del(id)
 }
 
