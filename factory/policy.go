@@ -460,6 +460,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			}
 		}
 	case verdict == "approve" || verdict == "nits":
+		fb := uiFeedback(notes)
 		scanned := ""
 		if f.guarded(t.Repo) {
 			scanned = f.scanNote(t.Cwd, "") // public repo: the factory's own scan, before any landing
@@ -482,8 +483,15 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 				note += ": public repo: scan passed at review"
 			}
 			if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelNote, note); err == nil {
-				err = f.send(target, fmt.Sprintf("Code review passed (%s tier). %s", tier, f.landMsgFor(t)))
+				msg := fmt.Sprintf("Code review passed (%s tier). %s", tier, f.landMsgFor(t))
+				if fb != "" {
+					msg += uiFeedbackLandMsg(fb)
+				}
+				err = f.send(target, msg)
 			}
+		}
+		if err == nil && fb != "" && labels[labelStage] == "zach" {
+			err = f.send(target, uiFeedbackHoldMsg(fb))
 		}
 	case verdict == "changes" && rounds < f.cfg.ReworkCap:
 		back := "building"
@@ -612,6 +620,9 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 	prompt := strings.ReplaceAll(ReviewPrompt(c, kind, f.cfg.Port, vis), "<errands>", f.errandsName())
 	if f.guarded(c.Repo) {
 		prompt += publicReviewRule
+	}
+	if kind != "plan" && f.uiChange(c) {
+		prompt += uiReviewRule
 	}
 	if kind == "land" {
 		if why == "" {
