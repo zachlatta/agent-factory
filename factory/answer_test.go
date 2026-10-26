@@ -16,6 +16,7 @@ func TestParseAnswer(t *testing.T) {
 	plan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Approve plan & build"),
 		reply("Send back", ""), act("close", "Drop it")}, Questions: qs}
 	brief := &Ask{Yes: "recommend", Actions: []Action{primary("recommend", btnRecommend), act("close", btnDrop)}}
+	briefQs := &Ask{Yes: "recommend", Actions: brief.Actions, Questions: qs}
 	rerun := &Ask{Actions: []Action{primary("rerun", "Re-run"), reply("Reply", "")}}
 	for _, tc := range []struct {
 		ask        *Ask
@@ -34,7 +35,9 @@ func TestParseAnswer(t *testing.T) {
 		{plan, "Please drop the second point and build", "send", "drop the second point"},
 		{plan, "1B 2A", "approve", "Which store?\n   → SQLite"},
 		{plan, "1b, 2b", "approve", "When?\n   → Later"},
-		{brief, "1A", "send", "1A"}, // no questions on the brief
+		{brief, "1A", "send", "1A"},                                              // no questions on the brief
+		{briefQs, "1B", "send", "Zach's answers:\n1. Which store?\n   → SQLite"}, // recommend would drop the choice
+		{briefQs, "yes", "recommend", ""},
 		{plan, "3C", "send", "3C"},
 		{plan, "wait\n\n> approve", "send", "wait"},
 		{plan, "approve\n\nOn Sun, Oct 25, 2026 at 7:42 PM zrl bot wrote:\n> Needs you", "approve", ""},
@@ -159,5 +162,35 @@ func TestAnswerAPIStatusTellsTheDispatcherToFallBack(t *testing.T) {
 	}
 	if !errors.Is(func() error { _, err := f.Act("answer", Body{Thread: "nope", MessageID: "m"}); return err }(), ErrNoCard) {
 		t.Error("unknown thread is not ErrNoCard")
+	}
+}
+
+func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes",
+		labelZachThread: "nt1"})
+	f, p, m := mailFactory(t, a)
+	p.logs["c1"] = "Brief.\n\nQUESTION: Which fix?\n- The small one (recommended)\n- The big one\n"
+	c, _ := f.card("c1")
+	if ask := askFor(c, f.agent("c1")); ask.Yes != "recommend" {
+		t.Fatalf("ask = %+v", ask)
+	}
+	res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "1B"})
+	if err != nil || res.(map[string]string)["action"] != "send" {
+		t.Fatalf("res = %v, err = %v", res, err)
+	}
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Which fix?\n   → The big one") ||
+		strings.Contains(msgs[0], "accepts the recommendations") {
+		t.Errorf("sent = %v", msgs)
+	}
+	if s := m.sends(); len(s) != 1 {
+		t.Errorf("confirmation = %+v", s)
+	}
+	c, _ = f.card("c1")
+	ask := askFor(c, f.agent("c1"))
+	_, ask.Questions = f.askDetail(c, ask)
+	for _, w := range replyWords(ask) {
+		if w.Word == "1A 2B" && strings.Contains(w.Does, "approve") {
+			t.Errorf("brief letter answers promise approve: %+v", w)
+		}
 	}
 }

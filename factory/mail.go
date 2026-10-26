@@ -253,8 +253,10 @@ func replyWords(ask *Ask) []replyWord {
 	}
 	if len(ask.Questions) > 0 {
 		does := "answers the questions above"
-		if ask.Yes == "approve" || ask.Yes == "recommend" {
+		if ask.Yes == "approve" {
 			does += ", then the same as \"approve\""
+		} else {
+			does += "; the agent gets your answers"
 		}
 		out = append(out, replyWord{"1A 2B", does})
 	}

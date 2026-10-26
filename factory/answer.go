@@ -67,8 +67,10 @@ func parseAnswer(text string, ask *Ask) answer {
 		return answer{Action: "close"}
 	case letterReply.MatchString(clean):
 		if expanded, ok := expandLetters(clean, ask.Questions); ok {
-			if yesActs && actionFor(ask, ask.Yes) != nil {
-				return answer{Action: ask.Yes, Message: expanded}
+			// approve carries answers; recommend does not (it applies the brief as written), so on a
+			// brief they go to the agent, as the board sends them
+			if ask.Yes == "approve" && actionFor(ask, "approve") != nil {
+				return answer{Action: "approve", Message: expanded}
 			}
 			return answer{Action: "send", Message: "Zach's answers:\n" + expanded}
 		}
