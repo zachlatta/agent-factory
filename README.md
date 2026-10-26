@@ -36,6 +36,9 @@ The planner (the "Fellow") first picks a track:
 
 - Refactors and cleanups must cover the whole repo (or list what is left and why); a partial
   refactor is a blocking finding.
+- Plans and build summaries name their deploy steps (if any). Builders make no live changes
+  (install scripts, enabling or restarting services, resizing VMs, external settings) before code
+  review: the code reviewer checks the steps, and the landing step runs and verifies them after pushing.
 - Circuit breakers: 3 review rounds per gate, then a person; reviewers may answer `nits` or
   `close`; a card that stops with nothing queued goes to Needs Zach after 2 minutes.
 - Blocked agents: a child agent waiting on a permission prompt (`paseo permit ls`) or running with

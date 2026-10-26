@@ -140,7 +140,7 @@ var rubric = map[string]string{
 	"plan": `Check the plan (the builder's latest messages) against Zach's request and follow-ups (section below):
 - Does it solve what Zach actually asked, not a nearby problem?
 - Diagnosis: is the cause or approach grounded in evidence the agent looked at?
-- Files, tests, risks and open questions named? Missing facts recorded as questions, not guessed?
+- Files, deploy steps (if any), tests, risks and open questions named? Missing facts recorded as questions, not guessed?
 - Scope: nothing unasked-for. Over about 1,000 changed lines means it must be split.
 - Cheaper or safer approach available?
 - Refactor or cleanup: does it cover the whole app (rule below)?
@@ -151,6 +151,10 @@ var rubric = map[string]string{
   landed, find its commits on origin/main.
 - Correct? Run the repo's tests or the narrowest check that proves it, and paste the command and its actual
   output (last lines) in your reply. Re-check claims, numbers and links in the builder's final answer.
+- Deploy and live changes: no live changes (install scripts, enabling or restarting services, resizing VMs,
+  changing external settings) belong in build before code review; they wait for the landing step. If any
+  deploy steps are named in the builder's summary or plan, check that they match the diff and are safe to run
+  (including what happens if a step fails part-way or is run twice).
 - Tests: none skipped or weakened. If new tests exist, revert the change locally in a scratch copy and
   confirm they fail (skip if impractical, and say so).
 - Scope: no unrelated files. No secrets, tokens or private data committed.
@@ -267,7 +271,8 @@ The direct track commits only its own <errands> work item (work/...): no other f
 Anything else (code, config, infra, deletes, money, messages to anyone but Zach) is the build track:
 
 Step 1 now: write a PLAN only, then stop. No file edits yet. The plan has: goal (Zach's words),
-what you found (evidence), approach, files to change, how you'll test it, risks, open questions,
+what you found (evidence), approach, files to change, deploy steps (if any; they run in the landing
+step after code review, not during build), how you'll test it, risks, open questions,
 and an estimate of changed lines (over 1,000 means split into smaller cards).
 End the plan with one line: TIER: <low|risky|architecture>.
 
@@ -281,7 +286,8 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 A different agent reviews the plan (architecture-tier plans also go to Zach). When you get
 "Plan approved", build it. Don't improvise: if scope must change, stop and say so. Commit on your
-branch, but do NOT land until the factory tells you to. If stuck, stop and write a handoff: what
+branch, but do NOT land or make live changes (install scripts, enable or restart services, resize VMs,
+change external settings) until the factory tells you to land after code review. If stuck, stop and write a handoff: what
 you tried, what you know, what you need. You run unattended: never use AskUserQuestion or plan mode.
 Put the plan's open questions, and anything you need from Zach, in this form:
 %s
@@ -289,7 +295,7 @@ Put the plan's open questions, and anything you need from Zach, in this form:
 
 const landMsg = "Land it now the way this repo lands work: read its AGENTS.md and README (and how recent commits reached " +
 	"main) and do that. Land exactly the reviewed commits: no new commits or amends. If the rebase conflicts or anything must change, stop and say so " +
-	"instead of landing. Verify it landed, then stop with a one-line summary. " + overviewReminder + " The agent factory deploys itself " +
+	"instead of landing. Then run any deploy steps from your reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system), then stop with a one-line summary. " + overviewReminder + " The agent factory deploys itself " +
 	"from its repo's main within a minute of landing (and rolls back if it does not come up): never run its install.sh " +
 	"to deploy."
 
@@ -303,24 +309,26 @@ const summaryMsg = "Your plan passed review, and because it is an architecture c
 	"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
 	"start building; stop after the summary."
 
+const noLiveChangesRule = "Do not make live changes (install scripts, enable or restart services, resize VMs, change external settings) before code review: do them in the landing step after review and verify them."
+
 func restate(kind string) string {
 	if kind == "plan" {
 		return "the whole revised plan (not just the changes)"
 	}
-	return "a short summary"
+	return "a short summary (including the deploy steps as built, if any)"
 }
 
 // reworkMsg sends a builder its reviewer's requested changes.
 func reworkMsg(kind string, round, limit int, notes string) string {
 	return fmt.Sprintf("A reviewer (a different agent) requested changes to your %s (round %d of %d). "+
 		"Address each blocking finding, or explain why it is wrong. Then stop with %s; it will be "+
-		"re-reviewed. %s Do not land.\n\n%s", kind, round, limit, restate(kind), overviewReminder, notes)
+		"re-reviewed. %s Do not land. %s\n\n%s", kind, round, limit, restate(kind), overviewReminder, noLiveChangesRule, notes)
 }
 
 func buildMsg(prefix, notes string) string {
 	return prefix + " Build it now, as planned. Don't improvise: if the scope has to change, stop and say so " +
-		"instead. When done, commit everything on your branch and leave the worktree clean (delete or gitignore " +
-		"scratch files), but do NOT land; stop with a short summary. " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
+		"instead. " + noLiveChangesRule + " When done, commit everything on your branch and leave the worktree clean (delete or gitignore " +
+		"scratch files), but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
 }
 
 // findings is the reviewer's last message, trimmed for forwarding to the builder.
@@ -651,7 +659,7 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 	f.logf("%s: worktree not clean, asked the builder to commit before review", c.Short)
 	return f.send(c.ID, "Before code review the worktree must be clean, so the reviewer sees exactly what lands. "+
 		"Commit everything that belongs to this work on your branch (do NOT land), delete or gitignore scratch "+
-		"files, then stop with a short summary. "+overviewReminder+" The review starts when you stop.\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
+		"files, then stop with a short summary (including the deploy steps as built, if any). "+noLiveChangesRule+" "+overviewReminder+" The review starts when you stop.\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
 }
 
 // runReviewer starts a read-only reviewer of the given kind for c. For a landing review, why is the

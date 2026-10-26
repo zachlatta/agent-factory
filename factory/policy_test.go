@@ -749,3 +749,77 @@ func TestReviewPromptTreatsZachsRulingsAsSettled(t *testing.T) {
 		t.Error("ruling not passed to the reviewer")
 	}
 }
+
+func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	planPrompt := fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "", "")
+	for name, s := range map[string]string{
+		"newCardPrompt": planPrompt,
+		"plan rubric":   ReviewPrompt(c, "plan", 7478, "unknown"),
+	} {
+		if !strings.Contains(s, "deploy steps") {
+			t.Errorf("%s lacks deploy steps requirement: %q", name, s)
+		}
+	}
+
+	f, p := newTestFactory(t,
+		card("c-plan", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
+			labelVerdict: "plan changes", labelPlanRounds: "3", labelTier: "risky"}),
+		card("c-code", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
+			labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3", labelTier: "low"}),
+		card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
+	if _, err := f.Act("recommend", Body{ID: "c-plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("recommend", Body{ID: "c-code"}); err != nil {
+		t.Fatal(err)
+	}
+	dirtyCard, _ := f.card("c-dirty")
+	if err := f.askToCommit(dirtyCard, " M a.go"); err != nil {
+		t.Fatal(err)
+	}
+
+	noLivePrompts := map[string]string{
+		"newCardPrompt":  planPrompt,
+		"buildMsg":       buildMsg("Plan approved.", "(none)"),
+		"reworkMsg plan": reworkMsg("plan", 1, 3, "fix it"),
+		"reworkMsg code": reworkMsg("code", 1, 3, "fix it"),
+		"askToCommit":    p.sent("c-dirty")[0],
+		"recommend plan": p.sent("c-plan")[0],
+		"recommend code": p.sent("c-code")[0],
+		"code rubric":    ReviewPrompt(c, "code", 7478, "unknown"),
+	}
+	for name, s := range noLivePrompts {
+		if !strings.Contains(s, "live changes") {
+			t.Errorf("%s lacks no-live-changes rule: %q", name, s)
+		}
+	}
+	for name, s := range map[string]string{
+		"buildMsg":       noLivePrompts["buildMsg"],
+		"reworkMsg code": noLivePrompts["reworkMsg code"],
+		"askToCommit":    noLivePrompts["askToCommit"],
+		"recommend plan": noLivePrompts["recommend plan"],
+		"recommend code": noLivePrompts["recommend code"],
+	} {
+		if !strings.Contains(s, "deploy steps") {
+			t.Errorf("%s does not ask the summary to restate deploy steps: %q", name, s)
+		}
+	}
+	codeRubric := noLivePrompts["code rubric"]
+	for _, want := range []string{"deploy steps", "fails part-way", "run twice"} {
+		if !strings.Contains(codeRubric, want) {
+			t.Errorf("code rubric lacks %q: %q", want, codeRubric)
+		}
+	}
+	for name, s := range map[string]string{
+		"landMsg":        landMsg,
+		"guardedLandMsg": guardedLandMsg,
+	} {
+		for _, want := range []string{"deploy steps", "stop and report", "improvise"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s lacks %q: %q", name, want, s)
+			}
+		}
+	}
+}
+
