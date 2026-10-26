@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Usage · Factory</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#1f2328;background:#f6f8fa}
+body{margin:0}
+header,main{max-width:1280px;margin:auto;padding:20px}
+header{padding-top:calc(20px + env(safe-area-inset-top))}
+main{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+a{color:#0969da}
+h1{margin:16px 0 8px}
+h2{font-size:22px}
+h3{font-size:16px;margin:0 0 10px}
+p,dd{line-height:1.5}
+.muted{color:#59636e;font-size:14px}
+.notice{padding:12px;background:#fff8c5;border:1px solid #d4a72c;border-radius:6px}
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+article,details{background:white;border:1px solid #d1d9e0;border-radius:8px;padding:16px;min-width:0}
+article p{margin:6px 0}
+.account{border-top:1px solid #d1d9e0;margin-top:12px;padding-top:8px}
+#filters{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+label{display:flex;flex-direction:column;gap:4px;font-size:14px}
+select,button{font:inherit;padding:7px;border:1px solid #8c959f;border-radius:5px;background:white;color:inherit}
+select{max-width:240px}
+button{cursor:pointer;align-self:end}
+summary{cursor:pointer;font-weight:600}
+.scroll{overflow:auto;max-height:65vh;background:white;border:1px solid #d1d9e0;border-radius:6px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid #d1d9e0}
+th{position:sticky;top:0;background:#f6f8fa;white-space:nowrap}
+td{max-width:260px;overflow-wrap:anywhere}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{display:block;font-size:12px;color:#59636e;margin-top:4px}
+dt{font-weight:600;margin-top:12px}
+dd{margin:4px 0}
+#loadError[hidden]{display:none}
+@media(max-width:600px){header,main{padding-left:12px;padding-right:12px}
+.plans{grid-template-columns:1fr}
+#filters label{width:calc(50% - 5px)}
+select{max-width:100%;width:100%}
+h1{font-size:26px}
+.scroll{max-height:70vh}
+}
+
+</style>
+</head>
+<body>
+<header><a href="/">← Factory</a><h1>Usage</h1>
+<p>Subscription allowances cover activity across devices. Recorded local tokens below cover only retained sessions on this factory host. These figures cannot be reconciled as a bill.</p>
+<div id="loadError" class="notice" role="alert" hidden></div>
+<p id="snapshot" role="status">Loading recorded usage…</p></header>
+<main>
+<section aria-labelledby="allowanceHeading"><h2 id="allowanceHeading">Subscription allowances</h2>
+<p class="muted">One entry per provider and plan, independent of the token filters. Historical account attribution is unknown; current account allowances do not identify which account paid for earlier tokens.</p>
+<div class="plans" id="plans">Loading allowances…</div></section>
+<section aria-labelledby="recordedHeading"><h2 id="recordedHeading">Recorded local tokens</h2>
+<p class="notice" id="coverage">Waiting for a bounded scan. This is not complete history.</p>
+<p>Input includes cached input. Cache read/write and Reasoning counts are subsets of input/output; total is input plus output. Missing or unsupported records are unavailable, not proof of zero usage.</p>
+<div id="filters" aria-label="Token filters"></div>
+<p id="totals" aria-live="polite"></p>
+<p id="transcriptStatus" class="muted"></p>
+<div class="scroll" tabindex="0" role="region" aria-label="Recorded token rows"><table>
+<thead><tr><th>Plan / model</th><th>Role</th><th>Card / agent</th><th>Recorded stage</th><th>Status</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num">Reasoning</th><th class="num">Total</th></tr></thead>
+<tbody id="rows"><tr><td colspan="11">Waiting for recorded usage…</td></tr></tbody>
+</table></div></section>
+<details style="margin-top:20px"><summary>How to read roles, stages and coverage</summary>
+<dl>
+<dt>Fellow (fellow)</dt><dd>The card's agent owns planning, building, rework and landing.</dd>
+<dt>Plan reviewer (plan reviewer) / code reviewer (code reviewer)</dt><dd>Separate agents check the plan or built work. A recorded review round is shown when available.</dd>
+<dt>Scout (scout)</dt><dd>Looks for useful work and proposes ideas.</dd>
+<dt>Repo picker (picker)</dt><dd>Chooses the repository for a request before its card starts.</dd>
+<dt>Sub-agent (sub-agent)</dt><dd>A delegated Paseo agent belongs to its owning card, including nested delegation. Claude's built-in sub-agent files are included under their owning agent, card and stage, rather than shown as separate Paseo agents.</dd>
+<dt>Other / unassigned</dt><dd>Other is the existing role for agents outside these factory roles. Shared sessions with conflicting owners or roles remain unassigned; duplicate references do not add tokens twice.</dd>
+<dt>Recorded stages</dt><dd>Stages use the same identifiers and descriptions as the board. A span identifies a recorded visit, so repeated Building visits remain distinct; a round identifies a recorded review round.</dd>
+</dl><dl id="stages"></dl>
+<p>Initial Codex cumulative readings, ambiguous intervals crossing stage boundaries, and missing or expired timing stay unassigned. Timing history is retained for 30 days. Stage attribution describes the recorded interval, not the current board column.</p>
+<p>Scans are bounded to 2,000 metadata files, 32 MiB per session, 128 MiB of session data and 20 seconds. A limit or error can leave partial counts. Coverage includes built-in Claude sub-agent files. Missing, unsupported, duplicate and limit-skipped sessions are reported separately.</p>
+<p>Records can disappear after cleanup and totals can shrink. Disappeared sources are detected against this process's prior inventory only on scans that are not limited; restarting forgets that inventory. Timing entries without agent metadata cannot supply token records.</p>
+<p>Refreshes are cached for up to five minutes. This page polls for updated snapshots; reloading does not force a new collection. Transcript links are offered only for agents currently available through the board; older retained usage can outlive that access.</p>
+</details>
+</main>
+<script>
+// usage helpers: begin
+const countKeys=['input','output','cacheRead','cacheWrite','reasoning','total'];
+const filterKeys=['provider','plan','model','role','card','agent','stage'];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const number=n=>Number(n||0).toLocaleString();
+const stageName=(id,stages)=>(stages||[]).find(s=>s[0]===id)?.[1]||id||'unassigned';
+function selectRows(rows,filters){return rows.filter(r=>filterKeys.every(k=>!filters[k]||(r[k]||'unassigned')===filters[k]));}
+function sumCounts(rows){
+  const c=Object.fromEntries(countKeys.map(k=>[k,0]));
+  for(const r of rows)for(const k of countKeys)c[k]+=Number(r.counts?.[k]||0);
+  c.total=c.input+c.output;return c;
+}
+function freshness(at){
+  if(!at||!Number.isFinite(Date.parse(at)))return 'freshness unknown';
+  const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));
+  return `${minutes} min old · ${new Date(at).toLocaleString()}`;
+}
+function snapshotText(v){return v.updatedAt?`${v.refreshing?'Refreshing; showing cached snapshot. ':''}Recorded snapshot ${freshness(v.updatedAt)}.`:'Waiting for the first recorded snapshot; refreshing.';}
+function coverageText(c){
+  return `Retained local records only — bounded scan${c.limited?' LIMITED; counts may be partial':''}. ${c.agents||0} agents; ${c.readableSessions||0} readable sessions; ${c.missingSessions||0} missing; ${c.unsupportedSessions||0} unsupported; ${c.errors||0} errors; ${c.duplicateSessions||0} duplicate references; ${c.timingWithoutAgent||0} timing entries without agents; ${c.disappearedSources||0} disappeared sources; ${c.limitedSessions||0} limit-skipped sessions. Not complete history.`;
+}
+function allowanceHTML(u={}){
+  return `<p>${esc(u.summary||'Allowance unknown')}</p>`+(u.windows||[]).map(w=>`<p>${esc(w.label)}: <b>${esc(w.remainingPct)}% remaining</b><br><span class="muted">Resets ${esc(w.resetsAt?new Date(w.resetsAt).toLocaleString():'unknown')}</span></p>`).join('')+
+    (u.extra?`<p>${esc(u.extra)}</p>`:'')+`<p class="muted">${esc(freshness(u.updatedAt))}</p>`;
+}
+function plansHTML(plans=[]){
+  const seen=new Set();
+  return plans.filter(p=>{const key=JSON.stringify([p.provider,p.plan]);if(seen.has(key))return false;seen.add(key);return true}).map(p=>`<article><h3>${esc(p.plan)} · ${esc(p.provider)}</h3>${p.allowance?.accounts?.length?'<p class="muted">Current account allowances</p>':allowanceHTML(p.allowance)}${(p.allowance?.accounts||[]).map(a=>`<div class="account"><b>${esc(a.label)}</b>${a.active?' · active':''}${a.email?` · ${esc(a.email)}`:''}${allowanceHTML(a)}</div>`).join('')}</article>`).join('')||'Allowances unavailable.';
+}
+function transcriptLink(id,label,available){return available.has(id)?`<a href="/t/${encodeURIComponent(id)}">${esc(label||id)}</a>`:esc(label||id||'unassigned');}
+function rowsHTML(rows,stages,available){
+  return rows.map(r=>{
+    const unavailable=['missing','unsupported','duplicate','limited','error'].includes(r.status)&&!countKeys.some(k=>r.counts?.[k]>0);
+    return `<tr><td>${esc(r.plan)}<span class="tag">${esc(r.provider)} · ${esc(r.model||'model unknown')}</span></td><td>${esc(r.role||'unassigned')}</td>
+<td>${transcriptLink(r.card,r.cardTitle||r.card,available)}<span class="tag">Agent: ${transcriptLink(r.agent,r.title||r.agent,available)}</span>${!available.has(r.agent)?'<span class="tag">Transcript unavailable</span>':''}</td>
+<td>${esc(stageName(r.stage,stages))}<span class="tag">${esc(r.stage||'unassigned')}${r.span?` · span ${r.span}`:' · unassigned span'}${r.round?` · round ${r.round}`:''}</span></td>
+<td>${esc(r.status||'unknown')}${r.sharedSession?'<span class="tag">shared session</span>':''}</td>${countKeys.map(k=>`<td class="num">${unavailable?'—':number(r.counts?.[k])}</td>`).join('')}</tr>`;
+  }).join('')||'<tr><td colspan="11">No recorded rows match these filters.</td></tr>';
+}
+async function fetchJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error(`HTTP ${r.status}`);return r.json();}
+// usage helpers: end
+const $=id=>document.getElementById(id);
+let view=null,available=new Set(),filters={};
+function renderRows(){
+  if(!view.updatedAt){
+    $('rows').innerHTML='<tr><td colspan="11">Waiting for the first recorded snapshot…</td></tr>';
+    $('totals').textContent='Waiting for recorded counts; totals are not available yet.';return;
+  }
+  const rows=selectRows(view.rows||[],filters),c=sumCounts(rows);
+  $('rows').innerHTML=rowsHTML(rows,view.stages,available);
+  $('totals').textContent=`${rows.length} matching rows · ${number(c.input)} input + ${number(c.output)} output = ${number(c.total)} recorded tokens. Subsets: ${number(c.cacheRead)} cache read, ${number(c.cacheWrite)} cache write, ${number(c.reasoning)} reasoning. Coverage limits still apply.`;
+}
+function render(){
+  $('snapshot').textContent=snapshotText(view);
+  $('plans').innerHTML=plansHTML(view.plans);
+  $('coverage').textContent=view.updatedAt?coverageText(view.coverage||{}):'Waiting for a bounded scan. Coverage is not available yet.';
+  $('stages').innerHTML=(view.stages||[]).map(s=>`<dt>${esc(s[1])} (${esc(s[0])})</dt><dd>${esc(s[2])}</dd>`).join('');
+  const focus=document.activeElement?.id;
+  $('filters').innerHTML=filterKeys.map(k=>{
+    const values=[...new Set((view.rows||[]).map(r=>r[k]||'unassigned'))].sort();
+    if(filters[k]&&!values.includes(filters[k]))values.push(filters[k]);
+    return `<label>${esc(k[0].toUpperCase()+k.slice(1))}<select id="filter-${k}" data-key="${k}"><option value="">All</option>${values.map(v=>{
+      const row=(view.rows||[]).find(r=>r[k]===v);
+      const label=k==='stage'?stageName(v,view.stages):k==='card'?(row?.cardTitle||v):k==='agent'?(row?.title||v):v;
+      return `<option value="${esc(v)}"${filters[k]===v?' selected':''}>${esc(label)}${['card','agent'].includes(k)&&label!==v?' · '+esc(v):''}</option>`;
+    }).join('')}</select></label>`;
+  }).join('')+'<button id="clearFilters">Clear filters</button>';
+  if(focus?.startsWith('filter-'))$(focus)?.focus();
+  renderRows();
+}
+$('filters').addEventListener('change',e=>{if(e.target.dataset.key){filters[e.target.dataset.key]=e.target.value;renderRows()}});
+$('filters').addEventListener('click',e=>{if(e.target.id==='clearFilters'){filters={};render()}});
+async function load(){
+  try{
+    const next=await fetchJSON('/api/usage');
+    view=next;render();$('loadError').hidden=true;
+  }catch(e){
+    $('loadError').hidden=false;
+    $('loadError').textContent=`Cannot load usage (${e.message}). ${view?'Showing the last successful snapshot; it may be stale.':'No snapshot available.'} Retrying automatically.`;
+  }
+  try{
+    const board=await fetchJSON('/api/board');
+    available=new Set((board.cards||[]).flatMap(c=>[c.id,...(c.children||[]).map(k=>k.id)]));
+    $('transcriptStatus').textContent='Transcript links reflect agents currently available on the board.';
+  }catch(e){available=new Set();$('transcriptStatus').textContent='Transcript availability could not be checked; links are unavailable.';}
+  if(view)renderRows();
+  setTimeout(load,15000);
+}
+load();
+</script>
+</body>
+</html>

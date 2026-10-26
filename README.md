@@ -187,7 +187,13 @@ are flagged. A process remembers previously observed sources and reports their d
 on subsequent complete scans. Restarting forgets that inventory. Totals can shrink after
 cleanup; they describe retained local records, not every device's activity or a subscription
 bill. Historical subscription account attribution is unknown. No prompts, session contents
-or filesystem paths are returned. A separate usage page will consume this data feed.
+or filesystem paths are returned. The board’s Usage link opens `/usage`, which consumes this feed without another collector.
+The page separates subscription allowances across devices from retained local tokens, with
+filters for provider, plan, model, role, card, agent and recorded stage. Rows show stage spans,
+review rounds, session status and links to transcripts currently available on the board.
+Filters affect recorded counts only; allowances and coverage remain visible for the snapshot.
+Refresh and fetch failures keep the last snapshot visibly dated. Missing or unsupported records
+are unavailable, not evidence of zero usage. Cache and reasoning fields remain subsets.
 
 ### Ideas
 
