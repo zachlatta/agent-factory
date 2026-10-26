@@ -49,6 +49,9 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 					return "", fmt.Errorf("paseo agent update: Error: Invalid label format: %s", v[strings.LastIndex(v, ",")+1:])
 				}
 			}
+			if args[i] == "--name" && strings.TrimSpace(args[i+1]) == "" {
+				return "", fmt.Errorf("paseo agent update: Error: Name cannot be empty")
+			}
 		}
 	}
 	p.calls = append(p.calls, args)
@@ -166,6 +169,24 @@ func (p *fakePaseo) labels(id string) map[string]string {
 			if c[i] == "--label" {
 				k, v, _ := strings.Cut(c[i+1], "=")
 				out[strings.TrimPrefix(k, labelPrefix)] = v
+			}
+		}
+	}
+	return out
+}
+
+// names returns the names set on id with `agent update <id> --name`, in order.
+func (p *fakePaseo) names(id string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for _, c := range p.calls {
+		if len(c) < 3 || c[0] != "agent" || c[1] != "update" || c[2] != id {
+			continue
+		}
+		for i := 3; i+1 < len(c); i += 2 {
+			if c[i] == "--name" {
+				out = append(out, c[i+1])
 			}
 		}
 	}

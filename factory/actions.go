@@ -261,13 +261,13 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	if title == "" {
 		title = strings.SplitN(req, "\n", 2)[0]
 	}
-	title = trunc(title, 70)
+	title = truncWords(strings.TrimSpace(title), 70)
 	agent, err := f.resolveAgent(b.Agent)
 	if err != nil {
 		return nil, err
 	}
 	if repo == autoRepo {
-		r := Route{Request: req, Title: title, Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: b.Agent}
+		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: b.Agent}
 		if tierRank(b.Tier) >= 0 {
 			r.Tier = b.Tier
 		}
@@ -281,6 +281,10 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	}
 	if tierRank(b.Tier) >= 0 {
 		args = append(args, "--label", labelArg(labelTier, b.Tier))
+	}
+	if b.Title != "" {
+		// the caller named the card (an idea, the email dispatcher): the planner does not rename it
+		args = append(args, "--label", labelArg(labelTitled, "given"))
 	}
 	prompt := fmt.Sprintf(strings.ReplaceAll(newCardPrompt, "<errands>", f.errandsName()), req, repo, fellowPeersRule(f.cfg.Port, f.Peers("", repo).Text(f.cfg.Location)),
 		tierRules, wholeAppRule, questionRule)

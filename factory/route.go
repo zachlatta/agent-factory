@@ -29,6 +29,7 @@ const routedNote = "started in " // + repo: a picker whose card started
 type Route struct {
 	Request   string    `json:"request"`
 	Title     string    `json:"title"`
+	Titled    bool      `json:"titled,omitempty"` // the caller gave Title; otherwise it came from Request
 	Thread    string    `json:"thread,omitempty"`
 	Origin    string    `json:"origin,omitempty"`
 	Tier      string    `json:"tier,omitempty"`
@@ -251,7 +252,11 @@ func (f *Factory) startRouted(a Agent, repo string) error {
 	if r.Scout {
 		res, err = f.startScout(repo, r.Request)
 	} else {
-		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: r.Title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent})
+		title := ""
+		if r.Titled {
+			title = r.Title
+		}
+		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent})
 	}
 	if err != nil {
 		return failed(err)

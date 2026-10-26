@@ -20,6 +20,8 @@ The planner (the "Fellow") first picks a track:
   the factory checks the work reached `origin/main`, then moves it to Done.
 - **Build track**: everything else. The plan ends with `TIER:`; the plan reviewer sets its own and
   the card takes the higher. A code reviewer can raise the tier, never lower it.
+- The planner names the card once, from the `TITLE:` line of its first plan or direct result; titles
+  given by an idea or the email dispatcher are kept, and other titles are cut at a word.
 
 | Tier | What | Gates | Lands |
 | --- | --- | --- | --- |

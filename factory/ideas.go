@@ -260,7 +260,7 @@ func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 		if strings.TrimSpace(guidance) == "" {
 			return nil, errors.New("Suggest ideas with Repo Auto needs a prompt: pick a repo, or say what ideas you want")
 		}
-		return f.startPicker(Route{Request: guidance, Title: trunc("Scout: "+strings.SplitN(strings.TrimSpace(guidance), "\n", 2)[0], 70), Scout: true})
+		return f.startPicker(Route{Request: guidance, Title: truncWords("Scout: "+strings.SplitN(strings.TrimSpace(guidance), "\n", 2)[0], 70), Scout: true})
 	}
 	cwd := filepath.Join(f.cfg.Home, "dev", repo)
 	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeAppRule,
@@ -269,7 +269,7 @@ func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 	if strings.TrimSpace(guidance) != "" {
 		prompt += "\nGuidance:\n" + guidance + "\n"
 	}
-	out, err := f.paseo(append(reviewerRunArgs(), "--cwd", cwd, "--title", trunc(title, 70),
+	out, err := f.paseo(append(reviewerRunArgs(), "--cwd", cwd, "--title", truncWords(title, 70),
 		"--label", labelArg(labelRole, "scout"), "--label", labelArg(labelSource, "board"), "--background", "--quiet", prompt)...)
 	if err != nil {
 		return nil, err

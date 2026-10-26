@@ -62,7 +62,25 @@ var (
 	verdictRe = regexp.MustCompile(`(?i)VERDICT:\s*\**\s*(approve|nits|changes|escalate|close)`)
 	tierRe    = regexp.MustCompile(`(?i)TIER:\s*\**\s*(low|risky|architecture)`)
 	trackRe   = regexp.MustCompile(`(?i)TRACK:\s*\**\s*(direct)`)
+	titleRe   = regexp.MustCompile(`(?im)^[ \t>*_#-]*TITLE[*_]*\s*:[ \t]*(.*)$`)
 )
+
+// titleCap is the most runes a planner's TITLE line keeps; longer ones are cut at a word.
+const titleCap = 60
+
+// ParseTitle returns the last TITLE line's value without markdown, cut to titleCap at a word,
+// or "" if there is none. Empty values and the prompt's <placeholder> are skipped.
+func ParseTitle(text string) string {
+	m := titleRe.FindAllStringSubmatch(text, -1)
+	for i := len(m) - 1; i >= 0; i-- {
+		t := strings.Trim(strings.TrimSpace(m[i][1]), "*_`\"' ")
+		if t == "" || strings.HasPrefix(t, "<") {
+			continue
+		}
+		return truncWords(t, titleCap)
+	}
+	return ""
+}
 
 func lastMatch(re *regexp.Regexp, text string) string {
 	m := re.FindAllStringSubmatch(text, -1)
@@ -234,6 +252,9 @@ Zach's request:
 Work in this repo (%s). Read its AGENTS.md and README first, and the start-here skill.
 
 %s
+On either track, your first reply (the plan, or the direct result) includes one line naming the card:
+TITLE: <the outcome in at most 60 characters, plain words, no file names>
+
 First decide the track. Direct track: the request is an errand that changes no code: a question,
 suggestions, research, a report or an email to Zach, or a PDW mutation he approves himself. Those
 come out better from one strong pass than from plan and review agents. On the
@@ -729,7 +750,11 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return err
 		}
 		// only the agent's own last reply: the Fellow prompt itself has a "TRACK: direct" line
-		if text, err := f.lastReply(a); err == nil && ParseTrack(text) == "direct" {
+		text, err := f.lastReply(a)
+		if err == nil {
+			f.nameCard(a, text)
+		}
+		if err == nil && ParseTrack(text) == "direct" {
 			return f.finishDirect(a, c)
 		}
 		if fromInbox(a) {
@@ -739,7 +764,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 				return f.finishDirect(a, c)
 			}
 		}
-		_, err := f.StartReview(c, "plan")
+		_, err = f.StartReview(c, "plan")
 		return err
 	case a.L(labelStage) == "landing" && acted:
 		if live, err := f.stillStopped(a); !live {
@@ -885,6 +910,34 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 	}
 	f.logf("%s done in one pass", short(a.ID))
 	return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "done in one pass"})
+}
+
+// nameCard renames board card a once, from the TITLE line of its first plan (or direct result),
+// reply being its last message. Titles given by the caller (factory.titled=given) and inbox cards keep theirs; a reply
+// that is neither a plan nor a direct result (a question) leaves the card for its next reply. A
+// failed rename is logged and does not hold up the card.
+func (f *Factory) nameCard(a Agent, reply string) {
+	if a.L(labelSource) != "board" || a.L(labelTitled) != "" {
+		return
+	}
+	if ParseTrack(reply) != "direct" {
+		// the reply drops its TIER line (stripTrailer, lastMessage): look for it in the recent log
+		if text, err := f.lastText(a.ID, 60); err != nil || ParseTier(text) == "" {
+			return
+		}
+	}
+	title := ParseTitle(reply)
+	if title == "" || title == a.Title {
+		if err := f.setLabels(a.ID, map[string]string{labelTitled: "kept"}); err != nil {
+			f.logf("%s title not marked kept: %v", short(a.ID), err)
+		}
+		return
+	}
+	if _, err := f.paseo("agent", "update", a.ID, "--name", title, "--label", labelArg(labelTitled, "planner")); err != nil {
+		f.logf("%s rename failed: %v", short(a.ID), err)
+		return
+	}
+	f.logf("%s renamed: %s → %s", short(a.ID), a.Title, title)
 }
 
 // stillStopped re-checks with Paseo, just before an automatic move, that agent a is still idle and
