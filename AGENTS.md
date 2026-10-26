@@ -36,5 +36,10 @@ Host settings (board URL, default repo, private scan patterns, PATH) live in
 
 - Go, test-first: write the failing test, then the change. `go vet ./...` and
   `go test -race ./...` pass before every commit.
+- Do all work in this worktree, never in `/tmp` or another temp directory. Put transient scratch
+  (JSON payloads, downloads, one-off helper scripts) in `.factory-scratch/`, listed in
+  `.git/info/exclude` (`git rev-parse --git-path info/exclude`) before first use; never commit or
+  force-add `.factory-scratch/`, and delete `.factory-scratch/` before landing or finishing so
+  ignored files do not block worktree retirement.
 - The secret scan (`factory/scan`, `.gitleaks.toml`, `.githooks/`, `bin/`) is reviewed as
   security code: a change that weakens it is a blocking finding.

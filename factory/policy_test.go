@@ -1269,3 +1269,69 @@ func TestTickFinishesDirectCardQueuedForCodeReview(t *testing.T) {
 		})
 	}
 }
+
+func TestWorktreeNotTmpRule(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	planPrompt := strings.ReplaceAll(fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "", ""), "<errands>", "desk")
+
+	f, p := newTestFactory(t,
+		card("c-plan", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
+			labelVerdict: "plan changes", labelPlanRounds: "3", labelTier: "risky"}),
+		card("c-code", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
+			labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3", labelTier: "low"}),
+		card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
+	if _, err := f.Act("recommend", Body{ID: "c-plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("recommend", Body{ID: "c-code"}); err != nil {
+		t.Fatal(err)
+	}
+	dirtyCard, _ := f.card("c-dirty")
+	if err := f.askToCommit(dirtyCard, " M a.go"); err != nil {
+		t.Fatal(err)
+	}
+
+	worktreePrompts := map[string]string{
+		"newCardPrompt":  planPrompt,
+		"buildMsg":       buildMsg("Plan approved.", "(none)"),
+		"reworkMsg plan": reworkMsg("plan", 1, 3, "fix it"),
+		"reworkMsg code": reworkMsg("code", 1, 3, "fix it"),
+		"askToCommit":    p.sent("c-dirty")[0],
+		"recommend plan": p.sent("c-plan")[0],
+		"recommend code": p.sent("c-code")[0],
+	}
+	for name, s := range worktreePrompts {
+		for _, want := range []string{"worktree", "/tmp", ".factory-scratch/", ".git/info/exclude"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s lacks %q:\n%s", name, want, s)
+			}
+		}
+	}
+	if !strings.Contains(planPrompt, "work/YYYY-MM-DD-short-name/") {
+		t.Errorf("newCardPrompt direct track lacks work/YYYY-MM-DD-short-name/ instruction:\n%s", planPrompt)
+	}
+
+	deleteScratchPrompts := map[string]string{
+		"newCardPrompt":  planPrompt,
+		"worktreeRule":   worktreeRule,
+		"landMsg":        landMsg,
+		"guardedLandMsg": guardedLandMsg,
+		"landMsgFor":     f.landMsgFor(f.agent("c-code")),
+		"rerunLandMsg":   rerunLandMsg(false),
+		"rerunGuarded":   rerunLandMsg(true),
+	}
+	for name, s := range deleteScratchPrompts {
+		for _, want := range []string{"delete .factory-scratch/", "retirement"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s lacks %q:\n%s", name, want, s)
+			}
+		}
+	}
+
+	codeRubric := ReviewPrompt(c, "code", 7478, "unknown")
+	for _, want := range []string{"must not use /tmp for work that belongs in the worktree", "t.TempDir()"} {
+		if !strings.Contains(codeRubric, want) {
+			t.Errorf("code rubric lacks %q:\n%s", want, codeRubric)
+		}
+	}
+}

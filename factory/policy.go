@@ -181,7 +181,8 @@ var rubric = map[string]string{
   (including what happens if a step fails part-way or is run twice).
 - Tests: none skipped or weakened. If new tests exist, revert the change locally in a scratch copy and
   confirm they fail (skip if impractical, and say so).
-- Scope: no unrelated files. No secrets, tokens or private data committed.
+- Scope: no unrelated files. No secrets, tokens or private data committed. Committed scripts, tests and work
+  items must not use /tmp for work that belongs in the worktree (tests using t.TempDir() are fine).
 - <visibility> If the repo is public or unknown, any private data in the diff is a blocking finding:
   names or emails of people (other than Zach's public identity), Zach's personal details, internal
   hostnames or tailnet URLs (*.ts.net), local paths (/home/<user>/...), and content from <errands> or PDW.
@@ -306,7 +307,10 @@ TITLE: <the outcome in at most 60 characters, plain words, no file names>
 First decide the track. Direct track: the request is an errand that changes no code: a question,
 suggestions, research, a report or an email to Zach, or a PDW mutation he approves himself. Those
 come out better from one strong pass than from plan and review agents. On the
-direct track, do NOT write a plan: do the whole thing now, in one pass, as well as you can. Check
+direct track, do NOT write a plan: do the whole thing now, in one pass, as well as you can. Create your
+<errands> work item directory (work/YYYY-MM-DD-short-name/) in this worktree first and do all your work
+there, never in /tmp (put transient scratch in .factory-scratch/ listed in .git/info/exclude, and delete
+.factory-scratch/ before you finish so ignored files do not block worktree retirement). Check
 every fact at its source, including anything that changed in the last day (a rebooked flight, a
 moved meeting: look at <errands> work items on origin/main from today). Deliver the result, record it in
 a <errands> work item, land it (commit, then land it the way that repo's AGENTS.md says), and end your final message with the line
@@ -326,6 +330,8 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 ` + shellRule + `
 
+` + worktreeRule + `
+
 ` + overviewRule + `
 
 A different agent reviews the plan (architecture-tier plans also go to Zach). When you get
@@ -339,7 +345,7 @@ Put the plan's open questions, and anything you need from Zach, in this form:
 
 const landMsg = "Land it now the way this repo lands work: read its AGENTS.md and README (and how recent commits reached " +
 	"main) and do that. Land exactly the reviewed commits: no new commits or amends. If the rebase conflicts or anything must change, stop and say so " +
-	"instead of landing. Then run any deploy steps from your reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system), then stop with a one-line summary. " + overviewReminder + " The agent factory deploys itself " +
+	"instead of landing. Then run any deploy steps from your reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system), delete .factory-scratch/ if present so ignored files do not block worktree retirement, then stop with a one-line summary. " + overviewReminder + " The agent factory deploys itself " +
 	"from its repo's main within a minute of landing (and rolls back if it does not come up): never run its install.sh " +
 	"to deploy."
 
@@ -366,13 +372,13 @@ func restate(kind string) string {
 func reworkMsg(kind string, round, limit int, notes string) string {
 	return fmt.Sprintf("A reviewer (a different agent) requested changes to your %s (round %d of %d). "+
 		"Address each blocking finding, or explain why it is wrong. Then stop with %s; it will be "+
-		"re-reviewed. %s Do not land. %s\n\n%s", kind, round, limit, restate(kind), overviewReminder, noLiveChangesRule, notes)
+		"re-reviewed. %s Do not land. %s\n\n%s\n\n%s", kind, round, limit, restate(kind), overviewReminder, noLiveChangesRule, worktreeRule, notes)
 }
 
 func buildMsg(prefix, notes string) string {
 	return prefix + " Build it now, as planned. Don't improvise: if the scope has to change, stop and say so " +
-		"instead. " + noLiveChangesRule + " When done, commit everything on your branch and leave the worktree clean (delete or gitignore " +
-		"scratch files), but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
+		"instead. " + noLiveChangesRule + " When done, commit everything on your branch and leave the worktree clean (put transient scratch in .factory-scratch/ listed in .git/info/exclude before first use, never in /tmp), " +
+		"but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\n" + worktreeRule + "\n\nReviewer notes:\n" + notes
 }
 
 func buildWithFixesMsg(notes string) string {
@@ -751,8 +757,8 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 	}
 	f.logf("%s: worktree not clean, asked the builder to commit before review", c.Short)
 	return f.send(c.ID, "Before code review the worktree must be clean, so the reviewer sees exactly what lands. "+
-		"Commit everything that belongs to this work on your branch (do NOT land), delete or gitignore scratch "+
-		"files, then stop with a short summary (including the deploy steps as built, if any). "+noLiveChangesRule+" "+overviewReminder+" The review starts when you stop.\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
+		"Commit everything that belongs to this work on your branch (do NOT land), delete transient scratch files or move them into .factory-scratch/ listed in .git/info/exclude (never /tmp), "+
+		"then stop with a short summary (including the deploy steps as built, if any). "+noLiveChangesRule+" "+overviewReminder+" The review starts when you stop.\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
 }
 
 // runReviewer starts a read-only reviewer of the given kind for c. For a landing review, why is the

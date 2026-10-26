@@ -4,5 +4,6 @@
 *.local
 /factory.bin
 
-# Decision screenshots stay local to the worktree.
+# Decision screenshots and transient agent scratch stay local to the worktree.
 /.factory-evidence/
+/.factory-scratch/

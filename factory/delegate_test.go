@@ -29,6 +29,9 @@ func TestDelegateTextCommands(t *testing.T) {
 		"Before you end any turn",
 		"At most 3 sub-agents",
 		"overrides",
+		"never in /tmp",
+		".factory-scratch/",
+		".git/info/exclude",
 	} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("delegate text lacks %q:\n%s", want, txt)
