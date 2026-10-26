@@ -145,6 +145,7 @@ dialog h3{margin:0 0 8px}
 .banner div+div{margin-top:4px}
 .banner details{color:var(--ink);margin-top:4px}
 .banner pre{white-space:pre-wrap;font-size:11.5px;max-height:14em;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin:4px 0 0}
+body.stale .grid{opacity:.45}
 /* phone: one column at a time, picked from the stage tabs */
 .tabs{display:none}
 @media (max-width:760px){
@@ -311,7 +312,17 @@ function pickAgent(selId, id){
   const el = $(selId); if(!el) return; el.value = id; el.dispatchEvent(new Event('change'));
 }
 function agentNote(id){ const a = AG.agents.find(x=>x.id===id); return a&&a.note ? 'Note: '+a.note : ''; }
-// Banner: a factory deploy that failed (GET /api/deploy, written by the deployer) or Paseo unreadable.
+// Banner: the board can't load, a factory deploy that failed (GET /api/deploy, written by the
+// deployer) or Paseo unreadable. While loads fail it shows only the load failure: the rest is stale.
+let deployRows = [], loadErr = '';
+const offlineMsg = () => `Can't reach the factory (${loadErr}). `+(B.updated ? 'Last update '+ago(B.updated)+', retrying' : 'Retrying')+' every 10 s.';
+function renderBanner(){
+  const rows = !loadErr ? deployRows.concat(Object.entries(B.errors||{}).map(([h,e]) => `<div><b>Can't read Paseo on ${esc(h)}:</b> ${esc(e.slice(0,200))}</div>`))
+    : B.updated ? [`<div><b>${esc(offlineMsg())}</b></div>`] : [];
+  const b = $('banner'), html = rows.join('');
+  if(b.dataset.html !== html){ b.dataset.html = html; b.innerHTML = html; }
+  b.hidden = !rows.length;
+}
 async function loadDeploy(){
   let D = {};
   try{ D = await (await fetch('api/deploy')).json(); }catch(e){}
@@ -323,15 +334,23 @@ async function loadDeploy(){
     rows.push(`<div><b>Deploy of ${s7(f.rev)} failed</b> (${esc(f.stage)}, attempt ${esc(f.attempts)}), ${kept}; running ${s7(D.running)}; ${next}.`+
       `<details><summary>Log</summary><pre>${esc(f.log)}</pre></details></div>`);
   }
-  Object.entries(B.errors||{}).forEach(([h,e]) => rows.push(`<div><b>Can't read Paseo on ${esc(h)}:</b> ${esc(e.slice(0,200))}</div>`));
-  const b = $('banner'), html = rows.join('');
-  if(b.dataset.html !== html){ b.dataset.html = html; b.innerHTML = html; }
-  b.hidden = !rows.length;
+  deployRows = rows; renderBanner();
 }
 async function load(){
+  let nb;
   try{
-    const r = await fetch('api/board'); B = await r.json();
-  }catch(e){ $('updated').textContent='server unreachable'; return; }
+    let r; try{ r = await fetch('api/board'); }catch(e){ throw 'network error'; }
+    if(!r.ok) throw 'HTTP '+r.status;
+    try{ nb = await r.json(); }catch(e){ throw 'bad response'; }
+  }catch(e){
+    loadErr = String(e); document.body.classList.toggle('stale', !!B.updated);
+    $('updated').textContent = B.updated ? 'offline · last update '+ago(B.updated) : 'offline';
+    // nothing loaded yet: say so where the cards would be, not a blank page
+    if(!B.updated) $('grid').innerHTML = `<div class="empty" style="color:var(--red)">${esc(offlineMsg())}</div>`;
+    renderBanner(); return;
+  }
+  B = nb; loadErr = ''; document.body.classList.remove('stale');
+  renderBanner();
   $('updated').textContent = 'live · updated ' + ago(B.updated);
   $('errors').textContent = Object.entries(B.errors||{}).map(([h,e])=>h+': '+e.slice(0,80)).join(' · ');
   loadDeploy();
@@ -383,6 +402,7 @@ function renderPhone(cards){
 }
 
 function render(){
+  if(loadErr && !B.updated) return; // keep load()'s "can't reach" message in #grid
   if(phone.matches) return renderPhone(visible());
   $('tabs').innerHTML = '';
   const cards = visible(), stages = B.stages;
