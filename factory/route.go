@@ -34,6 +34,7 @@ type Route struct {
 	Origin    string    `json:"origin,omitempty"`
 	Tier      string    `json:"tier,omitempty"`
 	Agent     string    `json:"agent,omitempty"` // AgentChoice id for the real card ("" = default)
+	Thinking  string    `json:"thinking,omitempty"`
 	Scout     bool      `json:"scout,omitempty"` // start a Scout (Suggest ideas) with Request as guidance, not a card
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -256,7 +257,7 @@ func (f *Factory) startRouted(a Agent, repo string) error {
 		if r.Titled {
 			title = r.Title
 		}
-		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent})
+		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent, Thinking: r.Thinking})
 	}
 	if err != nil {
 		return failed(err)

@@ -88,7 +88,16 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	if err := checkAgentID(b.Agent); err != nil {
 		return Idea{}, err
 	}
-	idea.Agent = b.Agent
+	if b.Thinking != "" {
+		a, ok := agentByID(b.Agent)
+		if !ok {
+			return Idea{}, errors.New("choose an agent before setting idea thinking")
+		}
+		if _, err := a.withThinking(b.Thinking); err != nil {
+			return Idea{}, err
+		}
+	}
+	idea.Agent, idea.Thinking = b.Agent, b.Thinking
 	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for _, i := range ideas {
 			if !strings.EqualFold(i.Title, idea.Title) {
@@ -123,7 +132,7 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 // panel) wins, else the idea's suggested agent. The factory's own starts (by "auto") clear the
 // idea's suggested agent so newCard uses the usage-balanced auto-suggestion.
 // note is Zach's own changes typed before starting; it follows the brief and overrides it.
-func (f *Factory) startIdea(id, by, agent, note string) (map[string]string, error) {
+func (f *Factory) startIdea(id, by, agent, note, thinking string) (map[string]string, error) {
 	var res map[string]string
 	note = trunc(strings.TrimSpace(note), 4000)
 	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
@@ -141,11 +150,14 @@ func (f *Factory) startIdea(id, by, agent, note string) (map[string]string, erro
 			}
 			switch {
 			case by == "auto":
-				agent = ""
+				agent, thinking = "", ""
 			case agent == "":
 				agent = i.Agent
+				if thinking == "" {
+					thinking = i.Thinking
+				}
 			}
-			r, err := f.newCard(Body{Request: req, Repo: i.Repo, Title: i.Title, Origin: "idea", Tier: i.Tier, Agent: agent})
+			r, err := f.newCard(Body{Request: req, Repo: i.Repo, Title: i.Title, Origin: "idea", Tier: i.Tier, Agent: agent, Thinking: thinking})
 			if err != nil {
 				return nil, err
 			}
@@ -209,7 +221,7 @@ func (f *Factory) tickIdeas() error {
 		return nil
 	}
 	sort.Slice(waiting, func(a, b int) bool { return waiting[a].CreatedAt.Before(waiting[b].CreatedAt) })
-	if _, err := f.startIdea(waiting[0].ID, "auto", "", ""); err != nil {
+	if _, err := f.startIdea(waiting[0].ID, "auto", "", "", ""); err != nil {
 		return err
 	}
 	f.logf("started idea %s (%d/%d in flight, %d/%d today)", waiting[0].ID, inFlight+1, f.cfg.IdeaWIP,

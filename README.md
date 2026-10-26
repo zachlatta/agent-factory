@@ -133,6 +133,12 @@ agent plus its reviewers and sub-agents), and the last reap; the `/host` page sh
   auto-suggested agent; cards started from an email thread always default to Opus 5.5 unless
   another agent is explicitly named.
 
+The model pickers prefer GPT-6.1 Sol within OpenAI and Opus 5.5 within Claude; Sonnet 5.5 is
+also available. Opus, Sonnet and Sol start at medium thinking. New Task and Start Idea let you
+choose a supported thinking level; switching models restores that model's default. Models without
+an adjustable thinking level hide the control. Explicit choices survive Repo Auto. The supported
+levels are listed per model in `factory/agents.go`, matching Paseo's provider model metadata.
+
 ### Sub-agents
 
 A card's agent and its reviewers may hand parts of their work to sub-agents, on any provider Paseo
@@ -194,6 +200,7 @@ review rounds, session status and links to transcripts currently available on th
 Filters affect recorded counts only; allowances and coverage remain visible for the snapshot.
 Refresh and fetch failures keep the last snapshot visibly dated. Missing or unsupported records
 are unavailable, not evidence of zero usage. Cache and reasoning fields remain subsets.
+
 
 ### Ideas
 

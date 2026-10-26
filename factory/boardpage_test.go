@@ -313,20 +313,21 @@ func TestNewCardSubmission(t *testing.T) {
 	}
 	script := `
 const assert = require('node:assert/strict');
-const elements = Object.fromEntries(['newBtn','nGo','nScout','nReq','nRepo','nAgent','nError','newDlg','newStarting','newStartingTitle','newStartingText'].map(id=>[id,{value:'',textContent:'',hidden:true,disabled:false,dataset:{}}]));
+const elements = Object.fromEntries(['newBtn','nGo','nScout','nReq','nRepo','nAgent','nThinking','nError','newDlg','newStarting','newStartingTitle','newStartingText'].map(id=>[id,{value:'',textContent:'',hidden:true,disabled:false,dataset:{}}]));
 const $ = id => elements[id];
 $('newDlg').open=true;
 $('newDlg').close=()=>{$('newDlg').open=false;};
 $('newDlg').showModal=()=>{$('newDlg').open=true;};
 let B={cards:[]}, calls=0, reply, sent, refreshes=0;
 const releaseKeyboard=()=>{}, fillNewDlg=()=>{}, refreshNewDlg=()=>{}, toast=()=>{};
+const fillThinking=(id,agent,level)=>{$(id).value=level;};
 const refresh=async()=>{refreshes++; renderNewSubmission();};
 const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new Promise((resolve,reject)=>{reply={resolve,reject};});};
 ` + page[i:j] + `
 (async()=>{
  // Board polls must not undo the busy state of another dialog action (such as Scout).
  $('nGo').disabled=true; renderNewSubmission(); assert.equal($('nGo').disabled,true); $('nGo').disabled=false;
- $('nReq').value='Test request'; $('nRepo').value='auto'; $('nAgent').value='codex-sol';
+ $('nReq').value='Test request'; $('nRepo').value='auto'; $('nAgent').value='codex-sol'; $('nThinking').value='high';
  const start=performance.now(); const first=$('nGo').onclick();
  const elapsed=performance.now()-start;
  assert.ok(elapsed<100, 'acknowledgement under 100 ms');
@@ -334,7 +335,7 @@ const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new 
  assert.equal($('newDlg').open,false); assert.equal($('newStarting').hidden,false);
  assert.match($('newStartingText').textContent,/Starting/);
  assert.equal($('newStartingTitle').textContent,'Test request');
- assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol'});
+ assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol',thinking:'high'});
  await $('nGo').onclick(); $('newBtn').onclick();
  assert.equal(calls,1); assert.equal($('newDlg').open,false);
  B={cards:[]}; renderNewSubmission(); assert.equal($('newStarting').hidden,false);
@@ -350,12 +351,13 @@ const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new 
  B.cards.push({id:'later'}); renderNewSubmission();
  assert.equal($('newStarting').hidden,true); assert.equal($('nGo').disabled,false);
  // A known rejection restores the complete captured form and an inline error.
- $('nReq').value='  Keep this draft\n'; $('nRepo').value='example/project'; $('nAgent').value='opus';
+ $('nReq').value='  Keep this draft\n'; $('nRepo').value='example/project'; $('nAgent').value='opus'; $('nThinking').value='low';
  const failed=$('nGo').onclick();
- $('nReq').value=''; $('nRepo').value='auto'; $('nAgent').value='codex-sol';
+ $('nReq').value=''; $('nRepo').value='auto'; $('nAgent').value='codex-sol'; $('nThinking').value='medium';
  reply.resolve({ok:false,status:400,json:async()=>({error:'Provider unavailable'})}); await failed;
  assert.equal($('newDlg').open,true); assert.equal($('newStarting').hidden,true);
  assert.equal($('nReq').value,'  Keep this draft\n'); assert.equal($('nRepo').value,'example/project'); assert.equal($('nAgent').value,'opus');
+ assert.equal($('nThinking').value,'low');
  assert.match($('nError').textContent,/Provider unavailable/); assert.equal($('nGo').disabled,false);
  // Lost or malformed responses are uncertain; neither may trigger an automatic retry.
  for(const malformed of [false,true]){

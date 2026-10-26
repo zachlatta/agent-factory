@@ -356,7 +356,7 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 	if len(agents) != len(AgentChoices) {
 		t.Fatalf("len(agents) = %d, want %d", len(agents), len(AgentChoices))
 	}
-	waitFor(t, "usage refresh", func() bool { return calls.Load() == 4 }) // 4 distinct providers across the 5 AgentChoices
+	waitFor(t, "usage refresh", func() bool { return calls.Load() == 4 }) // 4 distinct providers across the model choices
 	waitFor(t, "usage visible", func() bool {
 		agents = callAPI()
 		return strings.HasSuffix(agents[0].Usage.Summary, "80% 7d left")
@@ -365,9 +365,9 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 		if !strings.HasSuffix(a.Usage.Summary, "80% 7d left") || a.Usage.Extra != "as of just now" {
 			t.Errorf("%s usage = %+v", a.ID, a.Usage)
 		}
-		if a.ID == "opus" {
+		if a.ID == "opus" || a.ID == "sonnet" {
 			if len(a.Usage.Accounts) != 2 || a.Usage.Accounts[1].Label != "Claude #2" || !a.Usage.Accounts[1].Active {
-				t.Errorf("opus accounts = %+v, want both Claude accounts", a.Usage.Accounts)
+				t.Errorf("%s accounts = %+v, want both Claude accounts", a.ID, a.Usage.Accounts)
 			}
 		} else if len(a.Usage.Accounts) != 0 {
 			t.Errorf("%s accounts = %+v, want none", a.ID, a.Usage.Accounts)

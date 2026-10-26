@@ -133,6 +133,7 @@ type Idea struct {
 	By        string    `json:"by"`
 	Tier      string    `json:"tier"`
 	Agent     string    `json:"agent,omitempty"` // AgentChoice id to build it ("" = default)
+	Thinking  string    `json:"thinking,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	Status    string    `json:"status"` // waiting, started, dismissed
 	Card      string    `json:"card,omitempty"`
@@ -153,7 +154,8 @@ type IdeaView struct {
 	Status    string `json:"status"`
 	Queue     int    `json:"queue,omitempty"` // waiting ideas: 1 = next to start
 	Agent     string `json:"agent,omitempty"` // AgentChoice id it will be built with ("" = default)
-	Note      string `json:"note,omitempty"`  // started ideas: Zach's changes before starting
+	Thinking  string `json:"thinking,omitempty"`
+	Note      string `json:"note,omitempty"` // started ideas: Zach's changes before starting
 }
 
 // Body is the JSON body of every POST /api/<action>.
@@ -173,6 +175,7 @@ type Body struct {
 	Tier        string       `json:"tier"`
 	Origin      string       `json:"origin"`
 	Agent       string       `json:"agent"`      // AgentChoice id for a new card, an idea, or starting an idea
+	Thinking    string       `json:"thinking"`   // optional model-specific effort for new cards and ideas
 	Thread      string       `json:"thread"`     // new card: zrl-bot Gmail thread to report in; answer: the reply's thread
 	MessageID   string       `json:"message_id"` // answer: Zach's reply
 	Text        string       `json:"text"`       // answer: the reply's text

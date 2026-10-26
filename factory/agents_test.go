@@ -28,6 +28,7 @@ func TestNewCardRunsTheChosenAgent(t *testing.T) {
 		{"opus", "claude/claude-opus-5-5", "medium", "bypassPermissions"},
 		{"codex-astra", "codex/gpt-6-astra", "high", "full-access"},
 		{"codex-sol", "codex/gpt-6.1-sol", "medium", "full-access"},
+		{"sonnet", "claude/claude-sonnet-5-5", "medium", "bypassPermissions"},
 		{"gemini-argon", "antigravity/gemini-4-argon-high", "", "full-access"},
 		{"muse-wonder", "muse/muse-wonder-full-1.0", "", "allowAll"},
 	} {
@@ -94,6 +95,9 @@ func TestReviewersAndScoutsAlwaysUseOpus(t *testing.T) {
 			}
 			if got := flag(r, "--provider"); got != ReviewerModel {
 				t.Errorf("%s card: run %q uses %q, want %q", agent, flag(r, "--title"), got, ReviewerModel)
+			}
+			if got := flag(r, "--thinking"); got != "medium" {
+				t.Errorf("reviewer/scout thinking = %q, want medium", got)
 			}
 		}
 	}
@@ -353,11 +357,12 @@ func TestAgentsAPIRanksByPaceAndSuggestsTopPlan(t *testing.T) {
 	}
 	// Expected order:
 	// 1. opus (+35.7 pace: 50% left with 1d to go beats 60% with 6d to go and Muse's 0 pace)
-	// 2. muse-wonder (0 pace: 100% left, full week assumed)
-	// 3. codex-astra (-25.7 pace)
-	// 4. codex-sol (-25.7 pace, secondary on ChatGPT Pro)
-	// 5. gemini-argon (5h window <= 20% in the red)
-	want := []string{"opus", "muse-wonder", "codex-astra", "codex-sol", "gemini-argon"}
+	// 2. sonnet (same Claude quota as Opus)
+	// 3. muse-wonder (0 pace: 100% left, full week assumed)
+	// 4. codex-sol (-25.7 pace, preferred on ChatGPT Pro)
+	// 5. codex-astra (-25.7 pace)
+	// 6. gemini-argon (5h window <= 20% in the red)
+	want := []string{"opus", "sonnet", "muse-wonder", "codex-sol", "codex-astra", "gemini-argon"}
 	if !slices.Equal(got, want) || out.Default != "opus" {
 		t.Errorf("agents = %v (default %q), want %v (default opus)", got, out.Default, want)
 	}
@@ -388,7 +393,7 @@ func TestAgentsAPIRanksByPaceAndSuggestsTopPlan(t *testing.T) {
 	}
 	// gemini-argon (70% with 3d left -> pace +27.1) > codex-astra, codex-sol (70% with no ResetsAt -> pace -30)
 	// > opus (exhausted 0%) > muse-wonder (unavailable).
-	want = []string{"gemini-argon", "codex-astra", "codex-sol", "opus", "muse-wonder"}
+	want = []string{"gemini-argon", "codex-sol", "codex-astra", "opus", "sonnet", "muse-wonder"}
 	if !slices.Equal(got, want) || out.Default != "gemini-argon" {
 		t.Errorf("agents = %v (default %q), want %v (default gemini-argon)", got, out.Default, want)
 	}

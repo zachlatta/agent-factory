@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,13 +17,14 @@ const ReviewerModel = "claude/claude-opus-5-5"
 // AgentChoice is one agent Zach can pick to plan and build a card. The planner and the builder
 // are the same Paseo agent, so the choice covers the whole card, rework rounds included.
 type AgentChoice struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider"` // paseo run --provider (provider/model)
-	Thinking string `json:"thinking"` // paseo run --thinking; "" = the model's default
-	Mode     string `json:"mode"`     // the provider's mode with no permission prompts
-	Plan     string `json:"plan"`     // the subscription it draws on
-	Note     string `json:"note,omitempty"`
+	ID              string   `json:"id"`
+	Label           string   `json:"label"`
+	Provider        string   `json:"provider"`                  // paseo run --provider (provider/model)
+	ThinkingOptions []string `json:"thinkingOptions,omitempty"` // supported Paseo levels; nil means no control
+	Thinking        string   `json:"thinking"`                  // paseo run --thinking; "" = the model's default
+	Mode            string   `json:"mode"`                      // the provider's mode with no permission prompts
+	Plan            string   `json:"plan"`                      // the subscription it draws on
+	Note            string   `json:"note,omitempty"`
 }
 
 // defaultAgent is used when a card or idea names no agent.
@@ -30,11 +32,13 @@ const defaultAgent = "opus"
 
 // AgentChoices is every agent a card can use. Mode ids were checked live against Paseo.
 var AgentChoices = []AgentChoice{
-	{ID: "opus", Label: "Opus 5.5", Provider: ReviewerModel, Thinking: "medium", Mode: "bypassPermissions",
+	{ID: "opus", Label: "Opus 5.5", Provider: ReviewerModel, Thinking: "medium", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultracode"}, Mode: "bypassPermissions",
 		Plan: "Claude Max"},
-	{ID: "codex-astra", Label: "GPT-6 Astra", Provider: "codex/gpt-6-astra", Thinking: "high", Mode: "full-access",
+	{ID: "sonnet", Label: "Sonnet 5.5", Provider: "claude/claude-sonnet-5-5", Thinking: "medium", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultracode"}, Mode: "bypassPermissions",
+		Plan: "Claude Max"},
+	{ID: "codex-sol", Label: "GPT-6.1 Sol", Provider: "codex/gpt-6.1-sol", Thinking: "medium", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Mode: "full-access",
 		Plan: "ChatGPT Pro", Note: "sends this card's work to OpenAI"},
-	{ID: "codex-sol", Label: "GPT-6.1 Sol", Provider: "codex/gpt-6.1-sol", Thinking: "medium", Mode: "full-access",
+	{ID: "codex-astra", Label: "GPT-6 Astra", Provider: "codex/gpt-6-astra", Thinking: "high", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Mode: "full-access",
 		Plan: "ChatGPT Pro", Note: "sends this card's work to OpenAI"},
 	{ID: "gemini-argon", Label: "Gemini 4 Argon", Provider: "antigravity/gemini-4-argon-high", Mode: "full-access",
 		Plan: "Google AI Ultra", Note: "sends this card's work to Google"},
@@ -49,6 +53,19 @@ func agentByID(id string) (AgentChoice, bool) {
 		}
 	}
 	return AgentChoice{}, false
+}
+
+// withThinking validates an optional override against the model's supported levels.
+// An empty override keeps the Factory default, including for older callers.
+func (a AgentChoice) withThinking(level string) (AgentChoice, error) {
+	if level == "" {
+		return a, nil
+	}
+	if !slices.Contains(a.ThinkingOptions, level) {
+		return a, fmt.Errorf("unsupported thinking level %q for %s", level, a.Label)
+	}
+	a.Thinking = level
+	return a, nil
 }
 
 // runArgs are the `paseo run` flags that start this agent.

@@ -27,7 +27,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	if strings.HasPrefix(b.ID, "idea-") {
 		switch action {
 		case "approve":
-			return f.startIdea(b.ID, "zach", b.Agent, b.Message)
+			return f.startIdea(b.ID, "zach", b.Agent, b.Message, b.Thinking)
 		case "archive":
 			return ok, f.dismissIdea(b.ID)
 		}
@@ -336,8 +336,12 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	agent, err = agent.withThinking(b.Thinking)
+	if err != nil {
+		return nil, err
+	}
 	if repo == autoRepo {
-		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: b.Agent}
+		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: agent.ID, Thinking: agent.Thinking}
 		if tierRank(b.Tier) >= 0 {
 			r.Tier = b.Tier
 		}

@@ -251,6 +251,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <div class="tiers" id="nTiers"></div>
   <label class="sub">Repo</label><br><select id="nRepo" style="width:100%;margin-bottom:8px"></select>
   <label class="sub">Agent (plans and builds it)</label><br><select id="nAgent" style="width:100%"></select>
+  <div id="nThinkingRow" hidden><label class="sub" for="nThinking">Thinking level</label><br><select id="nThinking" style="width:100%"></select></div>
   <div class="ausage" id="nAgentUsage"></div>
   <div class="sub" id="nAgentNote" style="margin:2px 0 8px;min-height:1em"></div>
   <label class="sub">What should it do?</label>
@@ -361,6 +362,17 @@ function agentOptions(selected){
     return `<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)} · ${esc(a.plan)}${esc(u)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`;
   }).join('');
 }
+// thinkingPicker: begin
+function fillThinking(id, agentID, selected){
+  const el = $(id), row = $(id+'Row'), a = AG.agents.find(a=>a.id===agentID);
+  const levels = (a && a.thinkingOptions) || [];
+  const previous = selected ?? (el.dataset.agent===agentID ? el.value : '');
+  const value = levels.includes(previous) ? previous : ((a && a.thinking) || '');
+  row.hidden = !levels.length;
+  el.innerHTML = levels.map(level=>`<option value="${esc(level)}">${esc(level)}${level===a.thinking?' (default)':''}</option>`).join('');
+  el.value = value; el.dataset.agent = agentID;
+}
+// thinkingPicker: end
 function usageBars(u){
   const ws = (u && u.windows) || [];
   return ws.length ? ws.map(w=>{
@@ -731,14 +743,18 @@ function fillPanel(c, fresh){
   if(isIdea){
     const picked = ($('pAgent')&&!fresh) ? $('pAgent').dataset.picked : '';
     const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : ((c.idea&&c.idea.agent)||AG.default);
+    const curThinking = ($('pThinking')&&!fresh) ? $('pThinking').value : ((c.idea&&c.idea.thinking)||'');
     $('pActs').innerHTML = `
     <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
-    <button class="primary" onclick="act('approve',{agent:$('pAgent').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
+    <div id="pThinkingRow" style="width:100%" hidden><label class="sub" for="pThinking">Thinking level</label><br><select id="pThinking" style="width:100%"></select></div>
+    <button class="primary" onclick="act('approve',{agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
     <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>
     <div class="ausage" id="pAgentUsage" style="width:100%">${agentUsageHtml(curAg,'pAgent')}</div>`;
+    fillThinking('pThinking',curAg,curThinking);
     if(picked) $('pAgent').dataset.picked = picked;
-    $('pAgent').onchange = ()=>{ $('pAgent').dataset.picked = '1'; $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
-    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v = ($('pAgent').dataset.picked && $('pAgent').value) || (c.idea&&c.idea.agent) || AG.default; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); } });
+    $('pThinking').onchange = ()=>{ $('pAgent').dataset.picked = '1'; };
+    $('pAgent').onchange = ()=>{ $('pAgent').dataset.picked = '1'; fillThinking('pThinking',$('pAgent').value); $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
+    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v = ($('pAgent').dataset.picked && $('pAgent').value) || (c.idea&&c.idea.agent) || AG.default; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); fillThinking('pThinking',v); } });
   } else if(c.routing) $('pActs').innerHTML = `
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
@@ -790,7 +806,7 @@ async function act(a, extra={}){
   refresh(); }
 $('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); refresh(); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
-function fillNewDlg(){ const v = ($('nAgent').dataset.picked && $('nAgent').value) || AG.default; $('nAgent').innerHTML = agentOptions(v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
+function fillNewDlg(){ const v = ($('nAgent').dataset.picked && $('nAgent').value) || AG.default; $('nAgent').innerHTML = agentOptions(v); fillThinking('nThinking',v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
 // The dialog opens from the cached agent list at once; right after a factory restart the
 // server may still be fetching availability/usage, so refill until they land (bounded).
 function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
@@ -821,7 +837,7 @@ $('newBtn').onclick = ()=>{
 $('nGo').onclick = async()=>{
   if(newSubmission) return;
   const draft=$('nReq').value;
-  const body={request:draft.trim(), repo:$('nRepo').value, agent:$('nAgent').value};
+  const body={request:draft.trim(), repo:$('nRepo').value, agent:$('nAgent').value, thinking:$('nThinking').value};
   if(!body.request) return;
   newSubmission={body}; $('nError').textContent='';
   renderNewSubmission();
@@ -843,14 +859,15 @@ $('nGo').onclick = async()=>{
     newSubmission=null;
     $('nReq').value=draft; $('nRepo').value=body.repo;
     $('nAgent').value=body.agent; $('nAgent').dataset.picked='1';
-    fillNewDlg();
+    fillNewDlg(); fillThinking('nThinking',body.agent,body.thinking);
     $('nError').textContent=error; $('newDlg').showModal();
   }
   renderNewSubmission();
   await refresh();
 };
 // newSubmission: end
-$('nAgent').onchange = ()=>{ $('nAgent').dataset.picked = '1'; const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
+$('nThinking').onchange = ()=>{ $('nAgent').dataset.picked = '1'; };
+$('nAgent').onchange = ()=>{ $('nAgent').dataset.picked = '1'; const v = $('nAgent').value; fillThinking('nThinking',v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
 ['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
 $('group').addEventListener('input', ()=>saveLaneGroup(laneStorage(), $('group').value, laneGroupOptions));
 phone.addEventListener('change', render);
