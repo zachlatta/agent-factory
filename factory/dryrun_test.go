@@ -4,20 +4,41 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zachlatta/agent-factory/factory/scan"
 )
 
+// gitLog records git calls; Peers runs git from several goroutines at once, so it locks.
+type gitLog struct {
+	mu    sync.Mutex
+	calls [][]string
+}
+
+func (g *gitLog) add(args []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, args)
+}
+
+// all is a copy of the calls so far.
+func (g *gitLog) all() [][]string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.calls)
+}
+
 // newDryRunFactory is newTestFactory with DryRun on: the fake paseo sits behind the dry-run wrapper,
-// and git calls reach *gitCalls only when the wrapper lets them through.
-func newDryRunFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *[][]string) {
+// and git calls reach the returned log only when the wrapper lets them through.
+func newDryRunFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *gitLog) {
 	t.Helper()
 	p := &fakePaseo{logs: map[string]string{}, archived: map[string]bool{}, status: map[string]string{},
 		busy: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
@@ -26,15 +47,15 @@ func newDryRunFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *[][
 	f.Now = func() time.Time { return t0 }
 	f.Sleep = func(time.Duration) {}
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
-	var gitCalls [][]string
+	gitCalls := &gitLog{}
 	f.Git, f.GitOut = f.dryRunGit(
-		func(_ context.Context, _ string, args ...string) error { gitCalls = append(gitCalls, args); return nil },
+		func(_ context.Context, _ string, args ...string) error { gitCalls.add(args); return nil },
 		func(_ context.Context, _ string, args ...string) (string, error) {
-			gitCalls = append(gitCalls, args)
+			gitCalls.add(args)
 			return "", errors.New("no git in tests")
 		})
 	f.SetAgents(agents)
-	return f, p, &gitCalls
+	return f, p, gitCalls
 }
 
 // writes are the paseo subcommands that change something.
@@ -99,8 +120,8 @@ func TestDryRunGitPassesOnlyReads(t *testing.T) {
 	}
 	f.Git(ctx, "/w", "remote", "set-url", "origin", "x")
 	f.GitOut(ctx, "/w", "push", "origin", "HEAD:main")
-	if want := [][]string{{"rev-parse", "HEAD"}, {"remote", "get-url", "origin"}}; !slices.EqualFunc(*calls, want, slices.Equal) {
-		t.Errorf("git calls %v, want %v", *calls, want)
+	if want := [][]string{{"rev-parse", "HEAD"}, {"remote", "get-url", "origin"}}; !slices.EqualFunc(calls.all(), want, slices.Equal) {
+		t.Errorf("git calls %v, want %v", calls.all(), want)
 	}
 	if log := strings.Join(f.log, "\n"); !strings.Contains(log, "dry run: would git -C /w fetch -q origin main") ||
 		!strings.Contains(log, "would git -C /w push") {
@@ -150,7 +171,7 @@ func TestDryRunActionsChangeNothing(t *testing.T) {
 	if w := paseoWrites(p); len(w) != 0 {
 		t.Errorf("dry-run actions wrote to paseo: %v", w)
 	}
-	for _, c := range *gitCalls {
+	for _, c := range gitCalls.all() {
 		if c[0] == "fetch" {
 			t.Errorf("dry-run ran git %v", c)
 		}
@@ -171,7 +192,7 @@ func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range *gitCalls {
+	for _, c := range gitCalls.all() {
 		if c[0] == "fetch" {
 			t.Errorf("dry-run approve ran git %v", c)
 		}
@@ -214,5 +235,31 @@ func TestDryRunStateCopiesAndLeavesOriginal(t *testing.T) {
 		t.Errorf("missing state dir: %v", err)
 	} else {
 		os.RemoveAll(missing)
+	}
+}
+
+func TestDryRunGitFakeIsSafeConcurrently(t *testing.T) {
+	var agents []Agent
+	for n := range 8 {
+		agents = append(agents, card(fmt.Sprintf("c%d", n), map[string]string{labelStage: "building"}))
+	}
+	f, _, calls := newDryRunFactory(t, agents...)
+	if p := f.Peers("", "example/desk"); len(p.InFlight) != 8 {
+		t.Fatalf("in flight %d, want 8", len(p.InFlight))
+	}
+	if got := len(calls.all()); got != 16 {
+		t.Errorf("Peers recorded %d git calls, want 16 (diff and status per card)", got)
+	}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.GitOut(context.Background(), "/w", "status", "--porcelain")
+		}()
+	}
+	wg.Wait()
+	if got := len(calls.all()); got != 36 {
+		t.Errorf("recorded %d git calls, want 36", got)
 	}
 }
