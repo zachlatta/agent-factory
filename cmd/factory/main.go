@@ -29,6 +29,9 @@ import (
 var rev = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "retirement-inventory" {
+		os.Exit(retirementCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "scan" {
 		os.Exit(scanCmd(os.Args[2:]))
 	}

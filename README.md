@@ -118,6 +118,9 @@ agent plus its reviewers and sub-agents), and the last reap; the `/host` page sh
 
 ### Repo and agent per card
 
+For the read-only completed-workspace inventory and the gates required before any
+future deletion, see [Workspace retirement](docs/workspace-retirement.md).
+
 - **Repo: Auto.** A read-only picker agent reads the request and names the repo it belongs in
   (`REPO: owner/name`); the card then starts there. If it can't tell, it asks in Needs Zach with
   buttons for its candidates (`factory/route.go`).
