@@ -121,6 +121,20 @@ func TestServerRoutesEveryAskAction(t *testing.T) {
 	}
 }
 
+// On a phone a text field left focused brings the keyboard back (tab resumed, window
+// refocused), so both pages drop focus when the page hides or the keyboard closes.
+func TestPagesReleaseKeyboard(t *testing.T) {
+	f, _ := newTestFactory(t, card("c1", nil))
+	h := f.Handler()
+	for _, path := range []string{"/", "/t/c1"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "function releaseKeyboard(") {
+			t.Errorf("%s: %d, no releaseKeyboard hook", path, rec.Code)
+		}
+	}
+}
+
 // Gzip covers only the allowlisted GET routes; anything else (actions today, a future
 // streaming route) is served plain unless it opts in.
 func TestGzipAllowlist(t *testing.T) {

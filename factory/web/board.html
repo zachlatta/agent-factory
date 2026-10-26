@@ -231,6 +231,28 @@ async function loadLanes(){ try{ Object.assign(LANES, await (await fetch('api/la
 
 function ago(iso){ if(!iso) return ''; const s=(Date.now()-Date.parse(iso))/1000; if(s<90) return 'just now'; if(s<3600) return Math.round(s/60)+' min ago'; if(s<86400) return Math.round(s/3600)+' h ago'; return Math.round(s/86400)+' d ago'; }
 function toast(t){ const e=$('toast'); e.textContent=t; e.style.display='block'; clearTimeout(e._t); e._t=setTimeout(()=>e.style.display='none',3500); }
+// releaseKeyboard drops focus from a text field (its text stays). On a phone a field left focused
+// brings the keyboard back when the tab resumes or the window refocuses, so touch screens release it
+// when the page hides and when the keyboard closes (the visual viewport grows back to full height;
+// a rotation resets the baseline, a pinch zoom is ignored).
+function releaseKeyboard(){
+  const e = document.activeElement;
+  if (e && (e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && !['checkbox','radio','file','button','submit'].includes(e.type)))) e.blur();
+}
+if (matchMedia('(pointer:coarse)').matches) {
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseKeyboard(); });
+  const vv = window.visualViewport;
+  if (vv) {
+    let full = vv.height, shrunk = false;
+    addEventListener('orientationchange', () => { full = 0; shrunk = false; });
+    vv.addEventListener('resize', () => {
+      if (vv.scale > 1.01) return;
+      if (vv.height > full) full = vv.height;
+      if (vv.height < full - 100) shrunk = true;
+      else if (shrunk) { shrunk = false; releaseKeyboard(); }
+    });
+  }
+}
 
 let AG = {agents:[], default:'opus'}; // GET /api/agents: who can plan and build a card
 async function loadAgents(){ try{ AG = await (await fetch('api/agents')).json(); }catch(e){} }
@@ -294,7 +316,7 @@ async function load(){
   const hs=$('host'); if(hs.options.length===1) B.hosts.forEach(h=>hs.add(new Option(h,h)));
   const nr=$('nRepo'); if(!nr.options.length){ nr.add(new Option('Auto: best match (recommended)','auto')); B.repos.forEach(r=>nr.add(new Option(r,r))); }
   $('activity').innerHTML = (B.log||[]).slice().reverse().map(esc).join('<br>') || 'No factory activity yet.';
-  if(!askOpen.size && !(document.activeElement && document.activeElement.tagName==='TEXTAREA')) render();
+  if(!askOpen.size && !(document.activeElement && document.activeElement.tagName==='TEXTAREA' && $('grid').contains(document.activeElement))) render();
   if(sel) fillPanel(B.cards.find(c=>c.id===sel), false);
 }
 
@@ -325,7 +347,8 @@ function renderPhone(cards){
       + (lc.length>cap ? `<div class="more" onclick="open_.add('p${i}${tab}');render()">+${lc.length-cap} more</div>` : '');
   });
   if(!cs.length) h += '<div class="empty">Nothing here.</div>';
-  const g=$('grid'); g.innerHTML = h;
+  const g=$('grid'); if(g.dataset.html === h) return; // unchanged: a refresh moves nothing under a tap
+  g.dataset.html = h; g.innerHTML = h;
   g.querySelectorAll('.card').forEach(el=>{ el.onclick=()=>openPanel(el.dataset.id); el.draggable=false; });
 }
 
@@ -355,7 +378,8 @@ function render(){
       h += `<div class="cell ${s[0].includes('review')?'gate':''} ${s[0]==='zach'?'zachc':''}" data-stage="${s[0]}">${cs.map(cardHtml).join('')}${more}</div>`;
     }
   }
-  g.innerHTML = h;
+  if(g.dataset.html === h) return; // unchanged: a refresh moves nothing under a tap
+  g.dataset.html = h; g.innerHTML = h;
   g.querySelectorAll('.card').forEach(el=>{
     el.onclick=()=>openPanel(el.dataset.id);
     el.ondblclick=()=>{ location.href='t/'+el.dataset.id; };
@@ -435,7 +459,9 @@ function answersText(id){
   });
   return out.length ? "Zach's answers:\n"+out.join('\n') : '';
 }
-function askDone(id, msg){ askOpen.delete(id); delete askPicks[id]; toast(msg); setTimeout(load, 1200); }
+// askSent: the card's picks and boxes were changed in place, so the next render rebuilds the list
+function askSent(id){ releaseKeyboard(); askOpen.delete(id); delete $('grid').dataset.html; }
+function askDone(id, msg){ askSent(id); delete askPicks[id]; toast(msg); setTimeout(load, 1200); }
 async function askAnswers(id){
   const m = answersText(id); if(!m){ toast('Pick an answer first'); return; }
   await post('send', {id, message:m}); askDone(id, 'Answers sent');
@@ -463,11 +489,11 @@ async function askYesNo(id, yes){
 }
 async function askRepo(id){
   const repo = document.querySelector('#p-'+id+' select').value;
-  await post('approve', {id, repo}); toast('Starting in '+repo); askOpen.delete(id); setTimeout(load, 1200);
+  await post('approve', {id, repo}); toast('Starting in '+repo); askSent(id); setTimeout(load, 1200);
 }
 async function askSend(id){
   const t = document.querySelector('#r-'+id+' textarea'); const m = t.value.trim(); if(!m) return;
-  await post('send', {id, message:m}); t.value=''; askOpen.delete(id); toast('Sent'); setTimeout(load, 1200);
+  await post('send', {id, message:m}); t.value=''; askSent(id); toast('Sent'); setTimeout(load, 1200);
 }
 
 async function post(action, body){
@@ -566,7 +592,7 @@ async function act(a, extra={}){
     : a+' done');
   if(c.id&&c.id.startsWith('idea-')) closePanel();
   setTimeout(load, 1500); }
-$('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; toast('Sent'); setTimeout(load,1500); };
+$('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); setTimeout(load,1500); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
 function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').innerHTML = agentOptions(v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
 // The dialog opens from the cached agent list at once; right after a factory restart the
@@ -576,7 +602,7 @@ $('newBtn').onclick = ()=>{ fillNewDlg(); $('newDlg').showModal(); refreshNewDlg
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
   try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast($('nRepo').value==='auto' ? 'Picking a repo, then the Scout starts: ideas show up in Ideas' : 'Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
-  try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
+  try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; releaseKeyboard(); setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
 $('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
 ['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
 phone.addEventListener('change', render);

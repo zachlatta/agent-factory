@@ -187,6 +187,28 @@ function ago(iso){ if(!iso) return ''; const s=(Date.now()-Date.parse(iso))/1000
 function clock(iso){ try{ return new Date(iso).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } }
 function dayOf(iso){ try{ return new Date(iso).toLocaleDateString([], {weekday:'long', month:'short', day:'numeric'}); }catch(e){ return ''; } }
 function toast(t){ const e=$('toast'); e.textContent=t; e.style.display='block'; clearTimeout(e._t); e._t=setTimeout(()=>e.style.display='none',3500); }
+// releaseKeyboard drops focus from a text field (its text stays). On a phone a field left focused
+// brings the keyboard back when the tab resumes or the window refocuses, so touch screens release it
+// when the page hides and when the keyboard closes (the visual viewport grows back to full height;
+// a rotation resets the baseline, a pinch zoom is ignored).
+function releaseKeyboard(){
+  const e = document.activeElement;
+  if (e && (e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && !['checkbox','radio','file','button','submit'].includes(e.type)))) e.blur();
+}
+if (matchMedia('(pointer:coarse)').matches) {
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseKeyboard(); });
+  const vv = window.visualViewport;
+  if (vv) {
+    let full = vv.height, shrunk = false;
+    addEventListener('orientationchange', () => { full = 0; shrunk = false; });
+    vv.addEventListener('resize', () => {
+      if (vv.scale > 1.01) return;
+      if (vv.height > full) full = vv.height;
+      if (vv.height < full - 100) shrunk = true;
+      else if (shrunk) { shrunk = false; releaseKeyboard(); }
+    });
+  }
+}
 function nearBottom(){ const s=$('scroll'); return s.scrollHeight - s.scrollTop - s.clientHeight < 160; }
 function toBottom(){ const s=$('scroll'); s.scrollTop = s.scrollHeight; }
 
@@ -408,6 +430,7 @@ async function sendMsg(){
     const r = await post('send', {id: meta.agent.id, message: text, attachments: sent.map(a => ({name: a.name, type: a.type, data_base64: a.data_base64}))});
     pending.push({text: text || '(see attached)', ts: new Date().toISOString(), at: Date.now(), images: sent.filter(a => a.type.startsWith('image/')).map(a => a.url)});
     $('msg').value = ''; atts = []; chips(); grow(); render(true); toBottom();
+    if (matchMedia('(pointer:coarse)').matches) releaseKeyboard();
     if (r.files && r.files.length) toast(`Sent with ${r.files.length} file${r.files.length>1?'s':''}`);
     setTimeout(poll, 1200);
   } finally { $('send').disabled = false; }
