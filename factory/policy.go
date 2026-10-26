@@ -19,13 +19,14 @@ var TierHelp = map[string]string{
 	"routine":      "Scheduled run of an approved job. No per-run review; it surfaces only if it gets stuck.",
 	"low":          "Plan review, then code review by another agent, then lands on its own.",
 	"risky":        "Plan review and code review must both pass, then lands on its own.",
-	"architecture": "Zach approves the plan before any code; code review, then lands on its own.",
+	"architecture": "Plan review, build, code review, then Zach tries a preview and approves the landing. He approves the plan first only when building it has side effects.",
 }
 
 const tierRules = `Tiers (pick the highest that applies):
 - architecture: new service, datastore, framework or dependency; a change to how components fit
   together or to a shared interface; any refactor or cleanup (these must cover the whole app, see
-  below); anything hard to undo or publicly visible. Zach approves the plan before code is written.
+  below); anything hard to undo or publicly visible. Zach sees a preview and approves before it lands;
+  he approves the plan before code is written only when building it has side effects.
 - risky: production data, migrations or deletes; money, payments or purchases; auth, secrets or
   permissions; hosts, deploys, cron or infra; email or messages to anyone but Zach; anything that
   runs unattended. Needs plan review and code review sign-off from other agents.
@@ -64,7 +65,13 @@ var (
 	trackRe    = regexp.MustCompile(`(?i)TRACK:\s*\**\s*(direct)`)
 	titleRe    = regexp.MustCompile(`(?im)^[ \t>*_#-]*TITLE[*_]*\s*:[ \t]*(.*)$`)
 	smallFixRe = regexp.MustCompile(`(?im)^[ \t>*_#-]*SMALL[ \t]*FIX[*_]*\s*:[ \t]*(.*)$`)
+	effectsRe  = regexp.MustCompile(`(?im)^[ \t>*_#-]*BUILD[ \t]+SIDE[ \t]+EFFECTS[*_]*\s*:[ \t]*(.*)$`)
 )
+
+// sideEffectsRule asks planners and plan reviewers what building a plan would change outside its worktree
+// before landing. An architecture plan goes to building without Zach only when the reviewer writes none.
+const sideEffectsRule = `BUILD SIDE EFFECTS: <none, or what building it changes outside the worktree before landing: prod data
+written or deleted, messages sent to anyone, money spent, hosts or services changed>`
 
 // titleCap is the most runes a planner's TITLE line keeps; longer ones are cut at a word.
 const titleCap = 60
@@ -104,6 +111,33 @@ func ParseSmallFix(text string) string {
 		return trunc(strings.ReplaceAll(s, ",", ";"), smallFixCap)
 	}
 	return ""
+}
+
+// ParseSideEffects returns the last BUILD SIDE EFFECTS line without markdown: "none" when building changes
+// nothing outside the worktree, the listed effects otherwise, or "" when there is no line. The prompt's
+// <placeholder> is skipped.
+func ParseSideEffects(text string) string {
+	m := effectsRe.FindAllStringSubmatch(text, -1)
+	for i := len(m) - 1; i >= 0; i-- {
+		s := strings.Trim(strings.TrimSpace(strings.ReplaceAll(m[i][1], "`", "")), "*_\"' ")
+		if s == "" || strings.HasPrefix(s, "<") {
+			continue
+		}
+		switch strings.ToLower(strings.TrimRight(s, ".;: ")) {
+		case "none", "no", "n/a", "nothing":
+			return "none"
+		}
+		return s
+	}
+	return ""
+}
+
+// buildsFirst says an architecture plan may be built before Zach sees it: the plan reviewer found that
+// building it changes nothing outside its worktree, and the builder's plan lists no side effect either.
+// A missing reviewer line keeps the plan-approval stop.
+func buildsFirst(review, plan string) bool {
+	b := ParseSideEffects(plan)
+	return ParseSideEffects(review) == "none" && (b == "" || b == "none")
 }
 
 func lastMatch(re *regexp.Regexp, text string) string {
@@ -168,7 +202,13 @@ var rubric = map[string]string{
 - Scope: nothing unasked-for. Over about 1,000 changed lines means it must be split.
 - Cheaper or safer approach available?
 - Refactor or cleanup: does it cover the whole app (rule below)?
-- Tier: is the builder's TIER right? Set your own.`,
+- Tier: is the builder's TIER right? Set your own.
+- Build side effects: would building it (not landing it) change anything outside the worktree: prod data
+  written or deleted, messages sent to anyone, money spent, hosts or services changed? Check the plan's
+  BUILD SIDE EFFECTS line against its approach and write your own, right before TIER:
+  ` + sideEffectsRule + `
+  An architecture plan whose line you write as none is built before Zach sees it; he sees a preview before it
+  lands. Any other answer, or no line, stops it for his plan approval first.`,
 	"code": `Check the work against Zach's request and follow-ups (section below) and its plan if any:
 - Read the diff: ` + "`git -C <cwd> log --oneline origin/main..HEAD`, `git -C <cwd> diff origin/main...HEAD`" + `
   (the worktree was clean when this review started: the committed work is what lands). If the work already
@@ -321,7 +361,8 @@ Anything else (code, config, infra, deletes, money, messages to anyone but Zach)
 Step 1 now: write a PLAN only, then stop. No file edits yet. The plan has: goal (Zach's words),
 what you found (evidence), approach, files to change, deploy steps (if any; they run in the landing
 step after code review, not during build), how you'll test it, risks, open questions,
-and an estimate of changed lines (over 1,000 means split into smaller cards).
+and an estimate of changed lines (over 1,000 means split into smaller cards). Right before TIER:, one line:
+` + sideEffectsRule + `
 End the plan with one line: TIER: <low|risky|architecture>.
 
 %s
@@ -334,7 +375,8 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 ` + overviewRule + `
 
-A different agent reviews the plan (architecture-tier plans also go to Zach). When you get
+A different agent reviews the plan. An architecture plan goes to Zach before building only when building
+it has side effects; otherwise it is built and reviewed, and Zach tries a preview before it lands. When you get
 "Plan approved", build it. Don't improvise: if scope must change, stop and say so. Commit on your
 branch, but do NOT land or make live changes (install scripts, enable or restart services, resize VMs,
 change external settings) until the factory tells you to land after code review. If stuck, stop and write a handoff: what
@@ -350,14 +392,41 @@ const landMsg = "Land it now the way this repo lands work: read its AGENTS.md an
 	"to deploy."
 
 // summaryMsg asks the builder of an architecture plan for the version Zach reads on his phone.
-const summaryMsg = "Your plan passed review, and because it is an architecture change it now waits for Zach's " +
-	"approval. Write a short version for Zach, in plain words for reading on a phone. Start with three lines:\n" +
+const summaryMsg = "Your plan passed review, and because it is an architecture change whose build has side effects (or " +
+	"they were not ruled out) it now waits for Zach's approval. Write a short version for Zach, in plain words for reading on a phone. Start with three lines:\n" +
 	"DECISION: <approve this plan?, in one line>\n" +
 	"OVERVIEW: <what changes and why, at most 3 short sentences>\n" +
 	"NEEDS FROM ZACH: <approve the plan, or answer the questions below, and what happens after>\n" +
 	"Then at most 3 bullets: what could go wrong and how you will check it. Then any question he must answer, " +
 	"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
 	"start building; stop after the summary. Use the evidence format already given when visuals help."
+
+// previewNote is the Needs Zach note of an architecture card that passed code review without Zach's plan
+// approval: his one stop, where he tries the built change before it lands.
+const previewNote = "built and reviewed: try the preview and approve to land"
+
+// previewAheadNote tells the builder of an architecture plan built before Zach saw it what comes after code review.
+const previewAheadNote = "It is an architecture change, but building it has no side effects, so it is built first: after " +
+	"code review Zach tries a preview of it before it lands."
+
+// previewMsg asks the builder of an architecture card that passed code review for what Zach needs to try it:
+// before and after, a link he can open on his phone, and his decision.
+const previewMsg = "Code review passed. This is an architecture change, so it stops for Zach once, now, before it lands. " +
+	"Write it for reading on a phone, in plain words. Start with three lines:\n" +
+	"DECISION: <land this change?, in one line>\n" +
+	"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
+	"NEEDS FROM ZACH: <try it, then approve the landing or say what to change, and what happens after>\n" +
+	"Then show it to him. If it changes something he sees (a page, an email, a message), take before (origin/main) and " +
+	"after (your branch) screenshots at desktop and phone widths, on test or fake data. Give him a live link he can open " +
+	"on his phone and try: your branch running on test or fake data, or in a dry-run mode the README documents (one " +
+	"that changes nothing), served on this host's tailnet IP (`tailscale ip -4`) and started under `timeout 24h` so it " +
+	"stops on its own (leave that one server running when you stop); where it cannot run safely, a static clickable " +
+	"mock-up instead. Upload the screenshots and any mock-up with the file-share skill, restricted to Zach, check that " +
+	"each link returns 401 without his login, and put the links in your message: a path on this host is not a link he " +
+	"can open. If the overview rule names before and after evidence lines, add them too. If nothing he sees changes, " +
+	"show the before and after behaviour in plain words and how he can try it. Then at most 3 bullets: what could go " +
+	"wrong. Then any question he must answer, each as a QUESTION: block (the question, then 2 to 6 options as - lines, " +
+	"recommended first). Do not land and do not change the code; stop after this."
 
 const noLiveChangesRule = "Do not make live changes (install scripts, enable or restart services, resize VMs, change external settings) before code review: do them in the landing step after review and verify them."
 
@@ -381,14 +450,18 @@ func buildMsg(prefix, notes string) string {
 		"but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\n" + worktreeRule + "\n\nReviewer notes:\n" + notes
 }
 
-func buildWithFixesMsg(notes string) string {
-	return buildMsg("The last plan review found only small, concrete blocking fixes (in Reviewer notes below). "+
-		"Apply these fixes, then build it now, as planned; do not stop for another plan review, and say in your summary how you applied them.", notes)
+func buildWithFixesMsg(notes string, preview bool) string {
+	prefix := "The last plan review found only small, concrete blocking fixes (in Reviewer notes below). " +
+		"Apply these fixes, then build it now, as planned; do not stop for another plan review, and say in your summary how you applied them."
+	if preview {
+		prefix += " " + previewAheadNote
+	}
+	return buildMsg(prefix, notes)
 }
 
 func summaryWithFixesMsg(notes string) string {
 	return "The last plan review found only small, concrete blocking fixes (below). Fold those fixes into your plan, and " +
-		"because it is an architecture change it now waits for Zach's approval. Write a short version for Zach (with the " +
+		"because it is an architecture change whose build has side effects (or they were not ruled out) it now waits for Zach's approval. Write a short version for Zach (with the " +
 		"fixes folded in), in plain words for reading on a phone. Start with three lines:\n" +
 		"DECISION: <approve this plan?, in one line>\n" +
 		"OVERVIEW: <what changes and why, at most 3 short sentences>\n" +
@@ -548,16 +621,19 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	roundsKey := roundsLabel(kind)
 	rounds := atoi(t.L(roundsKey)) + 1
-	builderTier := ""
+	builderTier, builderPlan := "", ""
 	if kind == "plan" {
-		bt, _ := f.lastText(target, 60)
-		builderTier = ParseTier(bt)
+		builderPlan, _ = f.lastText(target, 60)
+		builderTier = ParseTier(builderPlan)
 	}
 	tier := MaxTier(t.L(labelTier), ParseTier(text), builderTier)
 	if tier == "" && kind == "plan" {
 		tier = "low"
 	}
 	zachOK := t.L(labelZachPlan) == "approved"
+	// an architecture plan whose build changes nothing outside the worktree is built first: Zach sees a preview
+	// before it lands instead of approving the plan
+	early := tier == "architecture" && !zachOK && !(kind == "plan" && buildsFirst(notes, builderPlan))
 	labels := map[string]string{roundsKey: fmt.Sprint(rounds)}
 	if t.L(labelNoVerdict) != "" {
 		labels[labelNoVerdict] = ""
@@ -589,7 +665,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	switch {
 	case (verdict == "approve" || verdict == "nits") && kind == "plan":
-		if tier == "architecture" && !zachOK {
+		if early {
 			// the factory emails Zach the summary once the builder has written it (mailZach)
 			note := "architecture: approve the plan to build"
 			if err = set(labelStage, "zach", labelVerdict, "plan "+verdict, labelAwaiting, "plan", labelNote, note,
@@ -597,8 +673,12 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 				err = f.send(target, summaryMsg)
 			}
 		} else {
+			prefix := "Plan approved by the plan reviewer."
+			if tier == "architecture" && !zachOK {
+				prefix += " " + previewAheadNote
+			}
 			if err = set(labelStage, "building", labelVerdict, "plan "+verdict, labelSince, now, labelAutoReview, "code"); err == nil {
-				err = f.send(target, buildMsg("Plan approved by the plan reviewer.", notes))
+				err = f.send(target, buildMsg(prefix, notes))
 			}
 		}
 	case verdict == "approve" || verdict == "nits":
@@ -612,7 +692,10 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			// a scan hit or error stops the card; a clean public-repo card lands like any other
 			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, scanned)
 		case tier == "architecture" && !zachOK:
-			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, "review found an architecture change: approve to land")
+			// the one stop for Zach: the builder shows him before and after and a link to try (mailZach waits for it)
+			if err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, previewNote, labelWriting, now); err == nil {
+				err = f.send(target, previewMsg)
+			}
 		case t.L(labelPlanRounds) == "":
 			// a session that never had a plan review (sent to review by hand): Zach lands it. Not the
 			// tier label: every verdict records one, so a reworked hand-sent card has it by round 2.
@@ -652,7 +735,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
 		}
 	case verdict == "changes" && kind == "plan" && smallFix != "":
-		if tier == "architecture" && !zachOK {
+		if early {
 			note := "architecture: approve the plan to build"
 			if err = set(labelStage, "zach", labelVerdict, "plan changes", labelAwaiting, "plan", labelNote, note,
 				labelWriting, now, labelPlanFix, smallFix); err == nil {
@@ -661,7 +744,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		} else {
 			if err = set(labelStage, "building", labelVerdict, "plan fixes", labelSince, now, labelAutoReview, "code",
 				labelNote, "building with last-round plan fixes", labelPlanFix, smallFix); err == nil {
-				err = f.send(target, buildWithFixesMsg(notes))
+				err = f.send(target, buildWithFixesMsg(notes, tier == "architecture" && !zachOK))
 			}
 		}
 	case verdict == "close":

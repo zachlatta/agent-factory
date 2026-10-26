@@ -28,6 +28,8 @@ func TestAskFor(t *testing.T) {
 			"Approve landing?", "builder", "approve,reply,close"},
 		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
 			"Approve landing?", "reviewer", "approve,reply,close"},
+		{"architecture preview", card("c", map[string]string{labelStage: "zach", labelNote: previewNote}),
+			"Try it, then approve landing?", "builder", "approve,reply,close"},
 		{"rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
 			"Reviews didn't settle: your call on the code", "builder", "recommend,reply,approve,close"},
 		{"escalated", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),

@@ -129,7 +129,7 @@ func baseAsk(c Card, a Agent) *Ask {
 				act("done", "Mark done"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "plan":
 		return &Ask{Title: "Approve this plan?", From: "builder",
-			Why: "It is an architecture change, so nothing gets built until you OK the plan. A code review still runs before it lands.",
+			Why: "It is an architecture change and building it has side effects (or they were not ruled out), so nothing gets built until you OK the plan. A code review still runs before it lands.",
 			Actions: []Action{primary("approve", "Approve plan & build"),
 				reply("Send back with changes", "What should change in the plan?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
@@ -142,6 +142,11 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
+	case note == previewNote:
+		return &Ask{Title: "Try it, then approve landing?", From: "builder",
+			Why: "It is an architecture change, built and passed by code review; nothing is live yet. The agent's before and after and its link to try it are below.",
+			Actions: []Action{primary("approve", "Approve & land"),
+				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "review found an architecture change"):
 		return &Ask{Title: "Approve landing?", From: "reviewer",
 			Why: "The code passed review, but the reviewer found it changes the architecture, which needs your OK.",

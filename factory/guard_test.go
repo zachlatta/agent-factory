@@ -118,8 +118,10 @@ func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 		if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") {
 			t.Errorf("%s: labels = %v", name, l)
 		}
-		if len(p.sent("c1")) != 0 {
-			t.Errorf("%s: a landing message went out before Zach approved: %v", name, p.sent("c1"))
+		for _, m := range p.sent("c1") {
+			if strings.Contains(m, "Land it now") {
+				t.Errorf("%s: a landing message went out before Zach approved: %v", name, m)
+			}
 		}
 		if len(*ranges) != 1 {
 			t.Errorf("%s: scanned %v", name, *ranges)

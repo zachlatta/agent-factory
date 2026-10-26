@@ -129,16 +129,17 @@ func TestArchitectureApprovedByZachAutoLands(t *testing.T) {
 }
 
 func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
+	// raised to architecture at code review: the same preview stop before landing
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
 	p.logs["r1"] = "it swapped the database\nTIER: architecture\nVERDICT: approve"
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelTier] != "architecture" {
+	if l[labelStage] != "zach" || l[labelTier] != "architecture" || l[labelNote] != previewNote {
 		t.Errorf("labels = %v", l)
 	}
-	if len(p.sent("c1")) != 0 {
-		t.Errorf("must not land: %v", p.sent("c1"))
+	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
+		t.Errorf("must ask for the preview, not land: %v", msgs)
 	}
 }
 
@@ -1333,5 +1334,103 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		if !strings.Contains(codeRubric, want) {
 			t.Errorf("code rubric lacks %q:\n%s", want, codeRubric)
 		}
+	}
+}
+
+func TestParseSideEffects(t *testing.T) {
+	cases := map[string]string{
+		"BUILD SIDE EFFECTS: none":                                "none",
+		"**BUILD SIDE EFFECTS:** None.":                           "none",
+		"- BUILD SIDE EFFECTS: backfills prod rows\nTIER: risky":  "backfills prod rows",
+		"BUILD SIDE EFFECTS: <none, or what building changes>":    "",
+		"BUILD SIDE EFFECTS: <x>\nplan\nBUILD SIDE EFFECTS: none": "none",
+		"no line here": "",
+	}
+	for in, want := range cases {
+		if got := ParseSideEffects(in); got != want {
+			t.Errorf("ParseSideEffects(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestArchitecturePlanWithNoBuildSideEffectsBuildsFirst(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+		reviewer("r1", "c1", "plan"))
+	p.logs["r1"] = "plan is fine\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: approve"
+	p.logs["c1"] = "plan: new page\nBUILD SIDE EFFECTS: none\nTIER: architecture"
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelAwaiting] != "" || l[labelTier] != "architecture" {
+		t.Errorf("architecture plan with no build side effects should build: %v", l)
+	}
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Build it now") || !strings.Contains(msgs[0], "before it lands") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
+func TestArchitecturePlanStopsEarlyUnlessReviewerFindsNoSideEffects(t *testing.T) {
+	cases := map[string][2]string{
+		"reviewer has no line":       {"TIER: architecture\nVERDICT: approve", "plan\nBUILD SIDE EFFECTS: none\nTIER: architecture"},
+		"reviewer lists one":         {"BUILD SIDE EFFECTS: writes prod rows\nTIER: architecture\nVERDICT: approve", "plan\nBUILD SIDE EFFECTS: none"},
+		"builder lists one":          {"BUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: approve", "plan\nBUILD SIDE EFFECTS: sends a test email\nTIER: architecture"},
+		"reviewer none, builder old": {"BUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: nits", "plan\nTIER: architecture"},
+	}
+	for name, logs := range cases {
+		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+			reviewer("r1", "c1", "plan"))
+		p.logs["r1"], p.logs["c1"] = logs[0], logs[1]
+		f.ApplyVerdict(f.agent("r1"))
+		l := p.labels("c1")
+		wantStop := name != "reviewer none, builder old"
+		if stopped := l[labelStage] == "zach" && l[labelAwaiting] == "plan"; stopped != wantStop {
+			t.Errorf("%s: early stop = %v, want %v: %v", name, stopped, wantStop, l)
+		}
+	}
+}
+
+func TestArchitectureSmallFixWithNoSideEffectsBuilds(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: "2"}),
+		reviewer("r1", "c1", "plan"))
+	p.logs["r1"] = "SMALL FIX: add Ordering line\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: changes"
+	p.logs["c1"] = "plan\nBUILD SIDE EFFECTS: none"
+	f.ApplyVerdict(f.agent("r1"))
+	l := p.labels("c1")
+	if l[labelStage] != "building" || l[labelPlanFix] != "add Ordering line" || l[labelAwaiting] != "" {
+		t.Errorf("labels = %v", l)
+	}
+}
+
+func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1"}),
+		reviewer("r1", "c1", "code"))
+	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
+	f.ApplyVerdict(f.agent("r1"))
+	l := p.labels("c1")
+	if l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelWriting] == "" {
+		t.Errorf("labels = %v", l)
+	}
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "before and after") || !strings.Contains(msgs[0], "phone") ||
+		!strings.Contains(msgs[0], "file-share") || !strings.Contains(msgs[0], "DECISION:") || strings.Contains(msgs[0], "Land it now") {
+		t.Errorf("preview message = %v", msgs)
+	}
+
+	// approving the preview lands it; a reply sends it back to building and code review
+	waiting := withLabels(card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1", labelCodeRounds: "1", labelSource: "board"}), l)
+	f, p = newTestFactory(t, waiting)
+	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.labels("c1"); got[labelStage] != "landing" {
+		t.Errorf("approve on preview: %v", got)
+	}
+	f, p = newTestFactory(t, waiting)
+	if _, err := f.Act("send", Body{ID: "c1", Message: "make the chart bigger"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.labels("c1"); got[labelStage] != "building" || got[labelAutoReview] != "code" {
+		t.Errorf("reply on preview: %v", got)
 	}
 }

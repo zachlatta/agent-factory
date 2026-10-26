@@ -47,8 +47,18 @@ The planner (the "Fellow") first picks a track:
 | routine | scheduled runs of an approved job | none per run; surfaces only if blocked | itself |
 | low | docs, copy, an isolated fix, tests, a small feature on existing patterns | plan review, code review | on its own |
 | risky | prod data, deletes, migrations, money, auth/secrets, hosts/deploys/cron, messages to others, unattended jobs | plan review and code review both pass | on its own |
-| architecture | new service/datastore/framework/dependency, shared interfaces, any refactor or cleanup, hard to undo or public | plan review, then a person approves the plan, then code review | on its own |
+| architecture | new service/datastore/framework/dependency, shared interfaces, any refactor or cleanup, hard to undo or public | plan review, code review, then a person tries a preview and approves the landing (and approves the plan before building only when building has side effects) | after a person's OK |
 
+- Architecture cards stop for a person once, before landing, unless building has side effects. Every
+  plan and plan review ends with `BUILD SIDE EFFECTS: none`, or what building (not landing) would
+  change outside the worktree: prod data written or deleted, messages sent, money spent, hosts or
+  services changed. Only when the plan reviewer writes `none` and the plan lists nothing does the
+  card go to building; otherwise (or with no line) it waits for a person to approve the plan, as
+  before. A built card that passes code review waits in Needs Zach while its builder writes a
+  preview: before and after screenshots at desktop and phone widths, and a live link to try it
+  (the branch on test data or a dry-run mode, on the tailnet under `timeout`, or a static mock-up),
+  uploaded with the file-share skill, restricted to Zach. Approve lands it; a reply sends it back
+  to building and code review. A card whose plan a person approved early lands on its own.
 - Refactors and cleanups must cover the whole repo (or list what is left and why); a partial
   refactor is a blocking finding.
 - Plans and build summaries name their deploy steps (if any). Builders make no live changes
@@ -422,7 +432,7 @@ in them is published. For their cards:
   before its push, as does the pre-push hook. No person approves the landing: what keeps private
   data out is the code reviewer, told the repo is public, and the scans. This holds for every
   card, including ideas, Scouts and scheduled runs, so those can publish with no person reading
-  them. Architecture-tier cards and cards with no plan review still wait for Zach, as in any repo;
+  them. Architecture-tier cards (at their preview stop) and cards with no plan review still wait for Zach, as in any repo;
   approving one scans again before the land message.
 - The direct track is off, ideas wait for a person's Start, and reviewers get a public-repo rule
   (any hostname, email, id, quote or secret is blocking).

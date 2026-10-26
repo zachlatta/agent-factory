@@ -15,7 +15,7 @@ var Stages = [][3]string{
 	{"plan-review", "Plan review", "A different agent tries to find fault with the plan."},
 	{"building", "Building", "Agent is working."},
 	{"review", "Code review", "A different agent checks the work before it lands."},
-	{"zach", "Needs Zach", "Waiting on you: a question, an architecture plan, or an approval."},
+	{"zach", "Needs Zach", "Waiting on you: a question, a preview to try, or an approval."},
 	{"landing", "Landing", "Approved. Agent is landing it."},
 	{"landed", "Done", "Landed, answered by email, or finished and seen."},
 }
