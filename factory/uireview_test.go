@@ -154,3 +154,12 @@ func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
 		t.Errorf("the Noted turn started work: %v", p.calls)
 	}
 }
+
+func TestUIReviewRuleServesOnTailnetIP(t *testing.T) {
+	if !strings.Contains(uiReviewRule, "`tailscale ip -4`") {
+		t.Error("UI rule does not tell the reviewer to serve on the address from `tailscale ip -4`")
+	}
+	if strings.Contains(uiReviewRule, "(`hostname`)") {
+		t.Error("UI rule still tells the reviewer to serve on `hostname`")
+	}
+}

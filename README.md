@@ -42,11 +42,12 @@ The planner (the "Fellow") first picks a track:
   answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
 - A landing card is Done only if its HEAD is on `origin/main` and it made a commit of its own.
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
-  the reviewer runs it on test data and clicks through it with computer use. Its
-  non-blocking "UI feedback:" block goes to the builder, who repeats it in the landing summary.
-  In this repo, build the card's binary in /tmp and run `factory -dry-run -listen "$(tailscale ip -4):0"`
-  (the log names the port). That meets the check's data rule: it reads the real cards, ideas and
-  transcripts, and its buttons only log what they would do. Bind the tailnet address, never `0.0.0.0`.
+  the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
+  `0.0.0.0`), and clicks through it with computer use. Its non-blocking "UI feedback:" block goes to
+  the builder, who repeats it in the landing summary. In this repo, build the card's binary in /tmp
+  and run `factory -dry-run -listen "$(tailscale ip -4):0"` (the log names the port). That meets the
+  check's data rule: it reads the real cards, ideas and transcripts, and its buttons only log what
+  they would do.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
 

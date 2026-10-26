@@ -13,7 +13,9 @@ const uiReviewRule = `
 UI check: this change touches a user interface. Test it with computer use:
 - Read the openai-computer-use skill first, and reach the computer-use browser as it describes.
 - Run the builder's version from a scratch copy (/tmp), on test or fake data, or on real data only through a
-  dry-run mode the repo's README documents (one that changes nothing): never the live service itself. Serve it on this host's tailnet name (` + "`hostname`" + `), not 127.0.0.1, so the computer-use browser can reach it.
+  dry-run mode the repo's README documents (one that changes nothing): never the live service itself. Bind it to
+  this host's tailnet IP from ` + "`tailscale ip -4`" + ` (for example ` + "`\"$(tailscale ip -4):0\"`" + `), not 127.0.0.1, 0.0.0.0
+  or ` + "`hostname`" + ` (which can resolve to a loopback address), so the computer-use browser can reach it.
 - Click through every flow the change touches, at desktop width and at phone width (about 390 px). Read the page
   text and take screenshots; check it does what the request asked.
 - Blocking: a broken flow, a layout broken at either width, or console errors the change causes.
