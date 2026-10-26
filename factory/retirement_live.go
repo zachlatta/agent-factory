@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ type RetirementLive struct {
 	DaemonVersion string `json:"daemonVersion"`
 	StartedAt     string `json:"startedAt"`
 	At            string `json:"at"`
+	DeadlineAt    string `json:"deadlineAt"`
 }
 
 // Complete refers only to Scope at the time of this read, not resource safety.
@@ -35,13 +37,20 @@ type retirementReadCommand func(context.Context, ...string) ([]byte, error)
 // InventoryRetirementLive adds opt-in reads from the daemon selected by home's
 // .paseo directory. It never uses the board's filtered view or a remote endpoint.
 func InventoryRetirementLive(ctx context.Context, home string, now time.Time) RetirementInventory {
-	r := InventoryRetirement(ctx, home, now)
+	persisted, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	r := InventoryRetirement(persisted, home, now)
+	if persisted.Err() != nil {
+		r.Problems = append(r.Problems, "persisted inventory deadline exceeded or cancelled")
+	}
+	cancel()
 	observeRetirementLive(ctx, &r, home, retirementLiveCommand, time.Now)
 	return r
 }
 
+const retirementLiveCommandTimeout = 20 * time.Second
+
 func retirementLiveCommand(ctx context.Context, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, retirementLiveCommandTimeout)
 	defer cancel()
 	c := exec.CommandContext(ctx, "paseo", args...)
 	c.WaitDelay = time.Second
@@ -62,8 +71,18 @@ func retirementSetCheck(w *RetirementWorkspace, name, state, reason string) {
 }
 
 func observeRetirementLive(ctx context.Context, r *RetirementInventory, home string, run retirementReadCommand, now func() time.Time) {
-	r.Live = &RetirementLive{StartedAt: iso(now())}
-	defer func() { r.Live.At = iso(now()) }()
+	// Allow startup/list reads plus one bounded process per persisted workspace.
+	// This budget starts after the persisted reader, and parent cancellation wins.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute+time.Duration(len(r.Workspaces))*(retirementLiveCommandTimeout+time.Second))
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	r.Live = &RetirementLive{StartedAt: iso(now()), DeadlineAt: iso(deadline)}
+	defer func() {
+		r.Live.At = iso(now())
+		if ctx.Err() != nil {
+			r.Problems = append(r.Problems, "live inventory deadline exceeded or cancelled")
+		}
+	}()
 	for i := range r.Workspaces {
 		retirementSetCheck(&r.Workspaces[i], "exclusion", "unknown", "no supported concurrent-use exclusion established")
 	}
@@ -133,6 +152,7 @@ func observeRetirementLive(ctx context.Context, r *RetirementInventory, home str
 
 	// Query exact IDs, including archived records; never resolve by cwd or slug.
 	// A service in a sibling workspace still protects their shared folder.
+	failedScripts := 0
 	for _, owner := range r.Workspaces {
 		started = iso(now())
 		b, err = run(ctx, "script", "ls", "--workspace", owner.ID, "--json", "--home", paseoHome)
@@ -148,7 +168,7 @@ func observeRetirementLive(ctx context.Context, r *RetirementInventory, home str
 			seen[s.ScriptName] = true
 		}
 		if err != nil {
-			r.Problems = append(r.Problems, "configured script list unavailable or malformed for a workspace")
+			failedScripts++
 		}
 		at = iso(now())
 		for i := range r.Workspaces {
@@ -171,6 +191,9 @@ func observeRetirementLive(ctx context.Context, r *RetirementInventory, home str
 			}
 			w.Observations = append(w.Observations, o)
 		}
+	}
+	if failedScripts > 0 {
+		r.Problems = append(r.Problems, fmt.Sprintf("configured script list unavailable or malformed for %d workspaces", failedScripts))
 	}
 }
 

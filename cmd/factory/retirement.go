@@ -32,16 +32,16 @@ func retirementCmd(args []string, out, diagnostics io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
 	var r factory.RetirementInventory
 	if *live {
-		r = factory.InventoryRetirementLive(ctx, *home, time.Now())
+		r = factory.InventoryRetirementLive(context.Background(), *home, time.Now())
 	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
 		r = factory.InventoryRetirement(ctx, *home, time.Now())
-	}
-	if ctx.Err() != nil {
-		r.Problems = append(r.Problems, "inventory deadline exceeded")
+		if ctx.Err() != nil {
+			r.Problems = append(r.Problems, "inventory deadline exceeded")
+		}
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")

@@ -55,6 +55,14 @@ projections cannot attest complete configuration or runtime coverage, so their
 raw CLI diagnostics are omitted. Failed, malformed, null, unsupported or paginated
 responses remain unknown and add a problem; an empty array is not permission.
 
+Persisted reads have a two-minute deadline. Live reads get a separate budget after
+that phase: two minutes for startup and global reads, plus 21 seconds per persisted
+workspace. Each CLI process still has a 20-second timeout and one second to close
+its output pipes. `live.deadlineAt` reports the overall live deadline. A large
+inventory therefore has time for every sequential workspace query instead of
+sharing the persisted reader's fixed deadline. Script-read failures are reported
+as one count; cancellation or timeout still leaves unread checks unknown.
+
 An empty terminal list observes only the absence of matching daemon terminals at
 that moment. Services without a positive blocker remain unknown. Agents, active
 users, setups, arbitrary processes, mounts and scheduler ownership still require

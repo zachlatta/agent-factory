@@ -265,3 +265,78 @@ func TestRetirementLiveWrongDaemonHomeIsRefused(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestRetirementLiveBudgetCoversLargeInventory(t *testing.T) {
+	f := newRetirementLiveFixture(t)
+	r := f.f.inventory(t)
+	base := r.Workspaces[0]
+	for i := 1; i < 600; i++ {
+		w := base
+		w.ID = fmt.Sprintf("record-%d", i)
+		w.CanonicalPath = filepath.Join(f.f.root, w.ID)
+		w.Checks = append([]RetirementCheck(nil), base.Checks...)
+		r.Workspaces = append(r.Workspaces, w)
+	}
+	start := time.Now()
+	var elapsed time.Duration
+	reads := 0
+	run := func(ctx context.Context, args ...string) ([]byte, error) {
+		elapsed += 700 * time.Millisecond
+		deadline, ok := ctx.Deadline()
+		if !ok || start.Add(elapsed).After(deadline) {
+			return nil, context.DeadlineExceeded
+		}
+		if args[0] == "script" {
+			reads++
+			return []byte("[]"), nil
+		}
+		return f.run(ctx, args...)
+	}
+	observeRetirementLive(context.Background(), &r, f.f.home, run, time.Now)
+	if reads != 600 || len(r.Problems) != 0 {
+		t.Fatalf("incomplete large inventory: %d reads, %v", reads, r.Problems)
+	}
+	assertRetirementRefused(t, r)
+}
+
+func TestRetirementLiveScriptFailuresAreCounted(t *testing.T) {
+	f := newRetirementLiveFixture(t)
+	r := f.f.inventory(t)
+	w := r.Workspaces[0]
+	w.ID = "sibling"
+	w.Checks = append([]RetirementCheck(nil), w.Checks...)
+	r.Workspaces = append(r.Workspaces, w)
+	f.fail = "script"
+	observeRetirementLive(context.Background(), &r, f.f.home, f.run, time.Now)
+	if len(r.Problems) != 1 || !strings.Contains(r.Problems[0], "2 workspaces") {
+		t.Fatalf("repeated diagnostics: %v", r.Problems)
+	}
+}
+
+func TestRetirementLiveDaemonVersionDiffersFromCLI(t *testing.T) {
+	f := newRetirementLiveFixture(t)
+	r := f.f.inventory(t)
+	run := func(ctx context.Context, args ...string) ([]byte, error) {
+		if args[0] == "status" {
+			return json.Marshal(map[string]string{"home": filepath.Join(f.f.home, ".paseo"), "connectedDaemon": "reachable", "localDaemon": "running", "daemonVersion": "future"})
+		}
+		if args[0] != "--version" {
+			t.Fatalf("read unsupported daemon: %v", args)
+		}
+		return f.run(ctx, args...)
+	}
+	observeRetirementLive(context.Background(), &r, f.f.home, run, time.Now)
+	if len(r.Problems) == 0 || !hasRetirementCheck(r.Workspaces[0], "exclusion", "unknown") {
+		t.Fatal("unsupported daemon accepted")
+	}
+}
+
+func TestRetirementLivePreservesExistingBlocker(t *testing.T) {
+	f := newRetirementLiveFixture(t)
+	r := f.f.inventory(t)
+	retirementSetCheck(&r.Workspaces[0], "terminals", "blocked", "existing blocker")
+	observeRetirementLive(context.Background(), &r, f.f.home, f.run, time.Now)
+	if !hasRetirementCheck(r.Workspaces[0], "terminals", "blocked") {
+		t.Fatal("empty snapshot erased blocker")
+	}
+}
