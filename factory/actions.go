@@ -284,6 +284,11 @@ func (f *Factory) rerun(c Card) error {
 	return errors.New("this card is not stuck")
 }
 
+// fromEmail reports whether a new-card request came from an email or voice-memo thread.
+func fromEmail(b Body) bool {
+	return strings.TrimSpace(b.Thread) != "" || b.Origin == "email" || b.Origin == "voice"
+}
+
 // newCard starts a planning agent in a fresh worktree of the chosen repo, or, for repo "auto", a
 // picker that chooses the repo first (route.go).
 func (f *Factory) newCard(b Body) (map[string]string, error) {
@@ -303,7 +308,11 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		title = strings.SplitN(req, "\n", 2)[0]
 	}
 	title = truncWords(strings.TrimSpace(title), 70)
-	agent, err := f.resolveAgent(b.Agent)
+	agentID := b.Agent
+	if agentID == "" && fromEmail(b) {
+		agentID = defaultAgent
+	}
+	agent, err := f.resolveAgent(agentID)
 	if err != nil {
 		return nil, err
 	}

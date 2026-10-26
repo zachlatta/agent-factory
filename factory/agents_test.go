@@ -282,8 +282,8 @@ func TestProviderListFailureKeepsOpusAndRetries(t *testing.T) {
 }
 
 func TestAutoStartedIdeaUsesDefaultAgent(t *testing.T) {
-	// Muse and Gemini only when Zach picks them; automatic routing is a later card.
-	// An agent-submitted idea may suggest an agent, but only Zach's Start uses it.
+	// An agent-submitted idea may suggest an agent, but auto-start uses the factory's
+	// usage-balanced suggestion (which falls back to Opus when usage is unknown).
 	f, p := newTestFactory(t)
 	if _, err := f.addIdea(Body{Request: "do it", Title: "scout wants muse", Agent: "muse-wonder", By: "scout"}); err != nil {
 		t.Fatal(err)
@@ -297,5 +297,165 @@ func TestAutoStartedIdeaUsesDefaultAgent(t *testing.T) {
 	}
 	if got := flag(r[0], "--provider"); got != ReviewerModel {
 		t.Errorf("auto-started idea runs %q, want the default %q", got, ReviewerModel)
+	}
+}
+
+func seedUsage(f *Factory, byProv map[string]AgentUsage) {
+	f.usageMu.Lock()
+	f.usage.byProvider = byProv
+	f.usage.fetched = f.Now()
+	f.usageMu.Unlock()
+}
+
+func TestAgentsAPIRanksByPaceAndSuggestsTopPlan(t *testing.T) {
+	f, p := newTestFactory(t)
+	inDays := func(d float64) string {
+		return t0.Add(time.Duration(d * float64(24*time.Hour))).UTC().Format(time.RFC3339)
+	}
+	// Claude: 50% left resetting in 1d (weekLeft ≈ 14.3%, pace ≈ +35.7).
+	// Codex: 60% left resetting in 6d (weekLeft ≈ 85.7%, pace ≈ -25.7).
+	// Gemini: 95% 7d left resetting in 1d, but 5h is in the red at 15% (low-5h tier).
+	// Muse: fresh unused window (100% left, no ResetsAt -> weekLeft = 100%, pace = 0).
+	seedUsage(f, map[string]AgentUsage{
+		"claude": {
+			Summary: "50% 7d · 80% 5h left",
+			Windows: []UsageWindow{{Label: "7d", RemainingPct: 50, ResetsAt: inDays(1)}, {Label: "5h", RemainingPct: 80}},
+		},
+		"codex": {
+			Summary: "60% 7d left",
+			Windows: []UsageWindow{{Label: "7d", RemainingPct: 60, ResetsAt: inDays(6)}},
+		},
+		"antigravity": {
+			Summary: "95% 7d · 15% 5h left",
+			Windows: []UsageWindow{{Label: "7d", RemainingPct: 95, ResetsAt: inDays(1)}, {Label: "5h", RemainingPct: 15}},
+		},
+		"muse": parseMuseUsage([]byte(`{"allowance":null,"reason":"server_sent_no_usage"}`), t0),
+	})
+
+	var out struct {
+		Default string `json:"default"`
+		Agents  []struct {
+			ID        string `json:"id"`
+			Available bool   `json:"available"`
+		} `json:"agents"`
+	}
+	waitFor(t, "agents ranked", func() bool {
+		rec := httptest.NewRecorder()
+		f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Agents[0].Available
+	})
+	got := make([]string, len(out.Agents))
+	for i, a := range out.Agents {
+		got[i] = a.ID
+	}
+	// Expected order:
+	// 1. opus (+35.7 pace: 50% left with 1d to go beats 60% with 6d to go and Muse's 0 pace)
+	// 2. muse-wonder (0 pace: 100% left, full week assumed)
+	// 3. codex-astra (-25.7 pace)
+	// 4. codex-sol (-25.7 pace, secondary on ChatGPT Pro)
+	// 5. gemini-argon (5h window <= 20% in the red)
+	want := []string{"opus", "muse-wonder", "codex-astra", "codex-sol", "gemini-argon"}
+	if !slices.Equal(got, want) || out.Default != "opus" {
+		t.Errorf("agents = %v (default %q), want %v (default opus)", got, out.Default, want)
+	}
+
+	// A plan with no ResetsAt (or unparsable ResetsAt) counts as having a full week left (100%),
+	// so it never outranks a plan with the same % left and a known reset time.
+	seedUsage(f, map[string]AgentUsage{
+		"claude":      {Summary: "0% 7d left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 0, ResetsAt: inDays(1)}}},
+		"codex":       {Summary: "70% 7d left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 70}}},
+		"antigravity": {Summary: "70% 7d · 80% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 70, ResetsAt: inDays(3)}, {Label: "5h", RemainingPct: 80}}},
+		"muse":        {Summary: "70% 7d left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 70, ResetsAt: "not-a-timestamp"}}},
+	})
+	p.mu.Lock()
+	p.providers["muse"] = "error"
+	p.mu.Unlock()
+	f.provMu.Lock()
+	f.prov.status["muse"] = "error"
+	f.provMu.Unlock()
+
+	rec := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	got = got[:0]
+	for _, a := range out.Agents {
+		got = append(got, a.ID)
+	}
+	// gemini-argon (70% with 3d left -> pace +27.1) > codex-astra, codex-sol (70% with no ResetsAt -> pace -30)
+	// > opus (exhausted 0%) > muse-wonder (unavailable).
+	want = []string{"gemini-argon", "codex-astra", "codex-sol", "opus", "muse-wonder"}
+	if !slices.Equal(got, want) || out.Default != "gemini-argon" {
+		t.Errorf("agents = %v (default %q), want %v (default gemini-argon)", got, out.Default, want)
+	}
+}
+
+func TestNewCardAndAutoIdeaBalanceUsageAndKeepEmailOnOpus(t *testing.T) {
+	f, p := newTestFactory(t)
+	in3d := t0.Add(3 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	seedUsage(f, map[string]AgentUsage{
+		"claude":      {Summary: "35% 7d · 70% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 35, ResetsAt: in3d}, {Label: "5h", RemainingPct: 70}}},
+		"codex":       {Summary: "50% 7d left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 50, ResetsAt: in3d}}},
+		"antigravity": {Summary: "90% 7d · 85% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 90, ResetsAt: in3d}, {Label: "5h", RemainingPct: 85}}},
+		"muse":        {Summary: "40% 7d · 80% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 40, ResetsAt: in3d}, {Label: "5h", RemainingPct: 80}}},
+	})
+
+	// 1. Board card with no agent picked uses the usage-balanced suggestion (gemini-argon).
+	if _, err := f.Act("new", Body{Request: "board work"}); err != nil {
+		t.Fatal(err)
+	}
+	runs := p.runsWithLabel(labelArg(labelStage, "plan"))
+	if len(runs) != 1 || flag(runs[0], "--provider") != "antigravity/gemini-4-argon-high" || !slices.Contains(runs[0], labelArg(labelAgent, "gemini-argon")) {
+		t.Fatalf("board card run = %v, want gemini-argon", runs)
+	}
+
+	// 2. Auto-started idea (tickIdeas) ignores the scout's suggested agent and uses the usage-balanced suggestion.
+	if _, err := f.addIdea(Body{Request: "idea work", Title: "auto balanced idea", Agent: "opus", By: "scout"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.tickIdeas(); err != nil {
+		t.Fatal(err)
+	}
+	ideaRuns := p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(ideaRuns) != 1 || flag(ideaRuns[0], "--provider") != "antigravity/gemini-4-argon-high" {
+		t.Fatalf("auto-started idea run = %v, want gemini-argon", ideaRuns)
+	}
+
+	// 3. Direct-repo card from email (Thread set, Agent empty) stays on Opus 5.5.
+	if _, err := f.Act("new", Body{Request: "email work", Thread: "thread-abc"}); err != nil {
+		t.Fatal(err)
+	}
+	runs = p.runsWithLabel(labelArg(labelStage, "plan"))
+	if got := flag(runs[len(runs)-1], "--provider"); got != ReviewerModel {
+		t.Errorf("email card provider = %q, want %q", got, ReviewerModel)
+	}
+
+	// 4. Direct-repo card from email with an explicit agent honors the explicit choice.
+	if _, err := f.Act("new", Body{Request: "email work on codex", Thread: "thread-abc", Agent: "codex-astra"}); err != nil {
+		t.Fatal(err)
+	}
+	runs = p.runsWithLabel(labelArg(labelStage, "plan"))
+	if got := flag(runs[len(runs)-1], "--provider"); got != "codex/gpt-6-astra" {
+		t.Errorf("explicit email card provider = %q, want codex/gpt-6-astra", got)
+	}
+
+	// 5. Auto-repo card from email (Repo: "auto", Thread set, Agent empty) routes onto Opus 5.5.
+	withRepos(t, f, "example/desk")
+	res, err := f.Act("new", Body{Request: "routed email work", Repo: "auto", Thread: "thread-routed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pickerID := res.(map[string]string)["id"]
+	p.logs[pickerID] = "[Assistant]\nREPO: example/desk\n"
+	if err := f.routeFromReply(picker(pickerID, nil)); err != nil {
+		t.Fatal(err)
+	}
+	runs = p.runsWithLabel(gmailThreadLabel + "=thread-routed")
+	if len(runs) != 1 || flag(runs[0], "--provider") != ReviewerModel || !slices.Contains(runs[0], labelArg(labelAgent, "opus")) {
+		t.Errorf("auto-routed email card = %v, want opus (%s)", runs, ReviewerModel)
 	}
 }

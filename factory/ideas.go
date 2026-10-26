@@ -120,8 +120,8 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 }
 
 // startIdea turns a waiting idea into a planning card. When Zach starts it, agent (his pick in the
-// panel) wins, else the idea's suggested agent. The factory's own starts (by "auto") always use the
-// default agent: Zach picks Muse, Gemini and Codex by hand until automatic routing ships.
+// panel) wins, else the idea's suggested agent. The factory's own starts (by "auto") clear the
+// idea's suggested agent so newCard uses the usage-balanced auto-suggestion.
 // note is Zach's own changes typed before starting; it follows the brief and overrides it.
 func (f *Factory) startIdea(id, by, agent, note string) (map[string]string, error) {
 	var res map[string]string

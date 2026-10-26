@@ -228,7 +228,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
 
 <dialog id="newDlg">
   <h3>New card</h3>
-  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, an Opus 5.5 agent first picks the repo it belongs in (or asks you in Needs Zach if it truly can't tell). The agent you pick (Opus 5.5 unless you choose another) writes a plan in its own worktree and then builds it; reviewers are always Opus 5.5. A reviewer checks the plan and sets the tier, which decides how much review it gets:</div>
+  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, an Opus 5.5 agent first picks the repo it belongs in (or asks you in Needs Zach if it truly can't tell). The agent you pick (auto-suggested to balance plan usage unless you choose another; email cards default to Opus 5.5) writes a plan in its own worktree and then builds it; reviewers are always Opus 5.5. A reviewer checks the plan and sets the tier, which decides how much review it gets:</div>
   <div class="tiers" id="nTiers"></div>
   <label class="sub">Repo</label><br><select id="nRepo" style="width:100%;margin-bottom:8px"></select>
   <label class="sub">Agent (plans and builds it)</label><br><select id="nAgent" style="width:100%"></select>
@@ -662,14 +662,16 @@ function fillPanel(c, fresh){
     fetch('api/logs/'+c.idea.id).then(r=>r.json()).then(j=>{ briefs[c.idea.id] = (j.idea&&j.idea.request)||'';
       if(sel===c.id) $('pIdea').innerHTML = ideaHtml(c, isIdea); }); }
   if(isIdea){
+    const picked = ($('pAgent')&&!fresh) ? $('pAgent').dataset.picked : '';
     const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : ((c.idea&&c.idea.agent)||AG.default);
     $('pActs').innerHTML = `
     <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
     <button class="primary" onclick="act('approve',{agent:$('pAgent').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
     <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>
     <div class="ausage" id="pAgentUsage" style="width:100%">${agentUsageHtml(curAg,'pAgent')}</div>`;
-    $('pAgent').onchange = ()=>{ $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
-    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v=$('pAgent').value; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); } });
+    if(picked) $('pAgent').dataset.picked = picked;
+    $('pAgent').onchange = ()=>{ $('pAgent').dataset.picked = '1'; $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
+    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v = ($('pAgent').dataset.picked && $('pAgent').value) || (c.idea&&c.idea.agent) || AG.default; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); } });
   } else if(c.routing) $('pActs').innerHTML = `
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
@@ -721,16 +723,16 @@ async function act(a, extra={}){
   refresh(); }
 $('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); refresh(); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
-function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').innerHTML = agentOptions(v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
+function fillNewDlg(){ const v = ($('nAgent').dataset.picked && $('nAgent').value) || AG.default; $('nAgent').innerHTML = agentOptions(v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
 // The dialog opens from the cached agent list at once; right after a factory restart the
 // server may still be fetching availability/usage, so refill until they land (bounded).
 function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
-$('newBtn').onclick = ()=>{ fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4); };
+$('newBtn').onclick = ()=>{ delete $('nAgent').dataset.picked; fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4); };
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
   try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast($('nRepo').value==='auto' ? 'Picking a repo, then the Scout starts: ideas show up in Ideas' : 'Scout started: ideas show up in Ideas'); $('newDlg').close(); refresh();} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
   try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; releaseKeyboard(); refresh();} finally{ $('nGo').disabled=false; } };
-$('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
+$('nAgent').onchange = ()=>{ $('nAgent').dataset.picked = '1'; const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
 ['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
 phone.addEventListener('change', render);
 $('activity').onclick=()=>$('activity').classList.toggle('open');

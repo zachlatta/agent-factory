@@ -146,7 +146,7 @@ func (f *Factory) providerUsages() map[string]AgentUsage {
 	if stale && f.usage.refreshing == nil {
 		done := make(chan struct{})
 		f.usage.refreshing = done
-		go f.refreshUsage(done)
+		go f.refreshUsage(done, now)
 	}
 	out := make(map[string]AgentUsage, len(f.usage.byProvider))
 	for k, v := range f.usage.byProvider {
@@ -166,7 +166,7 @@ func (f *Factory) providerUsages() map[string]AgentUsage {
 
 // refreshUsage fetches every provider's usage (slow subprocesses; no lock held) and
 // stores the result, closing done to mark the refresh landed.
-func (f *Factory) refreshUsage(done chan struct{}) {
+func (f *Factory) refreshUsage(done chan struct{}, now time.Time) {
 	seen := map[string]bool{}
 	var provs []string
 	for _, a := range AgentChoices {
@@ -197,7 +197,7 @@ func (f *Factory) refreshUsage(done chan struct{}) {
 	wg.Wait()
 	f.usageMu.Lock()
 	f.usage.byProvider = res
-	f.usage.fetched = f.Now()
+	f.usage.fetched = now
 	f.usage.refreshing = nil
 	close(done)
 	f.usageMu.Unlock()
@@ -424,13 +424,26 @@ func parseMuseUsage(raw []byte, now time.Time) AgentUsage {
 		UsedPercent float64 `json:"usedPercent"`
 	}
 	var payload struct {
+		Reason    string `json:"reason"`
 		Allowance *struct {
 			AsOfMs int64 `json:"asOfMs"`
 			Weekly *win  `json:"weekly"`
 			Window *win  `json:"window"`
 		} `json:"allowance"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.Allowance == nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return unknownUsage()
+	}
+	if payload.Allowance == nil {
+		// Before the first use in a new window, Muse reports reason "server_sent_no_usage" for an active subscription.
+		if payload.Reason == "server_sent_no_usage" {
+			ws := []UsageWindow{{Label: "7d", RemainingPct: 100}, {Label: "5h", RemainingPct: 100}}
+			return AgentUsage{
+				Summary:   formatSummary(ws),
+				Windows:   ws,
+				UpdatedAt: now.UTC().Format(time.RFC3339),
+			}
+		}
 		return unknownUsage()
 	}
 	msISO := func(ms int64) string {

@@ -233,3 +233,18 @@ func TestPagesMarkSeen(t *testing.T) {
 		t.Error("transcript page does not mark the card seen on load")
 	}
 }
+
+func TestBoardPageAgentPickerFollowsSuggestedDefault(t *testing.T) {
+	page := boardPage(t)
+	for _, want := range []string{
+		`delete $('nAgent').dataset.picked`,
+		`$('nAgent').dataset.picked = '1'`,
+		`($('nAgent').dataset.picked && $('nAgent').value) || AG.default`,
+		`$('pAgent').dataset.picked = '1'`,
+		`($('pAgent').dataset.picked && $('pAgent').value) || (c.idea&&c.idea.agent) || AG.default`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("board page missing %q", want)
+		}
+	}
+}

@@ -3,7 +3,9 @@ package factory
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -77,11 +79,14 @@ func checkAgentID(id string) error {
 	return nil
 }
 
-// resolveAgent returns the agent to start for id ("" = default). It fails if the id is unknown or
-// its Paseo provider is not available on this host.
+// resolveAgent returns the agent to start for id ("" = usage-balanced auto-suggestion). It fails if
+// the id is unknown or its Paseo provider is not available on this host.
 func (f *Factory) resolveAgent(id string) (AgentChoice, error) {
 	if id == "" {
-		id = defaultAgent
+		if _, err := f.waitProviderStatus("claude"); err != nil {
+			return AgentChoice{}, err
+		}
+		id = f.suggestedAgent()
 	}
 	a, ok := agentByID(id)
 	if !ok {
@@ -98,6 +103,123 @@ func (f *Factory) resolveAgent(id string) (AgentChoice, error) {
 			a.providerID(), st)
 	}
 	return a, nil
+}
+
+type planScore struct {
+	tier int     // 3 = healthy known, 2 = 5h window in red (<=20%), 1 = usage unknown, 0 = window exhausted (<=0%)
+	pace float64 // % remaining minus % of 7d window remaining until reset
+	w7   int
+	w5   int
+}
+
+func usageScore(u AgentUsage, now time.Time) planScore {
+	if len(u.Windows) == 0 {
+		return planScore{tier: 1}
+	}
+	w7 := u.Windows[0]
+	w5Pct := w7.RemainingPct
+	has5h := false
+	for _, w := range u.Windows {
+		if w.RemainingPct <= 0 {
+			return planScore{tier: 0}
+		}
+		if w.Label == "7d" {
+			w7 = w
+		} else if w.Label == "5h" {
+			w5Pct = w.RemainingPct
+			has5h = true
+		}
+	}
+	if !has5h {
+		w5Pct = w7.RemainingPct
+	}
+	// A missing or unparsable reset time counts as a full 7-day window remaining (100%),
+	// so it never outranks a plan with the same % left and a known reset time.
+	weekLeftPct := 100.0
+	if w7.ResetsAt != "" {
+		if rt, err := time.Parse(time.RFC3339Nano, w7.ResetsAt); err == nil {
+			if rem := rt.Sub(now); rem > 0 {
+				weekLeftPct = min(100.0, float64(rem)/float64(7*24*time.Hour)*100.0)
+			}
+		}
+	}
+	tier := 3
+	eff := w7.RemainingPct
+	if has5h && w5Pct <= 20 {
+		tier = 2
+		eff = min(eff, w5Pct)
+	}
+	return planScore{
+		tier: tier,
+		pace: float64(eff) - weekLeftPct,
+		w7:   w7.RemainingPct,
+		w5:   w5Pct,
+	}
+}
+
+// rankAgentChoices orders AgentChoices by availability and remaining plan quota pace,
+// returning the ordered slice and the auto-suggested default agent id.
+func rankAgentChoices(statuses map[string]string, usages map[string]AgentUsage, now time.Time) ([]AgentChoice, string) {
+	type item struct {
+		choice AgentChoice
+		idx    int
+		avail  bool
+		score  planScore
+	}
+	items := make([]item, len(AgentChoices))
+	for i, a := range AgentChoices {
+		p := a.providerID()
+		items[i] = item{
+			choice: a,
+			idx:    i,
+			avail:  statuses[p] == "available",
+			score:  usageScore(usages[p], now),
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		if a.avail != b.avail {
+			return a.avail
+		}
+		if !a.avail {
+			return a.idx < b.idx
+		}
+		if a.score.tier != b.score.tier {
+			return a.score.tier > b.score.tier
+		}
+		if math.Abs(a.score.pace-b.score.pace) > 1e-9 {
+			return a.score.pace > b.score.pace
+		}
+		if a.score.w7 != b.score.w7 {
+			return a.score.w7 > b.score.w7
+		}
+		if a.score.w5 != b.score.w5 {
+			return a.score.w5 > b.score.w5
+		}
+		return a.idx < b.idx
+	})
+	ordered := make([]AgentChoice, len(items))
+	for i, it := range items {
+		ordered[i] = it.choice
+	}
+	def := defaultAgent
+	if len(items) > 0 && items[0].avail {
+		def = items[0].choice.ID
+	}
+	return ordered, def
+}
+
+func (f *Factory) suggestedAgent() string {
+	usages := f.providerUsages()
+	statuses := make(map[string]string, len(AgentChoices))
+	for _, a := range AgentChoices {
+		p := a.providerID()
+		if _, ok := statuses[p]; !ok {
+			statuses[p], _ = f.cachedProviderStatus(p)
+		}
+	}
+	_, def := rankAgentChoices(statuses, usages, f.Now())
+	return def
 }
 
 const (
@@ -254,11 +376,19 @@ func (f *Factory) handleAgents(w http.ResponseWriter, r *http.Request) {
 		Usage     AgentUsage `json:"usage"`
 	}
 	usages := f.providerUsages()
-	rows := []row{}
+	statuses := make(map[string]string, len(AgentChoices))
 	for _, a := range AgentChoices {
 		p := a.providerID()
-		st := f.providerStatus(p)
+		if _, ok := statuses[p]; !ok {
+			statuses[p] = f.providerStatus(p)
+		}
+	}
+	ordered, def := rankAgentChoices(statuses, usages, f.Now())
+	rows := make([]row, 0, len(ordered))
+	for _, a := range ordered {
+		p := a.providerID()
+		st := statuses[p]
 		rows = append(rows, row{a, st == "available", st, usages[p]})
 	}
-	writeJSON(w, 200, map[string]any{"agents": rows, "default": defaultAgent, "reviewer": ReviewerModel})
+	writeJSON(w, 200, map[string]any{"agents": rows, "default": def, "reviewer": ReviewerModel})
 }

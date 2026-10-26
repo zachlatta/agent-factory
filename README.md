@@ -108,9 +108,15 @@ agent plus its reviewers and sub-agents), and the last reap; the `/host` page sh
   buttons for its candidates (`factory/route.go`).
 - **Agent.** The builder can be any provider Paseo has (`factory/agents.go`: Opus, Codex, Gemini,
   Muse); reviewers are always Opus. Providers that are not available are greyed out. The agent
-  pickers (New Task dialog and card panel) show each provider's remaining subscription usage;
-  for Claude, every account `cswap` reports is listed by account number and email, with the
-  active one marked (organization names and ids are not shown).
+  pickers (New card dialog and card panel) show each provider's remaining subscription usage (cached
+  for 5 minutes; for Claude, every account `cswap` reports is listed by account number and email,
+  with the active one marked and no organization names or ids shown). Available choices are ordered
+  and auto-suggested by how far each plan's remaining weekly quota is ahead of its 7-day reset pace
+  (plans with a 5-hour window at `<= 20%` or an exhausted window rank lower, and a missing reset
+  time counts as a full week left; Muse's `server_sent_no_usage` state before the first use in a new
+  window counts as 100% left). Board cards with no agent picked and auto-started ideas use this
+  auto-suggested agent; cards started from an email thread always default to Opus 5.5 unless
+  another agent is explicitly named.
 
 ### Sub-agents
 

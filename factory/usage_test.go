@@ -215,6 +215,24 @@ func TestParseMuseUsage(t *testing.T) {
 	if got := withAge(u, t0).Extra; got != "as of 2m ago" {
 		t.Errorf("withAge Extra = %q, want %q", got, "as of 2m ago")
 	}
+
+	fresh := `{"allowance":null,"hint":"the server sent no usage data for this subscription; this can happen before your first use in a new window","reason":"server_sent_no_usage","schemaVersion":1}`
+	u = parseMuseUsage([]byte(fresh), t0)
+	if u.Summary != "100% 7d · 100% 5h left" {
+		t.Errorf("server_sent_no_usage Summary = %q, want %q", u.Summary, "100% 7d · 100% 5h left")
+	}
+	wantFresh := []UsageWindow{{Label: "7d", RemainingPct: 100}, {Label: "5h", RemainingPct: 100}}
+	if fmt.Sprint(u.Windows) != fmt.Sprint(wantFresh) {
+		t.Errorf("server_sent_no_usage Windows = %+v, want %+v", u.Windows, wantFresh)
+	}
+	if u.UpdatedAt != t0.UTC().Format(time.RFC3339) {
+		t.Errorf("server_sent_no_usage UpdatedAt = %q, want %q", u.UpdatedAt, t0.UTC().Format(time.RFC3339))
+	}
+
+	noSub := `{"allowance":null,"reason":"no_allowance","schemaVersion":1}`
+	if u := parseMuseUsage([]byte(noSub), t0); u.Summary != "usage unknown" {
+		t.Errorf("no_allowance = %+v, want usage unknown", u)
+	}
 }
 
 func TestUsageFallbacksAndGemini(t *testing.T) {
