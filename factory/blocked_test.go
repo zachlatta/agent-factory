@@ -135,6 +135,7 @@ func TestRerunSupersedesOldReviewers(t *testing.T) {
 		done := reviewer("r0", "c1", "code")
 		done.Labels[labelPrefix+labelApplied] = "1"
 		f, p := newTestFactory(t, c, old, done)
+		p.busy["r1"] = 1 // Paseo refuses to archive the running reviewer until it is stopped
 		if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
 			t.Fatalf("%s: %v", status, err)
 		}
@@ -142,7 +143,7 @@ func TestRerunSupersedesOldReviewers(t *testing.T) {
 			t.Errorf("%s: old reviewer labels = %v", status, l)
 		}
 		// marked applied before it is stopped, so no Tick can apply its verdict in between
-		if v := strings.Join(p.verbs("r1"), ","); v != "update,stop,archive" {
+		if v := strings.Join(p.verbs("r1"), ","); v != "update,archive,stop,archive" {
 			t.Errorf("%s: old reviewer calls = %s", status, v)
 		}
 		if len(p.labels("r0")) != 0 || p.called("stop", "r0") || p.called("archive", "r0") {

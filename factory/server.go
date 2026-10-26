@@ -251,6 +251,10 @@ func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.logf("action %s %s ok", action, short(b.ID))
+	// rebuild the board now (no paseo calls), so the next GET shows the change; the loop still runs early
+	if err := f.reload(); err != nil {
+		f.logf("board reload after %s failed: %v", action, err)
+	}
 	f.poke()
 	writeJSON(w, 200, res)
 }

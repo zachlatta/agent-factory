@@ -103,7 +103,7 @@ func TestServer(t *testing.T) {
 
 // every action a Needs Zach button posts is routed (rerun was missing: its button got a 404)
 func TestServerRoutesEveryAskAction(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
+	f, p := newDiskFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
 		labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}),
 		card("c2", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}))
 	h := f.Handler()

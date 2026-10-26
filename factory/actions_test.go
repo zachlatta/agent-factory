@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestArchiveStopsThenArchives(t *testing.T) {
+func TestArchiveStopsRunningAgentThenArchives(t *testing.T) {
 	for _, tc := range []struct {
 		action string
 		body   Body
@@ -21,12 +21,13 @@ func TestArchiveStopsThenArchives(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "plan", labelSource: "board"})
 			c.Status = "running"
 			f, p := newTestFactory(t, c)
+			p.busy["c1"] = 1 // Paseo refuses to archive a running agent
 			if _, err := f.Act(tc.action, tc.body); err != nil {
 				t.Fatal(err)
 			}
 			v := slices.DeleteFunc(p.verbs("c1"), func(s string) bool { return s == "update" })
-			if !slices.Equal(v, []string{"stop", "archive"}) {
-				t.Errorf("paseo calls on c1 = %v, want stop then archive", v)
+			if !slices.Equal(v, []string{"archive", "stop", "archive"}) {
+				t.Errorf("paseo calls on c1 = %v, want archive, stop, archive", v)
 			}
 			if a := f.agent("c1"); !a.archived() {
 				t.Error("snapshot not marked archived")

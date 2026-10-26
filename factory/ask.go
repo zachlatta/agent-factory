@@ -302,8 +302,9 @@ type detailKey struct {
 }
 
 // fillAsks adds Detail to each Needs Zach card's Ask from the builder's or its latest reviewer's
-// last message. Fetches only when that agent has new activity.
-func (f *Factory) fillAsks(cards []Card, agents []Agent) {
+// last message. Fetches only when that agent has new activity and fetch is set; without fetch a card
+// keeps its cached detail, even an older one, and a card with none waits for the next loop.
+func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 	byID := map[string]Agent{}
 	for _, a := range agents {
 		byID[a.ID] = a
@@ -319,9 +320,12 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent) {
 		f.mu.Lock()
 		cached, ok := f.details[cards[n].ID]
 		f.mu.Unlock()
-		if ok && cached.key == key {
+		if ok && (cached.key == key || !fetch) {
 			ask.Detail, ask.Questions, ask.Overview = cached.text, cached.questions, cached.overview
 			continue
+		}
+		if !fetch {
+			continue // no paseo logs here: the next loop fetches it
 		}
 		text, err := f.lastReply(a)
 		if err != nil {

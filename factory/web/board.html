@@ -22,6 +22,7 @@ button:hover{background:#eef1f4}
 button.primary{background:var(--green);border-color:var(--green);color:#fff}
 button.danger{color:var(--red)}
 button:disabled{opacity:.45;cursor:default}
+button.busy:disabled{opacity:1;cursor:progress}
 .counts{display:flex;gap:6px;flex-wrap:wrap}
 .pill{font-size:12px;padding:2px 8px;border-radius:99px;background:#eef1f4;color:var(--mute)}
 .pill b{color:var(--ink)}
@@ -495,7 +496,7 @@ function answersText(id){
 }
 // askSent: the card's picks and boxes were changed in place, so the next render rebuilds the list
 function askSent(id){ releaseKeyboard(); askOpen.delete(id); delete $('grid').dataset.html; }
-function askDone(id, msg){ askSent(id); delete askPicks[id]; toast(msg); setTimeout(load, 1200); }
+function askDone(id, msg){ askSent(id); delete askPicks[id]; toast(msg); refresh(); }
 async function askAnswers(id){
   const m = answersText(id); if(!m){ toast('Pick an answer first'); return; }
   await post('send', {id, message:m}); askDone(id, 'Answers sent');
@@ -523,22 +524,45 @@ async function askYesNo(id, yes){
 }
 async function askRepo(id){
   const repo = document.querySelector('#p-'+id+' select').value;
-  await post('approve', {id, repo}); toast('Starting in '+repo); askSent(id); setTimeout(load, 1200);
+  await post('approve', {id, repo}); toast('Starting in '+repo); askSent(id); refresh();
 }
 async function askSend(id){
   const t = document.querySelector('#r-'+id+' textarea'); const m = t.value.trim(); if(!m) return;
-  await post('send', {id, message:m}); t.value=''; askSent(id); toast('Sent'); setTimeout(load, 1200);
+  await post('send', {id, message:m}); t.value=''; askSent(id); toast('Sent'); refresh();
 }
 
+// A pressed button shows at once that it is working: its card's (or panel's or dialog's) buttons
+// are disabled and it says what it is doing until the board reloads (refresh). The click is caught
+// before the button's own handler, which calls post in the same tick.
+let pressed = null;
+document.addEventListener('click', e=>{ pressed = e.target.closest && e.target.closest('button'); setTimeout(()=>{ pressed=null; }); }, true);
+const busyText = {approve:'Approving…', recommend:'Applying…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
+  stop:'Stopping…', rerun:'Re-running…', review:'Starting review…', stage:'Moving…', new:'Starting…', scout:'Starting…'};
+let afterLoad = [];
+function busy(btn, action){
+  if(!btn || !btn.isConnected) return ()=>{};
+  const box = btn.closest('.card, #panel, dialog') || btn.parentNode;
+  const btns = [...box.querySelectorAll('button:not(.x)')].filter(b=>!b.disabled), text = btn.textContent;
+  btns.forEach(b=>b.disabled=true); btn.classList.add('busy'); btn.textContent = busyText[action]||'Working…';
+  return ()=>{ btns.forEach(b=>b.disabled=false); btn.classList.remove('busy'); btn.textContent = text; };
+}
 async function post(action, body){
-  const r = await fetch('api/'+action, {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify(body)});
-  const j = await r.json().catch(()=>({}));
-  if(!r.ok){ toast('Failed: '+(j.error||r.status)); throw new Error(j.error); }
+  const done = busy(pressed, action); pressed = null;
+  let r, j;
+  try{
+    r = await fetch('api/'+action, {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify(body)});
+    j = await r.json().catch(()=>({}));
+  }catch(e){ done(); toast('Failed: server unreachable'); throw e; }
+  if(!r.ok){ done(); toast('Failed: '+(j.error||r.status)); throw new Error(j.error); }
+  afterLoad.push(done); // the buttons stay busy until refresh shows the result
   return j;
 }
+// refresh reloads the board right after an action (the server has already rebuilt it), then frees
+// any busy buttons the render did not replace.
+async function refresh(){ try{ await load(); } finally{ afterLoad.splice(0).forEach(f=>f()); } }
 async function move(id, stage){ const c=B.cards.find(x=>x.id===id); if(!c||c.stage===stage) return;
   if(stage==='landed' && !confirm('Move to Done archives this agent in Paseo. Continue?')) return;
-  await post('stage',{id,stage}); toast('Moved to '+B.stages.find(s=>s[0]===stage)[1]); c.stage=stage; render(); }
+  await post('stage',{id,stage}); toast('Moved to '+B.stages.find(s=>s[0]===stage)[1]); c.stage=stage; render(); refresh(); }
 
 function openPanel(id){ sel=id; fillPanel(B.cards.find(c=>c.id===id), true); render(); }
 function closePanel(){ sel=null; $('panel').classList.remove('open'); render(); }
@@ -630,8 +654,8 @@ async function act(a, extra={}){
     : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Plan approved: agent is building':'Approved: agent is landing it')
     : a+' done');
   if(c.id&&c.id.startsWith('idea-')){ $('pMsg').value=''; releaseKeyboard(); closePanel(); }
-  setTimeout(load, 1500); }
-$('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); setTimeout(load,1500); };
+  refresh(); }
+$('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); refresh(); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
 function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').innerHTML = agentOptions(v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
 // The dialog opens from the cached agent list at once; right after a factory restart the
@@ -639,9 +663,9 @@ function fillNewDlg(){ const v = $('nAgent').value || AG.default; $('nAgent').in
 function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
 $('newBtn').onclick = ()=>{ fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4); };
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
-  try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast($('nRepo').value==='auto' ? 'Picking a repo, then the Scout starts: ideas show up in Ideas' : 'Scout started: ideas show up in Ideas'); $('newDlg').close(); setTimeout(load,2000);} finally{ $('nScout').disabled=false; } };
+  try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast($('nRepo').value==='auto' ? 'Picking a repo, then the Scout starts: ideas show up in Ideas' : 'Scout started: ideas show up in Ideas'); $('newDlg').close(); refresh();} finally{ $('nScout').disabled=false; } };
 $('nGo').onclick = async()=>{ const req=$('nReq').value.trim(); if(!req) return; $('nGo').disabled=true;
-  try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; releaseKeyboard(); setTimeout(load,2000);} finally{ $('nGo').disabled=false; } };
+  try{ const r=await post('new',{request:req, repo:$('nRepo').value, agent:$('nAgent').value}); toast('Card started: '+r.id.slice(0,7)); $('newDlg').close(); $('nReq').value=''; releaseKeyboard(); refresh();} finally{ $('nGo').disabled=false; } };
 $('nAgent').onchange = ()=>{ const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
 ['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
 phone.addEventListener('change', render);
@@ -652,7 +676,9 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePanel(); });
 // DOMContentLoaded, so re-render then for markdown.
 load(); loadAgents().then(render); loadLanes().then(render);
 document.addEventListener('DOMContentLoaded', ()=>{ render(); if(sel) fillPanel(B.cards.find(c=>c.id===sel), false); });
-setInterval(load, 10000);
+// every 5 s while the board is in view, none while hidden, and at once when it comes back
+setInterval(()=>{ if(!document.hidden) load(); }, 5000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
 </script>
 </body>
 </html>

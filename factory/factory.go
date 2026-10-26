@@ -101,6 +101,8 @@ type Factory struct {
 	list      []Agent
 	cards     []Card
 	updated   time.Time
+	readSeq   uint64 // agent-file reads started (nextRead)
+	boardSeq  uint64 // the read behind list and cards; the board never moves to an older one
 	errs      map[string]string
 	log       []string
 	details   map[string]detailEntry // Needs Zach card id -> fetched Ask detail
@@ -145,14 +147,34 @@ func New(cfg Config, p Paseo) *Factory {
 	return f
 }
 
-// SetAgents replaces the factory's view of Paseo and rebuilds the board.
+// SetAgents replaces the factory's view of Paseo and rebuilds the board, as a fresh read.
 func (f *Factory) SetAgents(agents []Agent) {
+	f.setAgents(agents, f.nextRead(), true)
+}
+
+// nextRead numbers a read of Paseo's agent files. Take it just before the read: the board only
+// ever moves to a newer read (setAgents), so a slow Refresh cannot undo a board action's reload.
+func (f *Factory) nextRead() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readSeq++
+	return f.readSeq
+}
+
+// setAgents stores agents (read number seq) and their board unless a newer read is already
+// stored, and reports whether it stored. fetch lets fillAsks read new Needs Zach detail with
+// `paseo logs`; without it the board uses only the cached detail (board actions must stay fast).
+func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 	agents = f.withArchiveMarks(agents)
 	cards := BuildBoard(agents, f.ideas.List(), f.Now())
-	f.fillAsks(cards, agents)
+	f.fillAsks(cards, agents, fetch)
 	f.mu.Lock()
-	f.list, f.cards, f.updated = agents, cards, f.Now()
-	f.mu.Unlock()
+	defer f.mu.Unlock()
+	if seq < f.boardSeq {
+		return false
+	}
+	f.list, f.cards, f.updated, f.boardSeq = agents, cards, f.Now(), seq
+	return true
 }
 
 // withArchiveMarks returns agents with the board's recent archives applied. It copies the slice
@@ -184,16 +206,22 @@ func (f *Factory) withArchiveMarks(agents []Agent) []Agent {
 }
 
 // markArchived records that the board archived agent id and rebuilds the board at once, so the
-// next Tick does not act on a snapshot taken before the archive.
+// next Tick does not act on a snapshot taken before the archive. It rebuilds the stored list under
+// that list's own read number; if a newer reload stores in between, this store is refused, and the
+// mark in archivedNow still applies to that newer board and every later one.
 func (f *Factory) markArchived(id string) {
 	f.mu.Lock()
 	f.archivedNow[id] = f.Now()
+	list, seq := f.list, f.boardSeq
 	f.mu.Unlock()
-	f.SetAgents(f.agents())
+	f.setAgents(list, seq, false)
 }
 
-// Refresh reloads agents from disk.
+// Refresh reloads agents from disk, with pending permissions and new Needs Zach detail. Those
+// take seconds of paseo calls; if a board action reloaded meanwhile, Refresh reads the files again
+// and stores that with what it fetched, so the action's change stays on the board.
 func (f *Factory) Refresh() {
+	seq := f.nextRead()
 	agents, err := LoadAgents(f.cfg.Home, f.cfg.Host, f.cfg.Window, f.Now())
 	f.mu.Lock()
 	if err != nil {
@@ -204,9 +232,44 @@ func (f *Factory) Refresh() {
 	f.mu.Unlock()
 	if err == nil {
 		f.addPending(agents)
-		f.SetAgents(agents)
+		if !f.setAgents(agents, seq, true) {
+			pending := map[string]string{}
+			for _, a := range agents {
+				pending[a.ID] = a.Pending
+			}
+			if stored, err := f.load(pending); !stored {
+				// a newer board stays; these permissions show after the next loop
+				f.logf("refresh gave up: board actions reloaded during it (re-read error: %v)", err)
+			}
+		}
 	}
 	f.noteRefreshed()
+}
+
+// reload re-reads the agent files and rebuilds the board with no paseo calls: pending permissions
+// carry over from the current list and Needs Zach detail comes from the cache. A board action
+// calls it so its change shows at once instead of after the next loop.
+func (f *Factory) reload() error {
+	pending := map[string]string{}
+	for _, a := range f.agents() {
+		pending[a.ID] = a.Pending
+	}
+	_, err := f.load(pending)
+	return err
+}
+
+// load reads the agent files, applies pending, and stores the board without fetching detail. It
+// reports whether it stored: false when the read failed or a newer read is already on the board.
+func (f *Factory) load(pending map[string]string) (bool, error) {
+	seq := f.nextRead()
+	agents, err := LoadAgents(f.cfg.Home, f.cfg.Host, f.cfg.Window, f.Now())
+	if err != nil {
+		return false, err
+	}
+	for i := range agents {
+		agents[i].Pending = pending[agents[i].ID]
+	}
+	return f.setAgents(agents, seq, false), nil
 }
 
 // Run polls Paseo and applies the rules until ctx ends. A POST kicks an early refresh. When ctx
@@ -317,20 +380,23 @@ func (f *Factory) send(id, msg string, images ...string) error {
 	return err
 }
 
-// archiveAgent stops agent id, archives it and marks the snapshot archived. `paseo archive`
-// refuses a running agent, `paseo stop` is a no-op on an idle one, and stop can return before the
-// run has wound down, so a "currently running" archive is retried for a few seconds.
+// archiveAgent archives agent id and marks the snapshot archived. `paseo archive` refuses a running
+// agent, so only then is it stopped first (an idle agent costs one paseo call, not two); stop can
+// return before the run has wound down, so a "currently running" archive is retried for a few seconds.
 func (f *Factory) archiveAgent(id string) error {
-	if _, err := f.paseo("stop", id); err != nil {
-		return err
-	}
-	var err error
-	for try := 1; ; try++ {
-		_, err = f.paseo("archive", id)
-		if err == nil || try == archiveTries || !strings.Contains(err.Error(), "currently running") {
-			break
+	_, err := f.paseo("archive", id)
+	if err != nil && strings.Contains(err.Error(), "currently running") {
+		// Paseo refuses a running agent without touching it: stop it, then retry while it winds down
+		if _, err := f.paseo("stop", id); err != nil {
+			return err
 		}
-		f.Sleep(time.Second)
+		for try := 1; ; try++ {
+			_, err = f.paseo("archive", id)
+			if err == nil || try == archiveTries || !strings.Contains(err.Error(), "currently running") {
+				break
+			}
+			f.Sleep(time.Second)
+		}
 	}
 	if err != nil {
 		return err
