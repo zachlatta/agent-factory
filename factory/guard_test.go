@@ -39,19 +39,19 @@ func TestGuardedDefaultsToFactoryRepoOnly(t *testing.T) {
 	}
 }
 
-func TestGuardedCodeApproveScansAndWaitsForZach(t *testing.T) {
+func TestGuardedZachCardLandsAfterCleanScan(t *testing.T) {
 	for _, tier := range []string{"low", "risky", "architecture"} {
-		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: tier,
+		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: tier, labelSource: "board",
 			labelPlanRounds: "1", labelZachPlan: "approved"}), reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
 		p.logs["r1"] = "TIER: " + tier + "\nVERDICT: approve"
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
-		if l[labelStage] != "zach" || !scanPassed(l[labelNote]) {
+		if l[labelStage] != "landing" || !strings.Contains(l[labelNote], "scan passed") {
 			t.Errorf("%s: labels = %v", tier, l)
 		}
-		if len(p.sent("c1")) != 0 {
-			t.Errorf("%s: a landing message went out before Zach approved: %v", tier, p.sent("c1"))
+		if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land") || !strings.Contains(msgs[0], "--no-verify") {
+			t.Errorf("%s: sent = %v", tier, msgs)
 		}
 		if len(*ranges) != 1 || (*ranges)[0] != "origin/main..HEAD" {
 			t.Errorf("%s: scanned %v", tier, *ranges)
@@ -59,8 +59,63 @@ func TestGuardedCodeApproveScansAndWaitsForZach(t *testing.T) {
 	}
 }
 
+func TestGuardedInboxCardLandsAndReports(t *testing.T) {
+	c := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "email", labelPlanRounds: "1"})
+	c.Labels[gmailThreadLabel] = "t1"
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
+	fakeScan(f, nil, nil)
+	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	f.ApplyVerdict(f.agent("r1"))
+	if l := p.labels("c1"); l[labelStage] != "landing" {
+		t.Errorf("labels = %v", l)
+	}
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land") || !strings.Contains(msgs[0], "t1") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
+// Cards Zach did not place (ideas, Scouts, scheduled runs), architecture plans he has not approved
+// and cards with no plan review still wait for him after a clean scan.
+func TestGuardedOtherCardsWaitForZach(t *testing.T) {
+	sched := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"})
+	sched.Labels["paseo.schedule-id"] = "s1"
+	for name, c := range map[string]Agent{
+		"idea": publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board",
+			labelOrigin: "idea", labelPlanRounds: "1"}),
+		"scout": publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board",
+			labelRole: "scout", labelPlanRounds: "1"}),
+		"schedule": sched,
+		"app":      publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+		"architecture": publicCard("c1", map[string]string{labelStage: "review", labelTier: "architecture",
+			labelSource: "board", labelPlanRounds: "1"}),
+		"no plan review": publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board"}),
+	} {
+		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
+		ranges := fakeScan(f, nil, nil)
+		p.logs["r1"] = "VERDICT: approve"
+		f.ApplyVerdict(f.agent("r1"))
+		if l := p.labels("c1"); l[labelStage] != "zach" {
+			t.Errorf("%s: labels = %v", name, l)
+		}
+		if len(p.sent("c1")) != 0 {
+			t.Errorf("%s: a landing message went out before Zach approved: %v", name, p.sent("c1"))
+		}
+		if len(*ranges) != 1 {
+			t.Errorf("%s: scanned %v", name, *ranges)
+		}
+	}
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board",
+		labelOrigin: "idea", labelPlanRounds: "1"}), reviewer("r1", "c1", "code"))
+	fakeScan(f, nil, nil)
+	p.logs["r1"] = "VERDICT: approve"
+	f.ApplyVerdict(f.agent("r1"))
+	if l := p.labels("c1"); !scanPassed(l[labelNote]) {
+		t.Errorf("idea note = %q", l[labelNote])
+	}
+}
+
 func TestGuardedScanHitStopsLanding(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
 	fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
 	p.logs["r1"] = "TIER: low\nVERDICT: approve"
@@ -75,7 +130,7 @@ func TestGuardedScanHitStopsLanding(t *testing.T) {
 }
 
 func TestGuardedScanErrorFailsClosed(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
 	fakeScan(f, nil, errors.New("gitleaks not found"))
 	p.logs["r1"] = "TIER: low\nVERDICT: approve"

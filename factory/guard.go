@@ -13,8 +13,21 @@ import (
 
 // Guarded repos are public: anything that lands there is published. For their cards the factory
 // runs the secret scan itself before any landing (from this binary, with origin/main's gitleaks
-// config, so a card cannot weaken the scan that checks it), and Zach approves every landing. Their
-// ideas wait for Zach's Start, and the direct track is off. Other repos are unaffected.
+// config, so a card cannot weaken the scan that checks it). A card Zach placed (zachRequested)
+// lands on its own once both reviews and that scan pass; any other card waits for his approval.
+// Their ideas wait for Zach's Start, and the direct track is off. Other repos are unaffected.
+
+// zachRequested: Zach placed this card himself, on the board (or Repo Auto) or through the email
+// and voice-memo inbox (fromInbox, the dispatcher's source label on cards; the dispatcher takes
+// only Zach's own messages). Ideas, Scouts and scheduled runs are not his requests, even after
+// he starts them.
+func zachRequested(a Agent) bool {
+	switch source(a) {
+	case "idea", "scout", "schedule":
+		return false
+	}
+	return a.L(labelSource) == "board" || fromInbox(a)
+}
 
 // guarded reports whether repo is in Config.Guarded.
 func (f *Factory) guarded(repo string) bool {
@@ -23,7 +36,8 @@ func (f *Factory) guarded(repo string) bool {
 
 const publicCardNote = `
 This repo is public: everything that lands here is published. So:
-- No direct track: every change is a build-track card, and Zach approves its landing.
+- No direct track: every change is a build-track card. It lands on its own only after both reviews
+  and the factory's secret scan pass, and only if Zach placed it; otherwise Zach approves its landing.
 - Never commit secrets, hostnames, IP addresses, email addresses, home-directory paths, thread or
   session ids, quotes from Zach or personal facts, in code, comments, tests, docs or commit messages.
   Keep incident history and evidence in the private work item that asked for the change, not here.

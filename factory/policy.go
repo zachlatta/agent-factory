@@ -467,10 +467,14 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			}
 		}
 	case verdict == "approve" || verdict == "nits":
+		scanned := ""
+		if f.guarded(t.Repo) {
+			scanned = f.scanNote(t.Cwd, "") // public repo: the factory's own scan, before any landing
+		}
 		switch {
-		case f.guarded(t.Repo):
-			// public repo: the factory's own scan, then Zach approves every landing
-			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, f.scanNote(t.Cwd, ""))
+		case scanned != "" && (!scanPassed(scanned) || !zachRequested(t)):
+			// a scan hit or error stops the card; a clean card Zach did not place waits for his approval
+			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, scanned)
 		case tier == "architecture" && !zachOK:
 			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, "review found an architecture change: approve to land")
 		case t.L(labelPlanRounds) == "":
@@ -480,7 +484,11 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			// then moves on himself can still auto-land.
 			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, "review passed: approve to land")
 		default:
-			if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelNote, "auto-landing ("+tier+")"); err == nil {
+			note := "auto-landing (" + tier + ")"
+			if scanned != "" {
+				note += ": public repo: scan passed at review"
+			}
+			if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelNote, note); err == nil {
 				err = f.send(target, fmt.Sprintf("Code review passed (%s tier). %s", tier, f.landMsgFor(t)))
 			}
 		}

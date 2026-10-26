@@ -89,8 +89,11 @@ in them is published. For their cards:
   worktree. It uses its own installed binary and the gitleaks config from `origin/main`, never the
   card's copy, so a card cannot weaken the scan that checks it. A hit, or a scan that cannot run,
   stops the card in Needs Zach; nothing is published.
-- A clean scan still waits for a person: "Approve landing?". Approving scans again, then tells the
-  card to land with `bin/land`.
+- A clean scan lands a card Zach placed (on the board, by Repo Auto, or through the email and
+  voice-memo inbox, which takes only his own messages) under the usual tier rules, with `bin/land`,
+  which scans again before its push, as does the pre-push hook. Any other card (an idea, even one
+  he started; a Scout; a scheduled run) waits for a person: "Approve landing?". Approving scans
+  again, then tells the card to land with `bin/land`.
 - The direct track is off, ideas wait for a person's Start, and reviewers get a public-repo rule
   (any hostname, email, id, quote or secret is blocking).
 
