@@ -48,6 +48,7 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /api/timings", gzipHandler(f.handleTimings))
 	mux.HandleFunc("GET /api/deploy", gzipHandler(f.handleDeploy))
 	mux.HandleFunc("GET /api/transcript/{id}", gzipHandler(f.handleTranscript))
+	mux.HandleFunc("GET /api/transcript/{id}/image/{ref}", f.handleTranscriptImage)
 	mux.HandleFunc("GET /api/logs/{id}", gzipHandler(f.handleLogs))
 	mux.HandleFunc("GET /api/land-review/{by}", gzipHandler(f.handleLandReview))
 	mux.HandleFunc("GET /host", page("host.html"))
@@ -144,8 +145,9 @@ func (f *Factory) handlePeers(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, p.Text(f.cfg.Location))
 }
 
-func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+// transcriptAgent is the agent whose transcript /api/transcript/{id} shows: the card's current agent
+// when id names one it replaced.
+func (f *Factory) transcriptAgent(id string) (Agent, map[string]Agent, bool) {
 	a, found := f.agentOK(id)
 	byID := f.byID()
 	if !found || (a.L(labelRole) == "" && replacedPredecessor(byID, a)) {
@@ -153,12 +155,56 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 			a, found = ca, true
 		}
 	}
+	return a, byID, found
+}
+
+// lineage is the agents a card's transcript is stitched from, oldest first and a last (or just a).
+func lineage(byID map[string]Agent, a Agent) []Agent {
+	if a.L(labelRole) == "" {
+		if lin := cardLineage(byID, a.ID); len(lin) > 1 {
+			return lin
+		}
+	}
+	return []Agent{a}
+}
+
+// lineagePrefix is the history of the agents a card's agent replaced, oldest first, each followed by
+// a "Switched from" note. Its events carry Prev (how many agents back) and image refs ending in
+// .<Prev>, so the image route reads them from that agent's own session file.
+func (f *Factory) lineagePrefix(lin []Agent) []Event {
+	var out []Event
+	for i := 0; i < len(lin)-1; i++ {
+		prev, next, hops := lin[i], lin[i+1], len(lin)-1-i
+		src := TranscriptSource{Provider: prev.Provider, SessionID: prev.SessionID, Cwd: prev.Cwd}
+		if pr, err := ReadTranscriptPage(f.cfg.Home, src, Page{Refs: true}); err == nil && !pr.Fallback {
+			for _, e := range pr.Events {
+				e.Prev = hops
+				eachImage([]Event{e}, func(_, _ int, im *Image) {
+					if im.Ref != "" {
+						im.Ref += "." + strconv.Itoa(hops)
+					}
+				})
+				out = append(out, e)
+			}
+		}
+		out = append(out, Event{Kind: "system", Prev: hops, Ts: iso(next.CreatedAt),
+			Text: fmt.Sprintf("Switched from %s (%s) to %s (%s)", short(prev.ID), orNone(prev.Model, prev.Provider), short(next.ID), orNone(next.Model, next.Provider))})
+	}
+	return out
+}
+
+func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
+	a, byID, found := f.transcriptAgent(r.PathValue("id"))
 	if !found {
 		writeJSON(w, 404, map[string]string{"error": "agent not on the board (open, or archived in the last 12 h)"})
 		return
 	}
-	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
-	res, err := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, after)
+	// tail=1: the newest page; before=N: the page before line N; after=N (from=N): new lines to poll
+	q := r.URL.Query()
+	num := func(k string) int { n, _ := strconv.Atoi(q.Get(k)); return max(n, 0) }
+	p := Page{After: num("after"), Before: num("before"), From: num("from"), Tail: q.Get("tail") == "1",
+		Budget: TranscriptBudget, Refs: true}
+	res, err := ReadTranscriptPage(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, p)
 	unavailable := ""
 	if err != nil || res.Fallback {
 		// no readable session file: say why, never ask Paseo (`paseo logs` would load the agent)
@@ -167,25 +213,16 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 			unavailable = err.Error()
 		}
 	}
-	if a.L(labelRole) == "" && (after == 0 || res.Replace) {
-		if lin := cardLineage(byID, a.ID); len(lin) > 1 {
-			var prefix []Event
-			for i := 0; i < len(lin)-1; i++ {
-				prev, next := lin[i], lin[i+1]
-				if pr, perr := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: prev.Provider, SessionID: prev.SessionID, Cwd: prev.Cwd}, 0); perr == nil && !pr.Fallback {
-					prefix = append(prefix, pr.Events...)
-				}
-				prefix = append(prefix, Event{
-					Kind: "system",
-					Text: fmt.Sprintf("Switched from %s (%s) to %s (%s)", short(prev.ID), orNone(prev.Model, prev.Provider), short(next.ID), orNone(next.Model, next.Provider)),
-					Ts:   iso(next.CreatedAt),
-				})
-			}
-			if len(prefix) > 0 {
-				res.Events = append(prefix, res.Events...)
-				res.Fallback = false
-				unavailable = ""
-			}
+	// the agents this card's agent replaced come before its first line: on the page that reaches it
+	start := !res.Older
+	if !p.back() {
+		start = p.After == 0 && p.From == 0
+	}
+	if lin := lineage(byID, a); start && len(lin) > 1 {
+		if prefix := f.lineagePrefix(lin); len(prefix) > 0 {
+			res.Events = append(prefix, res.Events...)
+			res.Fallback = false
+			unavailable = ""
 		}
 	}
 	c, isCard := f.card(a.ID)
@@ -200,8 +237,8 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	out := map[string]any{"events": res.Events, "next": res.Next, "fallback": res.Fallback, "replace": res.Replace,
-		"unavailable": unavailable,
-		"provider":    res.Provider, "stages": Stages, "parent": parent, "card": nil,
+		"unavailable": unavailable, "before": res.Before, "older": res.Older, "more": res.More,
+		"provider": res.Provider, "stages": Stages, "parent": parent, "card": nil,
 		"agent": map[string]any{"id": a.ID, "host": a.Host, "title": a.Title, "status": a.Status,
 			"archivedAt": iso(a.ArchivedAt), "cwd": a.Cwd, "repo": a.Repo, "branch": a.Branch, "model": a.Model,
 			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": a.Labels}}
@@ -209,6 +246,36 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		out["card"] = c
 	}
 	writeJSON(w, 200, out)
+}
+
+// handleTranscriptImage serves an image a transcript page refers to (Image.Ref), read from the
+// session file of an agent on the board, so a page fetches images only when it shows them.
+func (f *Factory) handleTranscriptImage(w http.ResponseWriter, r *http.Request) {
+	a, byID, found := f.transcriptAgent(r.PathValue("id"))
+	if !found {
+		writeJSON(w, 404, map[string]string{"error": "agent not on the board"})
+		return
+	}
+	// line.k is an image of a's own session; line.k.p one of the agent p back in its card's lineage
+	ref, hops := r.PathValue("ref"), 0
+	if m := lineageRef.FindStringSubmatch(ref); m != nil {
+		ref, hops = m[1], int(m[2][0]-'0')
+	}
+	if lin := lineage(byID, a); hops < len(lin) {
+		a = lin[len(lin)-1-hops]
+	} else {
+		writeJSON(w, 404, map[string]string{"error": errNoImage.Error()})
+		return
+	}
+	media, data, err := TranscriptImage(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, ref)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", media)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=86400") // a written line never changes
+	w.Write(data)
 }
 
 func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {

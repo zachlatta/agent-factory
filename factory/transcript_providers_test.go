@@ -260,7 +260,7 @@ func TestMuseFollowUpResetsAskReply(t *testing.T) {
 	if strings.Contains(reply, "Previous build reply") || reply != "" {
 		t.Fatalf("stale reply: %q, %v", reply, err)
 	}
-	tr, _, err := readMuse(f.cfg.Home, "synthetic-muse", 1)
+	tr, err := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: "muse", SessionID: c.SessionID}, 1)
 	if err != nil || len(tr.Events) != 1 || tr.Events[0].Kind != "user" || tr.Events[0].Text != "Check completion" || tr.Events[0].Ts == "" || tr.Events[0].Line != 2 {
 		t.Fatalf("follow-up: %+v %v", tr, err)
 	}

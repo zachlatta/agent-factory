@@ -125,6 +125,7 @@ footer{background:#fff;border-top:1px solid var(--line);padding:8px 16px 10px}
 #zoom{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:30;cursor:zoom-out}
 #zoom img{max-width:95vw;max-height:95vh}
 .empty{color:var(--mute);text-align:center;margin:40px 0}
+.older{text-align:center;margin:4px 0 14px}
 @media (max-width:900px){aside{display:none} #jump{right:16px} .toolbar input[type=search]{width:130px}
   header{padding:6px 12px;gap:6px} header h1{flex-basis:100%;order:-1;font-size:15px} header>a{order:-2}
   #hacts{flex-wrap:nowrap;overflow-x:auto;width:100%} #hacts button{padding:3px 8px;font-size:12px}
@@ -176,7 +177,9 @@ footer{background:#fff;border-top:1px solid var(--line);padding:8px 16px 10px}
 const AID = location.pathname.split('/').filter(Boolean).pop();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let events = [], next = 0, meta = null, pending = [], atts = [], lastRender = '';
+// The page holds lines `before` on (older pages load on scroll-up, a search, or the button) and polls
+// for lines after `next`. Images are fetched by ref when shown; a tool's only when it is opened.
+let events = [], next = 0, before = 0, older = false, meta = null, pending = [], atts = [], lastRender = '';
 const results = {};
 
 function md(s){
@@ -259,7 +262,11 @@ function toolBody(t){
   } else if (t.id) h += `<div class="lbl">no output yet</div>`;
   return h;
 }
-function imgHtml(im){ return im.missing ? '<div class="sub">[image too large to show]</div>' : `<img class="shot" src="data:${esc(im.media)};base64,${im.data}" alt="">`; }
+function imgHtml(im){
+  if (im.missing) return '<div class="sub">[image too large to show]</div>';
+  const src = im.ref ? `../api/transcript/${encodeURIComponent(AID)}/image/${encodeURIComponent(im.ref)}` : `data:${esc(im.media)};base64,${im.data}`;
+  return `<img class="shot" loading="lazy" src="${src}" alt="">`;
+}
 function toolHtml(t){
   const r = results[t.id];
   const st = r ? (r.error ? '<span class="st bad">✗</span>' : '<span class="st ok">✓</span>') : (t.id ? '<span class="st wait">…</span>' : '');
@@ -272,7 +279,10 @@ function render(force){
   const open = new Set([...document.querySelectorAll('#tx details[open]')].map(d => d.dataset.k).filter(Boolean));
   for (const e of events) if (e.kind === 'result' && e.id) results[e.id] = e;
   const q = $('q').value.trim().toLowerCase();
-  let h = '', day = '', group = [], n = 0, hits = 0, userIdx = 0;
+  let h = older ? `<div class="older"><button onclick="loadOlder()">${loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button></div>` : '';
+  const head = h;
+  let day = '', group = [], n = 0, hits = 0, userIdx = 0;
+  const thinkN = {};
   const outline = [];
   const flush = () => {
     if (!group.length) return;
@@ -300,16 +310,18 @@ function render(force){
     if (e.kind === 'user') {
       let imgs = e.images ? e.images.map(src => `<img class="shot" src="${src}" alt="">`).join('') : '';
       for (let j = i+1; j < all.length && all[j].kind === 'image' && all[j].from === 'user'; j++) imgs += imgHtml(all[j]);
-      const id = 'u' + (userIdx++);
+      const id = 'u' + (userIdx++), first = userIdx === 1 && !older;
       const fromBoard = /^Message from Zach via the factory board:\n\n/.test(e.text||'');
       const text = (e.text||'').replace(/^Message from Zach via the factory board:\n\n/, '');
-      outline.push({id, text, ts: e.ts, you: fromBoard || userIdx === 1});
+      outline.push({id, text, ts: e.ts, you: fromBoard || first});
       const long = text.length > 900 && !q;
-      h += `<div class="msg user ${e.pending?'pending':''}" id="${id}"><div class="ts">${fromBoard?'You (board)':userIdx===1?'Prompt':'User'} · ${clock(e.ts)}${e.pending?' · sending…':''}</div><div class="bubble ${long?'long':''}">${hl(esc(text))}${imgs}</div></div>`;
+      h += `<div class="msg user ${e.pending?'pending':''}" id="${id}"><div class="ts">${fromBoard?'You (board)':first?'Prompt':'User'} · ${clock(e.ts)}${e.pending?' · sending…':''}</div><div class="bubble ${long?'long':''}">${hl(esc(text))}${imgs}</div></div>`;
     } else if (e.kind === 'assistant') {
       h += `<div class="msg"><div class="ts">Agent · ${clock(e.ts)}</div><div class="md">${hl(md(e.text))}</div></div>`;
     } else if (e.kind === 'thinking') {
-      const k = 'th' + (e.line||i) + '-' + i;
+      // keyed by line, so an open block stays open when older pages are added above it
+      const ln = (e.prev || 0) + ':' + (e.line || 'i' + i);
+      const k = 'th' + ln + '-' + (thinkN[ln] = (thinkN[ln] || 0) + 1);
       h += `<details class="think" data-k="${k}" ${open.has(k)||q?'open':''}><summary>💭 ${esc(short(e.text, 160))}</summary><div class="md">${hl(md(e.text))}</div></details>`;
     } else if (e.kind === 'image') {
       h += `<div class="msg">${imgHtml(e)}</div>`;
@@ -318,7 +330,7 @@ function render(force){
     }
   }
   flush();
-  if (!h) h = `<div class="empty">${q ? 'No matches.' : meta && meta.unavailable ? esc(meta.unavailable.replace(/^history unavailable/, 'History unavailable')) + '.' : 'No messages yet.'}</div>`;
+  if (h === head) h += `<div class="empty">${q ? 'No matches.' : meta && meta.unavailable ? esc(meta.unavailable.replace(/^history unavailable/, 'History unavailable')) + '.' : 'No messages yet.'}</div>`;
   renderSide(outline);
   if (h === lastRender && !force) return;
   lastRender = h;
@@ -332,7 +344,7 @@ function render(force){
   document.querySelectorAll('.bubble.long').forEach(b => b.onclick = () => b.classList.remove('long'));
   document.querySelectorAll('#tx img.shot').forEach(im => im.onclick = () => { $('zoom').querySelector('img').src = im.src; $('zoom').style.display = 'flex'; });
   const tools = events.filter(e=>e.kind==='tool').length, msgs = events.filter(e=>e.kind==='assistant'||e.kind==='user').length;
-  $('counts').textContent = `${msgs} messages · ${tools} tool calls`;
+  $('counts').textContent = `${msgs} messages · ${tools} tool calls${older ? ' (recent; earlier not loaded)' : ''}`;
   if (stick) toBottom();
 }
 function fill(d){ const b = d.querySelector('.body'); if (b && b.dataset.lazy) { const t = events.find(e => e.kind==='tool' && e.id === d.dataset.k); if (t) b.innerHTML = toolBody(t); delete b.dataset.lazy; } }
@@ -352,7 +364,7 @@ function renderSide(outline){
     <div>Started</div><div>${ago(a.createdAt)}</div><div>Active</div><div>${ago(a.lastActivityAt)}</div>
     <div>Folder</div><div><code>${esc(a.cwd)}</code></div><div>Agent</div><div><code>${esc(a.id)}</code></div></div>`;
   if (c && c.children.length) h += `<h3>Sub-agents and reviews</h3><div class="outline">${c.children.map(k => `<a href="${encodeURIComponent(k.id)}">${k.role==='reviewer'?esc((k.kind||'')+' review'):esc(k.title||k.short)} <small>${k.model&&k.role!=='reviewer'?esc(k.model)+' · ':''}${k.archived?'archived':esc(k.status)}${k.verdict?' · '+esc(k.verdict):''}</small></a>`).join('')}</div>`;
-  if (outline.length) h += `<h3>Messages to the agent</h3><div class="outline">${outline.map(o => `<a href="#${o.id}" title="${esc(short(o.text, 300))}"><small>${clock(o.ts)}</small> ${esc(short(o.text, 60))}</a>`).join('')}</div>`;
+  if (outline.length || older) h += `<h3>Messages to the agent</h3><div class="outline">${older ? '<a href="#" onclick="loadOlder(); return false"><small>Earlier messages not loaded: load more</small></a>' : ''}${outline.map(o => `<a href="#${o.id}" title="${esc(short(o.text, 300))}"><small>${clock(o.ts)}</small> ${esc(short(o.text, 60))}</a>`).join('')}</div>`;
   $('side').innerHTML = h;
 }
 
@@ -377,26 +389,64 @@ function renderHeader(){
 }
 
 // ------------------------------------------------------------- data
-let timer = null, loading = false;
+let timer = null, loading = false, loadingOlder = false, olderFailed = 0, firstText = false;
 async function poll(){
   if (loading) return; loading = true;
+  let more = false;
   try {
-    const r = await fetch(`../api/transcript/${AID}?after=${next}`);
+    const first = !meta, from = before;
+    const r = await fetch(`../api/transcript/${AID}?` + (first ? 'tail=1' : `after=${next}&from=${from}`));
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
-    // replace: the whole transcript (a summary log, or a session whose steps change in place); the
-    // first poll after one restarts at line 0, so it replaces too
-    if (j.replace || (meta && meta.replace)) { events = j.events; } else if (j.events.length) { events = events.concat(j.events); }
-    next = j.next; meta = j;
+    if (first) { events = j.events; before = j.before; older = j.older; }
+    // replace: every event from line `from` on (a summary log, or a session whose steps change in
+    // place); older pages loaded meanwhile stay. The first poll after one replaces too.
+    // (events with prev come from the agents this card's agent replaced, sent once with its first line)
+    else if (j.replace || meta.replace) events = events.filter(e => e.prev || (e.line && e.line < from)).concat(j.events);
+    else if (j.events.length) events = events.concat(j.events);
+    if (j.fallback) older = false;
+    next = j.next; meta = j; more = j.more;
     // drop optimistic bubbles once the real message shows up
     pending = pending.filter(p => !events.some(e => e.kind === 'user' && Date.parse(e.ts) >= p.at - 5000 && (e.text||'').includes(p.text.slice(0, 40))) && Date.now() - p.at < 120000);
     renderHeader(); render();
+    if (!firstText && events.length) { firstText = true; performance.mark('transcript-first-text'); }
   } catch (e) {
     $('status').textContent = 'error: ' + e.message;
     if (!events.length) $('tx').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   } finally { loading = false; }
   clearTimeout(timer);
-  timer = setTimeout(poll, meta && meta.agent.status === 'running' || pending.length ? 2500 : 8000);
+  timer = setTimeout(poll, more ? 50 : meta && meta.agent.status === 'running' || pending.length ? 2500 : 8000);
+}
+
+// loadOlder adds the page before the oldest loaded line, keeping the view where it was. It reports
+// whether it did; after a failure it waits 10 s before trying again.
+async function loadOlder(){
+  if (!older || loadingOlder || Date.now() - olderFailed < 10000) return false;
+  loadingOlder = true; render(true);
+  try {
+    const r = await fetch(`../api/transcript/${AID}?before=${before}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    if (j.before >= before) throw new Error('no older page');
+    const s = $('scroll'), h0 = s.scrollHeight, t0 = s.scrollTop;
+    events = j.events.concat(events); before = j.before; older = j.older;
+    loadingOlder = false; render(true);
+    s.scrollTop = t0 + s.scrollHeight - h0;
+    return true;
+  } catch (e) {
+    olderFailed = Date.now(); loadingOlder = false; render(true);
+    toast('Could not load earlier messages: ' + e.message);
+    return false;
+  } finally { loadingOlder = false; }
+}
+// loadAll loads every older page (text only: images stay refs), so a search covers the whole transcript.
+async function loadAll(){
+  while (older) { $('qcount').textContent = 'loading earlier messages…'; if (!await loadOlder()) break; }
+}
+// fillUp loads older pages until the transcript fills the screen, so scrolling up can load more.
+async function fillUp(){
+  const s = $('scroll');
+  while (older && s.scrollHeight <= s.clientHeight + 200) if (!await loadOlder()) break;
 }
 
 async function post(action, body){
@@ -448,17 +498,17 @@ document.addEventListener('drop', e => { if (e.dataTransfer?.files?.length) { e.
 if (matchMedia('(pointer:coarse)').matches) $('sendHint').textContent = '';
 
 // ------------------------------------------------------------- toolbar
-$('q').addEventListener('input', () => render(true));
+$('q').addEventListener('input', async () => { if ($('q').value.trim() && older) await loadAll(); render(true); });
 $('showTools').onchange = e => $('tx').classList.toggle('hide-tools', !e.target.checked);
 $('showThink').onchange = e => $('tx').classList.toggle('hide-think', !e.target.checked);
 $('expandAll').onchange = () => render(true);
-$('scroll').addEventListener('scroll', () => $('jump').style.display = nearBottom() ? 'none' : 'block');
+$('scroll').addEventListener('scroll', () => { $('jump').style.display = nearBottom() ? 'none' : 'block'; if ($('scroll').scrollTop < 400) loadOlder(); });
 $('jump').onclick = toBottom;
 $('zoom').onclick = () => $('zoom').style.display = 'none';
 document.addEventListener('keydown', e => { if (e.key === 'Escape') $('zoom').style.display = 'none'; if (e.key === '/' && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); $('q').focus(); } });
 // opening the transcript marks the card read (factory.seen); quiet, since a read-only canary answers 403
 function seen(){ fetch('../api/seen', {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify({id: AID})}).catch(() => {}); }
-poll().then(() => { setTimeout(toBottom, 50); seen(); });
+poll().then(() => { setTimeout(() => { toBottom(); fillUp(); }, 50); seen(); });
 </script>
 </body>
 </html>

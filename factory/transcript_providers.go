@@ -108,98 +108,96 @@ func dataImage(url string) Image {
 
 var codexSystem = regexp.MustCompile(`^\s*(# AGENTS\.md instructions|<environment_context>|<user_instructions>|<system_instructions>|<turn_aborted>|<user_shell_command>)`)
 
-// readCodex reads a Codex rollout file, ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl
-// (or archived_sessions/). Developer messages are the system prompt and are left out.
-func readCodex(home, id string, after int) (Transcript, bool, error) {
-	path := firstFile(filepath.Join(home, ".codex/sessions/*/*/*", "rollout-*-"+id+".jsonl"),
+// codexPath is the Codex rollout file, ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl (or
+// archived_sessions/), or "" when there is none.
+func codexPath(home, id string) string {
+	return firstFile(filepath.Join(home, ".codex/sessions/*/*/*", "rollout-*-"+id+".jsonl"),
 		filepath.Join(home, ".codex/archived_sessions", "rollout-*-"+id+".jsonl"),
 		filepath.Join(home, ".codex/archived_sessions/*/*/*", "rollout-*-"+id+".jsonl"))
-	if path == "" {
-		return Transcript{}, false, nil
+}
+
+// codexLineEvents are the events of line n of a Codex rollout file. Developer messages are the
+// system prompt and are left out.
+func codexLineEvents(n int, line []byte) (out []Event) {
+	var d struct {
+		Timestamp, Type string
+		Payload         map[string]any
 	}
-	res := Transcript{Events: []Event{}, Path: path}
-	next, err := scanLines(path, after, func(n int, line []byte) {
-		var d struct {
-			Timestamp, Type string
-			Payload         map[string]any
-		}
-		if json.Unmarshal(line, &d) != nil || d.Type != "response_item" {
+	if json.Unmarshal(line, &d) != nil || d.Type != "response_item" {
+		return
+	}
+	p := d.Payload
+	add := func(ev Event) {
+		ev.Ts, ev.Line = d.Timestamp, n
+		out = append(out, ev)
+	}
+	switch str(p, "type") {
+	case "message":
+		role := str(p, "role")
+		if role != "user" && role != "assistant" {
 			return
 		}
-		p := d.Payload
-		add := func(ev Event) {
-			ev.Ts, ev.Line = d.Timestamp, n
-			res.Events = append(res.Events, ev)
-		}
-		switch str(p, "type") {
-		case "message":
-			role := str(p, "role")
-			if role != "user" && role != "assistant" {
-				return
+		blocks, _ := p["content"].([]any)
+		for _, x := range blocks {
+			b, _ := x.(map[string]any)
+			switch str(b, "type") {
+			case "input_text", "output_text", "text":
+				t := str(b, "text")
+				switch {
+				case strings.TrimSpace(t) == "":
+				case role == "user" && (codexSystem.MatchString(t) || systemText.MatchString(t)):
+					add(Event{Kind: "system", Text: capText(t)})
+				default:
+					add(Event{Kind: role, Text: t})
+				}
+			case "input_image":
+				im := dataImage(str(b, "image_url"))
+				add(Event{Kind: "image", Media: im.Media, Data: im.Data, Miss: im.Missing, From: role})
 			}
-			blocks, _ := p["content"].([]any)
-			for _, x := range blocks {
+		}
+	case "reasoning":
+		var parts []string
+		for _, key := range []string{"summary", "content"} {
+			xs, _ := p[key].([]any)
+			for _, x := range xs {
+				xm, _ := x.(map[string]any)
+				if t := str(xm, "text"); strings.TrimSpace(t) != "" {
+					parts = append(parts, t)
+				}
+			}
+		}
+		if len(parts) > 0 {
+			add(Event{Kind: "thinking", Text: strings.Join(parts, "\n\n")})
+		}
+	case "function_call":
+		add(toolEvent(str(p, "call_id"), str(p, "name"), argsMap(str(p, "arguments"))))
+	case "custom_tool_call":
+		// exec is Codex's JavaScript tool runner: its script is the command
+		add(toolEvent(str(p, "call_id"), str(p, "name"), map[string]any{"command": str(p, "input")}))
+	case "local_shell_call":
+		act, _ := p["action"].(map[string]any)
+		add(toolEvent(str(p, "call_id"), "local_shell", act))
+	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
+		ev := Event{Kind: "result", ID: str(p, "call_id"), Images: []Image{}}
+		switch o := p["output"].(type) {
+		case string:
+			ev.Text = capText(o)
+		case []any:
+			var texts []string
+			for _, x := range o {
 				b, _ := x.(map[string]any)
 				switch str(b, "type") {
 				case "input_text", "output_text", "text":
-					t := str(b, "text")
-					switch {
-					case strings.TrimSpace(t) == "":
-					case role == "user" && (codexSystem.MatchString(t) || systemText.MatchString(t)):
-						add(Event{Kind: "system", Text: capText(t)})
-					default:
-						add(Event{Kind: role, Text: t})
-					}
+					texts = append(texts, str(b, "text"))
 				case "input_image":
-					im := dataImage(str(b, "image_url"))
-					add(Event{Kind: "image", Media: im.Media, Data: im.Data, Miss: im.Missing, From: role})
+					ev.Images = append(ev.Images, dataImage(str(b, "image_url")))
 				}
 			}
-		case "reasoning":
-			var parts []string
-			for _, key := range []string{"summary", "content"} {
-				xs, _ := p[key].([]any)
-				for _, x := range xs {
-					xm, _ := x.(map[string]any)
-					if t := str(xm, "text"); strings.TrimSpace(t) != "" {
-						parts = append(parts, t)
-					}
-				}
-			}
-			if len(parts) > 0 {
-				add(Event{Kind: "thinking", Text: strings.Join(parts, "\n\n")})
-			}
-		case "function_call":
-			add(toolEvent(str(p, "call_id"), str(p, "name"), argsMap(str(p, "arguments"))))
-		case "custom_tool_call":
-			// exec is Codex's JavaScript tool runner: its script is the command
-			add(toolEvent(str(p, "call_id"), str(p, "name"), map[string]any{"command": str(p, "input")}))
-		case "local_shell_call":
-			act, _ := p["action"].(map[string]any)
-			add(toolEvent(str(p, "call_id"), "local_shell", act))
-		case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
-			ev := Event{Kind: "result", ID: str(p, "call_id"), Images: []Image{}}
-			switch o := p["output"].(type) {
-			case string:
-				ev.Text = capText(o)
-			case []any:
-				var texts []string
-				for _, x := range o {
-					b, _ := x.(map[string]any)
-					switch str(b, "type") {
-					case "input_text", "output_text", "text":
-						texts = append(texts, str(b, "text"))
-					case "input_image":
-						ev.Images = append(ev.Images, dataImage(str(b, "image_url")))
-					}
-				}
-				ev.Text = capText(strings.Join(texts, "\n"))
-			}
-			add(ev)
+			ev.Text = capText(strings.Join(texts, "\n"))
 		}
-	})
-	res.Next = next
-	return res, true, err
+		add(ev)
+	}
+	return out
 }
 
 var (
@@ -220,7 +218,7 @@ func readAntigravity(home, id string) (Transcript, bool, error) {
 	}
 	res := Transcript{Events: []Event{}, Path: path, Replace: true}
 	var pending []string // tool call ids waiting for their GENERIC step
-	_, err := scanLines(path, 0, func(n int, line []byte) {
+	err := scanLines(path, func(n int, line []byte) {
 		var d struct {
 			StepIndex                       int `json:"step_index"`
 			Type, Status, Content, Thinking string
@@ -285,93 +283,90 @@ func readAntigravity(home, id string) (Transcript, bool, error) {
 	return res, true, err
 }
 
-// readMuse reads a Muse Code session, ~/.local/share/muse/sessions/YYYY/MM/DD/<id>/session.jsonl
+// musePath is a Muse Code session file, ~/.local/share/muse/sessions/YYYY/MM/DD/<id>/session.jsonl
 // (sub-agents have their own files under subagent/ and are left out).
 //
 // Provisional: the record names below come from short sessions only, not a long coding run. Records
 // with any other kind, or fields that are missing, are skipped.
-func readMuse(home, id string, after int) (Transcript, bool, error) {
-	path := firstFile(filepath.Join(home, ".local/share/muse/sessions/*/*/*", id, "session.jsonl"))
-	if path == "" {
-		return Transcript{}, false, nil
+func musePath(home, id string) string {
+	return firstFile(filepath.Join(home, ".local/share/muse/sessions/*/*/*", id, "session.jsonl"))
+}
+
+// museLineEvents are the events of line n of a Muse session file.
+func museLineEvents(n int, line []byte) (out []Event) {
+	var d struct {
+		RecordedAt  int64  `json:"recorded_at"`
+		PayloadType string `json:"payload_type"`
+		Payload     struct {
+			Event  map[string]any
+			Record struct {
+				Command struct {
+					Kind   string `json:"kind"`
+					Prompt string `json:"prompt"`
+				} `json:"command"`
+			} `json:"record"`
+		}
 	}
-	res := Transcript{Events: []Event{}, Path: path}
-	next, err := scanLines(path, after, func(n int, line []byte) {
-		var d struct {
-			RecordedAt  int64  `json:"recorded_at"`
-			PayloadType string `json:"payload_type"`
-			Payload     struct {
-				Event  map[string]any
-				Record struct {
-					Command struct {
-						Kind   string `json:"kind"`
-						Prompt string `json:"prompt"`
-					} `json:"command"`
-				} `json:"record"`
-			}
+	if json.Unmarshal(line, &d) != nil {
+		return
+	}
+	ts := ""
+	if d.RecordedAt > 0 {
+		ts = time.UnixMicro(d.RecordedAt).UTC().Format(time.RFC3339Nano)
+	}
+	add := func(ev Event) {
+		ev.Ts, ev.Line = ts, n
+		out = append(out, ev)
+	}
+	if d.PayloadType == "runtime.command_intake.received" {
+		c := d.Payload.Record.Command
+		if c.Kind == "turn_submit" && strings.TrimSpace(c.Prompt) != "" {
+			add(Event{Kind: "user", Text: c.Prompt})
 		}
-		if json.Unmarshal(line, &d) != nil {
-			return
+		return
+	}
+	if d.PayloadType != "runtime.session" || d.Payload.Event == nil {
+		return
+	}
+	e := d.Payload.Event
+	text := func(k string) string { return str(e, k) }
+	switch text("kind") {
+	case "user_prompt_display":
+		if t := text("prompt"); strings.TrimSpace(t) != "" {
+			add(Event{Kind: "user", Text: t})
 		}
-		ts := ""
-		if d.RecordedAt > 0 {
-			ts = time.UnixMicro(d.RecordedAt).UTC().Format(time.RFC3339Nano)
+	case "assistant_message_committed":
+		if t := text("text"); strings.TrimSpace(t) != "" {
+			add(Event{Kind: "assistant", Text: t})
 		}
-		add := func(ev Event) {
-			ev.Ts, ev.Line = ts, n
-			res.Events = append(res.Events, ev)
+	case "reasoning_summary_committed":
+		if t := text("text"); strings.TrimSpace(t) != "" {
+			add(Event{Kind: "thinking", Text: t})
 		}
-		if d.PayloadType == "runtime.command_intake.received" {
-			c := d.Payload.Record.Command
-			if c.Kind == "turn_submit" && strings.TrimSpace(c.Prompt) != "" {
-				add(Event{Kind: "user", Text: c.Prompt})
+	case "assistant_tool_calls_committed":
+		calls, _ := e["tool_calls"].([]any)
+		for _, x := range calls {
+			c, _ := x.(map[string]any)
+			if str(c, "name") == "" {
+				continue
 			}
-			return
+			in, isMap := c["args"].(map[string]any)
+			if !isMap {
+				in = argsMap(str(c, "args"))
+			}
+			add(toolEvent(str(c, "call_id"), str(c, "name"), in))
 		}
-		if d.PayloadType != "runtime.session" || d.Payload.Event == nil {
-			return
+	case "tool_result_batch_committed":
+		rs, _ := e["results"].([]any)
+		for _, x := range rs {
+			r, _ := x.(map[string]any)
+			if str(r, "tool_call_id") == "" {
+				continue
+			}
+			ev := Event{Kind: "result", ID: str(r, "tool_call_id"), Text: capText(str(r, "text")), Images: []Image{}}
+			ev.Error, _ = r["is_error"].(bool)
+			add(ev)
 		}
-		e := d.Payload.Event
-		text := func(k string) string { return str(e, k) }
-		switch text("kind") {
-		case "user_prompt_display":
-			if t := text("prompt"); strings.TrimSpace(t) != "" {
-				add(Event{Kind: "user", Text: t})
-			}
-		case "assistant_message_committed":
-			if t := text("text"); strings.TrimSpace(t) != "" {
-				add(Event{Kind: "assistant", Text: t})
-			}
-		case "reasoning_summary_committed":
-			if t := text("text"); strings.TrimSpace(t) != "" {
-				add(Event{Kind: "thinking", Text: t})
-			}
-		case "assistant_tool_calls_committed":
-			calls, _ := e["tool_calls"].([]any)
-			for _, x := range calls {
-				c, _ := x.(map[string]any)
-				if str(c, "name") == "" {
-					continue
-				}
-				in, isMap := c["args"].(map[string]any)
-				if !isMap {
-					in = argsMap(str(c, "args"))
-				}
-				add(toolEvent(str(c, "call_id"), str(c, "name"), in))
-			}
-		case "tool_result_batch_committed":
-			rs, _ := e["results"].([]any)
-			for _, x := range rs {
-				r, _ := x.(map[string]any)
-				if str(r, "tool_call_id") == "" {
-					continue
-				}
-				ev := Event{Kind: "result", ID: str(r, "tool_call_id"), Text: capText(str(r, "text")), Images: []Image{}}
-				ev.Error, _ = r["is_error"].(bool)
-				add(ev)
-			}
-		}
-	})
-	res.Next = next
-	return res, true, err
+	}
+	return out
 }

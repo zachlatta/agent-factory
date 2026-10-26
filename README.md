@@ -649,6 +649,12 @@ Computer-use access keeps the role's existing action approvals and read-only res
   `~/.gemini/antigravity-cli/brain`, Muse `~/.local/share/muse/sessions`). With no readable file
   they say "history unavailable" and why; they never call `paseo logs`, which loads the agent in
   Paseo (resuming an archived one). Decision reads use the same session-file readers.
+  `/api/transcript/{id}` sends pages of about 300 KB at whole lines: `tail=1`
+  is the newest page, `before=N` the page before line N, `after=N` new lines to poll (`more` means
+  read again now; a line still being written waits until it ends). Images carry a `ref` instead of
+  their data and are fetched from `/api/transcript/{id}/image/{ref}` (PNG, JPEG, GIF or WebP, for
+  agents on the board), so a tool's images load only when it is opened. The page loads older pages
+  as you scroll up, and all of them before a search.
 - `factory/hostmetrics*.go`, `hostfleet.go`: host load for the header icon and `/host`. Each
   `FACTORY_METRIC_HOSTS` alias gets one read-only SSH stream (`ssh -o BatchMode=yes`, a fixed
   script on stdin, Linux or macOS), shared by all viewers, run only while someone polls
