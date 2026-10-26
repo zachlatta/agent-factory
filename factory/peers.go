@@ -299,8 +299,9 @@ const (
 	emailHeader    = "Zach's email:"            // the first prompt of an email card
 	followUpPrefix = "Zach's follow-up email (" // + RFC 5322 date + followUpSuffix: a steered follow-up
 	followUpSuffix = "):"
-	emailEnd       = "(end of Zach's email)" // closes either email block
-	subjectLine    = "- Subject: "           // older email cards: the subject is the request
+	dupPrefix      = "Zach's request from closed duplicate card " // + short id + " (" + date + followUpSuffix: steer.go, the factory's own
+	emailEnd       = "(end of Zach's email)"                      // closes either email block
+	subjectLine    = "- Subject: "                                // older email cards: the subject is the request
 )
 
 const (
@@ -308,8 +309,17 @@ const (
 	reviewFollowUpCap = 8    // newest follow-ups in a reviewer prompt
 )
 
-// FollowUp is one of Zach's follow-up emails: its date header and his words.
-type FollowUp struct{ Date, Text string }
+// FollowUp is one of Zach's follow-up emails: its date header and his words. From is set for the
+// request of a card closed as a duplicate of this one (steer.go): it adds to the request.
+type FollowUp struct{ Date, Text, From string }
+
+// label names a follow-up in a reviewer prompt or the peers brief.
+func (fu FollowUp) label() string {
+	if fu.From != "" {
+		return "From closed duplicate " + fu.From + " (" + fu.Date + "): adds to the request, does not override it"
+	}
+	return "Follow-up (" + fu.Date + ")"
+}
 
 // CardRequest is Zach's request for a card and his follow-ups, oldest first.
 type CardRequest struct {
@@ -324,7 +334,11 @@ func (r CardRequest) brief() (string, []string) {
 	out := line(r.Base)
 	var fus []string
 	for _, fu := range r.FollowUps {
-		fus = append(fus, line(fu.Text))
+		t := fu.Text
+		if fu.From != "" {
+			t = "from closed duplicate " + fu.From + ": " + t
+		}
+		fus = append(fus, line(t))
 	}
 	if len(fus) > 0 {
 		tail := fmt.Sprintf("Follow-ups (%d), newest: %s", len(fus), fus[len(fus)-1])
@@ -432,7 +446,7 @@ func (e *peerRequest) update(read *atomic.Int64) {
 		read.Add(int64(len(line)))
 		n++
 		// after the first message only follow-up blocks matter: skip decoding every other line
-		if e.based && !bytes.Contains(line, []byte("follow-up email (")) {
+		if e.based && !bytes.Contains(line, []byte("follow-up email (")) && !bytes.Contains(line, []byte("from closed duplicate card ")) {
 			continue
 		}
 		for _, ev := range claudeLineEvents(n, line) {
@@ -524,9 +538,15 @@ func followUpsOf(msg string) []FollowUp {
 	var out []FollowUp
 	lines := strings.Split(msg, "\n")
 	for i := 0; i < len(lines); i++ {
+		from := ""
 		d, ok := strings.CutPrefix(lines[i], followUpPrefix)
 		if !ok {
-			continue
+			if d, ok = strings.CutPrefix(lines[i], dupPrefix); !ok {
+				continue
+			}
+			if from, d, ok = strings.Cut(d, " ("); !ok || !shortIDRe.MatchString(from) {
+				continue
+			}
 		}
 		if d, ok = strings.CutSuffix(d, followUpSuffix); !ok {
 			continue
@@ -539,7 +559,7 @@ func followUpsOf(msg string) []FollowUp {
 			continue
 		}
 		if text != "" {
-			out = append(out, FollowUp{Date: d, Text: text})
+			out = append(out, FollowUp{Date: d, Text: text, From: from})
 		}
 		i += end + 1
 	}
@@ -654,8 +674,8 @@ func fellowPeersRule(port int, snapshot string) string {
 	return `Other agents. Other factory cards run at the same time as you, often in the same repo and files.
 Refresh the brief below before you plan, before you build and before you land:
 ` + peersCmd(port) + `
-- A card in flight already does what you were asked: say which one in one line and stop (no plan,
-  no edits).
+- A card in flight already does what you were asked: say which one on a line
+  "DUPLICATE OF: <card id>" and stop (no plan, no edits).
 - Your work overlaps another card's files or area: name that card in your plan, add an
   "Ordering:" line saying which should land first and why, and keep your edits to shared files small.
 - Before landing, fetch origin/main; if a card that touched your files has landed, rebase on it and
@@ -671,7 +691,7 @@ func reviewPeersRule(port int, kind, id string) string {
 	cmd := fmt.Sprintf(`curl -s "localhost:%d/api/peers?for=%s"`, port, id)
 	if kind == "plan" {
 		return "Other cards in flight (their files, stages and requests): `" + cmd + "`. A duplicate of a card in " +
-			"flight is a close verdict (name it). An overlap with another card's files or area that the plan does " +
+			"flight is a close verdict: name it on a line `DUPLICATE OF: <card id>`. An overlap with another card's files or area that the plan does " +
 			"not name, or a named overlap with no \"Ordering:\" line, is a blocking finding.\n"
 	}
 	return "Other cards in flight and what landed lately: `" + cmd + "`. Check the work against origin/main as " +

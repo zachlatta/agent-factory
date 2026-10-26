@@ -57,6 +57,12 @@ The planner (the "Fellow") first picks a track:
   they would do.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
+- A duplicate passes its request on. A reviewer (or the Fellow) that finds a duplicate names the
+  card it duplicates on a `DUPLICATE OF: <card id>` line. When Zach closes the card at that close
+  verdict, the factory keeps its request and the reviewer's notes (`steers.json`) and sends them to
+  the kept card once it is planning or building; an idle one then gets the review for its stage
+  again. While the kept card is in review or Needs Zach the steer waits; if it is landing, landed or
+  dropped, the request becomes an idea titled "From closed duplicate <id>: ..." (`factory/steer.go`).
 
 ### Idle agents
 
@@ -169,6 +175,11 @@ block without its end line is ignored, so text that only quotes this format is n
 Only user messages count, not tool output. An email card with no `Zach's email:` block (older
 cards, or an empty body) uses its `- Subject:` line. A follow-up overrides the first request where
 they conflict. Only Claude session files are read again as they grow.
+
+The factory writes one block of its own, not part of the dispatcher's contract: a closed duplicate's
+request, under `Zach's request from closed duplicate card <id> (<RFC 5322 date>):` and closed by the
+same end line. It holds only Zach's words (the reviewer's notes follow the block), and it adds to the
+kept card's request rather than overriding it.
 
 ## Public repos: review and secret scan
 

@@ -234,7 +234,7 @@ func requestSection(r *CardRequest) string {
 		fus = fus[n:]
 	}
 	for _, fu := range fus {
-		b = append(b, "Follow-up ("+fu.Date+"):\n"+truncWords(fu.Text, reviewBlockCap))
+		b = append(b, fu.label()+":\n"+truncWords(fu.Text, reviewBlockCap))
 	}
 	return strings.Join(b, "\n\n")
 }
@@ -691,6 +691,7 @@ func (f *Factory) Tick() {
 	if f.stopping.Load() {
 		return
 	}
+	f.tickSteers()
 	if err := f.tickIdeas(); err != nil {
 		f.logf("idea error: %v", err)
 	}

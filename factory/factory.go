@@ -21,7 +21,7 @@ import (
 type Config struct {
 	Host      string // name shown on cards (this machine)
 	Home      string // home dir holding ~/.paseo, ~/.claude and ~/dev
-	StateDir  string // ideas.json and routes.json live here
+	StateDir  string // ideas.json, routes.json and steers.json live here
 	Port      int
 	Window    time.Duration // archived agents stay in Done this long
 	Poll      time.Duration
@@ -92,6 +92,7 @@ type Factory struct {
 	p      Paseo
 	ideas  *IdeaStore
 	routes *RouteStore
+	steers *SteerStore // closed duplicates' requests on their way to the kept card (steer.go)
 
 	hostMetrics hostSampler
 	fleet       *hostFleet
@@ -148,6 +149,7 @@ func New(cfg Config, p Paseo) *Factory {
 	cfg.defaults()
 	f := &Factory{cfg: cfg, p: p, ideas: &IdeaStore{path: filepath.Join(cfg.StateDir, "ideas.json")},
 		routes: &RouteStore{path: filepath.Join(cfg.StateDir, "routes.json")}, routing: map[string]bool{},
+		steers:      &SteerStore{path: filepath.Join(cfg.StateDir, "steers.json")},
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), errs: map[string]string{},

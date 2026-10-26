@@ -166,7 +166,13 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		return ok, nil
 	case "close":
-		if err := f.setLabels(c.ID, map[string]string{labelNote: "closed by Zach"}); err != nil {
+		note := "closed by Zach"
+		if keep, err := f.recordSteer(f.agent(c.ID)); err != nil {
+			return nil, err
+		} else if keep != "" {
+			note += ": duplicate of " + keep
+		}
+		if err := f.setLabels(c.ID, map[string]string{labelNote: note}); err != nil {
 			return nil, err
 		}
 		return ok, f.dropAgent(c.ID)
