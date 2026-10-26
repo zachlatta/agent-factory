@@ -49,10 +49,13 @@ func main() {
 	zachEmail := flag.String("zach-email", os.Getenv("FACTORY_ZACH_EMAIL"), "address cards with no email thread email Zach at (env FACTORY_ZACH_EMAIL)")
 	metricHosts := flag.String("metric-hosts", os.Getenv("FACTORY_METRIC_HOSTS"), "comma-separated SSH aliases whose load the board shows besides this host (env FACTORY_METRIC_HOSTS)")
 	tick := flag.Bool("tick", true, "run the pipeline; -tick=false only serves the board (deploy canary)")
+	listen := flag.String("listen", "", "address to serve on (default 127.0.0.1:<port>; host:0 picks a free port)")
+	dryRun := flag.Bool("dry-run", false, "serve real data, change nothing: buttons only log the paseo and git writes they would make")
 	flag.Parse()
 
 	cfg := factory.Config{Host: host, Home: home, StateDir: *state, Port: *port, BoardURL: *boardURL,
-		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail}
+		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail,
+		DryRun: *dryRun}
 	if *metricHosts != "" {
 		cfg.MetricHosts = splitList(*metricHosts)
 	}
@@ -60,11 +63,21 @@ func main() {
 		cfg.Guarded = splitList(*guarded)
 	}
 	factory.InboxSource, factory.InboxAnchorRole = os.Getenv("FACTORY_INBOX_SOURCE"), os.Getenv("FACTORY_INBOX_ANCHOR_ROLE")
+	if *dryRun {
+		dir, err := factory.DryRunState(*state)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.StateDir = dir
+		log.Printf("dry run: nothing changes; state copied to %s", dir)
+	}
 	f := factory.New(cfg, factory.CLI{})
-	f.Mail = factory.PDWMailer{}
+	if !*dryRun {
+		f.Mail = factory.PDWMailer{}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	ln, err := net.Listen("tcp", listenAddr(*listen, *port))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -94,6 +107,14 @@ func landReview(args []string) int {
 			return string(out), err
 		},
 	}.Run()
+}
+
+// listenAddr is the address to serve on: listen if given, else 127.0.0.1:<port>.
+func listenAddr(listen string, port int) string {
+	if listen != "" {
+		return listen
+	}
+	return fmt.Sprintf("127.0.0.1:%d", port)
 }
 
 func splitList(s string) []string {

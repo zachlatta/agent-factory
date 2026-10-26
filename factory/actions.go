@@ -329,7 +329,7 @@ func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
 		if len(data) > 25<<20 {
 			return nil, fmt.Errorf("%s is over 25 MB", a.Name)
 		}
-		dir := filepath.Join(f.cfg.Home, ".paseo/factory-uploads", id[:min(8, len(id))])
+		dir := f.uploadDir(id)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}

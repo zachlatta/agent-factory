@@ -60,6 +60,14 @@ func TestUIReviewRuleOnlyForFrontendChanges(t *testing.T) {
 	}
 }
 
+func TestUIReviewRuleAllowsDocumentedDryRun(t *testing.T) {
+	for _, want := range []string{"dry-run mode the repo's README documents", "except inside such a dry run"} {
+		if !strings.Contains(uiReviewRule, want) {
+			t.Errorf("UI rule lacks %q", want)
+		}
+	}
+}
+
 func TestUIReviewRuleWhenFilesUnknown(t *testing.T) {
 	pr, f := reviewPrompt(t, "code", map[string]string{}) // every git call fails
 	if !strings.Contains(pr, uiReviewRule) {

@@ -159,7 +159,7 @@ func (f *Factory) refreshProviders(done chan struct{}) {
 	}
 	f.prov.status, f.prov.listed = st, now
 	var prod []string
-	if !f.cfg.ReadOnly {
+	if !f.passive() {
 		seen := map[string]bool{}
 		for _, a := range AgentChoices {
 			p := a.providerID()

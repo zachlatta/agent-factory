@@ -44,6 +44,9 @@ The planner (the "Fellow") first picks a track:
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
   the reviewer runs it on test data and clicks through it with computer use. Its
   non-blocking "UI feedback:" block goes to the builder, who repeats it in the landing summary.
+  In this repo, build the card's binary in /tmp and run `factory -dry-run -listen "$(tailscale ip -4):0"`
+  (the log names the port). That meets the check's data rule: it reads the real cards, ideas and
+  transcripts, and its buttons only log what they would do. Bind the tailnet address, never `0.0.0.0`.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded.
 
@@ -229,6 +232,8 @@ approve, 2 on changes, 3 when Zach must decide.
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
 | `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |
+| | `-listen` | address to serve on (default `127.0.0.1:<port>`); `host:0` picks a free port |
+| | `-dry-run` | real data, no changes: only paseo and git reads run, every write is logged to Activity, no Tick, no email, state copied to a temp dir |
 | `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks` and `pdw` (logged in) |
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>`.

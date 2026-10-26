@@ -30,6 +30,7 @@ type Config struct {
 	Location  *time.Location
 	Rev       string // commit this binary was built from (shown by /api/health)
 	ReadOnly  bool   // serve and refresh only: no Tick, no actions, no provider diagnostic (deploy canary)
+	DryRun    bool   // serve real data; actions answer but only log their paseo and git writes (dryrun.go)
 
 	BoardURL     string   // where Zach opens the board, for emails; "" = "the factory board"
 	DefaultRepo  string   // owner/repo for new cards, ideas and scouts with none given; errands are recorded there
@@ -141,6 +142,10 @@ func New(cfg Config, p Paseo) *Factory {
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), errs: map[string]string{},
 		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}}
+	if cfg.DryRun {
+		f.p = &dryRunPaseo{inner: p, logf: f.logf}
+		f.Git, f.GitOut = f.dryRunGit(runGit, runGitOut)
+	}
 	f.Scan = f.runScan
 	f.Usage = f.readProviderUsage
 	f.fleet = newHostFleet(cfg.MetricHosts, cfg.Host)
@@ -282,7 +287,7 @@ func (f *Factory) Run(ctx context.Context) {
 	for {
 		f.loopStarted()
 		f.Refresh()
-		if !f.cfg.ReadOnly {
+		if !f.passive() {
 			f.Tick()
 			f.Refresh()
 			f.providerStatus("claude") // keeps the provider list fresh (re-read every providerListTTL)
