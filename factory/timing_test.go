@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -471,15 +472,18 @@ func TestMetrics(t *testing.T) {
 	if m.Cards != 12 || m.Excluded.NotLanded != 1 || m.Excluded.Partial != 1 {
 		t.Fatalf("counts = %d %+v", m.Cards, m.Excluded)
 	}
+	if m.Turnaround.N != 12 || m.Turnaround.EndToEnd.Average == 0 || m.Turnaround.ToLanded.Average == 0 || m.Turnaround.ToDone.Average == 0 {
+		t.Errorf("turnaround = %+v", m.Turnaround)
+	}
 	byKey := map[string]MetricGroup{}
 	for _, g := range m.BySource {
 		byKey[g.Source] = g
 	}
-	if g := byKey["email"]; g.N != 10 || g.EndToEnd.Median != 5*3600 || g.EndToEnd.P90 != 9*3600 ||
-		g.ZachWait.Median != 300 || g.ZachWait.P90 != 540 {
+	if g := byKey["email"]; g.N != 10 || g.EndToEnd.Average != 19800 || g.EndToEnd.Median != 5*3600 || g.EndToEnd.P90 != 9*3600 ||
+		g.ZachWait.Average != 330 || g.ZachWait.Median != 300 || g.ZachWait.P90 != 540 {
 		t.Errorf("email = %+v", g)
 	}
-	if g := byKey["voice"]; g.EndToEnd.Median != 70*60 {
+	if g := byKey["voice"]; g.EndToEnd.Average != 70*60 || g.EndToEnd.Median != 70*60 || g.ToLanded.Average != 60*60 || g.ToDone.Average != 60*60 {
 		t.Errorf("voice (to the reply) = %+v", g)
 	}
 	if len(m.ByTier) != 3 || m.ByTier[0].Tier != "low" || m.ByTier[1].Tier != "none" {
@@ -488,8 +492,187 @@ func TestMetrics(t *testing.T) {
 	if len(m.BySourceTier) != 3 {
 		t.Errorf("by source and tier = %+v", m.BySourceTier)
 	}
-	if q := quantiles([]int{4, 1, 3, 2}); q.Median != 2 || q.P90 != 4 {
+	if len(m.ByRepo) != 1 || m.ByRepo[0].Repo != "unknown" || m.ByRepo[0].N != 12 {
+		t.Errorf("by repo = %+v", m.ByRepo)
+	}
+	if q := quantiles([]int{4, 1, 3, 2}); q.Average != 3 || q.Median != 2 || q.P90 != 4 {
 		t.Errorf("quantiles = %+v", q)
+	}
+}
+
+func TestMetricsStepsTurnsFiltersAndCoverage(t *testing.T) {
+	f, _ := newTestFactory(t)
+	home := f.cfg.Home
+	write := func(rel, content string) string {
+		t.Helper()
+		p := filepath.Join(home, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	base := t0.Add(-2 * time.Hour)
+	ts := func(d time.Duration) string { return base.Add(d).UTC().Format(time.RFC3339Nano) }
+
+	// Claude Fellow session spanning plan (with pre-creation prompt skew and two blocks on line 1),
+	// building, zach summary, and landing.
+	claudeRel := ".claude/projects/work/claude-fellow.jsonl"
+	claudeContent := strings.Join([]string{
+		`{"type":"user","timestamp":"` + ts(-500*time.Millisecond) + `","message":{"content":[{"type":"text","text":"plan part 1"},{"type":"text","text":"plan part 2"}]}}`,
+		`{"type":"assistant","timestamp":"` + ts(time.Minute) + `","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"tool_use","id":"u1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","timestamp":"` + ts(2*time.Minute) + `","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":"ok"}]}}`,
+		`{"type":"assistant","timestamp":"` + ts(5*time.Minute-500*time.Millisecond) + `","message":{"content":"TITLE: Plan ready\nTIER: architecture"}}`,
+		`{"type":"user","timestamp":"` + ts(10*time.Minute+2*time.Second) + `","message":{"content":"Write a short version for Zach"}}`,
+		`{"type":"assistant","timestamp":"` + ts(10*time.Minute+32*time.Second) + `","message":{"content":"DECISION: Approve\nOVERVIEW: Short\nNEEDS FROM ZACH: Approve"}}`,
+		`{"type":"user","timestamp":"` + ts(20*time.Minute) + `","message":{"content":"Build it now"}}`,
+		`{"type":"assistant","timestamp":"` + ts(25*time.Minute) + `","message":{"content":"first build pass"}}`,
+		`{"type":"assistant","timestamp":"` + ts(30*time.Minute) + `","message":{"content":"build finished"}}`,
+		`{"type":"user","timestamp":"` + ts(40*time.Minute) + `","message":{"content":"Rework build"}}`,
+		`{"type":"assistant","timestamp":"` + ts(42*time.Minute) + `","message":{"content":"rework finished"}}`,
+		`{"type":"user","timestamp":"` + ts(50*time.Minute) + `","message":{"content":"Land it"}}`,
+		`{"type":"assistant","timestamp":"` + ts(51*time.Minute) + `","message":{"content":"REMAINING: none"}}`,
+	}, "\n") + "\n"
+	write(claudeRel, claudeContent)
+
+	// Codex plan reviewer session (120s turn; developer/system message ignored).
+	write(".codex/sessions/2026/10/26/rollout-10-codex-rev.jsonl", strings.Join([]string{
+		`{"timestamp":"` + ts(5*time.Minute) + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\nignore"}]}}`,
+		`{"timestamp":"` + ts(5*time.Minute+10*time.Second) + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review plan"}]}}`,
+		`{"timestamp":"` + ts(6*time.Minute) + `","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"checking"}]}}`,
+		`{"timestamp":"` + ts(7*time.Minute+10*time.Second) + `","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"VERDICT: approve"}]}}`,
+	}, "\n")+"\n")
+
+	// Antigravity code reviewer session (180s turn).
+	write(".gemini/antigravity-cli/brain/agy-rev/.system_generated/logs/transcript_full.jsonl", strings.Join([]string{
+		`{"step_index":1,"type":"USER_INPUT","created_at":"` + ts(30*time.Minute) + `","content":"<USER_REQUEST>Review code</USER_REQUEST>"}`,
+		`{"step_index":2,"type":"PLANNER_RESPONSE","created_at":"` + ts(33*time.Minute) + `","content":"VERDICT: approve"}`,
+	}, "\n")+"\n")
+
+	// Muse sub-agent session: one completed 90s turn and one unfinished turn (missing assistant boundary).
+	us := func(d time.Duration) string { return strconv.FormatInt(base.Add(d).UnixMicro(), 10) }
+	musePath := write(".local/share/muse/sessions/2026/10/26/muse-sub/session.jsonl", strings.Join([]string{
+		`{"recorded_at":` + us(21*time.Minute) + `,"payload_type":"runtime.session","payload":{"event":{"kind":"user_prompt_display","prompt":"sub task 1"}}}`,
+		`{"recorded_at":` + us(22*time.Minute+30*time.Second) + `,"payload_type":"runtime.session","payload":{"event":{"kind":"assistant_message_committed","text":"sub done"}}}`,
+		`{"recorded_at":` + us(23*time.Minute) + `,"payload_type":"runtime.session","payload":{"event":{"kind":"user_prompt_display","prompt":"sub task 2"}}}`,
+		`{"recorded_at":` + us(23*time.Minute+10*time.Second) + `,"payload_type":"runtime.session","payload":{"event":{"kind":"reasoning_summary_committed","text":"still thinking"}}}`,
+	}, "\n")+"\n")
+
+	f.timings.cards["c1"] = &CardTiming{
+		Repo:        "owner/alpha",
+		Source:      "email",
+		Tier:        "architecture",
+		RequestedAt: base,
+		LandedAt:    base.Add(51 * time.Minute),
+		RepliedAt:   base.Add(52 * time.Minute),
+		Events: []TimingEvent{
+			{Stage: "plan", At: base},
+			{Stage: "plan-review", At: base.Add(5 * time.Minute)},
+			{Stage: "zach", At: base.Add(10*time.Minute + 10*time.Second)},
+			{Stage: "building", At: base.Add(20 * time.Minute)},
+			{Stage: "review", At: base.Add(30 * time.Minute)},
+			{Stage: "building", At: base.Add(40 * time.Minute)},
+			{Stage: "landing", At: base.Add(50 * time.Minute)},
+			{Stage: "landed", At: base.Add(51 * time.Minute)},
+		},
+		Sessions: []TimingSession{
+			{AgentID: "c1", Provider: "claude", SessionID: "claude-fellow", Model: "opus-a", Role: "fellow", Stage: "plan", ObservedAt: base},
+			{AgentID: "c1", Provider: "claude", SessionID: "claude-fellow", Model: "opus-a", Role: "fellow", Stage: "plan-review", ObservedAt: base.Add(5 * time.Minute)},
+			{AgentID: "r1", ParentID: "c1", Provider: "codex", SessionID: "codex-rev", Model: "gpt-sol", Role: "reviewer", ReviewKind: "plan", Stage: "plan-review", ObservedAt: base.Add(5 * time.Minute)},
+			{AgentID: "c1", Provider: "claude", SessionID: "claude-fellow", Model: "opus-a", Role: "fellow", Stage: "building", ObservedAt: base.Add(20 * time.Minute)},
+			{AgentID: "s1", ParentID: "c1", Provider: "muse", SessionID: "muse-sub", Model: "muse-1", Role: "subagent", Stage: "building", ObservedAt: base.Add(21 * time.Minute)},
+			{AgentID: "r2", ParentID: "c1", Provider: "antigravity", SessionID: "agy-rev", Model: "gemini-argon", Role: "reviewer", ReviewKind: "code", Stage: "review", ObservedAt: base.Add(30 * time.Minute)},
+			{AgentID: "c1", Provider: "claude", SessionID: "claude-fellow", Model: "opus-b", Role: "fellow", Stage: "landing", ObservedAt: base.Add(50 * time.Minute)},
+			{AgentID: "s2", ParentID: "c1", Provider: "codex", SessionID: "missing-session", Model: "gpt-sol", Role: "subagent", Stage: "building", ObservedAt: base.Add(25 * time.Minute)},
+		},
+	}
+	f.timings.cards["c2"] = &CardTiming{
+		Repo:        "owner/beta",
+		Source:      "board",
+		Tier:        "low",
+		RequestedAt: base,
+		LandedAt:    base.Add(10 * time.Minute),
+		Events: []TimingEvent{
+			{Stage: "plan", At: base},
+			{Stage: "building", At: base.Add(4 * time.Minute)},
+			{Stage: "landed", At: base.Add(10 * time.Minute)},
+		},
+	}
+
+	h := f.Handler()
+	get := func(q string) Metrics {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/metrics"+q, nil))
+		if rec.Code != 200 {
+			t.Fatalf("%s: status %d: %s", q, rec.Code, rec.Body.String())
+		}
+		var m Metrics
+		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	m := get("")
+	if m.Cards != 2 || m.Coverage.CardsWithRepo != 2 || m.Coverage.CardsWithSessions != 1 || m.Coverage.CardsWithoutSessions != 1 ||
+		m.Coverage.LinkedSessions != 5 || m.Coverage.MatchedSessions != 4 || m.Coverage.UnmatchedSessions != 1 ||
+		m.Coverage.Turns != 8 || m.Coverage.MissingBoundaries != 1 {
+		t.Fatalf("coverage = %+v", m.Coverage)
+	}
+
+	// Verify repeated building visits on c1 + single visit on c2.
+	steps := map[string]StepMetric{}
+	for _, s := range m.Steps {
+		steps[s.Step] = s
+	}
+	if b := steps["building"]; b.Cards != 2 || b.Visits != 3 || b.RepeatedVisits != 1 ||
+		b.VisitSecs.Average != 520 || b.VisitSecs.Median != 600 || b.CardSecs.Average != 780 {
+		t.Errorf("building step = %+v", b)
+	}
+	if z := steps["zach"]; z.Cards != 1 || z.Visits != 1 || z.VisitSecs.Average != 590 {
+		t.Errorf("zach step = %+v", z)
+	}
+
+	// Verify agent turns by role and step.
+	byRole := map[string]AgentTurnMetric{}
+	for _, a := range m.AgentTurnsByRole {
+		byRole[a.Role] = a
+	}
+	if g := byRole["fellow"]; g.Turns != 5 || g.Sessions != 1 || g.TurnSecs.Average != 222 || g.TurnSecs.Median != 120 || g.SessionTurnSecs.Average != 1110 {
+		t.Errorf("fellow turns = %+v", g)
+	}
+	if g := byRole["reviewer"]; g.Turns != 2 || g.Sessions != 2 || g.TurnSecs.Average != 150 || g.TurnSecs.Median != 120 {
+		t.Errorf("reviewer turns = %+v", g)
+	}
+	if g := byRole["subagent"]; g.Turns != 1 || g.Sessions != 1 || g.TurnSecs.Average != 90 {
+		t.Errorf("subagent turns = %+v", g)
+	}
+
+	// Verify filtering by repo, source, role, provider, model, and step.
+	if em := get("?source=email&repo=owner/alpha"); em.Cards != 1 || em.Turnaround.EndToEnd.Average != 52*60 || em.Turnaround.ToLanded.Average != 51*60 {
+		t.Errorf("email repo filter = %+v", em.Turnaround)
+	}
+	if lm := get("?role=fellow&provider=claude&model=opus-b&step=landing"); lm.Cards != 1 || len(lm.AgentTurns) != 1 ||
+		lm.AgentTurns[0].Turns != 1 || lm.AgentTurns[0].TurnSecs.Average != 60 || len(lm.Steps) != 1 || lm.Steps[0].Step != "landing" {
+		t.Errorf("landing model filter = %+v %+v", lm.AgentTurns, lm.Steps)
+	}
+
+	// Completing the second Muse turn on disk invalidates the cached turn entry.
+	f1, err := os.OpenFile(musePath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f1.WriteString(`{"recorded_at":` + us(24*time.Minute) + `,"payload_type":"runtime.session","payload":{"event":{"kind":"assistant_message_committed","text":"second done"}}}` + "\n")
+	f1.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2 := get("?role=subagent")
+	if m2.Coverage.MissingBoundaries != 0 || len(m2.AgentTurnsByRole) != 1 || m2.AgentTurnsByRole[0].Turns != 2 || m2.AgentTurnsByRole[0].TurnSecs.Average != 75 {
+		t.Errorf("after muse file update: coverage=%+v roles=%+v", m2.Coverage, m2.AgentTurnsByRole)
 	}
 }
 

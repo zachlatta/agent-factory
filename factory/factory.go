@@ -135,6 +135,7 @@ type Factory struct {
 	usage      usageCache
 	tokenMu    sync.Mutex
 	tokenCache tokenUsageCache
+	turnCache  transcriptTurnCache
 
 	peerCache peerCache           // git and request reads for /api/peers
 	vis       map[string]visEntry // owner/repo -> cached visibility

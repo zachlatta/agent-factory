@@ -8,7 +8,7 @@ import (
 
 // TimingSession links an observed native transcript session to a card's step. ObservedAt
 // dates the association, not an execution boundary. Earlier links survive session and step
-// changes so a warehouse can attribute individual transcript turns without reading prompts.
+// changes so Factory can attribute individual transcript turns without reading prompt text.
 type TimingSession struct {
 	AgentID    string    `json:"agentId"`
 	ParentID   string    `json:"parentId,omitempty"`
@@ -92,8 +92,9 @@ func sessionStep(a Agent, stage string, byID map[string]Agent) (string, string) 
 	return stage, ""
 }
 
-// TimingExport is a local snapshot for a host-side warehouse pusher. It contains workflow
-// facts and transcript identities only; mailbox identifiers and transcript bodies stay internal.
+// TimingExport is the read-only GET /api/timings snapshot of recorded card timings and
+// transcript session links. It contains workflow facts and transcript identities only;
+// mailbox identifiers and transcript bodies stay internal.
 type TimingExport struct {
 	Cards []TimingExportCard `json:"cards"`
 }
