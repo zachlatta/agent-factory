@@ -143,6 +143,36 @@ has available, so Opus can ask Codex, Gemini or Muse and the other way round (`f
   do; a card agent or reviewer waiting on a working sub-agent is not counted as stalled; and
   "sub-agent still running" flags one left running after the agent that started it stopped.
 
+### Recorded token usage
+
+`GET /api/usage` serves recorded tokens from retained local Paseo sessions, including
+archived agents. The first request starts a background scan and returns an empty snapshot
+with `refreshing: true`; later requests serve the cached snapshot while a refresh runs,
+at most once every five minutes. It makes no agent turns or changes to sessions.
+
+`plans` lists remaining subscription allowances once per provider, using the existing
+allowance cache. `rows` groups tokens by plan, provider, model, role, card, agent and recorded
+stage. `totals` sums those disjoint rows. Input includes cached input; cache read/write and
+reasoning columns are subsets, so total is input plus output. Claude messages are counted
+once, Codex cumulative snapshots become increments, and Muse model completions are counted
+without their duplicate attribution records. Unsupported providers show unavailable counts.
+
+Stage attribution uses the same timing events as the board and metrics. `span` identifies
+each visit to a stage, including repeated building visits; `round` identifies a recorded
+review round when available. Initial cumulative readings, intervals crossing stage boundaries
+and missing/expired timing remain `unassigned`. Timing history is retained for 30 days.
+Sessions shared by conflicting agent/card roles also remain unassigned and are flagged.
+
+Coverage reports missing/unsupported sessions, errors, duplicate session references, timing
+entries without agent metadata and scan limits. Scans are bounded to 2,000 metadata files,
+32 MiB per session, 128 MiB of session data and 20 seconds per refresh; newer agents are
+read first and limit-skipped sessions are counted separately from errors. Partial readings
+are flagged. A process remembers previously observed sources and reports their disappearance
+on subsequent complete scans. Restarting forgets that inventory. Totals can shrink after
+cleanup; they describe retained local records, not every device's activity or a subscription
+bill. Historical subscription account attribution is unknown. No prompts, session contents
+or filesystem paths are returned. A separate usage page will consume this data feed.
+
 ### Ideas
 
 Any agent can suggest work with `POST /api/idea` (header `X-Factory: 1`; `repo`, `title`,

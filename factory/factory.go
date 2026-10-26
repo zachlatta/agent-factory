@@ -129,10 +129,12 @@ type Factory struct {
 	parkedNow   map[string]string // agents the reap parked: their factory.parked value, applied like archivedNow
 	lastReap    *ReapReport       // the last reap that changed anything, for /api/health
 
-	provMu  sync.Mutex
-	prov    providers // Paseo provider status, for the agent choices
-	usageMu sync.Mutex
-	usage   usageCache
+	provMu     sync.Mutex
+	prov       providers // Paseo provider status, for the agent choices
+	usageMu    sync.Mutex
+	usage      usageCache
+	tokenMu    sync.Mutex
+	tokenCache tokenUsageCache
 
 	peerCache peerCache           // git and request reads for /api/peers
 	vis       map[string]visEntry // owner/repo -> cached visibility
