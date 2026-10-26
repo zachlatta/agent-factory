@@ -32,6 +32,12 @@ The planner (the "Fellow") first picks a track:
   refactor is a blocking finding.
 - Circuit breakers: 3 review rounds per gate, then a person; reviewers may answer `nits` or
   `close`; a card that stops with nothing queued goes to Needs Zach after 2 minutes.
+- Blocked agents: a child agent waiting on a permission prompt (`paseo permit ls`) or running with
+  no activity for 20 minutes flags its card ("reviewer waiting on permission", "reviewer stalled N
+  min"). Such a reviewer no longer counts as a pending verdict, so its card really moves to Needs
+  Zach (its labels change) with "Re-run the review", which retires the old reviewer first. If the
+  old reviewer finishes before a re-run, its verdict still moves the card on. The factory never
+  answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
 - A landing card is Done only if its HEAD is on `origin/main` and it made a commit of its own.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded.

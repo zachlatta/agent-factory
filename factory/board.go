@@ -151,6 +151,14 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			c.Tier = "routine"
 		}
 		idle := now.Sub(a.LastActivityAt)
+		if a.Status == "running" && a.Pending != "" && !a.archived() {
+			if !(a.RequiresAttention && a.AttentionReason == "permission") { // that flag says it below
+				c.Flags = append(c.Flags, "waiting on permission")
+			}
+			if c.Labelled {
+				c.Stage = "zach" // shown only, like a stall: nobody else answers the prompt
+			}
+		}
 		if a.Status == "running" && idle > stallMinutes*time.Minute {
 			c.Flags = append(c.Flags, fmt.Sprintf("stalled %d min", int(idle.Minutes())))
 			if c.Labelled && !a.archived() {
@@ -179,8 +187,13 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			if role == "" {
 				role = "subagent"
 			}
-			c.Children = append(c.Children, Child{ID: k.ID, Short: short(k.ID), Title: k.Title, Status: k.Status,
-				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Verdict: k.L(labelVerdict)})
+			ch := Child{ID: k.ID, Short: short(k.ID), Title: k.Title, Status: k.Status,
+				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Verdict: k.L(labelVerdict)}
+			if ch.Blocked = blockedWhy(k, now); ch.Blocked != "" {
+				ch.Permission = k.Pending
+				c.Flags = append(c.Flags, role+" "+ch.Blocked)
+			}
+			c.Children = append(c.Children, ch)
 			if role == "reviewer" && k.Status == "running" && !k.archived() {
 				c.Reviewing = true
 			}

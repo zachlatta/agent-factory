@@ -224,6 +224,9 @@ func (f *Factory) rerun(c Card) error {
 		if from == "plan" || from == "plan-review" {
 			kind = "plan"
 		}
+		if err := f.supersedeReviewers(c.ID); err != nil {
+			return err
+		}
 		if c.Status == "running" {
 			return f.setLabels(c.ID, map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())})
 		}

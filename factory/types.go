@@ -37,6 +37,7 @@ type Agent struct {
 	RequiresAttention bool
 	AttentionReason   string
 	LastError         string
+	Pending           string // the permission prompt it waits on (`paseo permit ls`), "" for none
 }
 
 // L returns the agent's factory.<k> label.
@@ -100,6 +101,9 @@ type Child struct {
 	Role     string `json:"role"`
 	Kind     string `json:"kind"`
 	Verdict  string `json:"verdict"`
+	// Blocked: running but not moving on its own ("waiting on permission", "stalled N min"); Permission: the prompt
+	Blocked    string `json:"blocked,omitempty"`
+	Permission string `json:"permission,omitempty"`
 }
 
 // Idea is a suggested card waiting to be started (by the factory within its caps, or by Zach).

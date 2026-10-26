@@ -91,6 +91,11 @@ func baseAsk(c Card, a Agent) *Ask {
 	}
 	note := a.L(labelNote)
 	switch {
+	case a.Status == "running" && a.Pending != "":
+		return &Ask{Title: "Waiting on a permission prompt", From: "builder",
+			Why: "Claude Code asked for permission (" + a.Pending + "), which it does even in bypass mode, and the factory " +
+				"never answers prompts. Approve or deny it in Paseo, stop the agent, or send it a message.",
+			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case a.Status == "running" && stalledFlag(c) == "":
 		// a builder writing its brief or plan summary for Zach (sent along with the move here)
 		return &Ask{Title: "Writing a summary for you…", From: "builder",
@@ -103,6 +108,11 @@ func baseAsk(c Card, a Agent) *Ask {
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
+	case note == "stuck" && (a.L(labelStuckFrom) == "review" || a.L(labelStuckFrom) == "plan-review"):
+		if r, ok := blockedReviewer(c); ok {
+			return blockedReviewerAsk(r)
+		}
+		fallthrough
 	case note == "stuck":
 		from := a.L(labelStuckFrom)
 		return &Ask{Title: "Stuck in " + stageName(from) + ": nothing is queued", From: "builder",
@@ -222,6 +232,24 @@ func briefAsk(a Agent) *Ask {
 	return &Ask{Title: "Reviews didn't settle: your call on the " + what, From: "builder", Why: briefWhy,
 		Actions: []Action{primary("recommend", btnRecommend), reply(btnTell, "e.g. ignore the second point, fix the first"),
 			act("approve", asIs), act("close", btnDrop)}}
+}
+
+// blockedReviewerAsk offers a fresh review for a card whose reviewer is stuck on a permission
+// prompt or stalled. It never offers to answer the prompt.
+func blockedReviewerAsk(r Child) *Ask {
+	acts := []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}
+	if r.Blocked == "waiting on permission" {
+		why := "Claude Code asked the reviewer for permission"
+		if r.Permission != "" {
+			why += " (" + r.Permission + ")"
+		}
+		return &Ask{Title: "Reviewer stuck on a permission prompt", From: "reviewer", Actions: acts,
+			Why: why + ", which it does even in bypass mode, and the factory never answers prompts. Re-run stops this " +
+				"reviewer and starts a fresh one. Or approve the prompt in Paseo and the review carries on."}
+	}
+	return &Ask{Title: "Reviewer " + strings.Replace(r.Blocked, "stalled ", "stalled: no activity for ", 1), From: "reviewer",
+		Actions: acts, Why: "The reviewer has been running a long time with no activity; it may be hung. Re-run stops it " +
+			"and starts a fresh review. If it finishes first, its verdict still moves the card on."}
 }
 
 func stalledFlag(c Card) string {

@@ -194,6 +194,7 @@ func (f *Factory) Refresh() {
 	}
 	f.mu.Unlock()
 	if err == nil {
+		f.addPending(agents)
 		f.SetAgents(agents)
 	}
 	f.noteRefreshed()

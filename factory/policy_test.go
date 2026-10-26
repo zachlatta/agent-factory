@@ -547,7 +547,7 @@ func TestReviewPending(t *testing.T) {
 		{"another card's reviewer", []Agent{other}, false},
 		{"none", nil, false},
 	} {
-		if got := reviewPending(tc.agents, "c1"); got != tc.want {
+		if got := reviewPending(tc.agents, "c1", t0); got != tc.want {
 			t.Errorf("%s: reviewPending = %v", tc.name, got)
 		}
 	}

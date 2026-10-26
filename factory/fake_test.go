@@ -28,6 +28,8 @@ type fakePaseo struct {
 	lsErr      error             // `provider ls` fails with this
 	cwd        map[string]string // inspect reports this Cwd
 	unknown    map[string]bool   // inspect fails: no such agent
+	permits    string            // `permit ls --json` output (default "[]")
+	permitErr  error             // `permit ls` fails with this
 }
 
 func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
@@ -90,6 +92,14 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 			}
 			return "Status: Ready", nil
 		}
+	case "permit":
+		if p.permitErr != nil {
+			return "", p.permitErr
+		}
+		if p.permits == "" {
+			return "[]", nil
+		}
+		return p.permits, nil
 	case "archive":
 		if p.busy[args[1]] > 0 {
 			p.busy[args[1]]--

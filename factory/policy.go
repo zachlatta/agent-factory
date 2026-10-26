@@ -189,6 +189,7 @@ Rules:
   escalate (a decision only Zach can make; ask it as a QUESTION: block, below), close (duplicate, already done, or not needed).
   Architecture-tier work goes to Zach anyway; do not escalate just for that.
 - Keep it short: at most 8 bullets.
+- `+shellRule+`
 
 %s
 
@@ -251,6 +252,8 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 %s
 
+` + shellRule + `
+
 A different agent reviews the plan (architecture-tier plans also go to Zach). When you get
 "Plan approved", build it. Don't improvise: if scope must change, stop and say so. Commit on your
 branch, but do NOT land until the factory tells you to. If stuck, stop and write a handoff: what
@@ -282,7 +285,7 @@ func restate(kind string) string {
 func buildMsg(prefix, notes string) string {
 	return prefix + " Build it now, as planned. Don't improvise: if the scope has to change, stop and say so " +
 		"instead. When done, commit everything on your branch and leave the worktree clean (delete or gitignore " +
-		"scratch files), but do NOT land; stop with a short summary. A code reviewer checks it next, and the factory lands it once the review passes.\n\nReviewer notes:\n" + notes
+		"scratch files), but do NOT land; stop with a short summary. A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
 }
 
 // findings is the reviewer's last message, trimmed for forwarding to the builder.
@@ -795,7 +798,7 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 			return nil // starts once the agent acts
 		}
 	case "plan-review", "review":
-		if reviewPending(f.agents(), a.ID) {
+		if reviewPending(f.agents(), a.ID, now) {
 			return nil
 		}
 	}
@@ -809,10 +812,12 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 
 // reviewPending reports whether card id has a reviewer that will still produce a verdict: one that
 // is running, or stopped with its verdict not yet applied (ApplyVerdict picks it up). A reviewer
-// archived without a verdict, or gone from the list (archived over Config.Window ago), is not.
-func reviewPending(agents []Agent, id string) bool {
+// archived without a verdict, or gone from the list (archived over Config.Window ago), is not, and
+// neither is one stuck on a permission prompt or stalled (reviewerBlocked): its card goes to Needs
+// Zach with a re-run, and a verdict it gives later is still applied.
+func reviewPending(agents []Agent, id string, now time.Time) bool {
 	for _, r := range agents {
-		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.archived() {
+		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.archived() || reviewerBlocked(r, now) {
 			continue
 		}
 		if r.Status == "running" || r.L(labelApplied) == "" {
