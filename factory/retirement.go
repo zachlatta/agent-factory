@@ -23,6 +23,7 @@ type RetirementInventory struct {
 	Problems        []string              `json:"problems"`
 	Workspaces      []RetirementWorkspace `json:"workspaces"`
 	Allowlist       []RetirementPermit    `json:"allowlist"`
+	Live            *RetirementLive       `json:"live,omitempty"`
 }
 
 // RetirementPermit is the contract for a separately reviewed executor. No command
@@ -53,19 +54,20 @@ type RetirementAgent struct {
 	Archived bool   `json:"archived"`
 }
 type RetirementWorkspace struct {
-	ID                string                `json:"workspaceId"`
-	Kind              string                `json:"kind"`
-	CanonicalPath     string                `json:"canonicalPath"`
-	CommonDir         string                `json:"commonDir"`
-	Branch            string                `json:"branch"`
-	RecordedBranch    string                `json:"recordedBranch"`
-	Head              string                `json:"head"`
-	Archived          bool                  `json:"archived"`
-	ExpectedDirectory string                `json:"expectedDirectory"`
-	Agents            []RetirementAgent     `json:"agents"`
-	Checks            []RetirementCheck     `json:"checks"`
-	Operations        []RetirementOperation `json:"operations"`
-	Fingerprint       string                `json:"fingerprint"`
+	ID                string                  `json:"workspaceId"`
+	Kind              string                  `json:"kind"`
+	CanonicalPath     string                  `json:"canonicalPath"`
+	CommonDir         string                  `json:"commonDir"`
+	Branch            string                  `json:"branch"`
+	RecordedBranch    string                  `json:"recordedBranch"`
+	Head              string                  `json:"head"`
+	Archived          bool                    `json:"archived"`
+	ExpectedDirectory string                  `json:"expectedDirectory"`
+	Agents            []RetirementAgent       `json:"agents"`
+	Checks            []RetirementCheck       `json:"checks"`
+	Operations        []RetirementOperation   `json:"operations"`
+	Fingerprint       string                  `json:"fingerprint"`
+	Observations      []RetirementObservation `json:"observations,omitempty"`
 }
 
 type retirementRecord struct {

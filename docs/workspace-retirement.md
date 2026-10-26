@@ -10,7 +10,7 @@ page limit. It reads workspace records, including archived records, and Git meta
 It never fetches, archives, stops resources, runs setup or teardown commands, removes
 files, or deletes branches. It has no apply mode and emits no allowlist entries.
 
-Exit 0 means the persisted inventory was read, **not** that retirement is safe.
+Exit 0 means the requested reads completed, **not** that retirement is safe.
 Exit 1 means evidence is incomplete; inspect `problems`. Exit 2 means invalid
 arguments. Per-workspace `checks` use these states:
 
@@ -24,6 +24,50 @@ All four `operations` are currently `refused`; `executorEnabled` is false and
 `allowlist` is null. An observed check never grants authority. Missing live-state,
 resource or scheduler checks remain unknown, even if persisted records look idle.
 Completion labels alone are insufficient evidence of a completed result.
+
+## Optional live observations
+
+`factory retirement-inventory -live` also reads the selected local daemon. The
+default remains persisted-only. `-home directory` selects both the record home and
+its `.paseo` daemon home; it never combines fixture records with the default daemon.
+Live mode requires the inspected CLI and reachable local daemon version 0.11.4.
+Unavailable, mismatched or unsupported versions leave checks unknown and exit 1.
+There is no automatic upgrade, repair or remote-host fallback.
+
+Live mode runs only these additional reads:
+
+- `paseo --version`
+- `paseo status --json --home <daemon-home>`
+- `paseo terminal ls --all --json --home <daemon-home>`
+- `paseo script ls --workspace <exact-id> --json --home <daemon-home>` for each
+  persisted workspace, including archived records.
+
+Terminal matches use exact workspace IDs **or** overlapping canonical paths,
+including terminals attributed to another workspace. Running configured scripts
+and services also block potentially overlapping folders. Sibling records stay
+intact. The command never starts or stops a script, setup, terminal or agent.
+
+Supplemental `observations` include source, scope, start/end times, completeness
+and matching terminal or running-script count. Completeness applies only to the
+stated source scope at that read, never to the workspace's overall safety. Script
+projections cannot attest complete configuration or runtime coverage, so their
+`complete` stays false even for a parsed response. Names, script commands and
+raw CLI diagnostics are omitted. Failed, malformed, null, unsupported or paginated
+responses remain unknown and add a problem; an empty array is not permission.
+
+An empty terminal list observes only the absence of matching daemon terminals at
+that moment. Services without a positive blocker remain unknown. Agents, active
+users, setups, arbitrary processes, mounts and scheduler ownership still require
+complete readers from their owners. Hook checks retain their existing limited
+configuration scope. Reads are sequential snapshots, not an atomic inventory or a
+lease. The fingerprint still covers the original persisted evidence and checks;
+supplemental live observations are not approval evidence.
+
+For the inspected version, `exclusion` is blocked: its published API offers no
+retirement lease spanning preflight, mutation and verification. Its internal
+archiving marker is status bookkeeping; workspace archive can stop resources and
+run teardown commands. Neither is a substitute for exclusion. Other versions
+remain unknown until their API is separately verified. All operations stay refused.
 
 ## Ownership and protection
 
@@ -97,7 +141,8 @@ picker handoff and waiting-card parking remain in their current paths because th
 stage adds observation only. They do not authorize workspace or branch deletion.
 
 The executor is separate reviewed work, following this inventory and the completed
-agent archive pagination correction. It must use the corrected supported archive
+agent archive pagination correction, plus supported concurrent-use exclusion from
+separately reviewed upstream work. It must use the corrected supported archive
 path rather than introducing another one. Enabling scheduled-run retirement follows
 both the executor and separate scheduler-owner work. Until both stages are built,
 the lifecycle remains incomplete and unattended deletion stays disabled.
