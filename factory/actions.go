@@ -92,7 +92,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				return nil, err
 			}
 			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, map[string]string{
-				labelStage: "plan", labelAwaiting: "", labelSince: now, labelNote: "revising plan for Zach"})
+				labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now, labelNote: "revising plan for Zach"})
 		}
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
@@ -116,8 +116,12 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			// Zach approved and answered the card's questions in one step
 			answers = "\n\nZach's answers to your questions:\n" + m + "\n\n"
 		}
-		if c.Awaiting == "plan" || planPending(f.agent(c.ID)) {
-			if err := f.send(c.ID, buildMsg("Zach approved your plan."+answers, "(none)")); err != nil {
+		if a := f.agent(c.ID); c.Awaiting == "plan" || planPending(a) {
+			notes := "(none)"
+			if fix := a.L(labelPlanFix); fix != "" {
+				notes = "Apply these fixes from the last plan review: " + fix
+			}
+			if err := f.send(c.ID, buildMsg("Zach approved your plan."+answers, notes)); err != nil {
 				return nil, err
 			}
 			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
@@ -217,7 +221,7 @@ func (f *Factory) dropAgent(id string) error {
 func planPending(a Agent) bool {
 	v, st := a.L(labelVerdict), a.L(labelStage)
 	return a.L(labelSource) == "board" && (st == "plan" || st == "plan-review" || st == "zach") && a.L(labelZachPlan) != "approved" && a.L(labelCodeRounds) == "" &&
-		!strings.HasPrefix(v, "plan approve") && !strings.HasPrefix(v, "plan nits") && !strings.HasPrefix(v, "code")
+		!strings.HasPrefix(v, "plan approve") && !strings.HasPrefix(v, "plan nits") && !strings.HasPrefix(v, "plan fixes") && !strings.HasPrefix(v, "code")
 }
 
 // replyLabels places a factory card after Zach replies to it, so its next move is queued once the

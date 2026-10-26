@@ -92,6 +92,7 @@ type Card struct {
 	Idea           *IdeaView `json:"idea,omitempty"` // waiting ideas, and cards started from one: what it proposes
 	WorkspaceID    string    `json:"-"`
 	Decided        bool      `json:"-"` // factory.zach-decided: reviews treat Zach's rulings as settled
+	PlanFix        string    `json:"-"` // factory.plan-fix: small fixes from the last plan review that code review checks
 
 	// when Zach asked, each column, reviews, landing and reply (timing.go)
 	Timing *TimingView `json:"timing,omitempty"`

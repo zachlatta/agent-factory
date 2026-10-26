@@ -59,14 +59,18 @@ leaves two ways of doing the same thing is a blocking finding. If that is too bi
 the plan splits it into ordered cards that together cover everything.`
 
 var (
-	verdictRe = regexp.MustCompile(`(?i)VERDICT:\s*\**\s*(approve|nits|changes|escalate|close)`)
-	tierRe    = regexp.MustCompile(`(?i)TIER:\s*\**\s*(low|risky|architecture)`)
-	trackRe   = regexp.MustCompile(`(?i)TRACK:\s*\**\s*(direct)`)
-	titleRe   = regexp.MustCompile(`(?im)^[ \t>*_#-]*TITLE[*_]*\s*:[ \t]*(.*)$`)
+	verdictRe  = regexp.MustCompile(`(?i)VERDICT:\s*\**\s*(approve|nits|changes|escalate|close)`)
+	tierRe     = regexp.MustCompile(`(?i)TIER:\s*\**\s*(low|risky|architecture)`)
+	trackRe    = regexp.MustCompile(`(?i)TRACK:\s*\**\s*(direct)`)
+	titleRe    = regexp.MustCompile(`(?im)^[ \t>*_#-]*TITLE[*_]*\s*:[ \t]*(.*)$`)
+	smallFixRe = regexp.MustCompile(`(?im)^[ \t>*_#-]*SMALL[ \t]*FIX[*_]*\s*:[ \t]*(.*)$`)
 )
 
 // titleCap is the most runes a planner's TITLE line keeps; longer ones are cut at a word.
 const titleCap = 60
+
+// smallFixCap is the most runes a plan reviewer's SMALL FIX summary keeps in factory.plan-fix.
+const smallFixCap = 200
 
 // ParseTitle returns the last TITLE line's value without markdown, cut to titleCap at a word,
 // or "" if there is none. Empty values and the prompt's <placeholder> are skipped.
@@ -78,6 +82,26 @@ func ParseTitle(text string) string {
 			continue
 		}
 		return truncWords(t, titleCap)
+	}
+	return ""
+}
+
+// ParseSmallFix returns the plan reviewer's last SMALL FIX line without markdown, or "" if there is
+// none. Empty values and the prompt's <placeholder> are skipped; "none"/"no"/"false"/"n/a" mean not small.
+func ParseSmallFix(text string) string {
+	m := smallFixRe.FindAllStringSubmatch(text, -1)
+	for i := len(m) - 1; i >= 0; i-- {
+		s := strings.ReplaceAll(m[i][1], "`", "")
+		s = strings.Trim(strings.TrimSpace(s), "*_\"' ")
+		s = strings.Join(strings.Fields(s), " ")
+		if s == "" || strings.HasPrefix(s, "<") {
+			continue
+		}
+		switch strings.ToLower(strings.TrimRight(s, ".;:")) {
+		case "none", "no", "false", "n/a":
+			return ""
+		}
+		return trunc(strings.ReplaceAll(s, ",", ";"), smallFixCap)
 	}
 	return ""
 }
@@ -182,6 +206,11 @@ func ReviewPrompt(c Card, kind string, port int, vis string) string {
 		branch = "n/a"
 	}
 	r := strings.NewReplacer("<cwd>", cwd, "<tier>", tier, "<visibility>", visibilityLine(vis)).Replace(rubric[kind]) + "\n\n" + reviewPeersRule(port, kind, c.ID)
+	if kind == "plan" {
+		r += "\n" + planSmallFixRule
+	} else if c.PlanFix != "" {
+		r += "\n" + planFixRule(c.PlanFix)
+	}
 	if c.Decided {
 		r += "\n" + decidedRule
 	}
@@ -247,6 +276,19 @@ func requestSection(r *CardRequest) string {
 const decidedRule = `- Zach has already ruled on open points in this card. His choices are in the builder's conversation ("Zach
   accepts the recommendations in your brief", or a message from Zach). Treat them as settled: do not raise them
   again as blocking. Flag only new problems, or a change that does not do what he chose.`
+
+const planSmallFixRule = `- Small blocking fixes: when your verdict is changes and every blocking finding is a small, concrete fix the
+  builder can apply while building and a code reviewer can check (such as a missing item in a list, an Ordering:
+  or Waits on: line, or a missed call site or test — not a design disagreement, wrong diagnosis or approach, an
+  unsplit >1,000-line change, or a large blocker), add one line right before TIER:
+  SMALL FIX: <one-line summary of the fixes the builder must apply>
+  At the plan-review rework cap, a plan with that line goes to build with those fixes applied and verified by
+  code review; without it, the card stops in Needs Zach.`
+
+func planFixRule(fix string) string {
+	return "- Last-round plan fixes: this card went to build from the final plan-review round with small blocking fixes to apply (" +
+		fix + "). The last plan review is in the builder's conversation. Verify in the diff that the builder applied every blocking fix from that review; any unapplied fix is a blocking finding."
+}
 
 const newCardPrompt = `You are the Fellow on Zach's agent factory board: you own this card from plan to landing.
 
@@ -329,6 +371,23 @@ func buildMsg(prefix, notes string) string {
 	return prefix + " Build it now, as planned. Don't improvise: if the scope has to change, stop and say so " +
 		"instead. " + noLiveChangesRule + " When done, commit everything on your branch and leave the worktree clean (delete or gitignore " +
 		"scratch files), but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
+}
+
+func buildWithFixesMsg(notes string) string {
+	return buildMsg("The last plan review found only small, concrete blocking fixes (in Reviewer notes below). "+
+		"Apply these fixes, then build it now, as planned; do not stop for another plan review, and say in your summary how you applied them.", notes)
+}
+
+func summaryWithFixesMsg(notes string) string {
+	return "The last plan review found only small, concrete blocking fixes (below). Fold those fixes into your plan, and " +
+		"because it is an architecture change it now waits for Zach's approval. Write a short version for Zach (with the " +
+		"fixes folded in), in plain words for reading on a phone. Start with three lines:\n" +
+		"DECISION: <approve this plan?, in one line>\n" +
+		"OVERVIEW: <what changes and why, at most 3 short sentences>\n" +
+		"NEEDS FROM ZACH: <approve the plan, or answer the questions below, and what happens after>\n" +
+		"Then at most 3 bullets: what could go wrong and how you will check it. Then any question he must answer, " +
+		"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
+		"start building; stop after the summary.\n\nReviewer notes:\n" + notes
 }
 
 // findings is the reviewer's last message, trimmed for forwarding to the builder.
@@ -494,7 +553,14 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		return f.setLabels(target, labels)
 	}
 	now := iso(f.Now())
-	if (verdict == "approve" || verdict == "nits") && kind == "plan" {
+	smallFix := ""
+	if kind == "plan" {
+		labels[labelPlanFix] = ""
+		if verdict == "changes" && rounds >= f.cfg.ReworkCap {
+			smallFix = ParseSmallFix(notes)
+		}
+	}
+	if (verdict == "approve" || verdict == "nits" || smallFix != "") && kind == "plan" {
 		// the approved plan may name a card this one lands after (deps.go)
 		if plan, err := f.lastReply(t); err != nil {
 			f.logf("%s: plan not read for a Waits on line: %v", short(target), err)
@@ -565,6 +631,19 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		}
 		if err = set(labelStage, back, labelVerdict, kind+" changes", labelSince, now, labelAutoReview, kind); err == nil {
 			err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
+		}
+	case verdict == "changes" && kind == "plan" && smallFix != "":
+		if tier == "architecture" && !zachOK {
+			note := "architecture: approve the plan to build"
+			if err = set(labelStage, "zach", labelVerdict, "plan changes", labelAwaiting, "plan", labelNote, note,
+				labelWriting, now, labelPlanFix, smallFix); err == nil {
+				err = f.send(target, summaryWithFixesMsg(notes))
+			}
+		} else {
+			if err = set(labelStage, "building", labelVerdict, "plan fixes", labelSince, now, labelAutoReview, "code",
+				labelNote, "building with last-round plan fixes", labelPlanFix, smallFix); err == nil {
+				err = f.send(target, buildWithFixesMsg(notes))
+			}
 		}
 	case verdict == "close":
 		err = set(labelStage, "zach", labelVerdict, "close", labelNote, "reviewer suggests closing")

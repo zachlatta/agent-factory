@@ -39,8 +39,11 @@ The planner (the "Fellow") first picks a track:
 - Plans and build summaries name their deploy steps (if any). Builders make no live changes
   (install scripts, enabling or restarting services, resizing VMs, external settings) before code
   review: the code reviewer checks the steps, and the landing step runs and verifies them after pushing.
-- Circuit breakers: 3 review rounds per gate, then a person; reviewers may answer `nits` or
-  `close`; a card that stops with nothing queued goes to Needs Zach after 2 minutes.
+- Circuit breakers: 3 review rounds per gate, then a person (at the plan-review cap, a last round
+  whose only blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those
+  fixes applied and verified by code review; design disagreements and large blockers go to Needs
+  Zach); reviewers may answer `nits` or `close`; a card that stops with nothing queued goes to
+  Needs Zach after 2 minutes.
 - Blocked agents: a child agent waiting on a permission prompt (`paseo permit ls`) or running with
   no activity for 20 minutes flags its card ("reviewer waiting on permission", "reviewer stalled N
   min"). Such a reviewer no longer counts as a pending verdict, so its card really moves to Needs

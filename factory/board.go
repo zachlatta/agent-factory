@@ -132,7 +132,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Tier: a.L(labelTier), Awaiting: a.L(labelAwaiting), Origin: a.L(labelOrigin), Agent: a.L(labelAgent),
 			Rounds:    Rounds{Plan: atoi(a.L(labelPlanRounds)), Code: atoi(a.L(labelCodeRounds))},
 			CreatedAt: iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
-			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != ""}
+			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != "", PlanFix: a.L(labelPlanFix)}
 		if a.parked() {
 			c.ArchivedAt, c.Parked = "", iso(a.ArchivedAt)
 			c.Flags = append(c.Flags, parkedFlag)

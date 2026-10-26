@@ -43,6 +43,7 @@ const (
 	labelWaitsOn    = "waits-on"     // short id of the card this one lands after, from its approved plan (deps.go)
 	labelWaitsDone  = "waits-landed" // the waits-on card was seen landed: it stays landed after it leaves the list
 	labelHeld       = "held"         // in landing: the land prompt waits for this card to land (deps.go)
+	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
 )
 
 // labelArg is the `paseo --label` value that sets factory label k to v.
