@@ -28,20 +28,20 @@ func ParseWaitsOn(text, self string) string {
 // The state of a card named in a Waits on line.
 const (
 	depWaiting = "waiting" // in flight: hold the landing
-	depLanded  = "landed"  // Done: land
+	depLanded  = "landed"  // Done or verified landing with follow-up work: land
 	depDropped = "dropped" // archived without landing (dropped or closed): ask Zach
 	depMissing = "missing" // not on the board: ask Zach
 )
 
 // depOf is the state of the card with short id among agents. A Done card is landed even after it is
-// archived; any other archived card was dropped or closed.
+// archived. A verified landing also stays landed after follow-up work or closure.
 func depOf(agents []Agent, id string) string {
 	for _, d := range agents {
 		if short(d.ID) != id || d.L(labelRole) != "" {
 			continue
 		}
 		switch {
-		case d.L(labelStage) == "landed":
+		case d.L(labelStage) == "landed" || d.L(labelLandedVerified) == "1":
 			return depLanded
 		case d.gone():
 			return depDropped
@@ -141,11 +141,14 @@ func depHoldMsg(id, fb string) string {
 		"summary with it under 'UI feedback:'.\n\n" + fb
 }
 
-// tickHeld moves a held landing card on: nothing while its waits-on card is in flight, the land
-// prompt once it lands, Needs Zach if it was dropped or cannot be found. A held card is never
-// checked as a landing (or stuck): it has not been told to land.
+// tickHeld moves a held landing card on, or recovers a dependency ask once its dependency lands.
+// It sends the land prompt once landed, or asks Zach if the dependency was dropped or is missing.
+// A held card is never checked as a landing (or stuck): it has not been told to land.
 func (f *Factory) tickHeld(a Agent, c Card) error {
 	id := a.L(labelHeld)
+	if id == "" {
+		id = a.L(labelWaitsOn)
+	}
 	st := depState(f.agents(), a, id)
 	if st == depWaiting {
 		return nil
@@ -163,8 +166,12 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelHeld: "", labelNote: note})
 		}
 	}
-	if err := f.setLabels(a.ID, map[string]string{labelHeld: "", labelSince: iso(f.Now()),
-		labelNote: "auto-landing: " + id + " landed"}); err != nil {
+	labels := map[string]string{labelHeld: "", labelSince: iso(f.Now()), labelTold: "", labelWaitsDone: "1",
+		labelNote: "auto-landing: " + id + " landed"}
+	if a.L(labelStage) == "zach" {
+		labels[labelStage] = "landing"
+	}
+	if err := f.setLabels(a.ID, labels); err != nil {
 		return err
 	}
 	f.logf("%s released: %s landed", short(a.ID), id)

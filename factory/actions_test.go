@@ -197,3 +197,23 @@ func TestRerunRestartsTheStuckStep(t *testing.T) {
 		}
 	}
 }
+
+func TestClosingVerifiedLandingPreservesDependency(t *testing.T) {
+	c := dep("zach", false)
+	c.Labels[labelPrefix+labelLandedVerified] = "1"
+	f, p := newTestFactory(t, c)
+	if _, err := f.Act("close", Body{ID: c.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if !p.called("archive", c.ID) {
+		t.Fatal("card not archived")
+	}
+	// Apply only the labels actually written by the close action.
+	for k, v := range p.labels(c.ID) {
+		c.Labels[labelPrefix+k] = v
+	}
+	c.ArchivedAt = t0
+	if c.L(labelNote) != "closed by Zach" || depOf([]Agent{c}, short(c.ID)) != depLanded {
+		t.Errorf("closed verified landing no longer satisfies dependency: %v", c.Labels)
+	}
+}

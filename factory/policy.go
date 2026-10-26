@@ -926,10 +926,13 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		if note := remainingNote(reply); note != "" {
 			f.logf("%s landed with work left: %s", short(a.ID), note)
-			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note})
+			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note, labelLandedVerified: "1"})
 		}
 		f.logf("%s finished landing", short(a.ID))
-		return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "landed"})
+		return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "landed", labelLandedVerified: "1"})
+	case a.L(labelStage) == "zach" && isDepAskNote(a.L(labelNote)) && a.L(labelWaitsOn) != "" &&
+		depState(f.agents(), a, a.L(labelWaitsOn)) == depLanded:
+		return f.tickHeld(a, c)
 	case a.L(labelStage) == "zach" && f.Mail != nil && a.L(labelTold) != waitNote(a) && mailable(c.Ask):
 		if live, err := f.stillStopped(a); !live {
 			return err

@@ -48,6 +48,10 @@ const (
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
 )
 
+// labelLandedVerified records that commits reached main and passed the reviewed-change check.
+// It survives follow-up work and closure.
+const labelLandedVerified = "landed-verified"
+
 // labelArg is the `paseo --label` value that sets factory label k to v.
 // labelArg is a factory label for `paseo --label`. Paseo reads --label as comma-separated k=v pairs,
 // so a comma in a value would split it and fail the whole update: commas become semicolons.

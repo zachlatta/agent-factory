@@ -2,6 +2,7 @@ package factory
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -135,23 +136,32 @@ func TestHeldCardWaitsWhileDependencyInFlight(t *testing.T) {
 }
 
 func TestHeldCardIsReleasedOnceDependencyLands(t *testing.T) {
-	f, p := newTestFactory(t, heldCard(nil), dep("landed", false))
-	f.Tick()
-	l := p.labels("c1")
-	if l[labelHeld] != "" || l[labelStage] != "" || l[labelSince] != iso(t0) || l[labelWaitsDone] != "1" {
-		t.Errorf("labels = %v", l)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "d0e0001") || !strings.Contains(msgs[0], "Land it now") ||
-		!strings.Contains(msgs[0], "REMAINING:") {
-		t.Fatalf("sent = %v", msgs)
-	}
-	// the next Tick sees the released card (since = now, not acted yet): nothing more is sent
-	released := heldCard(map[string]string{labelHeld: "", labelSince: iso(t0), labelWaitsDone: "1"})
-	f.SetAgents([]Agent{released, dep("landed", false)})
-	f.Tick()
-	if msgs := p.sent("c1"); len(msgs) != 1 {
-		t.Errorf("sent again: %v", msgs)
+	verified := dep("zach", true)
+	verified.Labels[labelPrefix+labelLandedVerified] = "1"
+	parked := dep("zach", true)
+	parked.Labels[labelPrefix+labelParked] = iso(t0)
+	parked.Labels[labelPrefix+labelLandedVerified] = "1"
+	for name, d := range map[string]Agent{"done": dep("landed", false), "verified closed": verified, "verified parked": parked} {
+		t.Run(name, func(t *testing.T) {
+			f, p := newTestFactory(t, heldCard(nil), d)
+			f.Tick()
+			l := p.labels("c1")
+			if l[labelHeld] != "" || l[labelStage] != "" || l[labelSince] != iso(t0) || l[labelWaitsDone] != "1" {
+				t.Errorf("labels = %v", l)
+			}
+			msgs := p.sent("c1")
+			if len(msgs) != 1 || !strings.Contains(msgs[0], "d0e0001") || !strings.Contains(msgs[0], "Land it now") ||
+				!strings.Contains(msgs[0], "REMAINING:") {
+				t.Fatalf("sent = %v", msgs)
+			}
+			// the next Tick sees the released card (since = now, not acted yet): nothing more is sent
+			released := heldCard(map[string]string{labelHeld: "", labelSince: iso(t0), labelWaitsDone: "1"})
+			f.SetAgents([]Agent{released, d})
+			f.Tick()
+			if msgs := p.sent("c1"); len(msgs) != 1 {
+				t.Errorf("sent again: %v", msgs)
+			}
+		})
 	}
 }
 
@@ -251,3 +261,141 @@ func TestBoardShowsWaitsOn(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A verified landing remains a satisfied dependency after follow-up work or closure.
+func TestVerifiedLandingDependency(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		d := dep("zach", archived)
+		d.Labels[labelPrefix+labelLandedVerified] = "1"
+		d.Labels[labelPrefix+labelNote] = "closed by Zach"
+		if got := depOf([]Agent{d}, "d0e0001"); got != depLanded {
+			t.Errorf("archived=%v: depOf = %q", archived, got)
+		}
+		if got := depState([]Agent{d}, heldCard(nil), "d0e0001"); got != depLanded {
+			t.Errorf("archived=%v: depState = %q", archived, got)
+		}
+	}
+}
+
+func TestDependencyAskRecoversAfterVerifiedLanding(t *testing.T) {
+	for _, note := range []string{depAskNote("d0e0001", depDropped), depAskNote("d0e0001", depMissing)} {
+		t.Run(note, func(t *testing.T) {
+			d := dep("zach", true)
+			d.Labels[labelPrefix+labelLandedVerified] = "1"
+			c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: note, labelTold: note})
+			f, p := newTestFactory(t, c, d)
+			f.Tick()
+			l := p.labels("c1")
+			if l[labelStage] != "landing" || l[labelHeld] != "" || l[labelTold] != "" || l[labelWaitsDone] != "1" || l[labelSince] != iso(t0) || !strings.HasPrefix(l[labelNote], "auto-landing:") {
+				t.Errorf("labels = %v", l)
+			}
+			if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Land it now") {
+				t.Fatalf("sent = %v", msgs)
+			}
+			c.Labels[labelPrefix+labelStage] = "landing"
+			c.Labels[labelPrefix+labelNote] = l[labelNote]
+			c.Labels[labelPrefix+labelSince] = iso(t0)
+			c.Labels[labelPrefix+labelWaitsDone] = "1"
+			f.SetAgents([]Agent{c, d})
+			f.Tick()
+			if len(p.sent("c1")) != 1 {
+				t.Error("sent another land prompt")
+			}
+		})
+	}
+}
+
+func TestDependencyRecoveryStaysBlocked(t *testing.T) {
+	for _, name := range []string{"unverified", "diff changed", "unrelated ask", "running", "closed", "parked", "running on inspect"} {
+		t.Run(name, func(t *testing.T) {
+			d := dep("zach", false)
+			d.Labels[labelPrefix+labelLandedVerified] = "1"
+			c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote("d0e0001", depDropped)})
+			switch name {
+			case "unverified", "diff changed":
+				delete(d.Labels, labelPrefix+labelLandedVerified)
+				d.Labels[labelPrefix+labelNote] = "landing not verified"
+				if name == "diff changed" {
+					d.Labels[labelPrefix+labelNote] = "landed diff differs from the reviewed one: changed"
+				}
+			case "unrelated ask":
+				c.Labels[labelPrefix+labelNote] = "review passed: approve to land"
+			case "running":
+				c.Status = "running"
+			case "closed", "parked":
+				c.ArchivedAt = t0.Add(-time.Minute)
+				if name == "parked" {
+					c.Labels[labelPrefix+labelParked] = iso(t0)
+				}
+			}
+			f, p := newTestFactory(t, c, d)
+			if name == "running on inspect" {
+				p.status["c1"] = "running"
+			}
+			f.Tick()
+			if l := p.labels("c1"); l[labelStage] != "" || l[labelHeld] != "" {
+				t.Errorf("moved blocked card: %v", l)
+			}
+			if len(p.sent("c1")) != 0 {
+				t.Error("sent blocked card a land prompt")
+			}
+		})
+	}
+}
+
+func TestGuardedDependencyAskRecoveryScansAgain(t *testing.T) {
+	for _, clean := range []bool{false, true} {
+		c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote("d0e0001", depDropped)})
+		c.Repo = publicRepo
+		d := dep("zach", true)
+		d.Labels[labelPrefix+labelLandedVerified] = "1"
+		f, p := newTestFactory(t, c, d)
+		var hits []scan.Hit
+		if !clean {
+			hits = []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}
+		}
+		ranges := fakeScan(f, hits, nil)
+		f.Tick()
+		if len(*ranges) != 1 {
+			t.Errorf("scans = %v", *ranges)
+		}
+		if clean {
+			if len(p.sent("c1")) != 1 {
+				t.Errorf("sent = %v", p.sent("c1"))
+			}
+		} else if l := p.labels("c1"); l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], "secret scan failed") || len(p.sent("c1")) != 0 {
+			t.Errorf("failed scan released card: labels %v, sent %v", l, p.sent("c1"))
+		}
+	}
+}
+
+func TestFailedLandingDoesNotRecordVerifiedDependency(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		c := dep("landing", false)
+		c.Cwd = t.TempDir()
+		c.Labels[labelPrefix+labelSince] = ago(10 * time.Minute)
+		if changed {
+			c.Labels[labelPrefix+labelReviewed] = "h1"
+		}
+		f, p := newTestFactory(t, c)
+		f.Git = func(context.Context, string, ...string) error {
+			if !changed {
+				return errors.New("not on main")
+			}
+			return nil
+		}
+		f.GitOut = func(context.Context, string, ...string) (string, error) { return "", errors.New("review not verified") }
+		p.logs[c.ID] = "REMAINING: none"
+		f.Tick()
+		l := p.labels(c.ID)
+		if l[labelLandedVerified] != "" || l[labelStage] != "zach" {
+			t.Errorf("failed verification recorded landing: %v", l)
+		}
+		for k, v := range l {
+			c.Labels[labelPrefix+k] = v
+		}
+		if got := depOf([]Agent{c}, short(c.ID)); got != depWaiting {
+			t.Errorf("dependency state = %q", got)
+		}
+	}
+}

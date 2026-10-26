@@ -81,6 +81,9 @@ func TestLandingReadsWhatRemains(t *testing.T) {
 			if l := p.labels("c1"); l[labelStage] != tc.stage || l[labelNote] != tc.note {
 				t.Errorf("labels = %v", l)
 			}
+			if l := p.labels("c1"); l[labelLandedVerified] != "1" {
+				t.Errorf("verified landing not recorded: %v", l)
+			}
 			if p.called("archive", "c1") {
 				t.Error("card archived")
 			}
