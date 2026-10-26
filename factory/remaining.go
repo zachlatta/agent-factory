@@ -11,9 +11,13 @@ import (
 
 // remainingRule ends every landing message. It stays on one line: the log fallback (lastMessage)
 // skips the whole [User] line, so the rule's own example is never read as the agent's answer.
-const remainingRule = " End that summary with a line that says what is left: REMAINING: none only when " +
-	"everything this card was asked to do is landed and live; otherwise a line REMAINING: followed by one " +
-	"- line per thing not done (a commit not pushed, a check not run, a setting someone still has to change)."
+// It lists only this card's own unfinished work: anything else held finished cards in Needs Zach.
+const remainingRule = " End that summary with a line that says what is left of this card's own request: " +
+	"REMAINING: none only when everything this card was asked to do is landed and live; otherwise a line " +
+	"REMAINING: followed by one - line per part of it not done (a commit not pushed, a check of this change " +
+	"not run, a setting this change needs that is not set). Do not list work another card owns, a problem " +
+	"this change did not cause (an expired login, a test failing for reasons unrelated to it) or follow-ups: " +
+	"say those in the summary, and suggest any worth doing as an idea."
 
 var (
 	remainingRe     = regexp.MustCompile(`(?i)^[ \t>*_#-]*REMAINING[*_]*\s*:[*_]*[ \t]*(.*)$`)

@@ -68,6 +68,7 @@ func TestAskYesNo(t *testing.T) {
 		{"stuck", card("c", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}), "", ""},
 		{"landing unverified", card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"}), "say", "say"},
 		{"moved by hand", card("c", map[string]string{labelStage: "zach"}), "say", "say"},
+		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"}), "say", "say"},
 		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}}, "say", "say"},
 		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}}, "", ""},
 		{"repo picker", card("c", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelCandidates: "example/desk"}), "", ""},

@@ -50,8 +50,12 @@ The planner (the "Fellow") first picks a track:
   card goes to Needs Zach with one question: land it anyway, reply, or drop it.
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none`. A card that lists work left (`REMAINING:` then one `-`
-  line per item), or says nothing, waits in Needs Zach with the list in its note: reply to send the
-  agent on, or mark it Done.
+  line per item), or says nothing, waits in Needs Zach with the list in its note ("Landed, with work
+  left" or "Landed: did it finish?", and emailed like any other wait): reply to send the agent on, or
+  mark it Done. REMAINING lists only this card's own request: another card's work, a problem the
+  change did not cause (an expired login, an unrelated failing test) and follow-ups go in the summary
+  or become ideas, so they never hold a finished card. A landing whose commits differ from the
+  reviewed ones waits as "Landed something other than what was reviewed".
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
   the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
   `0.0.0.0`), and clicks through it with computer use. Its non-blocking "UI feedback:" block goes to

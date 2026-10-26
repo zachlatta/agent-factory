@@ -164,6 +164,22 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Title: "Landing didn't reach main", From: "builder",
 			Why:     "The agent finished landing, but its commit is not on origin/main. Its last message is below.",
 			Actions: []Action{reply("Tell it to retry", "e.g. rebase and land it again"), act("done", "It's fine, mark done")}}
+	case strings.HasPrefix(note, "landed; still to do: "):
+		return &Ask{Title: "Landed, with work left", From: "builder",
+			Why: "The agent landed its change but says part of this card is not done: " +
+				strings.TrimPrefix(note, "landed; still to do: ") + ". Send it on to finish, or mark it done.",
+			Actions: []Action{{ID: "reply", Label: "Send it on", Primary: true, Hint: "e.g. finish the rest"}, act("done", "Mark done")}}
+	case note == "landed; did not say what remains":
+		return &Ask{Title: "Landed: did it finish?", From: "builder",
+			Why: "The agent landed its change but did not end with a REMAINING line, so the factory can't tell " +
+				"whether anything is left. Its last message is below.",
+			Actions: []Action{primary("done", "Mark done"), reply("Reply", "e.g. what is left?")}}
+	case strings.HasPrefix(note, "landed diff differs from the reviewed one"):
+		return &Ask{Title: "Landed something other than what was reviewed", From: "builder",
+			Why: "What reached main is not exactly the reviewed commits (" +
+				strings.TrimPrefix(strings.TrimPrefix(note, "landed diff differs from the reviewed one"), ": ") +
+				"). Check what landed. Its last message is below.",
+			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
 	case a.L(labelStage) == "zach":
 		return &Ask{Title: handTitle, From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",

@@ -53,6 +53,9 @@ func TestLandingMessagesAskWhatRemains(t *testing.T) {
 		if !strings.HasSuffix(s, remainingRule) {
 			t.Errorf("%s does not end with the REMAINING rule: %q", name, s)
 		}
+		if !strings.Contains(s, "this card's own request") || !strings.Contains(s, "another card") {
+			t.Errorf("%s does not limit REMAINING to this card's own work: %q", name, s)
+		}
 		if strings.Contains(s, "\n") {
 			t.Errorf("%s spans lines: the log fallback could read the rule as the agent's answer", name)
 		}

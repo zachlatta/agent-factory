@@ -52,6 +52,12 @@ func TestAskFor(t *testing.T) {
 			"Stuck in Building: nothing is queued", "builder", "rerun,reply,done,close"},
 		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),
 			"Moved here by hand", "builder", "reply,done"},
+		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: push 2"}),
+			"Landed, with work left", "builder", "reply,done"},
+		{"landed without a REMAINING line", card("c", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}),
+			"Landed: did it finish?", "builder", "done,reply"},
+		{"landed other than reviewed", card("c", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: extra commit"}),
+			"Landed something other than what was reviewed", "builder", "reply,done"},
 	}
 	for _, c := range cases {
 		cards := BuildBoard([]Agent{c.a}, nil, t0)
@@ -180,5 +186,22 @@ func TestAskDetailJoinsAReplySplitOverBlocks(t *testing.T) {
 	got, _ := f.card("c1")
 	if got.Ask.Detail != "Part one.\n\nPart two." {
 		t.Errorf("detail = %q", got.Ask.Detail)
+	}
+}
+
+// A landed card held in Needs Zach says why, and is emailed; a card moved by hand is not.
+func TestLandedAsks(t *testing.T) {
+	for note, want := range map[string]string{
+		"landed; still to do: push 2 not landed; check production": "push 2 not landed; check production",
+		"landed; did not say what remains":                         "REMAINING",
+		"landed diff differs from the reviewed one: extra commit":  "extra commit",
+	} {
+		ask := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: note})}, nil, t0)[0].Ask
+		if ask == nil || !strings.Contains(ask.Why, want) || !mailable(ask) {
+			t.Errorf("%s: ask = %+v", note, ask)
+		}
+	}
+	if mailable(BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach"})}, nil, t0)[0].Ask) {
+		t.Error("a card moved by hand is mailable")
 	}
 }
