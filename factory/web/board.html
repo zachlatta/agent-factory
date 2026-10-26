@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent factory</title>
+<title>Factory</title>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <style>
@@ -162,13 +162,28 @@ dialog h3{margin:0 0 8px}
   aside .x{font-size:28px;top:6px}
   .acts button{padding:8px 12px}
 }
-#hostPreview{display:block;padding:7px 16px;background:#fff;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink);text-decoration:none;font-variant-numeric:tabular-nums}
-#hostPreview:hover{text-decoration:underline}#hostPreview[data-stale=true]{color:#b42318}
+/* host load: one bar per host in the header; click for the per-host popover */
+button.fleet{display:inline-flex;align-items:center;padding:3px 5px;margin-left:-4px;background:none;border-color:transparent}
+button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-color:var(--line)}
+#fleetIcon .track{fill:#eef1f4}#fleetIcon .bar.ok{fill:var(--green)}#fleetIcon .bar.warm{fill:#d4a72c}#fleetIcon .bar.hot{fill:var(--red)}#fleetIcon .bar.stale{fill:#d0d7de}
+#fleetPop{position:fixed;top:48px;left:12px;z-index:20;width:min(440px,calc(100vw - 24px));max-height:calc(100vh - 64px);overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(31,35,40,.15);padding:6px 12px;font-variant-numeric:tabular-nums}
+#fleetPop .frow{padding:8px 0;border-bottom:1px solid var(--line)}
+#fleetPop .fhd{display:flex;align-items:center;gap:6px}#fleetPop .fnote{margin-left:auto;text-align:right}
+#fleetPop .frow.stale .fnote{color:var(--red)}
+.fdot{width:8px;height:8px;border-radius:50%;flex:none}.fdot.ok{background:var(--green)}.fdot.warm{background:#d4a72c}.fdot.hot{background:var(--red)}.fdot.stale{background:#d0d7de}
+#fleetPop .fstats{display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12px;color:var(--mute);margin:3px 0 4px}#fleetPop .fstats b{color:var(--ink)}
+#fleetPop .spark{display:block;width:100%;height:24px;background:#f6f8fa;border-radius:3px}
+#fleetPop polyline{fill:none;stroke-width:1.5;vector-effect:non-scaling-stroke}
+#fleetPop polyline.cpu,#fleetPop .k.cpu{stroke:var(--blue);background:var(--blue)}#fleetPop polyline.memory,#fleetPop .k.memory{stroke:var(--purple);background:var(--purple)}
+#fleetPop .k{display:inline-block;width:8px;height:3px;margin:0 3px 2px 0;vertical-align:middle}
+#fleetPop .ffoot{display:flex;justify-content:space-between;gap:8px;padding:8px 0 4px;font-size:12px}#fleetPop .ffoot a{color:var(--blue)}
+@media (max-width:760px){#fleetPop{top:44px;left:8px;width:calc(100vw - 16px)}}
 </style>
 </head>
 <body>
 <header>
-  <h1>Agent factory</h1>
+  <h1>Factory</h1>
+  <button id="fleetBtn" class="fleet" aria-expanded="false" aria-controls="fleetPop" aria-label="Host load" title="Host load"><svg id="fleetIcon" height="16" width="14" viewBox="0 0 4 16" aria-hidden="true"></svg></button>
   <span class="sub" id="updated">loading…</span>
   <span class="err" id="errors"></span>
   <div class="counts" id="counts"></div>
@@ -180,7 +195,7 @@ dialog h3{margin:0 0 8px}
   <label class="sub"><input type="checkbox" id="showKids"> sub-agents</label>
   <button class="primary" id="newBtn">+ New card</button>
 </header>
-<a href="/host" id="hostPreview">Host metrics loading…</a>
+<div id="fleetPop" role="dialog" aria-label="Host load" hidden></div>
 <script src="/host-metrics.js" defer></script>
 <div class="banner" id="banner" hidden></div>
 <nav class="tabs" id="tabs"></nav>

@@ -38,6 +38,7 @@ type Config struct {
 	PrivateRules string   // file of private scan patterns (hostnames and the like), never in a repo
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
 	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't
+	MetricHosts  []string // SSH aliases whose load the board shows besides this host (hostfleet.go)
 }
 
 func (c *Config) defaults() {
@@ -83,6 +84,7 @@ type Factory struct {
 	routes *RouteStore
 
 	hostMetrics hostSampler
+	fleet       *hostFleet
 	// landReviews: landing reviews asked for by agents outside the card flow (landreview.go)
 	landReviews *LandReviewStore
 	GitHubAPI   string // base URL for repo visibility lookups
@@ -139,6 +141,7 @@ func New(cfg Config, p Paseo) *Factory {
 		once: map[string]string{}}
 	f.Scan = f.runScan
 	f.Usage = f.readProviderUsage
+	f.fleet = newHostFleet(cfg.MetricHosts, cfg.Host)
 	return f
 }
 

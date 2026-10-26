@@ -37,7 +37,7 @@ func readHost(path string) hostReading {
 		r.Metrics.Disk, _ = diskSpace(stat.Blocks, stat.Bfree, stat.Bavail, uint64(stat.Bsize))
 	}
 	if r.Metrics.Disk == nil {
-		r.Metrics.Errors["disk"] = "Work filesystem capacity unavailable"
+		r.Metrics.Errors["disk"] = "Home filesystem capacity unavailable"
 	}
 	return r
 }

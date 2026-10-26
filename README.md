@@ -217,6 +217,7 @@ approve, 2 on changes, 3 when Zach must decide.
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
+| `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |
 | `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks` and `pdw` (logged in) |
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>`.
@@ -234,6 +235,10 @@ Cards can start in any checkout under `~/dev/<owner>/<repo>`.
   session file (Claude `~/.claude/projects`, Codex `~/.codex/sessions`, Antigravity
   `~/.gemini/antigravity-cli/brain`, Muse `~/.local/share/muse/sessions`), and `paseo logs` only
   when there is none.
+- `factory/hostmetrics*.go`, `hostfleet.go`: host load for the header icon and `/host`. Each
+  `FACTORY_METRIC_HOSTS` alias gets one read-only SSH stream (`ssh -o BatchMode=yes`, a fixed
+  script on stdin, Linux or macOS), shared by all viewers, run only while someone polls
+  `/api/hosts` and stopped a minute after the last poll.
 - Tests sit beside the code, with a fake `paseo` (`factory/fake_test.go`).
 
 ## License

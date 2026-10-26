@@ -47,11 +47,15 @@ func main() {
 	lanes := flag.String("lanes", os.Getenv("FACTORY_LANES"), "JSON file of board lane names per repo (env FACTORY_LANES; default ~/.config/agent-factory/lanes.json)")
 	private := flag.String("private-rules", os.Getenv("FACTORY_PRIVATE_RULES"), "file of private scan patterns (env FACTORY_PRIVATE_RULES; default ~/.config/agent-factory/denylist)")
 	zachEmail := flag.String("zach-email", os.Getenv("FACTORY_ZACH_EMAIL"), "address cards with no email thread email Zach at (env FACTORY_ZACH_EMAIL)")
+	metricHosts := flag.String("metric-hosts", os.Getenv("FACTORY_METRIC_HOSTS"), "comma-separated SSH aliases whose load the board shows besides this host (env FACTORY_METRIC_HOSTS)")
 	tick := flag.Bool("tick", true, "run the pipeline; -tick=false only serves the board (deploy canary)")
 	flag.Parse()
 
 	cfg := factory.Config{Host: host, Home: home, StateDir: *state, Port: *port, BoardURL: *boardURL,
 		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail}
+	if *metricHosts != "" {
+		cfg.MetricHosts = splitList(*metricHosts)
+	}
 	if *guarded != "" {
 		cfg.Guarded = splitList(*guarded)
 	}

@@ -47,6 +47,7 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /host", page("host.html"))
 	mux.HandleFunc("GET /host-metrics.js", page("host-metrics.js"))
 	mux.HandleFunc("GET /api/host", f.handleHost)
+	mux.HandleFunc("GET /api/hosts", f.handleHosts)
 	mux.HandleFunc("POST /api/{action}", f.handleAction)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

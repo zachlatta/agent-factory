@@ -33,7 +33,7 @@ func TestServer(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Agent factory") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<h1>Factory</h1>") {
 		t.Errorf("index: %d", rec.Code)
 	}
 	rec = httptest.NewRecorder()
