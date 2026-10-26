@@ -17,6 +17,10 @@ The board remembers the Lanes grouping you last picked, in your browser's local 
 restores it on the next visit; an unrecognized or unavailable saved value falls back to grouping
 by repo.
 
+Every card and idea shows its repo at the start of its grey info line (the lane name, else the
+name after `owner/`; the full `owner/name` on hover), so the repo is visible in any grouping and on
+the phone.
+
 ## How a card moves
 
 Plan → Plan review → Building → Code review → Landing → Done, with **Needs Zach** for anything

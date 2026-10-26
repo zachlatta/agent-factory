@@ -44,6 +44,7 @@ main{padding:12px 16px calc(80px + env(safe-area-inset-bottom));overflow-x:auto}
 .card.sel{outline:2px solid var(--blue)}
 .card .t{font-weight:600;font-size:13px;display:flex;gap:6px;align-items:flex-start}
 .card .m{color:var(--mute);font-size:11.5px;margin-top:2px}
+.card .m .repo{color:var(--ink);font-weight:600;white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:#afb8c1;flex:none;margin-top:5px}
 .dot.running{background:var(--green);animation:p 1.6s infinite}
 .dot.attn{background:var(--amber)}
@@ -276,6 +277,20 @@ function saveLaneGroup(storage, v, options){
   try{ if(storage) storage.setItem(LANE_GROUP_KEY, v); }catch(e){}
 }
 // laneGroup: end
+
+// repoLabel: begin
+// repoLabel names a card's repo the way its lane header does: the host's lane name, else the
+// name after owner/. repoTag is the label for a card's info line, with owner/name on hover.
+const REPO_WORDS = {'(no repo)':'no repo', 'auto':'picking a repo'};
+function repoLabel(repo, names = LANE_NAMES){
+  if(!repo) return '';
+  return REPO_WORDS[repo] || names[repo] || repo.slice(repo.indexOf('/')+1);
+}
+function repoTag(c, names = LANE_NAMES){
+  const l = repoLabel(c.repo, names);
+  return l ? `<span class="repo" title="${esc(c.repo)}">${esc(l)}</span>` : '';
+}
+// repoLabel: end
 const laneGroupOptions = [...$('group').options].map(o=>o.value);
 const savedGroup = savedLaneGroup(laneStorage(), laneGroupOptions);
 if(savedGroup) $('group').value = savedGroup;
@@ -519,7 +534,7 @@ function cardHtml(c){
   return `<div class="card ${sel===c.id?'sel':''}" draggable="true" data-id="${c.id}">
     <div class="t"><span class="dot ${dot}"></span><span>${esc(c.title)}</span></div>
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
-    <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${esc(c.host)} · ${esc(c.source)} · ${ago(c.lastActivityAt)}${hidden?` · ${hidden} sub-agent${hidden>1?'s':''}`:''}</div>
+    <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${hidden?` · ${hidden} sub-agent${hidden>1?'s':''}`:''}</div>
     <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?askHtml(c):''}

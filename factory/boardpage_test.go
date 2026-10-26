@@ -375,3 +375,45 @@ const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new 
 	}
 	t.Log(strings.TrimSpace(string(out)))
 }
+
+// Every card and idea shows its repo at the start of its info line, in any grouping and on the phone.
+func TestBoardPageCardShowsRepo(t *testing.T) {
+	page := boardPage(t)
+	const begin, end = "// repoLabel: begin", "// repoLabel: end"
+	i, j := strings.Index(page, begin), strings.Index(page, end)
+	if i < 0 || j < i {
+		t.Fatal("no repoLabel markers in the page")
+	}
+	// cardHtml draws board, phone and idea cards; its info line starts with the repo
+	if !regexp.MustCompile(`<div class="m">[^\n]*\[repoTag\(c\)`).MatchString(page) {
+		t.Error("cardHtml info line does not start with the repo")
+	}
+	if len(cssRules(page, ".card .m .repo")) == 0 {
+		t.Error("no .card .m .repo rule")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := `const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+` + page[i:j] + `
+const names = {'acme/widgets': 'Widgets'};
+console.log(JSON.stringify([
+  repoLabel('acme/widgets', names),
+  repoLabel('acme/gadgets', names),
+  repoLabel('(no repo)', names),
+  repoLabel('auto', names),
+  repoLabel('', names),
+  repoLabel(undefined, names),
+  repoTag({repo: 'acme/<b>'}, names),
+  repoTag({repo: ''}, names),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `["Widgets","gadgets","no repo","picking a repo","","","<span class=\"repo\" title=\"acme/&lt;b&gt;\">&lt;b&gt;</span>",""]`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("repoLabel = %s\nwant %s", got, want)
+	}
+}
