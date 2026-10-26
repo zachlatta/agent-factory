@@ -508,7 +508,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 			return err
 		}
-		f.paseo("archive", rev.ID)
+		f.archiveStoppedAgent(rev.ID)
 		return nil
 	}
 	t, ok := f.agentOK(target)
@@ -525,7 +525,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 				return err
 			}
-			f.paseo("archive", rev.ID)
+			f.archiveStoppedAgent(rev.ID)
 			f.logf("reviewer %s: target %s archived, verdict not sent", short(rev.ID), short(target))
 			return nil
 		}
@@ -533,7 +533,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 		return err
 	}
-	defer f.paseo("archive", rev.ID)
+	defer f.archiveStoppedAgent(rev.ID)
 	if !ok {
 		f.logf("reviewer %s: target %s not found", short(rev.ID), short(target))
 		return nil
@@ -835,7 +835,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	case a.L(labelRole) == "scout":
 		if a.stopped() && old {
 			f.logf("scout %s finished", short(a.ID))
-			_, err := f.paseo("archive", a.ID)
+			err := f.archiveStoppedAgent(a.ID)
 			return err
 		}
 		return nil

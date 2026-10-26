@@ -77,7 +77,7 @@ func main() {
 		cfg.StateDir = dir
 		log.Printf("dry run: nothing changes; state copied to %s", dir)
 	}
-	f := factory.New(cfg, factory.CLI{})
+	f := factory.New(cfg, factory.CLI{ArchiveBin: os.Getenv("FACTORY_ARCHIVE_CLI")})
 	if !*dryRun {
 		f.Mail = factory.PDWMailer{}
 	}

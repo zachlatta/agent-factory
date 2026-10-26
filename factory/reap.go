@@ -74,7 +74,7 @@ func (f *Factory) reap(now time.Time) {
 			f.parkedNow[a.ID] = iso(now)
 			f.mu.Unlock()
 		}
-		if err := f.archiveAgent(a.ID); err != nil {
+		if err := f.archiveStoppedAgent(a.ID); err != nil {
 			// a parked label left on a live agent is cleared by the next reap
 			rep.Errors = append(rep.Errors, short(a.ID)+": "+err.Error())
 			f.mu.Lock()

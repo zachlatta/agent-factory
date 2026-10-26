@@ -485,37 +485,6 @@ func (f *Factory) resume(id string) {
 	f.unmarkArchived(id)
 }
 
-// archiveAgent archives agent id and marks the snapshot archived. `paseo archive` refuses a running
-// agent, so only then is it stopped first (an idle agent costs one paseo call, not two); stop can
-// return before the run has wound down, so a "currently running" archive is retried for a few seconds.
-//
-// A parked agent is archived already: archiving it for good only clears the park, so it leaves
-// Needs Zach.
-func (f *Factory) archiveAgent(id string) error {
-	if a, ok := f.agentOK(id); ok && a.parked() {
-		return f.unpark(a.ID)
-	}
-	_, err := f.paseo("archive", id)
-	if err != nil && strings.Contains(err.Error(), "currently running") {
-		// Paseo refuses a running agent without touching it: stop it, then retry while it winds down
-		if _, err := f.paseo("stop", id); err != nil {
-			return err
-		}
-		for try := 1; ; try++ {
-			_, err = f.paseo("archive", id)
-			if err == nil || try == archiveTries || !strings.Contains(err.Error(), "currently running") {
-				break
-			}
-			f.Sleep(time.Second)
-		}
-	}
-	if err != nil {
-		return err
-	}
-	f.markArchived(id)
-	return nil
-}
-
 const archiveTries = 5
 
 // liveState asks Paseo (not the snapshot, which can be a poll old) whether agent id is archived
@@ -574,14 +543,39 @@ func runGitOut(ctx context.Context, dir string, args ...string) (string, error) 
 }
 
 // CLI runs the real paseo binary against the local daemon.
-type CLI struct{ Bin string }
+type CLI struct{ Bin, ArchiveBin string }
 
 func (c CLI) Run(ctx context.Context, args ...string) (string, error) {
 	bin := c.Bin
 	if bin == "" {
 		bin = "paseo"
 	}
+	if len(args) > 0 && args[0] == "archive" {
+		if c.ArchiveBin != "" {
+			bin = c.ArchiveBin
+		}
+		resolved, err := exec.LookPath(bin)
+		if err != nil {
+			return "", fmt.Errorf("archive CLI: %w", err)
+		}
+		bin, err = filepath.Abs(resolved)
+		if err != nil {
+			return "", err
+		}
+		version, err := runCLI(ctx, bin, "--version")
+		if err != nil {
+			return "", err
+		}
+		if !fixedArchiveVersion(version) {
+			return "", fmt.Errorf("archive requires Paseo CLI >= 0.13.0 (stable); selected executable reports %q", strings.TrimSpace(version))
+		}
+	}
+	return runCLI(ctx, bin, args...)
+}
+
+func runCLI(ctx context.Context, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.WaitDelay = time.Second
 	// started from inside a Paseo agent? don't let the CLI think we are that agent
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "PASEO_AGENT_ID=") && !strings.HasPrefix(kv, "PASEO_AGENT_CWD=") {
@@ -591,6 +585,9 @@ func (c CLI) Run(ctx context.Context, args ...string) (string, error) {
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("paseo command: %w", ctx.Err())
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = strings.TrimSpace(stdout.String())

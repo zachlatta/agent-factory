@@ -26,8 +26,8 @@ func TestArchiveStopsRunningAgentThenArchives(t *testing.T) {
 				t.Fatal(err)
 			}
 			v := slices.DeleteFunc(p.verbs("c1"), func(s string) bool { return s == "update" })
-			if !slices.Equal(v, []string{"archive", "stop", "archive"}) {
-				t.Errorf("paseo calls on c1 = %v, want archive, stop, archive", v)
+			if !slices.Equal(v, []string{"inspect", "archive", "stop", "inspect", "archive", "inspect"}) {
+				t.Errorf("paseo calls on c1 = %v, want inspected stop/retry and archive verification", v)
 			}
 			if a := f.agent("c1"); !a.archived() {
 				t.Error("snapshot not marked archived")

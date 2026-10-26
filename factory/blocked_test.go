@@ -143,7 +143,7 @@ func TestRerunSupersedesOldReviewers(t *testing.T) {
 			t.Errorf("%s: old reviewer labels = %v", status, l)
 		}
 		// marked applied before it is stopped, so no Tick can apply its verdict in between
-		if v := strings.Join(p.verbs("r1"), ","); v != "update,archive,stop,archive" {
+		if v := strings.Join(p.verbs("r1"), ","); v != "update,inspect,archive,stop,inspect,archive,inspect" {
 			t.Errorf("%s: old reviewer calls = %s", status, v)
 		}
 		if len(p.labels("r0")) != 0 || p.called("stop", "r0") || p.called("archive", "r0") {

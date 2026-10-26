@@ -76,7 +76,11 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 		if st == "" {
 			st = "idle"
 		}
-		return fmt.Sprintf(`{"Id": %q, "Status": %q, "Archived": %t, "Cwd": %q}`, args[1], st, p.archived[args[1]],
+		at := ""
+		if p.archived[args[1]] {
+			at = t0.Format(time.RFC3339)
+		}
+		return fmt.Sprintf(`{"Id": %q, "Status": %q, "Archived": %t, "ArchivedAt": %q, "Cwd": %q}`, args[1], st, p.archived[args[1]], at,
 			p.cwd[args[1]]), nil
 	case "provider":
 		switch args[1] {
@@ -107,6 +111,8 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 			return "[]", nil
 		}
 		return p.permits, nil
+	case "stop":
+		p.status[args[1]] = "idle"
 	case "archive":
 		if p.busy[args[1]] > 0 {
 			p.busy[args[1]]--

@@ -113,6 +113,24 @@ idle agents (`factory/reap.go`), at most 20 archives per Tick:
   or to Needs Zach, within minutes. Running agents and agents the factory did not start (email
   agents, schedules, your own sessions) are never touched, only counted.
 
+Archive writes require a stable Paseo CLI version 0.13.0 or newer: earlier versions search only
+one page of agents, even for a full ID. `FACTORY_ARCHIVE_CLI` selects a separate executable for
+archive writes; other commands use the existing CLI on PATH. Factory checks the selected
+executable's version, reads each agent by full ID before archiving, and verifies its archive
+timestamp afterward. Automatic archives never stop a running agent. Each CLI call has a
+90-second deadline, including paginated lookups; failures leave the agent unmarked for retry.
+Dry-run skips writes and simulates the local result.
+
+For an archive-only CLI rollout, install exact version 0.13.2 into a separate versioned prefix
+outside the repository, with `npm install --prefix "$archive_prefix" --ignore-scripts --no-audit
+--no-fund --save-exact @getpaseo/cli@0.13.2` (one shell command). Do not overwrite the daemon's
+package tree or restart it. Check the separate executable's version and read-only paginated
+listing against the current daemon before setting `FACTORY_ARCHIVE_CLI` in the host environment
+file to its `node_modules/.bin/paseo` executable. The existing deployer then loads that setting
+when it deploys the landed change. Verify board health and that the daemon's process did not
+restart. Restoring the previous setting rolls back selection; an unsupported CLI refuses
+archive writes.
+
 `/api/health` reports live, running, idle and parked agents, per kind and per card (a card's own
 agent plus its reviewers and sub-agents), and the last reap; the `/host` page shows them.
 
@@ -484,6 +502,7 @@ approve, 2 on changes, 3 when Zach must decide.
 | `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |
 | | `-listen` | address to serve on (default `127.0.0.1:<port>`); `host:0` picks a free port |
 | | `-dry-run` | real data, no changes: only paseo and git reads run, every write is logged to Activity, no Tick, no email, state copied to a temp dir |
+| `FACTORY_ARCHIVE_CLI` | | separate Paseo executable for archive writes (default: `paseo` on PATH; stable version >= 0.13.0 required) |
 | `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks` and `pdw` (logged in) |
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>`.

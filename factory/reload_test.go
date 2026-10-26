@@ -240,7 +240,7 @@ func TestArchiveIdleAgentSkipsStop(t *testing.T) {
 	if err := f.archiveAgent("c1"); err != nil {
 		t.Fatal(err)
 	}
-	if v := p.verbs("c1"); !slices.Equal(v, []string{"archive"}) {
-		t.Errorf("paseo calls on c1 = %v, want archive only", v)
+	if v := p.verbs("c1"); !slices.Equal(v, []string{"inspect", "archive", "inspect"}) {
+		t.Errorf("paseo calls on c1 = %v, want inspect, archive, inspect without stop", v)
 	}
 }
