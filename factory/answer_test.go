@@ -128,7 +128,7 @@ func TestEmailDropClosesTheCard(t *testing.T) {
 }
 
 func TestEmailApproveOnPublicRepoStillScans(t *testing.T) {
-	a := card("c1", map[string]string{labelStage: "zach", labelNote: scanPassedNote, labelVerdict: "code approve",
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelVerdict: "code approve",
 		labelPlanRounds: "1"})
 	a.Labels[gmailThreadLabel] = "t9"
 	a.Repo = "zachlatta/agent-factory"

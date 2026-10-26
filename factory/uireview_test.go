@@ -123,9 +123,9 @@ func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 }
 
 func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board",
-		labelOrigin: "idea", labelPlanRounds: "1"}), reviewer("r1", "c1", "code"))
-	fakeScan(f, nil, nil)
+	// no plan review, so the card waits for Zach after its code review
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board"}),
+		reviewer("r1", "c1", "code"))
 	p.logs["r1"] = reviewWithUI + "approve"
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")

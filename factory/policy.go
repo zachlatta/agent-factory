@@ -507,8 +507,8 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			scanned = f.scanNote(t.Cwd, "") // public repo: the factory's own scan, before any landing
 		}
 		switch {
-		case scanned != "" && (!scanPassed(scanned) || !zachRequested(t)):
-			// a scan hit or error stops the card; a clean card Zach did not place waits for his approval
+		case scanned != "" && !scanPassed(scanned):
+			// a scan hit or error stops the card; a clean public-repo card lands like any other
 			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, scanned)
 		case tier == "architecture" && !zachOK:
 			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, "review found an architecture change: approve to land")

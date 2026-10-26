@@ -127,12 +127,6 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "It is an architecture change, so nothing gets built until you OK the plan. A code review still runs before it lands.",
 			Actions: []Action{primary("approve", "Approve plan & build"),
 				reply("Send back with changes", "What should change in the plan?"), act("close", "Drop it")}}
-	case strings.HasPrefix(note, "public repo: scan passed"):
-		return &Ask{Title: "Approve landing?", From: "reviewer",
-			Why: "This repo is public, so landing publishes it. Code review passed and the factory's secret scan found nothing. " +
-				"Read the diff for anything private a scan can't spot, then approve.",
-			Actions: []Action{primary("approve", "Approve & publish"),
-				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
 		return &Ask{Title: "Secret scan stopped this landing", From: "builder",
 			Why: "This repo is public. The factory's scan " + strings.TrimPrefix(note, "secret scan ") +

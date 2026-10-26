@@ -38,7 +38,7 @@ type Config struct {
 	BoardURL     string   // where Zach opens the board, for emails; "" = "the factory board"
 	DefaultRepo  string   // owner/repo for new cards, ideas and scouts with none given; errands are recorded there
 	LanesFile    string   // board lane names per repo (lanes.go); default ~/.config/agent-factory/lanes.json
-	Guarded      []string // public repos: scanned before landing; only Zach's own cards land without his approval (guard.go)
+	Guarded      []string // public repos: public-repo review rule, then scanned before landing (guard.go)
 	PrivateRules string   // file of private scan patterns (hostnames and the like), never in a repo
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
 	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't

@@ -74,9 +74,9 @@ func TestGuardedInboxCardLandsAndReports(t *testing.T) {
 	}
 }
 
-// Cards Zach did not place (ideas, Scouts, scheduled runs), architecture plans he has not approved
-// and cards with no plan review still wait for him after a clean scan.
-func TestGuardedOtherCardsWaitForZach(t *testing.T) {
+// Every public-repo card lands on its own after an approving review and a clean scan, whoever
+// placed it: ideas, Scouts, scheduled runs and cards with no source label too.
+func TestGuardedAnyCardLandsAfterCleanScan(t *testing.T) {
 	sched := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"})
 	sched.Labels["paseo.schedule-id"] = "s1"
 	for name, c := range map[string]Agent{
@@ -86,6 +86,27 @@ func TestGuardedOtherCardsWaitForZach(t *testing.T) {
 			labelRole: "scout", labelPlanRounds: "1"}),
 		"schedule": sched,
 		"app":      publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	} {
+		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
+		ranges := fakeScan(f, nil, nil)
+		p.logs["r1"] = "VERDICT: nits"
+		f.ApplyVerdict(f.agent("r1"))
+		if l := p.labels("c1"); l[labelStage] != "landing" || !strings.Contains(l[labelNote], "scan passed") {
+			t.Errorf("%s: labels = %v", name, l)
+		}
+		if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land") {
+			t.Errorf("%s: sent = %v", name, msgs)
+		}
+		if len(*ranges) != 1 {
+			t.Errorf("%s: scanned %v", name, *ranges)
+		}
+	}
+}
+
+// Architecture plans Zach has not approved and cards with no plan review still wait for him after
+// a clean scan, as in any repo.
+func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
+	for name, c := range map[string]Agent{
 		"architecture": publicCard("c1", map[string]string{labelStage: "review", labelTier: "architecture",
 			labelSource: "board", labelPlanRounds: "1"}),
 		"no plan review": publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board"}),
@@ -94,7 +115,7 @@ func TestGuardedOtherCardsWaitForZach(t *testing.T) {
 		ranges := fakeScan(f, nil, nil)
 		p.logs["r1"] = "VERDICT: approve"
 		f.ApplyVerdict(f.agent("r1"))
-		if l := p.labels("c1"); l[labelStage] != "zach" {
+		if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") {
 			t.Errorf("%s: labels = %v", name, l)
 		}
 		if len(p.sent("c1")) != 0 {
@@ -103,14 +124,6 @@ func TestGuardedOtherCardsWaitForZach(t *testing.T) {
 		if len(*ranges) != 1 {
 			t.Errorf("%s: scanned %v", name, *ranges)
 		}
-	}
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board",
-		labelOrigin: "idea", labelPlanRounds: "1"}), reviewer("r1", "c1", "code"))
-	fakeScan(f, nil, nil)
-	p.logs["r1"] = "VERDICT: approve"
-	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); !scanPassed(l[labelNote]) {
-		t.Errorf("idea note = %q", l[labelNote])
 	}
 }
 
@@ -142,7 +155,7 @@ func TestGuardedScanErrorFailsClosed(t *testing.T) {
 
 func TestGuardedApproveRescans(t *testing.T) {
 	c := publicCard("c1", map[string]string{labelStage: "zach", labelVerdict: "code approve", labelCodeRounds: "1",
-		labelNote: scanPassedNote})
+		labelNote: "review passed: approve to land"})
 	f, p := newTestFactory(t, c)
 	fakeScan(f, []scan.Hit{{Rule: "email", File: "README.md", Line: 9}}, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err == nil {

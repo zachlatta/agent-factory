@@ -106,7 +106,7 @@ func post(t *testing.T, f *Factory, action, body string) {
 
 func zachCard() Agent {
 	return card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelVerdict: "code approve",
-		labelNote: scanPassedNote, labelPlanRounds: "1", labelCodeRounds: "1"})
+		labelNote: "review passed: approve to land", labelPlanRounds: "1", labelCodeRounds: "1"})
 }
 
 // A button press shows on the next board read, not after the factory's next loop.

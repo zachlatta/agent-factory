@@ -166,7 +166,7 @@ func TestDryRunActionsChangeNothing(t *testing.T) {
 
 func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 	f, p, gitCalls := newDryRunFactory(t, publicCard("c1", map[string]string{labelStage: "zach",
-		labelVerdict: "code approve", labelCodeRounds: "1", labelNote: scanPassedNote}))
+		labelVerdict: "code approve", labelCodeRounds: "1", labelNote: "review passed: approve to land"}))
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) { return nil, nil }
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
