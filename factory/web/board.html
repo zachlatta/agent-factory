@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Factory</title>
 <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
@@ -10,7 +10,7 @@
 :root{--bg:#f6f7f9;--card:#fff;--ink:#1f2328;--mute:#656d76;--line:#d8dee4;--green:#1a7f37;--amber:#9a6700;--red:#cf222e;--blue:#0969da;--purple:#8250df}
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
-header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 h1{font-size:17px;margin:0 8px 0 0}
 .sub{color:var(--mute);font-size:12px}
 .err{color:var(--red);font-size:12px}
@@ -27,7 +27,7 @@ button.busy:disabled{opacity:1;cursor:progress}
 .pill{font-size:12px;padding:2px 8px;border-radius:99px;background:#eef1f4;color:var(--mute)}
 .pill b{color:var(--ink)}
 .pill.zach{background:#fff8c5}
-main{padding:12px 16px 80px;overflow-x:auto}
+main{padding:12px 16px calc(80px + env(safe-area-inset-bottom));overflow-x:auto}
 .grid{display:grid;grid-template-columns:150px repeat(var(--cols),minmax(210px,1fr));gap:0;min-width:calc(150px + var(--cols)*210px)}
 .colhead{position:sticky;top:0;background:var(--bg);padding:6px 8px;font-weight:600;font-size:12.5px;border-bottom:2px solid var(--line)}
 .colhead small{display:block;font-weight:400;color:var(--mute);font-size:11px}
@@ -78,10 +78,10 @@ main{padding:12px 16px 80px;overflow-x:auto}
 .more{font-size:12px;color:var(--blue);cursor:pointer;padding:2px}
 aside{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.08);z-index:10;display:none;flex-direction:column}
 aside.open{display:flex}
-aside .hd{padding:14px 16px;border-bottom:1px solid var(--line)}
+aside .hd{padding:calc(14px + env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--line)}
 aside .hd h2{font-size:16px;margin:0 30px 4px 0}
 aside .x{position:absolute;right:12px;top:10px;border:0;background:none;font-size:20px}
-aside .bd{padding:12px 16px;overflow:auto;flex:1}
+aside .bd{padding:12px 16px calc(12px + env(safe-area-inset-bottom));overflow:auto;flex:1}
 .kv{display:grid;grid-template-columns:90px 1fr;gap:2px 10px;font-size:12.5px;margin-bottom:10px}
 .kv div:nth-child(odd){color:var(--mute)}
 .kv code{font-size:11.5px;word-break:break-all}
@@ -94,9 +94,9 @@ pre.logs{white-space:pre-wrap;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,m
 textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:6px;padding:6px}
 dialog{border:1px solid var(--line);border-radius:10px;padding:16px;width:min(560px,94vw)}
 dialog h3{margin:0 0 8px}
-#activity{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);font:11.5px/1.4 ui-monospace,Menlo,monospace;color:var(--mute);max-height:22px;overflow:hidden;padding:3px 16px;cursor:pointer;z-index:4}
-#activity.open{max-height:40vh;overflow:auto}
-#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;display:none;z-index:20}
+#activity{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);font:11.5px/1.4 ui-monospace,Menlo,monospace;color:var(--mute);max-height:calc(22px + env(safe-area-inset-bottom));overflow:hidden;padding:3px 16px calc(3px + env(safe-area-inset-bottom));cursor:pointer;z-index:4}
+#activity.open{max-height:calc(40vh + env(safe-area-inset-bottom));overflow:auto}
+#toast{position:fixed;left:50%;bottom:calc(34px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1f2328;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;display:none;z-index:20}
 .help{font-size:12px;color:var(--mute);margin:4px 0 10px}
 /* Needs Zach: what each card asks of him */
 .ask{margin-top:8px;border-top:1px solid #f0e6c0;padding-top:8px;cursor:default}
@@ -148,16 +148,17 @@ dialog h3{margin:0 0 8px}
 /* phone: one column at a time, picked from the stage tabs */
 .tabs{display:none}
 @media (max-width:760px){
-  header{padding:8px 10px;gap:6px}
+  header{padding:calc(8px + env(safe-area-inset-top)) 10px 8px;gap:6px}
   header .counts,#group,#host,label.sub,#errors,#updated,header>span[style]{display:none}
   h1{font-size:16px;margin:0}
   #q{flex:1;width:auto;min-width:0}
   #newBtn{padding:5px 10px}
-  .tabs{display:flex;gap:6px;overflow-x:auto;padding:8px 10px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:51px;z-index:4;scrollbar-width:none}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:8px 10px 8px 0;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:calc(51px + env(safe-area-inset-top));z-index:4;scrollbar-width:none}
   .tabs button{flex:none;border-radius:99px;font-size:13px;padding:5px 11px;white-space:nowrap}
+  .tabs .pin{position:sticky;left:0;z-index:1;flex:none;display:flex;padding:0 6px 0 10px;margin-right:-6px;background:#fff;box-shadow:6px 0 6px -6px rgba(0,0,0,.25)}
   .tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
   .tabs button.zach:not(.on){background:#fff8c5}
-  main{padding:8px 10px 60px}
+  main{padding:8px 10px calc(60px + env(safe-area-inset-bottom))}
   .grid{display:block;min-width:0}
   .plane{font-weight:600;font-size:12px;color:var(--mute);margin:12px 2px 6px;text-transform:uppercase;letter-spacing:.03em}
   .card{padding:10px 11px;margin-bottom:8px}
@@ -360,7 +361,9 @@ function renderPhone(cards){
   const stages = B.stages, counts = {};
   cards.forEach(c=>counts[c.stage]=(counts[c.stage]||0)+1);
   if(!tab) tab = counts.zach ? 'zach' : 'building';
-  $('tabs').innerHTML = stages.map(s=>`<button class="${s[0]===tab?'on':''} ${s[0]==='zach'?'zach':''}" data-s="${s[0]}">${esc(s[1])} ${counts[s[0]]||0}</button>`).join('');
+  // Needs Zach first, so it is in view without scrolling the strip
+  const order = [...stages.filter(s=>s[0]==='zach'), ...stages.filter(s=>s[0]!=='zach')];
+  $('tabs').innerHTML = order.map(s=>{ const b = `<button class="${s[0]===tab?'on':''} ${s[0]==='zach'?'zach':''}" data-s="${s[0]}">${esc(s[1])} ${counts[s[0]]||0}</button>`; return s[0]==='zach' ? `<span class="pin">${b}</span>` : b; }).join('');
   $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ tab=b.dataset.s; render(); scrollTo(0,0); });
   const on = $('tabs').querySelector('.on');
   if(on && on.dataset.s !== renderPhone.shown){ renderPhone.shown = on.dataset.s; on.scrollIntoView({inline:'center', block:'nearest'}); }
