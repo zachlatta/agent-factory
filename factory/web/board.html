@@ -643,7 +643,7 @@ async function askSubmit(id){
     await post('send',body);askDone(id,'Instructions sent');return;
   }
   if(!x)return;
-  const acceptsAnswers=x.id==='recommend'||x.id==='send'||(x.id==='approve'&&!c.routing&&!x.repo);
+  const acceptsAnswers=x.id==='recommend'||x.id==='send'||(x.id==='approve'&&!c.routing&&!x.repo&&!a.actions.some(y=>y.id==='recommend'));
   if(!acceptsAnswers&&(partial||text)){
     toast('Choose a reply option to send your answers and instructions first');return;
   }

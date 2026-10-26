@@ -222,7 +222,9 @@ are folded into details. Missing original requests are labeled unavailable, with
 Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
 The decision and needs fields describe the concrete choice and its consequence; overview prose
 stays in details. Existing `QUESTION:` blocks provide up to four questions, with the recommendation
-first. Approval and recommendation require every question to be answered. Drop and Other do not.
+first. Ordinary approval and recommendation require every question to be answered. A brief’s as-is
+approval ignores open questions and refuses filled answers or instructions. Drop and Other do not
+require every question to be answered.
 Every action requires an explicit choice, including cards with only one action. Named reply choices
 keep their hints and recommendation. Send question answers through a reply choice; completion, retry,
 stop and drop refuse to discard filled answers or instructions. Select the action and press Submit once; Other sends typed
