@@ -42,6 +42,7 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /api/lanes", gzipHandler(f.handleLanes))
 	mux.HandleFunc("GET /api/health", gzipHandler(f.handleHealth))
 	mux.HandleFunc("GET /api/metrics", gzipHandler(f.handleMetrics))
+	mux.HandleFunc("GET /api/timings", gzipHandler(f.handleTimings))
 	mux.HandleFunc("GET /api/deploy", gzipHandler(f.handleDeploy))
 	mux.HandleFunc("GET /api/transcript/{id}", gzipHandler(f.handleTranscript))
 	mux.HandleFunc("GET /api/logs/{id}", gzipHandler(f.handleLogs))

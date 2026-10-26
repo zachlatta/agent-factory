@@ -56,20 +56,22 @@ type FactoryMail struct {
 
 // CardTiming is one card's recorded times.
 type CardTiming struct {
-	RequestedAt   time.Time     `json:"requestedAt,omitzero"`
-	RequestedFrom string        `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
-	Source        string        `json:"source"`
-	Tier          string        `json:"tier,omitempty"`
-	Thread        string        `json:"thread,omitempty"` // email and voice cards: where the reply goes
-	Partial       bool          `json:"partial,omitempty"`
-	Events        []TimingEvent `json:"events"`
-	Rounds        []TimingRound `json:"rounds,omitempty"`
-	LandedAt      time.Time     `json:"landedAt,omitzero"` // the last landing's commit time
-	RepliedAt     time.Time     `json:"repliedAt,omitzero"`
-	ReplyChecked  bool          `json:"replyChecked,omitempty"`
-	ReplyTries    int           `json:"replyTries,omitempty"`
-	ReplyRetry    time.Time     `json:"replyRetry,omitzero"`
-	Mails         []FactoryMail `json:"mails,omitempty"`
+	Repo          string          `json:"repo,omitempty"`
+	Sessions      []TimingSession `json:"sessions,omitempty"`
+	RequestedAt   time.Time       `json:"requestedAt,omitzero"`
+	RequestedFrom string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
+	Source        string          `json:"source"`
+	Tier          string          `json:"tier,omitempty"`
+	Thread        string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
+	Partial       bool            `json:"partial,omitempty"`
+	Events        []TimingEvent   `json:"events"`
+	Rounds        []TimingRound   `json:"rounds,omitempty"`
+	LandedAt      time.Time       `json:"landedAt,omitzero"` // the last landing's commit time
+	RepliedAt     time.Time       `json:"repliedAt,omitzero"`
+	ReplyChecked  bool            `json:"replyChecked,omitempty"`
+	ReplyTries    int             `json:"replyTries,omitempty"`
+	ReplyRetry    time.Time       `json:"replyRetry,omitzero"`
+	Mails         []FactoryMail   `json:"mails,omitempty"`
 }
 
 func (t CardTiming) last() TimingEvent {
@@ -153,6 +155,7 @@ func (t *CardTiming) copy() CardTiming {
 	c.Events = append([]TimingEvent(nil), t.Events...)
 	c.Rounds = append([]TimingRound(nil), t.Rounds...)
 	c.Mails = append([]FactoryMail(nil), t.Mails...)
+	c.Sessions = append([]TimingSession(nil), t.Sessions...)
 	return c
 }
 
@@ -248,6 +251,7 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 		byID[a.ID] = a
 	}
 	changed := false
+	owners := cardOwners(agents, nil)
 	for _, c := range cards {
 		a, ok := byID[c.ID]
 		if !ok || !timed(a) {
@@ -277,6 +281,12 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 		}
 		if c.Tier != "" && c.Tier != t.Tier {
 			t.Tier, changed = c.Tier, true
+		}
+		if a.Repo != "" && a.Repo != t.Repo {
+			t.Repo, changed = a.Repo, true
+		}
+		if t.observeSessions(c, agents, byID, owners, now) {
+			changed = true
 		}
 		if th := emailThread(a); th != "" && th != t.Thread {
 			t.Thread, changed = th, true

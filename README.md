@@ -291,6 +291,40 @@ Needs Zach, by source (`board`, `email`, `voice`, `idea`), by tier, and by both.
 that reached Done in the window and landed; dropped or closed cards and partial ones are only
 counted in `excluded`.
 
+#### Transcript links for warehouse analysis
+
+The same timing records keep the repo and a history of observed agent-to-session links for the
+Fellow, reviewers and nested Paseo sub-agents. A link contains the Paseo agent and immediate
+parent, device, provider, native transcript session id, model, role, review kind and card step.
+Session ids use the same decoding as the transcript reader, including plugin providers.
+
+`GET /api/timings` is a read-only snapshot for a host-side warehouse uploader. It returns
+`{"cards":[...]}`, sorted by card id, from the existing timing store. Each card includes `id`,
+`repo`, `source`, `tier`, `partial`, `requestedAt`, `requestedFrom`, `landedAt`, `repliedAt`,
+`doneAt`, `events`, `rounds` and `sessions` when available. It excludes titles, folders, transcript
+bodies, mailbox thread and message ids, and reply-check bookkeeping. Like the other board APIs,
+it uses the server's existing access boundary; it must not be published on the public internet.
+
+The warehouse should upsert these snapshots by card id and use the exported request, landing and
+reply times directly, so its card turnaround agrees with Factory's own metrics. It can join each
+link's `provider`, `device` and native `sessionId` to its transcript archive after mapping Paseo
+provider names to the archive's source names. Do not match sessions by title or folder.
+
+A link's `observedAt` dates when Factory saw that association, not when a turn began or ended.
+`createdAt` is the Paseo agent's creation, not necessarily the transcript session's creation.
+Links are added on changes to the session, step or attribution metadata; unchanged polls and
+export reads write nothing. Reviewers and their descendants keep their review step. Archived
+children keep their previous step. Earlier links survive session changes, restarts and agents
+leaving the board until the card timing record expires under the existing 30-day rule.
+
+Older records may lack a repo or session links. First observations can miss earlier sessions or
+step changes; export absence is not a deletion signal. Warehouse analysis must report unmatched
+sessions and incomplete coverage. Agent duration should be measured per transcript turn, from
+the prompt to its final assistant event, with missing boundaries counted explicitly. Session
+span is not uninterrupted work, and overlapping agents' durations are not card elapsed time.
+Warehouse ingestion and average/median queries by repo, source, agent and step are a separate
+warehouse change; this export makes no warehouse calls and does not change `/api/metrics`.
+
 ## Public repos: review and secret scan
 
 Repos listed in `FACTORY_GUARDED_REPOS` (default: this one) are public, so everything that lands
