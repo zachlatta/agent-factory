@@ -53,7 +53,7 @@ messages or the commit authors; and any change to the secret scan (factory/scan/
 // guardedLandMsg replaces the landing message for a guarded card.
 const guardedLandMsg = "Land it now with bin/land (it scans, tests, rebases and pushes HEAD:main). Land exactly the " +
 	"reviewed commits: do not commit anything else first. Never use --no-verify. Verify it landed, then stop with " +
-	"a one-line summary."
+	"a one-line summary. " + overviewReminder
 
 // scanCard runs the secret scan on what the card at cwd would publish (origin/main..HEAD). It
 // returns a short note: "" when clean, else what was found (rule and place, never the text). An

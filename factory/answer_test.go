@@ -188,7 +188,7 @@ func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
 	}
 	c, _ = f.card("c1")
 	ask := askFor(c, f.agent("c1"))
-	_, ask.Questions = f.askDetail(c, ask)
+	_, ask.Questions, _ = f.askDetail(c, ask)
 	for _, w := range replyWords(ask) {
 		if w.Word == "1A 2B" && strings.Contains(w.Does, "approve") {
 			t.Errorf("brief letter answers promise approve: %+v", w)

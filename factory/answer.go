@@ -143,7 +143,7 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if ask == nil {
 		return nil, ErrNotWaiting
 	}
-	_, ask.Questions = f.askDetail(c, ask)
+	_, ask.Questions, _ = f.askDetail(c, ask)
 	ans := parseAnswer(b.Text, ask)
 	if ans.Action == "" {
 		return map[string]string{"card": a.ID, "action": "none"}, nil

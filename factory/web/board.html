@@ -109,6 +109,11 @@ dialog h3{margin:0 0 8px}
 .ask .detail code{font-size:12px;background:#f0eee6;padding:0 3px;border-radius:3px}
 .ask .detail pre{white-space:pre-wrap;font-size:12px}
 .ask .detail.empty{color:var(--mute);font-style:italic}
+/* the agent's overview: the decision, the gist, what it needs from Zach (ask.go Overview) */
+.ask .ov .dec{font-weight:700;font-size:15px;color:#7d4e00}
+.ask .ov .gist{font-size:13px;line-height:1.45;margin:3px 0 6px}
+.ask .ov .needs{font-size:13px;line-height:1.45;background:#fff8c5;border-left:3px solid #d4a72c;border-radius:4px;padding:5px 9px;margin-bottom:6px}
+.ask .ov .gist,.ask .ov .needs{white-space:pre-wrap}
 .ask .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .ask .btns button{padding:7px 12px}
 .ask textarea{margin-top:6px;min-height:64px}
@@ -434,7 +439,16 @@ function cardHtml(c){
 const md = s => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(s||'', {gfm:true})) : `<pre>${esc(s)}</pre>`;
 function askHtml(c){
   const a = c.ask, qs = a.questions||[], box = !c.routing; // the reply box is always open, except on repo pickers
-  const detail = a.detail ? `<div class="detail ${askFull.has(c.id)?'full':''}" id="d-${c.id}">${md(a.detail)}</div>
+  // with the agent's overview on top, its full message shows open under it; without one, today's preview
+  const ov = a.overview;
+  const head = ov ? `<div class="ov">${ov.decision?`<div class="dec">${esc(ov.decision)}</div>`:''}
+      ${ov.overview?`<div class="gist">${esc(ov.overview)}</div>`:''}
+      ${ov.needs?`<div class="needs"><b>Needs from you:</b> ${esc(ov.needs)}</div>`:''}</div>
+    <div class="why">${esc(a.title)} · ${esc(a.why)}</div>`
+    : `<div class="q">${esc(a.title)}</div>
+    <div class="why">${esc(a.why)}</div>`;
+  const detail = a.detail && ov ? `<div class="detail full" id="d-${c.id}">${md(a.detail)}</div>`
+    : a.detail ? `<div class="detail ${askFull.has(c.id)?'full':''}" id="d-${c.id}">${md(a.detail)}</div>
       <div class="more" onclick="event.stopPropagation(); askFull.has('${c.id}')?askFull.delete('${c.id}'):askFull.add('${c.id}'); render()">${askFull.has(c.id)?'Show less':'Show all'}</div>`
     : `<div class="detail empty">${c.status==='running'?'The agent is writing it now…':'No message yet. Open the transcript.'}</div>`;
   const picks = askPicks[c.id]||{};
@@ -447,8 +461,7 @@ function askHtml(c){
   const acts = a.actions.map((x,i)=>[x,i]).filter(([x])=>!(box && x.id==='reply'));
   const hint = (a.actions.find(x=>x.id==='reply')||{}).hint || 'Message to the agent';
   return `<div class="ask" onclick="event.stopPropagation()">
-    <div class="q">${esc(a.title)}</div>
-    <div class="why">${esc(a.why)}</div>
+    ${head}
     <div class="from">${a.from==='reviewer'?'Reviewer says':'Agent says'}</div>
     ${detail}
     ${quiz}

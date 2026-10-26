@@ -110,6 +110,7 @@ func uiFeedbackLandMsg(fb string) string {
 // uiFeedbackHoldMsg tells a builder whose card waits for Zach about the reviewer's UI feedback.
 func uiFeedbackHoldMsg(fb string) string {
 	return "Code review passed and the card now waits for Zach. The reviewer tested the UI and left this " +
-		"non-blocking feedback. Do not change anything now. Reply with one line, 'Noted', then stop. When you " +
+		"non-blocking feedback. Do not change anything now. Zach reads your reply on his card: reply with the " +
+		"DECISION:, OVERVIEW: and NEEDS FROM ZACH: lines for him (approve landing of the reviewed work), then stop. When you " +
 		"land later, end your summary with this feedback under 'UI feedback:'.\n\n" + fb
 }

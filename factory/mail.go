@@ -96,8 +96,8 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 		}
 		return nil
 	}
-	detail, qs := f.askDetail(c, ask)
-	ask.Questions = qs
+	detail, qs, ov := f.askDetail(c, ask)
+	ask.Questions, ask.Overview = qs, ov
 	m := f.composeEmail(a, c, ask, detail)
 	// told first: one email per wait even if the factory stops mid-send
 	if err := f.setLabels(a.ID, map[string]string{labelTold: note}); err != nil {
@@ -230,13 +230,13 @@ func askSource(c Card, ask *Ask) string {
 	return src
 }
 
-// askDetail is the full Detail (not cut like the board's) and its questions.
-func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question) {
+// askDetail is the full Detail (not cut like the board's), its questions and its overview.
+func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
 	text, err := f.lastReply(f.agent(askSource(c, ask)))
 	if err != nil || strings.TrimSpace(text) == "" {
-		return "(The agent's last message could not be read. Open the board to see it.)", nil
+		return "(The agent's last message could not be read. Open the board to see it.)", nil, nil
 	}
-	return ParseQuestions(text)
+	return parseReply(text)
 }
 
 // replyWord is one word Zach can answer with by email and what it does.
@@ -296,6 +296,15 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
 	words := replyWords(ask)
 
 	var t strings.Builder
+	if ov := ask.Overview; ov != nil {
+		// the agent's own overview leads; the factory's title and why follow it
+		for _, l := range []string{ov.Decision, ov.Overview, prefixed("Needs from you: ", ov.Needs)} {
+			if l != "" {
+				t.WriteString(l + "\n")
+			}
+		}
+		t.WriteString("\n")
+	}
 	fmt.Fprintf(&t, "%s\n%s\n\nCard: %s (%s)\n\n%s\n", ask.Title, ask.Why, title, repo, detail)
 	if len(ask.Questions) > 0 {
 		t.WriteString("\nQuestions:\n")
@@ -318,6 +327,18 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
 	e := html.EscapeString
 	var h strings.Builder
 	h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
+	if ov := ask.Overview; ov != nil {
+		if ov.Decision != "" {
+			fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(ov.Decision))
+		}
+		if ov.Overview != "" {
+			fmt.Fprintf(&h, `<p style="white-space:pre-wrap">%s</p>`, e(ov.Overview))
+		}
+		if ov.Needs != "" {
+			fmt.Fprintf(&h, `<div style="white-space:pre-wrap;background:#fff8c5;border-left:3px solid #d4a72c;`+
+				`padding:8px 12px;margin-bottom:12px"><b>Needs from you:</b> %s</div>`, e(ov.Needs))
+		}
+	}
 	fmt.Fprintf(&h, `<p><b>%s</b><br>%s</p><p style="color:#59636e">Card: %s (%s)</p>`, e(ask.Title), e(ask.Why), e(title), e(repo))
 	fmt.Fprintf(&h, `<div style="white-space:pre-wrap;border-left:3px solid #d1d9e0;padding-left:12px">%s</div>`, e(detail))
 	if len(ask.Questions) > 0 {
@@ -372,4 +393,12 @@ func (f *Factory) probeMail() {
 type mailProbe struct {
 	at     time.Time
 	status string
+}
+
+// prefixed is p+s, or "" when s is empty.
+func prefixed(p, s string) string {
+	if s == "" {
+		return ""
+	}
+	return p + s
 }

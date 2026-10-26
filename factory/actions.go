@@ -82,7 +82,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if c.Awaiting == "plan" {
 			// Zach's answer to an architecture plan: revise it, then plan review runs again
 			msg = "Zach read your plan and wants changes:\n\n" + msg + "\n\nRevise the plan, then restate the " +
-				"whole revised plan (not just the changes) and stop. Do not build yet."
+				"whole revised plan (not just the changes) and stop. " + overviewReminder + " Do not build yet."
 			files, err := f.chat(c.ID, msg, b.Attachments)
 			if err != nil {
 				return nil, err
@@ -137,7 +137,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		// Zach accepts the builder's brief (rework cap or escalation): apply it, then code review as usual
 		if planPending(f.agent(c.ID)) {
 			if err := f.send(c.ID, "Zach accepts the recommendations in your brief. Revise the plan to match them, then "+
-				"build it as revised. Commit on your branch, do NOT land, and stop with a short summary. A code reviewer "+
+				"build it as revised. Commit on your branch, do NOT land, and stop with a short summary. "+overviewReminder+" A code reviewer "+
 				"checks it next, and the factory lands it once the review passes."); err != nil {
 				return nil, err
 			}
@@ -145,7 +145,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				labelAwaiting: "", labelZachPlan: "approved", labelDecided: "1", labelNote: "building with Zach's choices"})
 		}
 		if err := f.send(c.ID, "Zach accepts the recommendations in your brief. Apply them, commit on your branch, do NOT "+
-			"land, and stop with a short summary. A code reviewer checks it next, and the factory lands it once the "+
+			"land, and stop with a short summary. "+overviewReminder+" A code reviewer checks it next, and the factory lands it once the "+
 			"review passes."); err != nil {
 			return nil, err
 		}

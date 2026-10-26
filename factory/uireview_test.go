@@ -125,11 +125,11 @@ func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
 		t.Fatalf("labels = %v", l)
 	}
 	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "- the Save button is hard to see") || !strings.Contains(msgs[0], "Noted") ||
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "- the Save button is hard to see") || !strings.Contains(msgs[0], "NEEDS FROM ZACH:") ||
 		strings.Contains(msgs[0], "Land it now") {
 		t.Fatalf("sent = %v", msgs)
 	}
-	// the builder answers "Noted" and stops: the card stays with Zach, no review or landing starts
+	// the builder answers and stops: the card stays with Zach, no review or landing starts
 	a := f.agent("c1")
 	for k, v := range l {
 		a.Labels[labelPrefix+k] = v

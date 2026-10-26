@@ -193,6 +193,8 @@ Rules:
 
 %s
 
+`+overviewRule+`
+
 End your final message with exactly two lines:
 TIER: <low|risky|architecture>
 VERDICT: <approve|nits|changes|escalate|close>
@@ -254,6 +256,8 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 ` + shellRule + `
 
+` + overviewRule + `
+
 A different agent reviews the plan (architecture-tier plans also go to Zach). When you get
 "Plan approved", build it. Don't improvise: if scope must change, stop and say so. Commit on your
 branch, but do NOT land until the factory tells you to. If stuck, stop and write a handoff: what
@@ -264,15 +268,18 @@ Put the plan's open questions, and anything you need from Zach, in this form:
 
 const landMsg = "Land it now the way this repo lands work: read its AGENTS.md and README (and how recent commits reached " +
 	"main) and do that. Land exactly the reviewed commits: no new commits or amends. If the rebase conflicts or anything must change, stop and say so " +
-	"instead of landing. Verify it landed, then stop with a one-line summary. The agent factory deploys itself " +
+	"instead of landing. Verify it landed, then stop with a one-line summary. " + overviewReminder + " The agent factory deploys itself " +
 	"from its repo's main within a minute of landing (and rolls back if it does not come up): never run its install.sh " +
 	"to deploy."
 
 // summaryMsg asks the builder of an architecture plan for the version Zach reads on his phone.
 const summaryMsg = "Your plan passed review, and because it is an architecture change it now waits for Zach's " +
-	"approval. Write a short version for Zach, in plain words for reading on a phone: 3 to 6 bullets covering what " +
-	"changes, why, what could go wrong, and how you will check it, then any question he must answer, each as a " +
-	"QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
+	"approval. Write a short version for Zach, in plain words for reading on a phone. Start with three lines:\n" +
+	"DECISION: <approve this plan?, in one line>\n" +
+	"OVERVIEW: <what changes and why, at most 3 short sentences>\n" +
+	"NEEDS FROM ZACH: <approve the plan, or answer the questions below, and what happens after>\n" +
+	"Then at most 3 bullets: what could go wrong and how you will check it. Then any question he must answer, " +
+	"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
 	"start building; stop after the summary."
 
 func restate(kind string) string {
@@ -282,10 +289,17 @@ func restate(kind string) string {
 	return "a short summary"
 }
 
+// reworkMsg sends a builder its reviewer's requested changes.
+func reworkMsg(kind string, round, limit int, notes string) string {
+	return fmt.Sprintf("A reviewer (a different agent) requested changes to your %s (round %d of %d). "+
+		"Address each blocking finding, or explain why it is wrong. Then stop with %s; it will be "+
+		"re-reviewed. %s Do not land.\n\n%s", kind, round, limit, restate(kind), overviewReminder, notes)
+}
+
 func buildMsg(prefix, notes string) string {
 	return prefix + " Build it now, as planned. Don't improvise: if the scope has to change, stop and say so " +
 		"instead. When done, commit everything on your branch and leave the worktree clean (delete or gitignore " +
-		"scratch files), but do NOT land; stop with a short summary. A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
+		"scratch files), but do NOT land; stop with a short summary. " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + shellRule + "\n\nReviewer notes:\n" + notes
 }
 
 // findings is the reviewer's last message, trimmed for forwarding to the builder.
@@ -323,22 +337,27 @@ func briefMsg(kind string, escalated bool, notes string, ask *Ask) string {
 	}
 	b.WriteString(" Zach has not followed the review rounds and may not remember what this card is.\n\n" +
 		"The reviewer's final review, in full:\n<<<\n" + notes + "\n>>> End of review\n\n" +
-		"Write a brief for Zach, in plain words he can read on a phone (no file paths, no jargon):\n" +
-		"1. What this card is for (his request, one line) and where it stands (planned or built; nothing has landed).\n" +
-		"2. Each point from that review that is still open: the reviewer's view, stated fairly even where you " +
+		"Write a brief for Zach, in plain words he can read on a phone (no file paths, no jargon). Start it with " +
+		"these lines, which his board shows on top of the card:\n" +
+		"DECISION: <the decision he must make, one line>\n" +
+		"OVERVIEW: <what this card is for (his request) and where it stands (planned or built; nothing has " +
+		"landed), at most 3 short sentences>\n" +
+		"NEEDS FROM ZACH: <what you need from him>, then one line for each button on his board, saying what it " +
+		"does, by these exact labels:\n")
+	for _, x := range ask.Actions {
+		fmt.Fprintf(&b, "- \"%s\": %s\n", x.Label, buttonMeaning(x, ask))
+	}
+	b.WriteString("Then, after a blank line:\n" +
+		"1. Each point from that review that is still open: the reviewer's view, stated fairly even where you " +
 		"disagree, and your view.\n")
-	n := 3
+	n := 2
 	if escalated {
-		b.WriteString("3. The reviewer's question for Zach, quoted word for word from the review above, then the " +
+		b.WriteString("2. The reviewer's question for Zach, quoted word for word from the review above, then the " +
 			"options and the one you recommend, as a QUESTION: block (below).\n")
 		n++
 	}
 	fmt.Fprintf(&b, "%d. Each decision Zach must make, with the options and the one you recommend, each as a "+
-		"QUESTION: block (below).\n"+
-		"%d. What each button on his board does, by these exact labels:\n", n, n+1)
-	for _, x := range ask.Actions {
-		fmt.Fprintf(&b, "   - \"%s\": %s\n", x.Label, buttonMeaning(x, ask))
-	}
+		"QUESTION: block (below).\n", n)
 	b.WriteString("\nThe board shows each QUESTION: block as buttons he taps; his answers come to you as a " +
 		"message that quotes each question. " + questionRule + "\n\nThen stop. Do not build, edit files or land.")
 	return b.String()
@@ -499,9 +518,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			back = "plan"
 		}
 		if err = set(labelStage, back, labelVerdict, kind+" changes", labelSince, now, labelAutoReview, kind); err == nil {
-			err = f.send(target, fmt.Sprintf("A reviewer (a different agent) requested changes to your %s (round %d of %d). "+
-				"Address each blocking finding, or explain why it is wrong. Then stop with %s; it will be "+
-				"re-reviewed. Do not land.\n\n%s", kind, rounds, f.cfg.ReworkCap, restate(kind), notes))
+			err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
 		}
 	case verdict == "close":
 		err = set(labelStage, "zach", labelVerdict, "close", labelNote, "reviewer suggests closing")
@@ -596,7 +613,7 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 	f.logf("%s: worktree not clean, asked the builder to commit before review", c.Short)
 	return f.send(c.ID, "Before code review the worktree must be clean, so the reviewer sees exactly what lands. "+
 		"Commit everything that belongs to this work on your branch (do NOT land), delete or gitignore scratch "+
-		"files, then stop. The review starts when you stop.\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
+		"files, then stop with a short summary. "+overviewReminder+" The review starts when you stop.\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
 }
 
 // runReviewer starts a read-only reviewer of the given kind for c. For a landing review, why is the

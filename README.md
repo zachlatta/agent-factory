@@ -74,6 +74,15 @@ An email dispatcher (not in this repo) can start agents as cards with labels
 `factory.source=email|voice` and `gmail-thread=<id>`. Those cards follow the same tracks and
 report back in their email thread when they land.
 
+### Needs Zach overview
+
+Agents start every message where they stop (plan, build or rework summary, review, brief, handoff,
+result) with three lines: `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` (`factory/overview.go`).
+The factory takes the first such block (at least 2 of the 3 keys) out of the message shown on a
+Needs Zach card and puts it in the ask's `overview`. The board shows it in full on top of the card,
+with the agent's whole message open under it, and the email leads with it. A message with no block
+shows as before.
+
 ### Needs Zach email
 
 Every card that waits in Needs Zach is emailed to Zach once per wait reason, by the factory itself

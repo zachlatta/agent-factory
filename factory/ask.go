@@ -15,6 +15,8 @@ type Ask struct {
 	Actions []Action `json:"actions"`
 	// Questions are the QUESTION: blocks in the agent's last reply (ParseQuestions), shown as choices.
 	Questions []Question `json:"questions,omitempty"`
+	// Overview is the agent's DECISION / OVERVIEW / NEEDS FROM ZACH lines (ParseOverview), shown on top.
+	Overview *Overview `json:"overview,omitempty"`
 	// Yes and No say what the board's Yes and No buttons do when there are no Questions (then Zach
 	// gets a free-form reply and a Yes/No pair): an action id
 	// ("approve", "close"), "changes" (send the typed text as the change request; it needs text), or
@@ -318,7 +320,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent) {
 		cached, ok := f.details[cards[n].ID]
 		f.mu.Unlock()
 		if ok && cached.key == key {
-			ask.Detail, ask.Questions = cached.text, cached.questions
+			ask.Detail, ask.Questions, ask.Overview = cached.text, cached.questions, cached.overview
 			continue
 		}
 		text, err := f.lastReply(a)
@@ -326,10 +328,10 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent) {
 			continue
 		}
 		// parse the whole reply: questions often close a long plan, past the Detail cut
-		text, ask.Questions = ParseQuestions(text)
+		text, ask.Questions, ask.Overview = parseReply(text)
 		ask.Detail = trunc(text, 6000)
 		f.mu.Lock()
-		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions}
+		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview}
 		f.mu.Unlock()
 	}
 }
@@ -338,6 +340,7 @@ type detailEntry struct {
 	key       detailKey
 	text      string
 	questions []Question
+	overview  *Overview
 }
 
 // When an agent needs Zach's input it can ask multiple-choice questions, and he can always write his
