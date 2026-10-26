@@ -934,6 +934,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 	}
 	f.markDepLanded(a)
+	f.tickDelegate(a, now)
 	if !a.stopped() {
 		return nil
 	}

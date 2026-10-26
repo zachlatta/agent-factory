@@ -119,6 +119,9 @@ type Child struct {
 	// Blocked: running but not moving on its own ("waiting on permission", "stalled N min"); Permission: the prompt
 	Blocked    string `json:"blocked,omitempty"`
 	Permission string `json:"permission,omitempty"`
+	// CreatedAt and LastActivityAt (RFC 3339): when it started and last moved, for the board's sub-agent rows
+	CreatedAt      string `json:"createdAt,omitempty"`
+	LastActivityAt string `json:"lastActivityAt,omitempty"`
 }
 
 // Idea is a suggested card waiting to be started (by the factory within its caps, or by Zach).

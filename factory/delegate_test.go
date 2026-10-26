@@ -27,7 +27,7 @@ func TestDelegateTextCommands(t *testing.T) {
 		"paseo ls -g -q --label paseo.parent-agent-id=$PASEO_AGENT_ID",
 		"paseo archive <id>",
 		"Before you end any turn",
-		"At most 3 sub-agents",
+		"At most 6 sub-agents",
 		"overrides",
 		"never in /tmp",
 		".factory-scratch/",

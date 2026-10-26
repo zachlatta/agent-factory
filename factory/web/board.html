@@ -77,6 +77,17 @@ main{padding:12px 16px calc(80px + env(safe-area-inset-bottom));overflow-x:auto}
 .kid.reviewer{background:#fbefff;color:var(--purple)}
 .kid.running{font-weight:600}
 .more{font-size:12px;color:var(--blue);cursor:pointer;padding:2px}
+.kid.archived{opacity:.6}
+.kids-hd{margin:14px 0 6px;font-size:13px}
+.kids-hd small{color:var(--mute);font-weight:400}
+.krow{border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px;background:#fff}
+.krow .kt{display:flex;align-items:center;gap:6px;font-size:13px;overflow-wrap:anywhere}
+.krow .km{font-size:12px;color:var(--mute);margin-top:2px;overflow-wrap:anywhere}
+.krow .km.warn{color:var(--red)}
+.krow .kacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.krow .kacts a{padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:#f6f8fa;color:var(--ink);text-decoration:none;font-size:13.3px}
+.krow .kmsg{display:flex;gap:6px;margin-top:6px;align-items:flex-end}
+.krow .kmsg textarea{flex:1;min-width:0;min-height:52px;font:inherit;font-size:13px;padding:5px;border:1px solid var(--line);border-radius:6px}
 aside{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.08);z-index:10;display:none;flex-direction:column}
 aside.open{display:flex}
 aside .hd{padding:calc(14px + env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--line)}
@@ -182,6 +193,7 @@ body.stale .grid{opacity:.45}
   aside{width:100%}
   aside .x{font-size:28px;top:6px}
   .acts button{padding:8px 12px}
+  .krow .kacts button,.krow .kacts a,.krow .kmsg button{padding:8px 12px}
 }
 /* host load: one bar per host in the header; click for the per-host popover */
 button.fleet{display:inline-flex;align-items:center;padding:3px 5px;margin-left:-4px;background:none;border-color:transparent}
@@ -234,6 +246,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <div class="bd">
     <div id="pFlags"></div>
     <div class="kv" id="pKv"></div>
+    <div id="pKids"></div>
     <div class="idea" id="pIdea"></div>
     <div class="acts" id="pActs"></div>
     <textarea id="pMsg" placeholder="Send a message to this agent (it resumes the session)"></textarea>
@@ -543,19 +556,62 @@ function reviewLabel(k, rounds){
   return (k.kind||'review') + (n ? ' round '+n : '') + (k.verdict ? ': '+k.verdict : running ? ' (running)' : '');
 }
 // latestReviews: end
+// subagents: begin
+// A card's sub-agents (role subagent) and reviewers. The card shows a count and a chip for each
+// sub-agent that is running (all of them with the "sub-agents" box); the panel has a row for each
+// with Open (its transcript), Message, Stop and Archive, and a row per review with Open.
+const kidOpen = new Set(), kidDraft = {};
+function kidStatus(k){ return k.archived ? 'archived' : (k.blocked || k.status || ''); }
+function kidLine(k){ return [k.model, kidStatus(k), ago(k.lastActivityAt)].filter(Boolean).join(' · '); }
+function kidChip(k){ return (k.title||k.short).slice(0,22) + (k.model ? ' · ' + k.model.replace(/^claude-|^gpt-/,'').slice(0,14) : ''); }
+function kidSummary(children){
+  const s = children.filter(k=>k.role!=='reviewer');
+  if(!s.length) return '';
+  const run = s.filter(k=>k.status==='running'&&!k.archived).length;
+  return `${s.length} sub-agent${s.length>1?'s':''}${run?` · ${run} running`:''}`;
+}
+function cardKids(children, all){
+  return children.filter(k=>k.role!=='reviewer' && (all || (k.status==='running'&&!k.archived))).slice(all?0:-6);
+}
+function kidRow(k){
+  const running = k.status==='running' && !k.archived, sub = k.role!=='reviewer';
+  const name = sub ? (k.title||k.short) : (k.kind||'')+' review'+(k.verdict?': '+k.verdict:'');
+  const dot = k.archived ? 'arch' : running ? 'running' : '';
+  return `<div class="krow" data-kid="${esc(k.id)}">
+    <div class="kt"><span class="dot ${dot}"></span><b>${esc(name)}</b></div>
+    <div class="km">${esc(kidLine(k))}</div>
+    ${k.permission?`<div class="km warn">Waiting on: ${esc(k.permission)}</div>`:''}
+    <div class="kacts"><a href="t/${encodeURIComponent(k.id)}">Open</a>${sub?`
+      <button onclick="kidToggle(this)">Message</button>
+      <button onclick="kidAct('stop',this)" ${running?'':'disabled'}>Stop</button>
+      <button class="danger" onclick="if(confirm('Archive this sub-agent in Paseo?')) kidAct('archive',this)" ${k.archived?'disabled':''}>Archive</button>`:''}</div>
+    ${sub&&kidOpen.has(k.id)?`<div class="kmsg"><textarea placeholder="Message this sub-agent" oninput="kidDraft[this.closest('.krow').dataset.kid]=this.value">${esc(kidDraft[k.id]||'')}</textarea><button class="primary" onclick="kidSend(this)">Send</button></div>`:''}
+  </div>`;
+}
+function kidsHtml(c){
+  const subs = c.children.filter(k=>k.role!=='reviewer'), revs = c.children.filter(k=>k.role==='reviewer');
+  return `<h4 class="kids-hd">Sub-agents <small>${subs.length?esc(kidSummary(c.children)):'none'}</small></h4>` + subs.map(kidRow).join('')
+    + (revs.length ? `<h4 class="kids-hd">Reviews <small>${revs.length}</small></h4>` + revs.map(kidRow).join('') : '');
+}
+// subagents: end
+function kidId(el){ return el.closest('.krow').dataset.kid; }
+function kidToggle(el){ const id = kidId(el); kidOpen.has(id) ? kidOpen.delete(id) : kidOpen.add(id); fillPanel(B.cards.find(c=>c.id===sel), false);
+  const t = document.querySelector(`.krow[data-kid="${CSS.escape(id)}"] textarea`); if(t) t.focus(); }
+async function kidAct(a, el){ await post(a, {id: kidId(el)}); toast(a==='stop' ? 'Sub-agent stopped' : 'Sub-agent archived'); refresh(); }
+async function kidSend(el){ const id = kidId(el), m = (kidDraft[id]||'').trim(); if(!m) return;
+  await post('send', {id, message: m}); delete kidDraft[id]; kidOpen.delete(id); releaseKeyboard(); toast('Sent to sub-agent'); refresh(); }
 function cardHtml(c){
   const dot = c.archivedAt?'arch':c.status==='running'?'running':(c.flags.length?'attn':'');
   const v = c.verdict ? `<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>` : '';
   const note = c.note && !c.ask ? `<span class="flag note">${esc(c.note)}</span>` : '';
-  let kids = c.children.filter(k=>k.role==='reviewer' || $('showKids').checked);
-  const hidden = c.children.length - kids.length;
-  const chip = (k, text) => `<span class="kid ${k.role} ${k.status==='running'&&!k.archived?'running':''}">${esc(text)}</span>`;
+  const chip = (k, text, title) => `<span class="kid ${k.role} ${k.status==='running'&&!k.archived?'running':''} ${k.archived?'archived':''}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
   const kh = latestReviews(c.children).map(k=>chip(k, reviewLabel(k, c.rounds))).join('')
-    + kids.filter(k=>k.role!=='reviewer').slice(-6).map(k=>chip(k, (k.title||k.short).slice(0,22))).join('');
+    + cardKids(c.children, $('showKids').checked).map(k=>chip(k, kidChip(k), kidLine(k))).join('');
+  const ks = kidSummary(c.children);
   return `<div class="card ${sel===c.id?'sel':''}" draggable="true" data-id="${c.id}">
     <div class="t"><span class="dot ${dot}"></span><span>${esc(c.title)}</span></div>
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
-    <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${hidden?` · ${hidden} sub-agent${hidden>1?'s':''}`:''}</div>
+    <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
     <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?askHtml(c):''}
@@ -722,7 +778,6 @@ function fillPanel(c, fresh){
     ['Tier', c.tier ? c.tier + ': ' + ((B.tiers||{})[c.tier]||'') : 'not set yet (the plan review sets it)'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
     ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Reviews', `plan ${c.rounds.plan} · code ${c.rounds.code} (cap 3 each)`],
     ...(c.timing ? [['Timeline', timeline(c.timing)]] : []),
-    ['Sub-agents', c.children.map(k=>`${k.role==='reviewer'?k.kind+' review':k.title||k.short} (${k.model&&k.role!=='reviewer'?k.model+', ':''}${k.archived?'archived':k.status}${k.verdict?', '+k.verdict:''})`).join('; ')||'none'],
     ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
   const busy = c.status==='running';
@@ -734,6 +789,8 @@ function fillPanel(c, fresh){
     : 'Send a message to this agent (it resumes the session)';
   $('pSend').parentElement.style.display = isIdea ? 'none' : '';
   $('pOpen').style.display = isIdea ? 'none' : 'block';
+  // a reload keeps a sub-agent message box Zach is typing in
+  if(fresh || !(document.activeElement && document.activeElement.matches('#pKids textarea'))) $('pKids').innerHTML = isIdea ? '' : kidsHtml(c);
   $('pKv').style.display = $('pLogsHd').style.display = $('pLogs').style.display = isIdea ? 'none' : '';
   $('pIdea').className = 'idea' + (c.idea && !isIdea ? ' started' : '');
   $('pIdea').innerHTML = c.idea ? ideaHtml(c, isIdea) : '';

@@ -82,3 +82,83 @@ func TestNewCardCanCarryEmailThread(t *testing.T) {
 		}
 	}
 }
+
+// runningInbox is an email or voice card the dispatcher started age ago, still on its first turn.
+func runningInbox(src string, age time.Duration, labels map[string]string) Agent {
+	l := map[string]string{labelStage: "plan", labelSource: src}
+	for k, v := range labels {
+		l[k] = v
+	}
+	a := inboxCard("c1", l)
+	a.Status, a.CreatedAt, a.LastActivityAt = "running", t0.Add(-age), t0
+	return a
+}
+
+func TestInboxCardGetsSubagentRuleFromFactory(t *testing.T) {
+	for _, src := range []string{"email", "voice"} {
+		f, p := newTestFactory(t, runningInbox(src, 30*time.Second, nil))
+		p.status["c1"] = "running"
+		f.Tick()
+		msgs := p.sent("c1")
+		if len(msgs) != 1 || !strings.Contains(msgs[0], "Factory note") || !strings.Contains(msgs[0], "Sub-agents. Zach allows") ||
+			!strings.Contains(msgs[0], "At most 6 sub-agents") {
+			t.Fatalf("%s: sent = %v", src, msgs)
+		}
+		if p.labels("c1")[labelDelegated] == "" {
+			t.Errorf("%s: no %s label: %v", src, labelDelegated, p.labels("c1"))
+		}
+	}
+}
+
+func TestSubagentRuleSentOnlyOnce(t *testing.T) {
+	f, p := newTestFactory(t, runningInbox("email", 30*time.Second, map[string]string{labelDelegated: ago(10 * time.Second)}))
+	p.status["c1"] = "running"
+	f.Tick()
+	if msgs := p.sent("c1"); len(msgs) != 0 {
+		t.Errorf("sent again: %v", msgs)
+	}
+}
+
+func TestSubagentRuleNotSentLateOrToStoppedOrBoardCards(t *testing.T) {
+	cases := map[string]struct {
+		a    Agent
+		live string // what paseo inspect reports just before the send
+	}{
+		"older than the window":  {runningInbox("email", 5*time.Minute, nil), "running"},
+		"stopped since the poll": {runningInbox("email", 30*time.Second, nil), "idle"},
+		"board card":             {runningInbox("board", 30*time.Second, nil), "running"},
+		"building":               {runningInbox("email", 30*time.Second, map[string]string{labelStage: "building"}), "running"},
+	}
+	for name, c := range cases {
+		f, p := newTestFactory(t, c.a)
+		p.status["c1"] = c.live
+		f.Tick()
+		if msgs := p.sent("c1"); len(msgs) != 0 {
+			t.Errorf("%s: sent = %v", name, msgs)
+		}
+	}
+}
+
+func TestFactoryMessageToInboxCardCarriesSubagentRuleOnce(t *testing.T) {
+	inbox := inboxCard("c1", map[string]string{labelStage: "plan", labelSource: "email"})
+	done := inboxCard("c2", map[string]string{labelStage: "plan", labelSource: "voice", labelDelegated: ago(time.Hour)})
+	board := card("b1", map[string]string{labelStage: "plan", labelSource: "board"})
+	sub := Agent{ID: "s1", Status: "idle", Labels: map[string]string{"paseo.parent-agent-id": "c1"}}
+	f, p := newTestFactory(t, inbox, done, board, sub)
+	for _, id := range []string{"c1", "c2", "b1", "s1"} {
+		if err := f.send(id, "Plan approved. Build it."); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m := p.sent("c1"); len(m) != 1 || !strings.HasPrefix(m[0], "Plan approved. Build it.") || !strings.Contains(m[0], "Sub-agents. Zach allows") {
+		t.Errorf("inbox card got %v", m)
+	}
+	if p.labels("c1")[labelDelegated] == "" {
+		t.Errorf("inbox card not marked: %v", p.labels("c1"))
+	}
+	for _, id := range []string{"c2", "b1", "s1"} {
+		if m := p.sent(id); len(m) != 1 || m[0] != "Plan approved. Build it." {
+			t.Errorf("%s got %v", id, m)
+		}
+	}
+}

@@ -133,7 +133,7 @@ func TestBoardPageReviewChipsCollapse(t *testing.T) {
 	}
 	// the panel still lists every child and both round counts
 	for _, want := range []string{
-		"['Sub-agents', c.children.map(",
+		"kidsHtml(c)",
 		"plan ${c.rounds.plan} · code ${c.rounds.code}",
 	} {
 		if !strings.Contains(page, want) {
@@ -417,5 +417,59 @@ console.log(JSON.stringify([
 	want := `["Widgets","gadgets","no repo","picking a repo","","","<span class=\"repo\" title=\"acme/&lt;b&gt;\">&lt;b&gt;</span>",""]`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("repoLabel = %s\nwant %s", got, want)
+	}
+}
+
+// Sub-agents render on the card (a count and a chip per running one) and as panel rows Zach can
+// open, message, stop and archive; reviews get rows with Open only.
+func TestBoardPageSubagents(t *testing.T) {
+	page := boardPage(t)
+	for _, want := range []string{`<div id="pKids"></div>`, "kidSummary(c.children)", "cardKids(c.children, $('showKids').checked)"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	if strings.Contains(page, "['Sub-agents',") {
+		t.Error("panel still lists sub-agents as one text line")
+	}
+	const begin, end = "// subagents: begin", "// subagents: end"
+	i, j := strings.Index(page, begin), strings.Index(page, end)
+	if i < 0 || j < i {
+		t.Fatal("no subagents markers in the page")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := `const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ago = iso => iso ? '2 min ago' : '';` + "\n" + page[i:j] + `
+const kids = [
+  {id:'s-run', short:'s-run', title:'Computer use check', model:'gpt-6.1-sol', status:'running', archived:false, role:'subagent', lastActivityAt:'x'},
+  {id:'s-old', short:'s-old', title:'<b>old</b>', model:'claude-opus-5-5', status:'closed', archived:true, role:'subagent'},
+  {id:'r1', short:'r1', role:'reviewer', kind:'plan', verdict:'approve', status:'closed', archived:true},
+];
+kidOpen.add('s-run');
+const html = kidsHtml({children: kids});
+const rows = html.split('class="krow"').slice(1);
+console.log(JSON.stringify({
+  summary: kidSummary(kids),
+  card: cardKids(kids, false).map(k => k.id),
+  all: cardKids(kids, true).map(k => k.id),
+  chip: kidChip(kids[0]),
+  rows: rows.length,
+  running: [rows[0].includes('href="t/s-run"'), rows[0].includes('gpt-6.1-sol · running · 2 min ago'),
+    /kidAct\('stop',this\)" >/.test(rows[0]), /kidAct\('archive',this\)" >/.test(rows[0]), rows[0].includes('kidSend(this)')],
+  archived: [/kidAct\('stop',this\)" disabled/.test(rows[1]), /kidAct\('archive',this\)" disabled/.test(rows[1]),
+    rows[1].includes('&lt;b&gt;old&lt;/b&gt;'), rows[1].includes('kidSend')],
+  review: [rows[2].includes('plan review: approve'), rows[2].includes('href="t/r1"'), rows[2].includes('kidAct')],
+}));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `{"summary":"2 sub-agents · 1 running","card":["s-run"],"all":["s-run","s-old"],"chip":"Computer use check · 6.1-sol",` +
+		`"rows":3,"running":[true,true,true,true,true],"archived":[true,true,true,false],"review":[true,true,false]}`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("sub-agents =\n%s\nwant\n%s", got, want)
 	}
 }

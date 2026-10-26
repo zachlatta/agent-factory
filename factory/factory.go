@@ -453,12 +453,18 @@ func (f *Factory) setLabels(id string, labels map[string]string) error {
 }
 
 func (f *Factory) send(id, msg string, images ...string) error {
+	msg, mark := f.withDelegateRule(id, msg)
 	args := []string{"send", "--no-wait"}
 	for _, p := range images {
 		args = append(args, "--image", p)
 	}
 	if _, err := f.paseo(append(args, id, msg)...); err != nil {
 		return err
+	}
+	if mark != "" {
+		if err := f.setLabels(mark, map[string]string{labelDelegated: iso(f.Now())}); err != nil {
+			f.logf("%s sub-agent section sent, label not set: %v", short(mark), err)
+		}
 	}
 	f.resume(id)
 	return nil

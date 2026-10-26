@@ -46,6 +46,7 @@ const (
 	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
 	labelNoVerdict  = "no-verdict"   // the current review round already re-ran once after a reviewer gave no verdict
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
+	labelDelegated  = "delegated"    // an email or voice card got the sub-agent section from the factory (inbox.go)
 )
 
 // labelLandedVerified records that commits reached main and passed the reviewed-change check.

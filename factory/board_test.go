@@ -38,7 +38,8 @@ func TestDerive(t *testing.T) {
 func TestBuildBoardFoldsChildren(t *testing.T) {
 	now := t0
 	parent := Agent{ID: "p", Title: "parent", Status: "running", LastActivityAt: now, Labels: map[string]string{}}
-	sub := Agent{ID: "s", Title: "sub", Status: "idle", Labels: map[string]string{"paseo.parent-agent-id": "p"}}
+	sub := Agent{ID: "s", Title: "sub", Status: "idle", CreatedAt: now.Add(-time.Hour), LastActivityAt: now.Add(-time.Minute),
+		Labels: map[string]string{"paseo.parent-agent-id": "p"}}
 	rev := Agent{ID: "r", Title: "rev", Status: "running", Labels: map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: "p", labelPrefix + labelReviewKind: "code"}}
 	anchor := Agent{ID: "a", Labels: map[string]string{"role": "mail-anchor"}}
 	sched := Agent{ID: "sc", Title: "Nightly check", Status: "running", LastActivityAt: now, Labels: map[string]string{"paseo.schedule-id": "x"}}
@@ -49,6 +50,14 @@ func TestBuildBoardFoldsChildren(t *testing.T) {
 	p := cards[0]
 	if p.ID != "p" || len(p.Children) != 2 || !p.Reviewing {
 		t.Errorf("parent card = %+v", p)
+	}
+	// the board's sub-agent rows show when each started and last moved
+	i := slices.IndexFunc(p.Children, func(k Child) bool { return k.ID == "s" })
+	if i < 0 {
+		t.Fatalf("no sub-agent child: %+v", p.Children)
+	}
+	if k := p.Children[i]; k.CreatedAt != iso(now.Add(-time.Hour)) || k.LastActivityAt != iso(now.Add(-time.Minute)) {
+		t.Errorf("sub-agent child = %+v", k)
 	}
 	if cards[1].Source != "schedule" || cards[1].Tier != "routine" {
 		t.Errorf("schedule card = %+v", cards[1])

@@ -184,11 +184,19 @@ has available, so Opus can ask Codex, Gemini or Muse and the other way round (`f
   answered. Before ending any turn they archive every sub-agent they started
   (`paseo ls -g -q --label paseo.parent-agent-id=$PASEO_AGENT_ID`), since Paseo archives children
   only with their parent and a card is archived only once Done.
-- At most 3 running at once per agent; no secrets in their prompts. A card's sub-agents edit only
+- At most 6 running at once per agent; no secrets in their prompts. A card's sub-agents edit only
   the files it assigns them and never commit; a reviewer's sub-agents are read-only. An agent's own
   sub-agent tool (Claude's Agent tool, say) is allowed too.
-- On the board, sub-agents fold into their card at any depth (a reviewer's own sub-agents too),
-  with their model. A sub-agent on a permission prompt or stalled flags the card as other children
+- Email and voice-memo cards get the same section from the factory, not from the dispatcher's
+  prompt: one note while the card is in plan, running and under 2 minutes old (checked again with
+  Paseo just before sending, since a message interrupts the command a running agent is on and would
+  start an extra turn for a stopped one), or else appended to the next message the factory sends it.
+  `factory.delegated` marks it sent.
+- On the board, sub-agents fold into their card at any depth (a reviewer's own sub-agents too).
+  The card shows how many there are and how many run, with a chip (title and model) for each
+  running one; the "sub-agents" box shows all of them. The card panel has a row per sub-agent with
+  its model, status and last activity, and Open (its transcript), Message, Stop and Archive; reviews
+  get rows with Open. A sub-agent on a permission prompt or stalled flags the card as other children
   do; a card agent or reviewer waiting on a working sub-agent is not counted as stalled; and
   "sub-agent still running" flags one left running after the agent that started it stopped.
 

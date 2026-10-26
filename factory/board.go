@@ -200,7 +200,8 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				role = "subagent"
 			}
 			ch := Child{ID: k.ID, Short: short(k.ID), Title: k.Title, Model: k.Model, Status: k.Status,
-				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Verdict: k.L(labelVerdict)}
+				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Verdict: k.L(labelVerdict),
+				CreatedAt: iso(k.CreatedAt), LastActivityAt: iso(k.LastActivityAt)}
 			if ch.Model == "" {
 				ch.Model = k.Provider
 			}

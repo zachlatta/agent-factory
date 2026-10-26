@@ -15,7 +15,7 @@ import (
 // own sub-agents before it stops.
 
 // maxSubagents is how many sub-agents one agent may have running at once.
-const maxSubagents = 3
+const maxSubagents = 6
 
 // subagentRunningFlag marks a card whose agent (or reviewer) stopped while a sub-agent it started runs on.
 const subagentRunningFlag = "sub-agent still running"
