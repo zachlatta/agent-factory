@@ -60,7 +60,7 @@ func TestEvidenceServing(t *testing.T) {
 		name   string
 		status int
 	}{{"before.png", 200}, {"bad.png", 404}, {"missing.png", 404}, {"link.png", 404}, {"large.png", 404}, {"../outside.png", 404}} {
-		p.logs["c1"] = "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\nBEFORE: " + tc.name
+		storeLog(t, f, p, "c1", "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\nBEFORE: "+tc.name)
 		a.LastActivityAt = a.LastActivityAt.Add(time.Second)
 		f.SetAgents([]Agent{a})
 		r := httptest.NewRecorder()
@@ -84,7 +84,7 @@ func TestEvidenceServing(t *testing.T) {
 func TestAskRequestAndEvidenceCache(t *testing.T) {
 	a := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
 	f, p := newTestFactory(t)
-	p.logs["c1"] = "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\nBEFORE: before.png\nAFTER: after.png\n\nDetails."
+	storeLog(t, f, p, "c1", "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\nBEFORE: before.png\nAFTER: after.png\n\nDetails.")
 	f.SetAgents([]Agent{a})
 	for i := 0; i < 2; i++ {
 		c, _ := f.card("c1")
@@ -129,7 +129,7 @@ func TestAskFullReport(t *testing.T) {
 	a := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
 	f, p := newTestFactory(t)
 	report := strings.Repeat("Plan detail. ", 700) + "End of plan."
-	p.logs[a.ID] = "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\n" + report
+	storeLog(t, f, p, a.ID, "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\n"+report)
 	f.SetAgents([]Agent{a})
 	c, _ := f.card(a.ID)
 	if c.Ask.Report != report || len(c.Ask.Detail) > 6100 {

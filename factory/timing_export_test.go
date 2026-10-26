@@ -143,6 +143,7 @@ func TestTimingSessionLinksSurviveRestartAndMissingAgents(t *testing.T) {
 
 func TestTimingSessionIDAppearsLater(t *testing.T) {
 	a := fresh("c1")
+	a.SessionID = ""
 	f, _ := newTestFactory(t, a)
 	if len(timing(t, f, a.ID).Sessions) != 0 {
 		t.Fatal("recorded an empty session identity")

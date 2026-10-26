@@ -191,7 +191,7 @@ func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
 	a := card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes",
 		labelZachThread: "nt1"})
 	f, p, m := mailFactory(t, a)
-	p.logs["c1"] = "Brief.\n\nQUESTION: Which fix?\n- The small one (recommended)\n- The big one\n"
+	storeLog(t, f, p, "c1", "Brief.\n\nQUESTION: Which fix?\n- The small one (recommended)\n- The big one\n")
 	c, _ := f.card("c1")
 	if ask := askFor(c, f.agent("c1")); ask.Yes != "recommend" {
 		t.Fatalf("ask = %+v", ask)

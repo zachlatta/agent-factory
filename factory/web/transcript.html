@@ -318,7 +318,7 @@ function render(force){
     }
   }
   flush();
-  if (!h) h = `<div class="empty">${q ? 'No matches.' : 'No messages yet.'}</div>`;
+  if (!h) h = `<div class="empty">${q ? 'No matches.' : meta && meta.unavailable ? esc(meta.unavailable.replace(/^history unavailable/, 'History unavailable')) + '.' : 'No messages yet.'}</div>`;
   renderSide(outline);
   if (h === lastRender && !force) return;
   lastRender = h;
@@ -361,7 +361,7 @@ function renderHeader(){
   document.title = (a.title || a.id.slice(0,7)) + ' · Transcript';
   $('title').textContent = a.title || '(untitled)';
   const dot = a.archivedAt ? 'arch' : a.status === 'running' ? 'running' : '';
-  $('status').innerHTML = `<span class="dot ${dot}"></span>${esc(a.archivedAt ? 'archived' : a.status)} · ${esc(a.host)}${meta.fallback?' · '+esc(meta.provider||'')+' (summary log)':''}`;
+  $('status').innerHTML = `<span class="dot ${dot}"></span>${esc(a.archivedAt ? 'archived' : a.status)} · ${esc(a.host)}${meta.fallback?' · '+esc(meta.provider||'')+' (no session file)':''}`;
   const busy = a.status === 'running';
   $('hacts').innerHTML = (c ? `
     <button onclick="act('review',{kind:'plan'})" title="A fresh Opus agent tries to find fault with the plan">Review plan</button>

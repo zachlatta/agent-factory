@@ -104,14 +104,16 @@ func (f *Factory) recordSteer(a Agent) (string, error) {
 	}
 	keep, notes := "", ""
 	if rev, ok := f.newestReviewer(a.ID); ok {
-		text, _ := f.lastText(rev.ID, 6)
-		notes = f.reviewNotes(rev, text)
+		// Close can come days after the review: read session files, never Paseo (which would load them)
+		text, _ := storedText(f.cfg.Home, rev, 6)
+		full, _ := f.storedReply(rev)
+		notes = reviewNotes(full, text)
 		if keep = ParseDuplicate(notes); keep == "" {
 			keep = ParseDuplicate(text)
 		}
 	}
 	if keep == "" {
-		if text, err := f.lastReply(a); err == nil {
+		if text, err := f.storedReply(a); err == nil {
 			keep = ParseDuplicate(text)
 		}
 	}

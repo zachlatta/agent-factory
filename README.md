@@ -550,10 +550,13 @@ Computer-use access keeps the role's existing action approvals and read-only res
 - `factory/route.go`: Repo Auto. `factory/agents.go`: the agent choices. `factory/reap.go`: the idle reap.
 - `factory/board.go`, `collect.go`, `ask.go`, `ideas.go`, `inbox.go`, `actions.go`,
   `transcript.go`, `server.go`; the board and transcript pages are in `factory/web/`.
-- `factory/transcript.go`, `transcript_providers.go`: the transcript page reads each agent's own
-  session file (Claude `~/.claude/projects`, Codex `~/.codex/sessions`, Antigravity
-  `~/.gemini/antigravity-cli/brain`, Muse `~/.local/share/muse/sessions`), and `paseo logs` only
-  when there is none.
+- `factory/transcript.go`, `transcript_providers.go`: the transcript page, the board's card summary,
+  Needs Zach text and email, Close, Retry and plan-review reads use each agent's own session file
+  (Claude `~/.claude/projects`, Codex `~/.codex/sessions`, Antigravity
+  `~/.gemini/antigravity-cli/brain`, Muse `~/.local/share/muse/sessions`). With no readable file
+  they say "history unavailable" and why; they never call `paseo logs`, which loads the agent in
+  Paseo (resuming an archived one). Only reads of an agent whose turn just ended use it
+  (`lastText` in `factory.go` lists them).
 - `factory/hostmetrics*.go`, `hostfleet.go`: host load for the header icon and `/host`. Each
   `FACTORY_METRIC_HOSTS` alias gets one read-only SSH stream (`ssh -o BatchMode=yes`, a fixed
   script on stdin, Linux or macOS), shared by all viewers, run only while someone polls

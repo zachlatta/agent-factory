@@ -483,10 +483,10 @@ func findings(text string) string {
 	return text
 }
 
-// reviewNotes is the reviewer's whole final message, for the builder and the brief. text (the last few log
-// lines, where the verdict is) is the fallback when no full reply can be read.
-func (f *Factory) reviewNotes(rev Agent, text string) string {
-	if full, err := f.lastReply(rev); err == nil && strings.TrimSpace(full) != "" {
+// reviewNotes is the reviewer's whole final message (full, as its caller read it), for the builder and
+// the brief. text (the last few log lines, where the verdict is) is the fallback when full is empty.
+func reviewNotes(full, text string) string {
+	if strings.TrimSpace(full) != "" {
 		return trunc(full, 8000)
 	}
 	return findings(text)
@@ -570,7 +570,8 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		return err
 	}
 	verdict := ParseVerdict(text)
-	notes := f.reviewNotes(rev, text)
+	full, _ := f.lastReply(rev)
+	notes := reviewNotes(full, text)
 	if kind == "land" {
 		if verdict == "" {
 			verdict = "escalate"
@@ -623,7 +624,8 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	rounds := atoi(t.L(roundsKey)) + 1
 	builderTier, builderPlan := "", ""
 	if kind == "plan" {
-		builderPlan, _ = f.lastText(target, 60)
+		// the builder has been idle through the review (maybe unloaded): its file, never Paseo
+		builderPlan, _ = storedText(f.cfg.Home, t, 60)
 		builderTier = ParseTier(builderPlan)
 	}
 	tier := MaxTier(t.L(labelTier), ParseTier(text), builderTier)
@@ -657,7 +659,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	if (verdict == "approve" || verdict == "nits" || smallFix != "") && kind == "plan" {
 		// the approved plan may name a card this one lands after (deps.go)
-		if plan, err := f.lastReply(t); err != nil {
+		if plan, err := f.storedReply(t); err != nil {
 			f.logf("%s: plan not read for a Waits on line: %v", short(target), err)
 		} else if id := ParseWaitsOn(plan, t.ID); id != t.L(labelWaitsOn) {
 			labels[labelWaitsOn], labels[labelWaitsDone] = id, ""

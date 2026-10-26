@@ -96,6 +96,61 @@ func ReadTranscript(home string, src TranscriptSource, after int) (Transcript, e
 	return res, nil
 }
 
+// ErrNoHistory means an agent's own session file cannot be read. Summaries, transcripts and reads
+// made long after an agent stopped report it rather than asking Paseo: `paseo logs` loads the
+// agent, resuming its provider session even when it is archived.
+var ErrNoHistory = errors.New("history unavailable")
+
+// transcriptReaders are the providers ReadTranscript has a session-file reader for.
+var transcriptReaders = map[string]bool{"claude": true, "codex": true, "antigravity": true, "muse": true}
+
+// storedEvents are agent a's transcript events from its own session file, never from Paseo. Every
+// failure wraps ErrNoHistory and says why.
+func storedEvents(home string, a Agent) ([]Event, error) {
+	id := nativeSessionID(a.SessionID)
+	switch {
+	case a.SessionID == "":
+		return nil, fmt.Errorf("%w: agent %s has no stored session", ErrNoHistory, short(a.ID))
+	case !transcriptReaders[a.Provider]:
+		return nil, fmt.Errorf("%w: no session-file reader for provider %q", ErrNoHistory, a.Provider)
+	case id == "":
+		return nil, fmt.Errorf("%w: agent %s has an unreadable session id", ErrNoHistory, short(a.ID))
+	}
+	res, err := ReadTranscript(home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: reading %s session %s: %v", ErrNoHistory, a.Provider, id, err)
+	}
+	if res.Fallback {
+		return nil, fmt.Errorf("%w: no %s session file for %s, or nothing in it yet", ErrNoHistory, a.Provider, id)
+	}
+	return res.Events, nil
+}
+
+// storedText is the last n user, thinking and assistant entries of agent a's session file, in the
+// shape of `paseo logs --filter text` (`[User] …`, `[Thought] …`, plain replies), for the board's
+// summary and for line parsers (VERDICT, TIER, DUPLICATE OF). It never asks Paseo.
+func storedText(home string, a Agent, n int) (string, error) {
+	evs, err := storedEvents(home, a)
+	if err != nil {
+		return "", err
+	}
+	var entries []string
+	for _, e := range evs {
+		switch e.Kind {
+		case "user":
+			entries = append(entries, "[User] "+e.Text)
+		case "thinking":
+			entries = append(entries, "[Thought] "+e.Text)
+		case "assistant":
+			entries = append(entries, e.Text)
+		}
+	}
+	if len(entries) > n {
+		entries = entries[len(entries)-n:]
+	}
+	return strings.Join(entries, "\n"), nil
+}
+
 var plainID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // nativeSessionID is the provider's own session id from Paseo's persistence.sessionId: plain for
@@ -270,35 +325,4 @@ func event(typ string, meta bool, b map[string]any) (Event, bool) {
 		return ev, true
 	}
 	return Event{}, false
-}
-
-var logTag = regexp.MustCompile(`^\[(User|Thought|[A-Z][A-Za-z_ -]{1,30})\]\s?(.*)$`)
-
-// parseLogs turns `paseo logs` text (codex and other providers) into transcript events.
-func parseLogs(text string) []Event {
-	events := []Event{}
-	cur := -1
-	for _, line := range strings.Split(text, "\n") {
-		if m := logTag.FindStringSubmatch(line); m != nil {
-			switch m[1] {
-			case "User":
-				events = append(events, Event{Kind: "user", Text: m[2]})
-			case "Thought":
-				events = append(events, Event{Kind: "thinking", Text: m[2]})
-			default:
-				events = append(events, Event{Kind: "tool", Name: m[1], Input: map[string]any{"summary": m[2]}})
-				cur = -1
-				continue
-			}
-			cur = len(events) - 1
-			continue
-		}
-		if cur >= 0 {
-			events[cur].Text += "\n" + line
-		} else {
-			events = append(events, Event{Kind: "assistant", Text: line})
-			cur = len(events) - 1
-		}
-	}
-	return events
 }

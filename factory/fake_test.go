@@ -2,7 +2,9 @@ package factory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -273,6 +275,7 @@ func card(id string, labels map[string]string) Agent {
 		l[labelPrefix+k] = v
 	}
 	return Agent{ID: id, Host: "host1", Title: "card " + id, Cwd: "/w/" + id, Repo: "example/desk",
+		Provider: "claude", SessionID: testSession(id),
 		Status: "idle", Labels: l, CreatedAt: t0.Add(-time.Hour), LastActivityAt: t0.Add(-time.Minute)}
 }
 
@@ -281,6 +284,59 @@ func ago(d time.Duration) string { return t0.Add(-d).Format(time.RFC3339) }
 
 func reviewer(id, of, kind string) Agent {
 	return Agent{ID: id, Host: "host1", Title: "review", Status: "idle", CreatedAt: t0.Add(-5 * time.Minute),
+		Provider: "claude", SessionID: testSession(id),
 		LastActivityAt: t0.Add(-time.Minute),
 		Labels:         map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: of, labelPrefix + labelReviewKind: kind}}
+}
+
+// testSession is the Claude session id card and reviewer give agent id; storeLog writes its file.
+func testSession(id string) string { return "s-" + strings.NewReplacer("/", "-", ".", "-").Replace(id) }
+
+var logTag = regexp.MustCompile(`^\[(User|Thought|[A-Z][A-Za-z_ -]{1,30})\]\s?(.*)$`)
+
+// storeLog gives agent id the history text, in `paseo logs --filter text` shape ("[User] …",
+// "[Thought] …", "[Tool] …" one-line entries, other lines the agent's text): as canned `paseo logs` output for the
+// reads of an agent whose turn just ended (lastText), and as the Claude session file at
+// testSession(id) that every other read uses.
+func storeLog(t *testing.T, f *Factory, p *fakePaseo, id, text string) {
+	t.Helper()
+	p.logs[id] = text
+	type entry struct{ typ, block, text string }
+	var es []entry
+	for _, line := range strings.Split(text, "\n") {
+		if m := logTag.FindStringSubmatch(line); m != nil {
+			switch m[1] {
+			case "User":
+				es = append(es, entry{"user", "", m[2]})
+			case "Thought":
+				es = append(es, entry{"assistant", "thinking", m[2]})
+			default:
+				es = append(es, entry{"assistant", "tool_use", m[1]})
+			}
+			continue
+		}
+		// as lastMessage reads it: lines after a [User] line are the reply
+		if n := len(es); n > 0 && es[n-1].block == "text" {
+			es[n-1].text += "\n" + line
+			continue
+		}
+		es = append(es, entry{"assistant", "text", line})
+	}
+	var lines []string
+	for n, e := range es {
+		var msg map[string]any
+		switch e.block {
+		case "":
+			msg = map[string]any{"content": e.text}
+		case "thinking":
+			msg = map[string]any{"content": []any{map[string]any{"type": "thinking", "thinking": e.text}}}
+		case "tool_use":
+			msg = map[string]any{"content": []any{map[string]any{"type": "tool_use", "id": fmt.Sprint("u", n), "name": e.text, "input": map[string]any{}}}}
+		default:
+			msg = map[string]any{"content": []any{map[string]any{"type": "text", "text": e.text}}}
+		}
+		b, _ := json.Marshal(map[string]any{"type": e.typ, "message": msg})
+		lines = append(lines, string(b))
+	}
+	writeFile(t, f.cfg.Home+"/.claude/projects/-test/"+testSession(id)+".jsonl", strings.Join(lines, "\n")+"\n")
 }

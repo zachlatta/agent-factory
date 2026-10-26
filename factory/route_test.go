@@ -96,7 +96,7 @@ func TestPickerRoutesToNamedRepo(t *testing.T) {
 	f, p := newTestFactory(t, a)
 	withRepos(t, f, "example/desk", "example/ops")
 	f.routes.put("pk", Route{Request: "Rotate the key\nsecond line", Title: "Rotate the key", Thread: "t1"})
-	p.logs["pk"] = "[User] Candidates... REPO: <owner/name from the list>\nIt is a host change.\nREPO: example/ops"
+	storeLog(t, f, p, "pk", "[User] Candidates... REPO: <owner/name from the list>\nIt is a host change.\nREPO: example/ops")
 	f.Tick()
 	runs := runArgs(p)
 	if len(runs) != 1 {
@@ -166,7 +166,7 @@ func TestPickerAsksZachWhenUnsure(t *testing.T) {
 			f, p := newTestFactory(t, picker("pk", nil))
 			withRepos(t, f, "example/desk", "example/ops", "zachlatta/personal-data-warehouse")
 			f.routes.put("pk", Route{Request: "q", Title: "q"})
-			p.logs["pk"] = "[User] prompt\n" + reply
+			storeLog(t, f, p, "pk", "[User] prompt\n"+reply)
 			f.Tick()
 			if n := len(runArgs(p)); n != 0 {
 				t.Errorf("runs = %d, want 0", n)
@@ -236,7 +236,7 @@ func TestPickerRunFailureKeepsRequest(t *testing.T) {
 	f, p := newTestFactory(t, a)
 	withRepos(t, f, "example/desk")
 	f.routes.put("pk", Route{Request: "q", Title: "q"})
-	p.logs["pk"] = "[User] x\nREPO: example/desk"
+	storeLog(t, f, p, "pk", "[User] x\nREPO: example/desk")
 	f.p = runFails{p}
 	f.Tick()
 	l := p.labels("pk")
@@ -300,7 +300,7 @@ func TestReplyToPickerRoutesAgain(t *testing.T) {
 	b.LastActivityAt = t0
 	b.Labels[labelPrefix+labelSince] = ago(5 * time.Minute)
 	f.SetAgents([]Agent{b})
-	p.logs["pk"] = "[User] Message from Zach\nREPO: zachlatta/personal-data-warehouse"
+	storeLog(t, f, p, "pk", "[User] Message from Zach\nREPO: zachlatta/personal-data-warehouse")
 	f.Tick()
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "pk")); len(runs) != 0 {
 		t.Errorf("plan review started for a picker: %v", runs)
@@ -316,7 +316,7 @@ func TestRerunStuckPickerRoutes(t *testing.T) {
 	f, p := newTestFactory(t, a)
 	withRepos(t, f, "example/desk")
 	f.routes.put("pk", Route{Request: "q", Title: "q"})
-	p.logs["pk"] = "[User] x\nREPO: example/desk"
+	storeLog(t, f, p, "pk", "[User] x\nREPO: example/desk")
 	if _, err := f.Act("rerun", Body{ID: "pk"}); err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func TestScoutPickerStartsScoutInNamedRepo(t *testing.T) {
 	f, p := newTestFactory(t, picker("pk", nil))
 	withRepos(t, f, "example/desk", "example/ops")
 	f.routes.put("pk", Route{Request: "Find ways to make backups faster", Title: "Scout: Find ways", Scout: true})
-	p.logs["pk"] = "[User] prompt\nBackups live in ops.\nREPO: example/ops"
+	storeLog(t, f, p, "pk", "[User] prompt\nBackups live in ops.\nREPO: example/ops")
 	f.Tick()
 	runs := runArgs(p)
 	if len(runs) != 1 {

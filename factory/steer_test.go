@@ -41,8 +41,8 @@ func dupFactory(t *testing.T, stage, status string, keepLabels map[string]string
 	keep := card(keepID, l)
 	keep.Status = status
 	f, p := newTestFactory(t, dup, rev, keep)
-	p.logs["rev1"] = "The kept card covers only builders and reviewers, not scouts or pickers.\n" +
-		"DUPLICATE OF: keep123\nTIER: low\nVERDICT: close"
+	storeLog(t, f, p, "rev1", "The kept card covers only builders and reviewers, not scouts or pickers.\n"+
+		"DUPLICATE OF: keep123\nTIER: low\nVERDICT: close")
 	return f, p
 }
 
@@ -173,7 +173,7 @@ func TestCloseWithoutDuplicateVerdictDoesNotSteer(t *testing.T) {
 		"itself":       "DUPLICATE OF: dup1234\nVERDICT: close",
 	} {
 		f, p := dupFactory(t, "building", "running", nil)
-		p.logs["rev1"] = text
+		storeLog(t, f, p, "rev1", text)
 		closeDup(t, f)
 		if len(f.steers.all()) != 0 || p.labels(dupID)[labelNote] != "closed by Zach" || !p.archived[dupID] {
 			t.Errorf("%s: steers %v, labels %v", name, f.steers.all(), p.labels(dupID))
@@ -186,15 +186,15 @@ func TestCloseUsesNewestReviewerOrTheCardsOwnLine(t *testing.T) {
 	old := reviewer("rev0", dupID, "plan")
 	old.CreatedAt = t0.Add(-30 * time.Minute)
 	f.SetAgents(append(f.agents(), old))
-	p.logs["rev0"] = "DUPLICATE OF: zzz9999\nVERDICT: close"
+	storeLog(t, f, p, "rev0", "DUPLICATE OF: zzz9999\nVERDICT: close")
 	closeDup(t, f)
 	if st := f.steers.all()[dupID]; st.Keep != keepID {
 		t.Errorf("newest reviewer's line wins: %+v", st)
 	}
 
 	f, p = dupFactory(t, "building", "running", nil)
-	p.logs["rev1"] = "Same as the reaper card.\nVERDICT: close"
-	p.logs[dupID] = "[Assistant] Card keep123 already does this.\nDUPLICATE OF: keep123"
+	storeLog(t, f, p, "rev1", "Same as the reaper card.\nVERDICT: close")
+	storeLog(t, f, p, dupID, "[Assistant] Card keep123 already does this.\nDUPLICATE OF: keep123")
 	closeDup(t, f)
 	if st := f.steers.all()[dupID]; st.Keep != keepID {
 		t.Errorf("the Fellow's own line counts at a close verdict: %+v", st)

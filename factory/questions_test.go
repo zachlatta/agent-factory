@@ -88,8 +88,8 @@ func TestAskQuestionsFromLongReply(t *testing.T) {
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
 	// the question sits past the 6000-character cut of Detail
-	p.logs["r1"] = "[User] review\nKeep the old flag?\nVERDICT: escalate"
-	p.logs["c1"] = "[User] brief please\n" + strings.Repeat("x", 7000) + "\nQUESTION: Keep the old flag?\n- Keep it\n- Remove it"
+	storeLog(t, f, p, "r1", "[User] review\nKeep the old flag?\nVERDICT: escalate")
+	storeLog(t, f, p, "c1", "[User] brief please\n"+strings.Repeat("x", 7000)+"\nQUESTION: Keep the old flag?\n- Keep it\n- Remove it")
 	f.SetAgents([]Agent{c, r})
 	got, _ := f.card("c1")
 	want := []Question{{Text: "Keep the old flag?", Options: []string{"Keep it", "Remove it"}}}

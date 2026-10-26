@@ -200,8 +200,9 @@ func (f *Factory) startPicker(r Route) (map[string]string, error) {
 }
 
 // routeFromReply acts on a stopped picker's reply: start the card in the repo it named, or ask Zach.
+// Retry can call it long after the picker stopped, so it reads the session file, never Paseo.
 func (f *Factory) routeFromReply(a Agent) error {
-	text, err := f.lastReply(a)
+	text, err := f.storedReply(a)
 	if err != nil {
 		return err
 	}

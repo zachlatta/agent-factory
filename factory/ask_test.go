@@ -100,8 +100,8 @@ func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	r := reviewer("r1", "c1", "code")
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
-	p.logs["r1"] = "[User] review\n- test missing at a.go:3\nVERDICT: changes"
-	p.logs["c1"] = "[User] go\nI built it."
+	storeLog(t, f, p, "r1", "[User] review\n- test missing at a.go:3\nVERDICT: changes")
+	storeLog(t, f, p, "c1", "[User] go\nI built it.")
 	f.SetAgents([]Agent{c, r})
 	got, _ := f.card("c1")
 	if got.Ask == nil || got.Ask.Detail != "- test missing at a.go:3" {

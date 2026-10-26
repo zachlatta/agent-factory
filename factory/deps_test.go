@@ -31,8 +31,8 @@ func TestParseWaitsOn(t *testing.T) {
 func TestPlanApprovalRecordsWaitsOn(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
-	p.logs["c1"] = "[User] write a plan\nThe plan.\nWaits on: d0e0001\nTIER: low"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001\nTIER: low")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}

@@ -510,6 +510,12 @@ func (f *Factory) liveState(id string) (archived, running bool, err error) {
 	return s.Archived, s.Status == "running", nil
 }
 
+// lastText is the last n text entries of `paseo logs`. That read loads the agent in Paseo (resuming
+// its provider session, even when archived), so it is only for an agent whose turn just ended and is
+// still loaded: ApplyVerdict's reviewer (policy.go) and the stopped builder's TIER and TRACK reads in
+// the Tick (tickAgent, directReply, nameCard), plus lastReply's fallback for the same reads. Every
+// other read (board summary, transcript, Needs Zach text and email, Close, plan-review builder reads,
+// the repo picker) uses storedText or storedReply, which read only the session file.
 func (f *Factory) lastText(id string, n int) (string, error) {
 	return f.paseo("logs", id, "--tail", fmt.Sprint(n), "--filter", "text")
 }

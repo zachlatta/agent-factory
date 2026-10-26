@@ -151,18 +151,13 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
 	res, err := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, after)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	if res.Fallback {
-		text, err := f.paseo("logs", a.ID, "--tail", "2000")
-		if err != nil {
-			writeJSON(w, 500, map[string]string{"error": err.Error()})
-			return
+	unavailable := ""
+	if err != nil || res.Fallback {
+		// no readable session file: say why, never ask Paseo (`paseo logs` would load the agent)
+		res = Transcript{Events: []Event{}, Fallback: true, Replace: true, Provider: a.Provider}
+		if _, err := storedEvents(f.cfg.Home, a); err != nil {
+			unavailable = err.Error()
 		}
-		// the summary log has no stable line numbers: send all of it each time
-		res.Events, res.Next = parseLogs(text), 0
 	}
 	c, isCard := f.card(a.ID)
 	var parent map[string]string
@@ -176,7 +171,8 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	out := map[string]any{"events": res.Events, "next": res.Next, "fallback": res.Fallback, "replace": res.Replace,
-		"provider": res.Provider, "stages": Stages, "parent": parent, "card": nil,
+		"unavailable": unavailable,
+		"provider":    res.Provider, "stages": Stages, "parent": parent, "card": nil,
 		"agent": map[string]any{"id": a.ID, "host": a.Host, "title": a.Title, "status": a.Status,
 			"archivedAt": iso(a.ArchivedAt), "cwd": a.Cwd, "repo": a.Repo, "branch": a.Branch, "model": a.Model,
 			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": a.Labels}}
@@ -208,9 +204,15 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": "no such idea"})
 		return
 	}
-	text, err := f.lastText(id, 30)
+	a, found := f.agentOK(id)
+	if !found {
+		writeJSON(w, 404, map[string]string{"error": "agent not on the board (open, or archived in the last 12 h)"})
+		return
+	}
+	// the session file only: `paseo logs` would load the agent (resuming it even when archived)
+	text, err := storedText(f.cfg.Home, a, 30)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, 200, map[string]string{"text": text})

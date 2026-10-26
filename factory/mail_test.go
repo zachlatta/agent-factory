@@ -87,7 +87,7 @@ func longPlan() string {
 func TestBoardCardWaitIsEmailedWithFullDetail(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
 	f, p, m := mailFactory(t, c)
-	p.logs["c1"] = longPlan()
+	storeLog(t, f, p, "c1", longPlan())
 	f.Tick()
 	sends := m.sends()
 	if len(sends) != 1 || sends[0].Tool != "send_email" {
@@ -239,7 +239,7 @@ func TestNoEmailForHandMovesOrWithoutAddress(t *testing.T) {
 
 func TestArchitecturePlanEmailWaitsForTheSummary(t *testing.T) {
 	f, p, m := mailFactory(t, card("c1", map[string]string{labelStage: "plan-review"}), reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestArchitecturePlanEmailWaitsForTheSummary(t *testing.T) {
 	done := waiting
 	done.LastActivityAt = t0.Add(2 * time.Minute)
 	f.Now = func() time.Time { return t0.Add(3 * time.Minute) }
-	p.logs["c1"] = "SUMMARY for Zach"
+	storeLog(t, f, p, "c1", "SUMMARY for Zach")
 	f.SetAgents([]Agent{done})
 	f.Tick()
 	if s := m.sends(); len(s) != 1 || !strings.Contains(s[0].Args["text"].(string), "SUMMARY for Zach") ||
@@ -500,8 +500,8 @@ func TestEmailHeaderKeepsOverviewExceptOnFactoryChecks(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agents := append([]Agent{tc.agent}, tc.extra...)
 			f, p, _ := mailFactory(t, agents...)
-			p.logs["c1"] = reply
-			p.logs["r1"] = reply
+			storeLog(t, f, p, "c1", reply)
+			storeLog(t, f, p, "r1", reply)
 			c, ok := f.card("c1")
 			if !ok {
 				t.Fatal("missing card c1")
@@ -551,7 +551,7 @@ func TestEmailIncludesOriginalTaskAndInlineEvidenceWithFallback(t *testing.T) {
 	sessionLines := `{"type":"user","message":{"content":"You are the Fellow on Zach's agent factory board: you own this card from plan to landing.\n\nZach's request:\nMake the Needs Zach emails show the original request and screenshots.\n\nWork in this repo (example/desk). Read its AGENTS.md and README first."}}` + "\n" +
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"` + replyBody + `"}]}}` + "\n"
 	writeFile(t, filepath.Join(f.cfg.Home, ".claude", "projects", strings.ReplaceAll(dir, "/", "-"), "s-req.jsonl"), sessionLines)
-	p.logs["c1"] = strings.ReplaceAll(replyBody, `\n`, "\n")
+	storeLog(t, f, p, "c1", strings.ReplaceAll(replyBody, `\n`, "\n"))
 	f.SetAgents([]Agent{c})
 	f.Tick()
 
@@ -579,7 +579,7 @@ func TestEmailIncludesOriginalTaskAndInlineEvidenceWithFallback(t *testing.T) {
 	c2.Cwd = dir
 	f2, p2, m2 := mailFactory(t, c2)
 	m2.attachmentErr = errors.New("attachment too large")
-	p2.logs["c2"] = p.logs["c1"]
+	storeLog(t, f2, p2, "c2", p.logs["c1"])
 	f2.Tick()
 	sends2 := m2.sends()
 	if len(sends2) != 2 {

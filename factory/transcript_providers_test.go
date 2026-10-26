@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -247,27 +246,5 @@ func TestPeersRequestFromCodexSession(t *testing.T) {
 	p := f.Peers("", "example/desk")
 	if len(p.InFlight) != 1 || p.InFlight[0].Request != "Make agents aware of each other" {
 		t.Errorf("request = %+v", p.InFlight)
-	}
-}
-
-func TestTranscriptEndpointFallbackSendsWholeLog(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan"})
-	c.Provider = "gemini-cli"
-	f, p := newTestFactory(t, c)
-	p.logs["c1"] = "[User] go\nfirst\n[Shell] ls\nsecond"
-	for _, after := range []string{"0", "5"} {
-		rec := httptest.NewRecorder()
-		f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/transcript/c1?after="+after, nil))
-		var j struct {
-			Events            []Event
-			Next              int
-			Fallback, Replace bool
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil || rec.Code != 200 {
-			t.Fatalf("%d %s", rec.Code, rec.Body)
-		}
-		if !j.Fallback || !j.Replace || j.Next != 0 || len(j.Events) != 3 {
-			t.Errorf("after=%s: %+v", after, j)
-		}
 	}
 }

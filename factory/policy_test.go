@@ -74,8 +74,8 @@ func TestPlanApprovedLowTierStartsBuild(t *testing.T) {
 func TestBuilderTierCanRaiseReviewerTier(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
-	p.logs["c1"] = "plan: replace the storage layer\nTIER: architecture"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "plan: replace the storage layer\nTIER: architecture")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelTier] != "architecture" {
@@ -1013,7 +1013,7 @@ func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 		f, p := newTestFactory(t,
 			card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: prev}),
 			reviewer("r1", "c1", "plan"))
-		p.logs["r1"] = reviewText
+		storeLog(t, f, p, "r1", reviewText)
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 			t.Fatal(err)
 		}
@@ -1026,8 +1026,8 @@ func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 	f, p := newTestFactory(t,
 		card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: "2"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = reviewText
-	p.logs["c1"] = "[Assistant] Plan...\nWaits on: abc1234\nTIER: risky"
+	storeLog(t, f, p, "r1", reviewText)
+	storeLog(t, f, p, "c1", "[Assistant] Plan...\nWaits on: abc1234\nTIER: risky")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -1075,7 +1075,7 @@ func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 	f, p = newTestFactory(t,
 		card("c-code", map[string]string{labelStage: "review", labelSource: "board", labelTier: "risky", labelPlanRounds: "1", labelCodeRounds: "2"}),
 		reviewer("r-code", "c-code", "code"))
-	p.logs["r-code"] = reviewText
+	storeLog(t, f, p, "r-code", reviewText)
 	if err := f.ApplyVerdict(f.agent("r-code")); err != nil {
 		t.Fatal(err)
 	}
@@ -1380,7 +1380,8 @@ func TestArchitecturePlanStopsEarlyUnlessReviewerFindsNoSideEffects(t *testing.T
 	for name, logs := range cases {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 			reviewer("r1", "c1", "plan"))
-		p.logs["r1"], p.logs["c1"] = logs[0], logs[1]
+		storeLog(t, f, p, "r1", logs[0])
+		storeLog(t, f, p, "c1", logs[1])
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		wantStop := name != "reviewer none, builder old"

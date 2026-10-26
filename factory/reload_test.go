@@ -61,7 +61,8 @@ func writeAgents(t *testing.T, f *Factory, agents ...Agent) {
 		b, _ := json.Marshal(map[string]any{"id": a.ID, "title": a.Title, "cwd": a.Cwd, "lastStatus": a.Status,
 			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": labels,
 			"requiresAttention": a.RequiresAttention, "attentionReason": a.AttentionReason,
-			"lastUserMessageAt": iso(a.LastUserMessageAt)})
+			"lastUserMessageAt": iso(a.LastUserMessageAt), "provider": a.Provider,
+			"persistence": map[string]string{"sessionId": a.SessionID}})
 		writeFile(t, agentFile(f.cfg.Home, a.ID), string(b))
 	}
 }
@@ -209,12 +210,12 @@ func TestReloadMakesNoPaseoCalls(t *testing.T) {
 func TestReloadUsesCachedDetail(t *testing.T) {
 	c := zachCard()
 	f, p := newDiskFactory(t)
-	p.logs["c1"] = "Old detail"
+	storeLog(t, f, p.fakePaseo, "c1", "Old detail")
 	f.SetAgents([]Agent{c})
 	if got, _ := f.card("c1"); got.Ask == nil || !strings.Contains(got.Ask.Detail, "Old detail") {
 		t.Fatalf("cached detail not fetched: %+v", got.Ask)
 	}
-	p.logs["c1"] = "New detail"
+	storeLog(t, f, p.fakePaseo, "c1", "New detail")
 	c.LastActivityAt = t0
 	writeAgents(t, f, c)
 	if err := f.reload(); err != nil {

@@ -442,25 +442,32 @@ func ParseQuestions(text string) (string, []Question) {
 	return strings.TrimSpace(strings.Join(out, "\n")), qs
 }
 
-// lastReply is agent a's last reply to a message. Session files mark who said what; `paseo logs`
-// text cannot tell a multi-line message to the agent from its answer, so it is only the fallback
-// when there is no session file to read.
-func (f *Factory) lastReply(a Agent) (string, error) {
-	if a.SessionID != "" {
-		res, err := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
-		if err == nil && !res.Fallback {
-			// the trailing run of text blocks: one reply can span several (a review written in parts)
-			var last []string
-			for _, e := range res.Events {
-				switch e.Kind {
-				case "user", "tool", "result":
-					last = nil
-				case "assistant":
-					last = append(last, e.Text)
-				}
-			}
-			return stripTrailer(strings.Join(last, "\n\n")), nil
+// storedReply is agent a's last reply to a message, from its own session file, which marks who
+// said what. It never asks Paseo; with no readable file it returns an ErrNoHistory error.
+func (f *Factory) storedReply(a Agent) (string, error) {
+	evs, err := storedEvents(f.cfg.Home, a)
+	if err != nil {
+		return "", err
+	}
+	// the trailing run of text blocks: one reply can span several (a review written in parts)
+	var last []string
+	for _, e := range evs {
+		switch e.Kind {
+		case "user", "tool", "result":
+			last = nil
+		case "assistant":
+			last = append(last, e.Text)
 		}
+	}
+	return stripTrailer(strings.Join(last, "\n\n")), nil
+}
+
+// lastReply is storedReply, falling back to `paseo logs` text (which cannot tell a multi-line
+// message to the agent from its answer) when there is no session file. Only for an agent whose
+// turn just ended, as lastText; every other read uses storedReply.
+func (f *Factory) lastReply(a Agent) (string, error) {
+	if text, err := f.storedReply(a); err == nil {
+		return text, nil
 	}
 	text, err := f.lastText(a.ID, 120)
 	if err != nil {
@@ -469,7 +476,8 @@ func (f *Factory) lastReply(a Agent) (string, error) {
 	return lastMessage(text), nil
 }
 
-// askReply is the text shown on a Needs Zach card and in its email. It starts with lastReply;
+// askReply is the text shown on a Needs Zach card and in its email, read from the session file only
+// (the card may have stopped long ago: asking Paseo would load it). It starts with storedReply;
 // when an agent stopped mid-turn (for example, killed during a tool call), it falls back to the
 // last assistant text in the turn, or a plain mid-run note naming the last tool and capped
 // reasoning from the transcript, never raw tool output.
@@ -477,29 +485,20 @@ func (f *Factory) askReply(a Agent) (string, error) {
 	if a.ID == "" {
 		return "", errors.New("agent not found")
 	}
-	text, err := f.lastReply(a)
-	if err == nil && strings.TrimSpace(text) != "" {
+	text, err := f.storedReply(a)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(text) != "" {
 		return text, nil
 	}
-	if a.SessionID == "" {
-		if err != nil {
-			return "", err
-		}
-		return "", errors.New("agent has no session id and logs had no reply")
-	}
-	res, tErr := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
-	if tErr != nil {
-		return "", tErr
-	}
-	if res.Fallback || len(res.Events) == 0 {
-		if err != nil {
-			return "", err
-		}
-		return "", fmt.Errorf("session file for %s not found or empty", nativeSessionID(a.SessionID))
+	evs, err := storedEvents(f.cfg.Home, a)
+	if err != nil {
+		return "", err
 	}
 	var run, lastRun []string
 	var lastTool, lastToolTs, lastThinking string
-	for _, e := range res.Events {
+	for _, e := range evs {
 		switch e.Kind {
 		case "user":
 			run, lastRun = nil, nil

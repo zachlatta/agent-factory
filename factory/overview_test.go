@@ -50,8 +50,8 @@ func TestParseOverview(t *testing.T) {
 func TestAskShowsTheAgentsOverview(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
 	f, p := newTestFactory(t)
-	p.logs["c1"] = "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung on a flaky test.\n" +
-		"NEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.\n\nQUESTION: Which fix?\n- Skip the test (recommended)\n- Fix it\n"
+	storeLog(t, f, p, "c1", "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung on a flaky test.\n"+
+		"NEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.\n\nQUESTION: Which fix?\n- Skip the test (recommended)\n- Fix it\n")
 	f.SetAgents([]Agent{c})
 	got, _ := f.card("c1")
 	ask := got.Ask
@@ -65,7 +65,7 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 		t.Errorf("cached overview = %+v", got.Ask.Overview)
 	}
 	// no block: today's view
-	p.logs["c1"] = "[User] go\nI tried twice."
+	storeLog(t, f, p, "c1", "[User] go\nI tried twice.")
 	c.LastActivityAt = c.LastActivityAt.Add(time.Minute)
 	f.SetAgents([]Agent{c})
 	if got, _ = f.card("c1"); got.Ask.Overview != nil || got.Ask.Detail != "I tried twice." {
@@ -76,7 +76,7 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 func TestEmailLeadsWithTheOverview(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"})
 	f, p, m := mailFactory(t, c)
-	p.logs["c1"] = "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice."
+	storeLog(t, f, p, "c1", "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.")
 	f.Tick()
 	sends := m.sends()
 	if len(sends) != 1 {

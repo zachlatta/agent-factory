@@ -455,7 +455,7 @@ func TestNewCardAndAutoIdeaBalanceUsageAndKeepEmailOnOpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	pickerID := res.(map[string]string)["id"]
-	p.logs[pickerID] = "[Assistant]\nREPO: example/desk\n"
+	storeLog(t, f, p, pickerID, "[Assistant]\nREPO: example/desk\n")
 	if err := f.routeFromReply(picker(pickerID, nil)); err != nil {
 		t.Fatal(err)
 	}

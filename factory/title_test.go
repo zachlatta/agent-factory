@@ -87,7 +87,7 @@ func TestAutoRepoCardTitles(t *testing.T) {
 			}
 			id := res.(map[string]string)["id"]
 			f.SetAgents([]Agent{picker(id, nil)})
-			p.logs[id] = "[User] x\nREPO: example/ops"
+			storeLog(t, f, p, id, "[User] x\nREPO: example/ops")
 			f.Tick()
 			runs := runArgs(p)
 			if len(runs) != 2 {
