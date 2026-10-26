@@ -33,10 +33,10 @@ func (f *Factory) landMsgFor(a Agent) string {
 	}
 	t := emailThread(a)
 	if t == "" {
-		return msg
+		return msg + remainingRule
 	}
 	return msg + " Then tell Zach by email what changed and anything he must do (" + emailHow(t) +
-		"), and archive the thread (modify_thread_labels, remove INBOX)."
+		"), and archive the thread (modify_thread_labels, remove INBOX)." + remainingRule
 }
 
 // newCardEmailNote is added to a board card's prompt when it was started from an email thread.

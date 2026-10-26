@@ -320,6 +320,7 @@ func TestLandingChecksTheReviewedCommit(t *testing.T) {
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
 			f.GitOut = gitStub(tc.git)
+			p.logs["c1"] = "Landed.\nREMAINING: none"
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelStage] != tc.stage {

@@ -147,6 +147,7 @@ func TestReplyThenTickFinishesLanding(t *testing.T) {
 	c.LastActivityAt = t0.Add(time.Minute)
 	f.SetAgents([]Agent{c})
 	f.Git = func(context.Context, string, ...string) error { return nil }
+	p.logs["c1"] = "Landed.\nREMAINING: none"
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "landed" {
 		t.Errorf("labels = %v", l)

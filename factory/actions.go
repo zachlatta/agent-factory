@@ -232,14 +232,13 @@ func (f *Factory) rerun(c Card) error {
 	}
 	switch from := f.agent(c.ID).L(labelStuckFrom); from {
 	case "landing":
-		msg := landMsg
-		if f.guarded(c.Repo) {
+		guarded := f.guarded(c.Repo)
+		if guarded {
 			if note := f.scanNote(c.Cwd, ""); !scanPassed(note) {
 				return errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
 			}
-			msg = guardedLandMsg
 		}
-		if err := f.send(c.ID, "The factory is re-running your landing. "+msg); err != nil {
+		if err := f.send(c.ID, rerunLandMsg(guarded)); err != nil {
 			return err
 		}
 		return f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run by Zach"})

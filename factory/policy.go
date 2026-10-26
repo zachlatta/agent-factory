@@ -784,6 +784,15 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 					labelNote: "landed diff differs from the reviewed one: " + trunc(why, 200)})
 			}
 		}
+		// landed: Done only when the agent says nothing is left (remaining.go)
+		reply, err := f.lastReply(a)
+		if err != nil {
+			f.logf("%s landing reply not read: %v", short(a.ID), err)
+		}
+		if note := remainingNote(reply); note != "" {
+			f.logf("%s landed with work left: %s", short(a.ID), note)
+			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note})
+		}
 		f.logf("%s finished landing", short(a.ID))
 		return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "landed"})
 	case a.L(labelStage) == "zach" && f.Mail != nil && a.L(labelTold) != waitNote(a) && mailable(c.Ask):

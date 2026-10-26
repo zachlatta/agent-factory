@@ -315,6 +315,7 @@ func TestTickFinishesLanding(t *testing.T) {
 				}
 				return nil
 			}
+			p.logs["c1"] = "Landed.\nREMAINING: none"
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelStage] != tc.stage {

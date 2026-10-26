@@ -44,7 +44,10 @@ The planner (the "Fellow") first picks a track:
   Zach (its labels change) with "Re-run the review", which retires the old reviewer first. If the
   old reviewer finishes before a re-run, its verdict still moves the card on. The factory never
   answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
-- A landing card is Done only if its HEAD is on `origin/main` and it made a commit of its own.
+- A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
+  last message ends with `REMAINING: none`. A card that lists work left (`REMAINING:` then one `-`
+  line per item), or says nothing, waits in Needs Zach with the list in its note: reply to send the
+  agent on, or mark it Done.
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
   the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
   `0.0.0.0`), and clicks through it with computer use. Its non-blocking "UI feedback:" block goes to
