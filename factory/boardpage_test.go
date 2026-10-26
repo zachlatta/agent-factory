@@ -248,3 +248,79 @@ func TestBoardPageAgentPickerFollowsSuggestedDefault(t *testing.T) {
 		}
 	}
 }
+
+// Exercise the actual submission controller with a held response, not a source-text assertion.
+func TestNewCardSubmission(t *testing.T) {
+	page := boardPage(t)
+	i, j := strings.Index(page, "// newSubmission: begin"), strings.Index(page, "// newSubmission: end")
+	if i < 0 || j < i {
+		t.Fatal("no submission controller")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := `
+const assert = require('node:assert/strict');
+const elements = Object.fromEntries(['newBtn','nGo','nScout','nReq','nRepo','nAgent','nError','newDlg','newStarting','newStartingTitle','newStartingText'].map(id=>[id,{value:'',textContent:'',hidden:true,disabled:false,dataset:{}}]));
+const $ = id => elements[id];
+$('newDlg').open=true;
+$('newDlg').close=()=>{$('newDlg').open=false;};
+$('newDlg').showModal=()=>{$('newDlg').open=true;};
+let B={cards:[]}, calls=0, reply, sent, refreshes=0;
+const releaseKeyboard=()=>{}, fillNewDlg=()=>{}, refreshNewDlg=()=>{}, toast=()=>{};
+const refresh=async()=>{refreshes++; renderNewSubmission();};
+const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new Promise((resolve,reject)=>{reply={resolve,reject};});};
+` + page[i:j] + `
+(async()=>{
+ // Board polls must not undo the busy state of another dialog action (such as Scout).
+ $('nGo').disabled=true; renderNewSubmission(); assert.equal($('nGo').disabled,true); $('nGo').disabled=false;
+ $('nReq').value='Test request'; $('nRepo').value='auto'; $('nAgent').value='codex-sol';
+ const start=performance.now(); const first=$('nGo').onclick();
+ const elapsed=performance.now()-start;
+ assert.ok(elapsed<100, 'acknowledgement under 100 ms');
+ console.log('Held-launch acknowledgement: '+elapsed.toFixed(2)+' ms');
+ assert.equal($('newDlg').open,false); assert.equal($('newStarting').hidden,false);
+ assert.match($('newStartingText').textContent,/Starting/);
+ assert.equal($('newStartingTitle').textContent,'Test request');
+ assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol'});
+ await $('nGo').onclick(); $('newBtn').onclick();
+ assert.equal(calls,1); assert.equal($('newDlg').open,false);
+ B={cards:[]}; renderNewSubmission(); assert.equal($('newStarting').hidden,false);
+ // A poll can see the new card before the POST returns; the response must reconcile it.
+ B={cards:[{id:'launched'}]};
+ reply.resolve({ok:true,json:async()=>({id:'launched'})}); await first;
+ assert.equal($('newStarting').hidden,true); assert.equal($('newBtn').disabled,false);
+ assert.equal($('nReq').value,'');
+ // A successful response can also precede the next board refresh.
+ $('nReq').value='Another request'; const second=$('nGo').onclick();
+ reply.resolve({ok:true,json:async()=>({id:'later'})}); await second;
+ assert.equal($('newStarting').hidden,false); assert.equal($('nGo').disabled,true);
+ B.cards.push({id:'later'}); renderNewSubmission();
+ assert.equal($('newStarting').hidden,true); assert.equal($('nGo').disabled,false);
+ // A known rejection restores the complete captured form and an inline error.
+ $('nReq').value='  Keep this draft\n'; $('nRepo').value='example/project'; $('nAgent').value='opus';
+ const failed=$('nGo').onclick();
+ $('nReq').value=''; $('nRepo').value='auto'; $('nAgent').value='codex-sol';
+ reply.resolve({ok:false,status:400,json:async()=>({error:'Provider unavailable'})}); await failed;
+ assert.equal($('newDlg').open,true); assert.equal($('newStarting').hidden,true);
+ assert.equal($('nReq').value,'  Keep this draft\n'); assert.equal($('nRepo').value,'example/project'); assert.equal($('nAgent').value,'opus');
+ assert.match($('nError').textContent,/Provider unavailable/); assert.equal($('nGo').disabled,false);
+ // Lost or malformed responses are uncertain; neither may trigger an automatic retry.
+ for(const malformed of [false,true]){
+  const before=calls; const uncertain=$('nGo').onclick();
+  if(malformed) reply.resolve({ok:true,json:async()=>{throw Error('bad JSON');}});
+  else reply.reject(Error('lost connection'));
+  await uncertain; await Promise.resolve();
+  assert.equal(calls,before+1); assert.equal($('nReq').value,'  Keep this draft\n');
+  assert.match($('nError').textContent,/may still start/); assert.match($('nError').textContent,/before trying again/);
+ }
+ assert.ok(refreshes>=5);
+ console.log('submission behavior passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("submission: %v\n%s", err, out)
+	}
+	t.Log(strings.TrimSpace(string(out)))
+}
