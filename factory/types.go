@@ -79,8 +79,9 @@ type Card struct {
 	Tier           string    `json:"tier"`
 	Awaiting       string    `json:"awaiting"`
 	Origin         string    `json:"origin"`
-	Agent          string    `json:"agent"`   // AgentChoice id (factory.agent label)
-	Routing        bool      `json:"routing"` // a repo picker (route.go), not the card's real work
+	Agent          string    `json:"agent"`             // AgentChoice id (factory.agent label)
+	WaitsOn        string    `json:"waitsOn,omitempty"` // short id of the card it lands after (deps.go)
+	Routing        bool      `json:"routing"`           // a repo picker (route.go), not the card's real work
 	CreatedAt      string    `json:"createdAt"`
 	LastActivityAt string    `json:"lastActivityAt"`
 	ArchivedAt     string    `json:"archivedAt"`

@@ -125,6 +125,12 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		msg := landMsg
 		if a, ok := f.agentOK(c.ID); ok {
+			if id, st := f.pendingDep(a); st == depWaiting {
+				// its plan lands it after a card still in flight: the next Tick sends the land prompt (tickHeld).
+				// A dropped or missing one is what Zach just answered, so that lands now.
+				return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelHeld: id,
+					labelNote: holdNote(id)})
+			}
 			msg = f.landMsgFor(a)
 		}
 		if f.guarded(c.Repo) {

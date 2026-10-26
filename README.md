@@ -44,6 +44,10 @@ The planner (the "Fellow") first picks a track:
   Zach (its labels change) with "Re-run the review", which retires the old reviewer first. If the
   old reviewer finishes before a re-run, its verdict still moves the card on. The factory never
   answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
+- A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
+  the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
+  or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
+  card goes to Needs Zach with one question: land it anyway, reply, or drop it.
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none`. A card that lists work left (`REMAINING:` then one `-`
   line per item), or says nothing, waits in Needs Zach with the list in its note: reply to send the

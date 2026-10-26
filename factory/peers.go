@@ -678,6 +678,9 @@ Refresh the brief below before you plan, before you build and before you land:
   "DUPLICATE OF: <card id>" and stop (no plan, no edits).
 - Your work overlaps another card's files or area: name that card in your plan, add an
   "Ordering:" line saying which should land first and why, and keep your edits to shared files small.
+- If yours must land after another card, end the plan with a line "Waits on: <its short id>" (one
+  card, the last such line counts). The factory holds your land prompt until that card lands and
+  sends it then: never poll for it or refuse a land prompt.
 - Before landing, fetch origin/main; if a card that touched your files has landed, rebase on it and
   rerun the tests.
 - Never edit another card's worktree, and never message other agents.

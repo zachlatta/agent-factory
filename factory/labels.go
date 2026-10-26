@@ -40,6 +40,9 @@ const (
 	labelSeen       = "seen"         // unix seconds Zach last opened the card on the board or its transcript
 	labelTitled     = "titled"       // the card's title is settled: given (by the caller), planner (renamed) or kept
 	labelParked     = "parked"       // archived by the idle reap with its column kept; a send resumes it (reap.go)
+	labelWaitsOn    = "waits-on"     // short id of the card this one lands after, from its approved plan (deps.go)
+	labelWaitsDone  = "waits-landed" // the waits-on card was seen landed: it stays landed after it leaves the list
+	labelHeld       = "held"         // in landing: the land prompt waits for this card to land (deps.go)
 )
 
 // labelArg is the `paseo --label` value that sets factory label k to v.

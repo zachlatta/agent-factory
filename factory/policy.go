@@ -486,6 +486,14 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		return f.setLabels(target, labels)
 	}
 	now := iso(f.Now())
+	if (verdict == "approve" || verdict == "nits") && kind == "plan" {
+		// the approved plan may name a card this one lands after (deps.go)
+		if plan, err := f.lastReply(t); err != nil {
+			f.logf("%s: plan not read for a Waits on line: %v", short(target), err)
+		} else if id := ParseWaitsOn(plan, t.ID); id != t.L(labelWaitsOn) {
+			labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
+		}
+	}
 	switch {
 	case (verdict == "approve" || verdict == "nits") && kind == "plan":
 		if tier == "architecture" && !zachOK {
@@ -522,6 +530,14 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			note := "auto-landing (" + tier + ")"
 			if scanned != "" {
 				note += ": public repo: scan passed at review"
+			}
+			if id, _ := f.pendingDep(t); id != "" {
+				// the land prompt waits for that card; the next Tick sends it or asks Zach (tickHeld)
+				if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelHeld, id,
+					labelNote, holdNote(id)); err == nil && fb != "" {
+					err = f.send(target, depHoldMsg(id, fb))
+				}
+				break
 			}
 			if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelNote, note); err == nil {
 				msg := fmt.Sprintf("Code review passed (%s tier). %s", tier, f.landMsgFor(t))
@@ -725,6 +741,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return err
 		}
 	}
+	f.markDepLanded(a)
 	if !a.stopped() {
 		return nil
 	}
@@ -769,6 +786,8 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		_, err = f.StartReview(c, "plan")
 		return err
+	case a.L(labelStage) == "landing" && a.L(labelHeld) != "":
+		return f.tickHeld(a, c)
 	case a.L(labelStage) == "landing" && acted:
 		if live, err := f.stillStopped(a); !live {
 			return err

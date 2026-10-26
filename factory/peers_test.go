@@ -261,7 +261,7 @@ func TestPromptsTellAgentsAboutPeers(t *testing.T) {
 		t.Fatalf("runs = %v", p.calls)
 	}
 	prompt := runs[0][len(runs[0])-1]
-	for _, want := range []string{`curl -s "localhost:7478/api/peers?for=$PASEO_AGENT_ID"`, "Ordering:",
+	for _, want := range []string{`curl -s "localhost:7478/api/peers?for=$PASEO_AGENT_ID"`, "Ordering:", "Waits on: <its short id>",
 		"The brief when you started:", `- ot1 [review`, "Zach's request:\ndo a thing\n"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("Fellow prompt lacks %q", want)

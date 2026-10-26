@@ -158,6 +158,8 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Title: "Reviewer thinks this isn't needed", From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
 			Actions: []Action{primary("close", "Close it"), reply("Keep going", "Why it is still needed")}}
+	case isDepAskNote(note):
+		return depAsk(note)
 	case note == "landing not verified":
 		return &Ask{Title: "Landing didn't reach main", From: "builder",
 			Why:     "The agent finished landing, but its commit is not on origin/main. Its last message is below.",

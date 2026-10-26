@@ -184,6 +184,9 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 		if c.Stage == "landed" && !a.archived() {
 			c.Flags = append(c.Flags, "not archived")
 		}
+		if c.WaitsOn = a.L(labelWaitsOn); c.WaitsOn != "" && c.Stage != "landed" {
+			c.Flags = append(c.Flags, waitFlag(agents, a))
+		}
 		if r := a.L(labelAutoReview); r != "" {
 			c.Flags = append(c.Flags, r+" review queued")
 		}
