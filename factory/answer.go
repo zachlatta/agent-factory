@@ -16,10 +16,12 @@ import (
 // approves or drops; anything else goes to the agent as his instructions. The factory confirms what
 // it did with a one-line reply in the thread.
 
-// ErrNoCard and ErrNotWaiting tell the dispatcher to fall back to its own handling.
+// ErrNoCard, ErrNotWaiting and ErrSharedThread tell the dispatcher to fall back to its own handling.
 var (
 	ErrNoCard     = errors.New("no card for this thread")
 	ErrNotWaiting = errors.New("the card is not waiting on Zach")
+	// ErrSharedThread: two or more cards in the thread wait on Zach, so the reply could be for either
+	ErrSharedThread = errors.New("several cards in this thread wait on Zach")
 )
 
 var (
@@ -92,8 +94,12 @@ func expandLetters(clean string, qs []Question) (string, bool) {
 	return strings.TrimRight(b.String(), "\n"), true
 }
 
-// waitingCard is the live factory card whose email thread is thread.
+// waitingCard is the one live factory card waiting on Zach in email thread thread. Several cards can
+// share a thread (cards started from one email), so only waiting cards count, and a reply that two
+// or more of them could be answering acts on none: the dispatcher passes it on as a follow-up.
 func (f *Factory) waitingCard(thread string) (Agent, error) {
+	var waiting []Agent
+	found := false
 	for _, a := range f.agents() {
 		if a.archived() || a.L(labelStage) == "" || a.L(labelRole) != "" {
 			continue
@@ -101,10 +107,18 @@ func (f *Factory) waitingCard(thread string) (Agent, error) {
 		if a.L(labelZachThread) != thread && emailThread(a) != thread {
 			continue
 		}
-		if a.L(labelStage) != "zach" {
-			return a, ErrNotWaiting
+		found = true
+		if a.L(labelStage) == "zach" {
+			waiting = append(waiting, a)
 		}
-		return a, nil
+	}
+	switch {
+	case len(waiting) == 1:
+		return waiting[0], nil
+	case len(waiting) > 1:
+		return Agent{}, ErrSharedThread
+	case found:
+		return Agent{}, ErrNotWaiting
 	}
 	return Agent{}, ErrNoCard
 }

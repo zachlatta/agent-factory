@@ -243,7 +243,7 @@ func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrNoCard):
 			code = 404 // answer: the dispatcher falls back to its own handling
-		case errors.Is(err, ErrNotWaiting):
+		case errors.Is(err, ErrNotWaiting), errors.Is(err, ErrSharedThread):
 			code = 409
 		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})

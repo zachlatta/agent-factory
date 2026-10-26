@@ -90,8 +90,9 @@ options, the words he can reply with, and an Open board button that opens the ca
 - `/api/health` reports the last mailbox check as `mail`; it never fails the health check.
 
 Replies: the email dispatcher checks the sender, then posts his reply to
-`POST /api/answer` (`thread`, `message_id`, `text`; 404 when no card has the thread, 409 when the
-card is not waiting). Quoted text and signatures are cut first. Only a whole reply from these lists
+`POST /api/answer` (`thread`, `message_id`, `text`; 404 when no card has the thread, 409 when none
+of its cards waits, or when two or more do: then the reply could be for either, so the dispatcher
+passes it on as a follow-up). Quoted text and signatures are cut first. Only a whole reply from these lists
 acts:
 
 | Reply | Does |

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zachlatta/agent-factory/factory/scan"
 )
@@ -192,5 +193,37 @@ func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
 		if w.Word == "1A 2B" && strings.Contains(w.Does, "approve") {
 			t.Errorf("brief letter answers promise approve: %+v", w)
 		}
+	}
+}
+
+func TestEmailAnswerFindsTheWaitingCardInASharedThread(t *testing.T) {
+	// cards started from one email share its thread; only the one waiting on Zach is answered
+	planning := card("c0", map[string]string{labelStage: "plan", labelZachThread: "nt1"})
+	planning.CreatedAt = t0.Add(-2 * time.Hour)
+	f, p, _ := mailFactory(t, planning, planWaiting("c1"))
+	res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "approve"})
+	if err != nil || res.(map[string]string)["card"] != "c1" {
+		t.Fatalf("res = %v, err = %v", res, err)
+	}
+	if p.labels("c1")[labelStage] != "building" || len(p.labels("c0")) != 0 {
+		t.Errorf("c0 = %v, c1 = %v", p.labels("c0"), p.labels("c1"))
+	}
+}
+
+func TestEmailAnswerActsOnNoneWhenTwoCardsWait(t *testing.T) {
+	f, p, m := mailFactory(t, planWaiting("c1"), planWaiting("c2"))
+	_, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "approve"})
+	if !errors.Is(err, ErrSharedThread) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(p.labels("c1")) != 0 || len(p.labels("c2")) != 0 || len(m.sends()) != 0 {
+		t.Errorf("acted on a shared thread: c1 = %v, c2 = %v, mail = %+v", p.labels("c1"), p.labels("c2"), m.sends())
+	}
+	req := httptest.NewRequest("POST", "/api/answer", strings.NewReader(`{"thread":"nt1","message_id":"m2","text":"approve"}`))
+	req.Header.Set("X-Factory", "1")
+	w := httptest.NewRecorder()
+	f.Handler().ServeHTTP(w, req)
+	if w.Code != 409 {
+		t.Errorf("status %d, want 409 so the dispatcher passes it on", w.Code)
 	}
 }
