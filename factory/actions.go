@@ -339,9 +339,13 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		}
 		return f.startPicker(r)
 	}
-	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", filepath.Join(f.cfg.Home, "dev", repo), "--title", title,
+	repoDir := filepath.Join(f.cfg.Home, "dev", repo)
+	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
 		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))
+	if branch := f.freeBranch(repoDir, branchSlug(title)); branch != "" {
+		args = append(args, "--new-branch", branch)
+	}
 	if b.Origin == "idea" {
 		args = append(args, "--label", labelArg(labelOrigin, "idea"))
 	}

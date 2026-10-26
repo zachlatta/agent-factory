@@ -1158,7 +1158,79 @@ func (f *Factory) nameCard(a Agent, reply string) {
 		f.logf("%s rename failed: %v", short(a.ID), err)
 		return
 	}
+	f.renameBranch(a, title)
 	f.logf("%s renamed: %s → %s", short(a.ID), a.Title, title)
+}
+
+func (f *Factory) renameBranch(a Agent, title string) {
+	want := branchSlug(title)
+	if a.Cwd == "" || want == a.Branch {
+		return
+	}
+	branch := f.freeBranch(a.Cwd, want)
+	if branch == "" || branch == a.Branch {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := f.Git(ctx, a.Cwd, "branch", "-m", branch); err != nil {
+		f.logf("%s branch rename failed: %v", short(a.ID), err)
+	}
+}
+
+// freeBranch picks a local branch name in dir starting from slug (slug, slug-2, ..., slug-50) that
+// does not already exist in refs/heads/, so Paseo branches off main instead of reusing an old ref.
+// It returns "" if all candidates are taken.
+func (f *Factory) freeBranch(dir, slug string) string {
+	if dir == "" {
+		return slug
+	}
+	if slug == "" {
+		slug = "card"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for i := 1; i <= 50; i++ {
+		cand := slug
+		if i > 1 {
+			cand = fmt.Sprintf("%s-%d", slug, i)
+		}
+		if _, err := f.GitOut(ctx, dir, "rev-parse", "--verify", "refs/heads/"+cand); err != nil {
+			return cand
+		}
+	}
+	return ""
+}
+
+// branchSlug turns a card title into a git branch slug of lowercase ASCII letters and digits
+// joined by single hyphens, cut at a word boundary to at most 50 characters.
+func branchSlug(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r)
+			dash = false
+		default:
+			dash = true
+		}
+	}
+	slug := b.String()
+	if len(slug) > 50 {
+		slug = slug[:50]
+		if i := strings.LastIndexByte(slug, '-'); i >= 25 {
+			slug = slug[:i]
+		}
+		slug = strings.TrimRight(slug, "-")
+	}
+	if slug == "" {
+		return "card"
+	}
+	return slug
 }
 
 // stillStopped re-checks with Paseo, just before an automatic move, that agent a is still idle and

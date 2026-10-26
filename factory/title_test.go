@@ -1,6 +1,9 @@
 package factory
 
 import (
+	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -205,5 +208,108 @@ func TestQuestionStopDoesNotUseUpRename(t *testing.T) {
 	}
 	if l := p.labels("c1"); l[labelTitled] != "" {
 		t.Errorf("titled set on a question: %v", l)
+	}
+}
+
+func TestBranchSlug(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Factory cards name their git branches after card titles", "factory-cards-name-their-git-branches-after-card"},
+		{"Make Needs Zach cards clear & easy to answer!", "make-needs-zach-cards-clear-easy-to-answer"},
+		{"  ---Scout: Look at how the board works…---  ", "scout-look-at-how-the-board-works"},
+		{"   ", "card"},
+		{"???", "card"},
+		{"a-" + strings.Repeat("b", 60), "a-" + strings.Repeat("b", 48)},
+	} {
+		if got := branchSlug(tc.in); got != tc.want {
+			t.Errorf("branchSlug(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNewCardSetsBranchFromTitle(t *testing.T) {
+	f, p := newTestFactory(t)
+	if _, err := f.Act("new", Body{Request: "Rotate the backup key\ndetails", Repo: "example/desk"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := argAfter(runArgs(p)[0], "--new-branch"); got != "rotate-the-backup-key" {
+		t.Errorf("--new-branch = %q, want rotate-the-backup-key", got)
+	}
+}
+
+func initTestRepo(t *testing.T, dir, branch string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q", "-b", branch},
+		{"config", "user.email", "1+bot@users.noreply.github.com"},
+		{"config", "user.name", "bot"},
+		{"commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+}
+
+func TestNewCardAvoidsExistingBranch(t *testing.T) {
+	f, p := newTestFactory(t)
+	f.Git, f.GitOut = runGit, runGitOut
+	repoDir := filepath.Join(f.cfg.Home, "dev", "example/desk")
+	initTestRepo(t, repoDir, "main")
+	if err := f.Git(context.Background(), repoDir, "branch", "rotate-the-backup-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Git(context.Background(), repoDir, "branch", "rotate-the-backup-key-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("new", Body{Request: "Rotate the backup key", Repo: "example/desk"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := argAfter(runArgs(p)[0], "--new-branch"); got != "rotate-the-backup-key-3" {
+		t.Errorf("--new-branch = %q, want rotate-the-backup-key-3", got)
+	}
+}
+
+func TestPlannerRenamesBranch(t *testing.T) {
+	wt := t.TempDir()
+	initTestRepo(t, wt, "initial-request-slug")
+	a := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	a.Cwd = wt
+	a.Branch = "initial-request-slug"
+	f, p := newTestFactory(t, a)
+	f.Git, f.GitOut = runGit, runGitOut
+	if err := f.Git(context.Background(), wt, "branch", "cards-get-short-titles"); err != nil {
+		t.Fatal(err)
+	}
+	p.logs["c1"] = "[Assistant] Plan: ...\nTITLE: **Cards get short titles**\nTIER: low"
+	f.Tick()
+	got, err := f.GitOut(context.Background(), wt, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(got) != "cards-get-short-titles-2" {
+		t.Errorf("branch = %q, want cards-get-short-titles-2", strings.TrimSpace(got))
+	}
+
+	// Pre-titled cards keep their existing branch.
+	wtGiven := t.TempDir()
+	initTestRepo(t, wtGiven, "ideas-keep-their-title")
+	g := card("c2", map[string]string{labelStage: "plan", labelSource: "board", labelTitled: "given", labelSince: ago(10 * time.Minute)})
+	g.Cwd = wtGiven
+	g.Branch = "ideas-keep-their-title"
+	f2, p2 := newTestFactory(t, g)
+	f2.Git, f2.GitOut = runGit, runGitOut
+	p2.logs["c2"] = "[Assistant] Plan\nTITLE: Another name\nTIER: low"
+	f2.Tick()
+	gotGiven, err := f2.GitOut(context.Background(), wtGiven, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(gotGiven) != "ideas-keep-their-title" {
+		t.Errorf("given card branch = %q, want ideas-keep-their-title", strings.TrimSpace(gotGiven))
 	}
 }

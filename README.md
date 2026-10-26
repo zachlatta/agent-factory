@@ -36,7 +36,11 @@ The planner (the "Fellow") first picks a track:
 - **Build track**: everything else. The plan ends with `TIER:`; the plan reviewer sets its own and
   the card takes the higher. A code reviewer can raise the tier, never lower it.
 - The planner names the card once, from the `TITLE:` line of its first plan or direct result; titles
-  given by an idea or the email dispatcher are kept, and other titles are cut at a word.
+  given by an idea or the email dispatcher are kept, and other titles are cut at a word. A card's
+  worktree starts on a git branch slugged from its initial title (`--new-branch`, with `-2`, `-3`, …
+  when a local branch already has that name) and renames the branch when the planner renames the
+  card; worktrees started outside the factory (such as email or voice dispatchers) name their own
+  branches.
 
 | Tier | What | Gates | Lands |
 | --- | --- | --- | --- |
