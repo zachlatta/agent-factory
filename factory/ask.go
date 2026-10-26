@@ -1,8 +1,11 @@
 package factory
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Ask says, for a card in Needs Zach, what Zach is being asked, why, what to read (Detail, from the
@@ -339,13 +342,17 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 		if !fetch {
 			continue // no paseo logs here: the next loop fetches it
 		}
-		text, err := f.lastReply(a)
-		if err != nil {
-			continue
+		text, err := f.askReply(a)
+		if strings.TrimSpace(text) == "" {
+			if err != nil && a.SessionID == "" {
+				continue
+			}
+			ask.Detail = unreadableReply(err)
+		} else {
+			// parse the whole reply: questions often close a long plan, past the Detail cut
+			text, ask.Questions, ask.Overview = parseReply(text)
+			ask.Detail = trunc(text, 6000)
 		}
-		// parse the whole reply: questions often close a long plan, past the Detail cut
-		text, ask.Questions, ask.Overview = parseReply(text)
-		ask.Detail = trunc(text, 6000)
 		f.mu.Lock()
 		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview}
 		f.mu.Unlock()
@@ -434,6 +441,99 @@ func (f *Factory) lastReply(a Agent) (string, error) {
 		return "", err
 	}
 	return lastMessage(text), nil
+}
+
+// askReply is the text shown on a Needs Zach card and in its email. It starts with lastReply;
+// when an agent stopped mid-turn (for example, killed during a tool call), it falls back to the
+// last assistant text in the turn, or a plain mid-run note naming the last tool and capped
+// reasoning from the transcript, never raw tool output.
+func (f *Factory) askReply(a Agent) (string, error) {
+	if a.ID == "" {
+		return "", errors.New("agent not found")
+	}
+	text, err := f.lastReply(a)
+	if err == nil && strings.TrimSpace(text) != "" {
+		return text, nil
+	}
+	if a.SessionID == "" {
+		if err != nil {
+			return "", err
+		}
+		return "", errors.New("agent has no session id and logs had no reply")
+	}
+	res, tErr := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
+	if tErr != nil {
+		return "", tErr
+	}
+	if res.Fallback || len(res.Events) == 0 {
+		if err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("session file for %s not found or empty", nativeSessionID(a.SessionID))
+	}
+	var run, lastRun []string
+	var lastTool, lastToolTs, lastThinking string
+	for _, e := range res.Events {
+		switch e.Kind {
+		case "user":
+			run, lastRun = nil, nil
+			lastTool, lastToolTs, lastThinking = "", "", ""
+		case "assistant":
+			if strings.TrimSpace(e.Text) != "" {
+				run = append(run, e.Text)
+				lastRun = run
+			}
+		case "tool":
+			run = nil
+			lastTool = e.Name
+			if lastTool == "" {
+				lastTool = e.Native
+			}
+			if lastTool == "" {
+				lastTool = "tool"
+			}
+			if e.Ts != "" {
+				lastToolTs = e.Ts
+			}
+		case "result":
+			run = nil
+		case "thinking":
+			if t := strings.TrimSpace(e.Text); t != "" {
+				lastThinking = t
+			}
+		}
+	}
+	if len(lastRun) > 0 {
+		if s := stripTrailer(strings.Join(lastRun, "\n\n")); s != "" {
+			return s, nil
+		}
+	}
+	if lastTool != "" || lastThinking != "" {
+		msg := "Stopped mid-run before writing a reply."
+		if lastTool != "" {
+			when := ""
+			if t := parseTime(lastToolTs); !t.IsZero() {
+				loc := f.cfg.Location
+				if loc == nil {
+					loc = time.UTC
+				}
+				when = " at " + t.In(loc).Format("15:04:05 MST")
+			}
+			msg = fmt.Sprintf("Stopped mid-run before writing a reply (last tool: %s%s).", lastTool, when)
+		}
+		if lastThinking != "" {
+			msg += "\n\nLast reasoning:\n" + truncWords(stripTrailer(lastThinking), 600)
+		}
+		return msg, nil
+	}
+	return "", errors.New("transcript has no assistant reply or activity after the prompt")
+}
+
+func unreadableReply(err error) string {
+	if err != nil {
+		return fmt.Sprintf("(The agent's last message could not be read from the transcript: %v. Open the board to see it.)", err)
+	}
+	return "(The agent's last message could not be read from the transcript: transcript had no reply. Open the board to see it.)"
 }
 
 func stripTrailer(s string) string {

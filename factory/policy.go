@@ -530,6 +530,14 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		f.logf("reviewer %s: target %s not found", short(rev.ID), short(target))
 		return nil
 	}
+	if verdict == "" && t.L(labelNoVerdict) == "" {
+		// first no-verdict in this round: re-run once on its own before asking Zach
+		if err := f.setLabels(target, map[string]string{labelNoVerdict: "1"}); err != nil {
+			return err
+		}
+		f.logf("%s review for %s ended without verdict; re-running once", kind, short(target))
+		return f.rerunReview(t, kind)
+	}
 	roundsKey := roundsLabel(kind)
 	rounds := atoi(t.L(roundsKey)) + 1
 	builderTier := ""
@@ -543,6 +551,9 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	zachOK := t.L(labelZachPlan) == "approved"
 	labels := map[string]string{roundsKey: fmt.Sprint(rounds)}
+	if t.L(labelNoVerdict) != "" {
+		labels[labelNoVerdict] = ""
+	}
 	if tier != "" {
 		labels[labelTier] = tier
 	}
@@ -730,10 +741,10 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 	if asks > dirtyAskCap {
 		f.logf("%s worktree still not clean after %d asks", c.Short, dirtyAskCap)
 		return f.setLabels(c.ID, map[string]string{labelStage: "zach", labelAutoReview: "",
-			labelNote: "worktree not clean for review"})
+			labelNote: "worktree not clean for review", labelNoVerdict: ""})
 	}
 	if err := f.setLabels(c.ID, map[string]string{labelStage: "building", labelAutoReview: "code",
-		labelSince: iso(f.Now()), labelDirtyAsks: fmt.Sprint(asks)}); err != nil {
+		labelSince: iso(f.Now()), labelDirtyAsks: fmt.Sprint(asks), labelNoVerdict: ""}); err != nil {
 		return err
 	}
 	f.logf("%s: worktree not clean, asked the builder to commit before review", c.Short)
@@ -947,16 +958,76 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 			return nil // starts once the agent acts
 		}
 	case "plan-review", "review":
-		if reviewPending(f.agents(), a.ID, now) {
+		agents := f.agents()
+		if reviewPending(agents, a.ID, now) || unappliedStoppedReviewer(agents, a.ID) {
 			return nil
+		}
+		if !hasBlockedReviewer(agents, a.ID, now) && a.L(labelNoVerdict) == "" {
+			if live, err := f.stillStopped(a); !live {
+				return err
+			}
+			for _, r := range agents {
+				if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == a.ID && r.archived() && r.L(labelApplied) == "" {
+					if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: ""}); err != nil {
+						return err
+					}
+				}
+			}
+			if err := f.setLabels(a.ID, map[string]string{labelNoVerdict: "1"}); err != nil {
+				return err
+			}
+			kind := "code"
+			if stage == "plan-review" {
+				kind = "plan"
+			}
+			f.logf("%s %s reviewer gone without verdict; re-running once", short(a.ID), kind)
+			return f.rerunReview(a, kind)
 		}
 	}
 	if live, err := f.stillStopped(a); !live {
 		return err
 	}
 	f.logf("%s stuck in %s: %s", short(a.ID), stage, why)
-	return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: stage,
-		labelAutoReview: ""})
+	labels := map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: stage,
+		labelAutoReview: ""}
+	if a.L(labelNoVerdict) != "" {
+		labels[labelNoVerdict] = ""
+	}
+	return f.setLabels(a.ID, labels)
+}
+
+func (f *Factory) rerunReview(a Agent, kind string) error {
+	c, ok := f.card(a.ID)
+	if !ok {
+		c = Card{ID: a.ID, Short: short(a.ID), Title: a.Title, Host: a.Host, Cwd: a.Cwd, Repo: a.Repo,
+			WorkspaceID: a.WorkspaceID, Tier: a.L(labelTier)}
+	}
+	_, err := f.StartReview(c, kind)
+	return err
+}
+
+// unappliedStoppedReviewer reports whether card id has an idle or closed reviewer whose verdict
+// has not been applied yet. ApplyVerdict picks those up (archived or not), so checkStuck leaves
+// them to ApplyVerdict instead of starting a second reviewer in the same Tick.
+func unappliedStoppedReviewer(agents []Agent, id string) bool {
+	for _, r := range agents {
+		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && r.L(labelApplied) == "" &&
+			(r.Status == "idle" || r.Status == "closed") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasBlockedReviewer reports whether card id has a live running reviewer that is stalled or
+// waiting on a permission prompt (reviewerBlocked).
+func hasBlockedReviewer(agents []Agent, id string, now time.Time) bool {
+	for _, r := range agents {
+		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && reviewerBlocked(r, now) {
+			return true
+		}
+	}
+	return false
 }
 
 // reviewPending reports whether card id has a reviewer that will still produce a verdict: one that

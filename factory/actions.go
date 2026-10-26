@@ -267,7 +267,16 @@ func (f *Factory) rerun(c Card) error {
 			return err
 		}
 		if c.Status == "running" {
-			return f.setLabels(c.ID, map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())})
+			labels := map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())}
+			if f.agent(c.ID).L(labelNoVerdict) != "" {
+				labels[labelNoVerdict] = ""
+			}
+			return f.setLabels(c.ID, labels)
+		}
+		if f.agent(c.ID).L(labelNoVerdict) != "" {
+			if err := f.setLabels(c.ID, map[string]string{labelNoVerdict: ""}); err != nil {
+				return err
+			}
 		}
 		_, err := f.StartReview(c, kind)
 		return err

@@ -316,3 +316,52 @@ func TestHealthReportsMailWithoutFailing(t *testing.T) {
 		t.Errorf("health = %+v", h)
 	}
 }
+
+func TestNoVerdictEmailLoadsReviewerTranscriptOrExplainsWhy(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "plan-review"})
+	r := reviewer("r1", "c1", "plan")
+	r.Labels[labelPrefix+labelApplied] = "1"
+	r.Provider, r.SessionID, r.Cwd = "claude", "s-oom", "/w/c1"
+	f, _, m := mailFactory(t, c, r)
+	lines := []string{
+		`{"type":"user","message":{"content":"Review this plan."}}`,
+		`{"type":"assistant","timestamp":"2026-10-26T04:03:09Z","message":{"content":[{"type":"thinking","thinking":"Checking git log."},{"type":"tool_use","id":"u1","name":"Bash","input":{"command":"git log"}}]}}`,
+		`{"type":"user","timestamp":"2026-10-26T04:03:10Z","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":"RAW_TOOL_RESULT_SECRET"}]}}`,
+	}
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s-oom.jsonl", strings.Join(lines, "\n")+"\n")
+	f.SetAgents([]Agent{c, r})
+	f.Tick()
+	sends := m.sends()
+	if len(sends) != 1 {
+		t.Fatalf("sends = %+v", sends)
+	}
+	text := sends[0].Args["text"].(string)
+	for _, want := range []string{
+		"The review didn't finish properly",
+		"Stopped mid-run before writing a reply (last tool: Bash at 00:03:09 EDT).",
+		"Last reasoning:\nChecking git log.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("email text lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "RAW_TOOL_RESULT_SECRET") || strings.Contains(text, "(The agent's last message could not be read. Open the board to see it.)") {
+		t.Errorf("email text leaked raw tool output or used bare fallback:\n%s", text)
+	}
+
+	// Missing transcript file says why it could not be read.
+	c2 := card("c2", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"})
+	r2 := reviewer("r2", "c2", "code")
+	r2.Labels[labelPrefix+labelApplied] = "1"
+	r2.Provider, r2.SessionID, r2.Cwd = "claude", "missing-id", "/w/c2"
+	f2, _, m2 := mailFactory(t, c2, r2)
+	f2.Tick()
+	sends2 := m2.sends()
+	if len(sends2) != 1 {
+		t.Fatalf("sends2 = %+v", sends2)
+	}
+	text2 := sends2[0].Args["text"].(string)
+	if !strings.Contains(text2, "could not be read from the transcript") || !strings.Contains(text2, "missing-id") {
+		t.Errorf("email text for missing transcript = %s", text2)
+	}
+}

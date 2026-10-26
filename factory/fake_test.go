@@ -22,6 +22,7 @@ type fakePaseo struct {
 	archived   map[string]bool
 	status     map[string]string
 	busy       map[string]int // archive fails with "currently running" this many more times
+	runErr     error          // `paseo run` fails with this
 	inspectErr error
 	providers  map[string]string // provider ls status by provider id; unset ones are "available"
 	fixed      map[string]bool   // providers a `provider diagnostic` turns available
@@ -59,6 +60,9 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 	case "logs":
 		return p.logs[args[1]], nil
 	case "run":
+		if p.runErr != nil {
+			return "", p.runErr
+		}
 		p.runs++
 		return fmt.Sprintf("new-agent-%d\n", p.runs), nil
 	case "inspect":

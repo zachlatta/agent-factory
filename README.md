@@ -42,8 +42,9 @@ The planner (the "Fellow") first picks a track:
 - Circuit breakers: 3 review rounds per gate, then a person (at the plan-review cap, a last round
   whose only blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those
   fixes applied and verified by code review; design disagreements and large blockers go to Needs
-  Zach); reviewers may answer `nits` or `close`; a card that stops with nothing queued goes to
-  Needs Zach after 2 minutes.
+  Zach); reviewers may answer `nits` or `close`; a reviewer that ends or disappears without a
+  verdict is re-run once on its own before the card moves to Needs Zach (`factory.no-verdict`); a
+  card that stops with nothing queued goes to Needs Zach after 2 minutes.
 - Blocked agents: a child agent waiting on a permission prompt (`paseo permit ls`) or running with
   no activity for 20 minutes flags its card ("reviewer waiting on permission", "reviewer stalled N
   min"). Such a reviewer no longer counts as a pending verdict, so its card really moves to Needs

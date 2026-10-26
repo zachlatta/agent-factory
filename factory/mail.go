@@ -237,9 +237,9 @@ func askSource(c Card, ask *Ask) string {
 
 // askDetail is the full Detail (not cut like the board's), its questions and its overview.
 func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
-	text, err := f.lastReply(f.agent(askSource(c, ask)))
+	text, err := f.askReply(f.agent(askSource(c, ask)))
 	if err != nil || strings.TrimSpace(text) == "" {
-		return "(The agent's last message could not be read. Open the board to see it.)", nil, nil
+		return unreadableReply(err), nil, nil
 	}
 	return parseReply(text)
 }

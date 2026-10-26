@@ -3,6 +3,7 @@ package factory
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func actionIDs(a *Ask) string {
@@ -203,5 +204,63 @@ func TestLandedAsks(t *testing.T) {
 	}
 	if mailable(BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach"})}, nil, t0)[0].Ask) {
 		t.Error("a card moved by hand is mailable")
+	}
+}
+
+func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "plan-review"})
+	r := reviewer("r1", "c1", "plan")
+	r.Labels[labelPrefix+labelApplied] = "1"
+	r.Provider, r.SessionID, r.Cwd = "claude", "s-mid", "/w/c1"
+	f, _ := newTestFactory(t)
+	lines := []string{
+		`{"type":"user","message":{"content":"Review this plan."}}`,
+		`{"type":"assistant","timestamp":"2026-10-26T04:03:09Z","message":{"content":[{"type":"thinking","thinking":"Inspecting the diff before writing verdict."},{"type":"tool_use","id":"u1","name":"Bash","input":{"command":"git status"}}]}}`,
+		`{"type":"user","timestamp":"2026-10-26T04:03:10Z","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":"RAW_TOOL_OUTPUT_DO_NOT_MAIL"}]}}`,
+	}
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s-mid.jsonl", strings.Join(lines, "\n")+"\n")
+	if got, err := f.lastReply(r); err != nil || got != "" {
+		t.Fatalf("lastReply must stay empty when turn ends in a tool call: got %q, err %v", got, err)
+	}
+	f.SetAgents([]Agent{c, r})
+	got, _ := f.card("c1")
+	for _, want := range []string{
+		"Stopped mid-run before writing a reply (last tool: Bash at 00:03:09 EDT).",
+		"Last reasoning:\nInspecting the diff before writing verdict.",
+	} {
+		if !strings.Contains(got.Ask.Detail, want) {
+			t.Errorf("detail = %q, lacks %q", got.Ask.Detail, want)
+		}
+	}
+	if strings.Contains(got.Ask.Detail, "RAW_TOOL_OUTPUT_DO_NOT_MAIL") {
+		t.Errorf("detail leaked tool output: %q", got.Ask.Detail)
+	}
+
+	// Earlier assistant text in the same turn before a trailing tool call is used for the ask, while lastReply stays empty.
+	r2 := r
+	r2.SessionID = "s-assistant-before-tool"
+	r2.LastActivityAt = t0.Add(time.Minute)
+	lines2 := []string{
+		`{"type":"user","message":{"content":"Review this plan."}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hold on, checking one more file.\nTRACK: direct\nTIER: low"},{"type":"tool_use","id":"u2","name":"Read","input":{}}]}}`,
+	}
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s-assistant-before-tool.jsonl", strings.Join(lines2, "\n")+"\n")
+	if gotReply, _ := f.lastReply(r2); ParseTrack(gotReply) != "" {
+		t.Fatalf("lastReply leaked mid-turn TRACK line: %q", gotReply)
+	}
+	f.SetAgents([]Agent{c, r2})
+	got, _ = f.card("c1")
+	if got.Ask.Detail != "Hold on, checking one more file.\nTRACK: direct" {
+		t.Errorf("detail = %q, want earlier assistant text", got.Ask.Detail)
+	}
+
+	// Missing session file explains why the message could not be read.
+	r3 := r
+	r3.SessionID = "s-missing"
+	r3.LastActivityAt = t0.Add(2 * time.Minute)
+	f.SetAgents([]Agent{c, r3})
+	got, _ = f.card("c1")
+	if !strings.Contains(got.Ask.Detail, "could not be read from the transcript") || !strings.Contains(got.Ask.Detail, "s-missing") {
+		t.Errorf("unreadable detail = %q", got.Ask.Detail)
 	}
 }
