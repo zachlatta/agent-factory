@@ -526,7 +526,11 @@ function fillPanel(c, fresh){
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
   const busy = c.status==='running';
   const isIdea = c.id.startsWith('idea-');
-  $('pMsg').style.display = isIdea ? 'none' : '';
+  // ideas: the message box holds Zach's changes, sent with Start now, so it sits above the buttons
+  const msg = $('pMsg'), acts = $('pActs');
+  if(isIdea !== (msg.nextElementSibling === acts)) isIdea ? acts.before(msg) : acts.after(msg);
+  msg.placeholder = isIdea ? 'Your changes before starting (optional): what to add, drop or do differently. The planner treats them as yours and they win over the brief.'
+    : 'Send a message to this agent (it resumes the session)';
   $('pSend').parentElement.style.display = isIdea ? 'none' : '';
   $('pOpen').style.display = isIdea ? 'none' : 'block';
   $('pKv').style.display = $('pLogsHd').style.display = $('pLogs').style.display = isIdea ? 'none' : '';
@@ -539,7 +543,7 @@ function fillPanel(c, fresh){
     const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : ((c.idea&&c.idea.agent)||AG.default);
     $('pActs').innerHTML = `
     <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
-    <button class="primary" onclick="act('approve',{agent:$('pAgent').value})" title="Start planning it now, past the daily cap">Start now</button>
+    <button class="primary" onclick="act('approve',{agent:$('pAgent').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
     <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>
     <div class="ausage" id="pAgentUsage" style="width:100%">${agentUsageHtml(curAg,'pAgent')}</div>`;
     $('pAgent').onchange = ()=>{ $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
@@ -574,6 +578,7 @@ function ideaHtml(c, isIdea){
   return `${isIdea?'':'<h4>Started from this idea</h4>'}
     <h4>What it proposes</h4>
     ${i.summary?`<div class="lead">${esc(i.summary)}</div>`:'<div class="lead none">No summary (suggested before ideas had one). Read Why and the technical brief.</div>'}
+    ${!isIdea&&i.note?`<h4>Your changes before starting</h4><div class="md">${mdIdea(i.note)}</div>`:''}
     <h4>Why</h4><div class="md">${i.why?mdIdea(i.why):'<i>Not given.</i>'}</div>
     ${i.doneWhen?`<h4>Done when</h4><div class="md">${mdIdea(i.doneWhen)}</div>`:''}
     <h4>Tier</h4><div class="md">${tier}</div>
@@ -590,7 +595,7 @@ async function act(a, extra={}){
   toast(r.queued?'Review queued: starts when the agent goes idle'
     : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Plan approved: agent is building':'Approved: agent is landing it')
     : a+' done');
-  if(c.id&&c.id.startsWith('idea-')) closePanel();
+  if(c.id&&c.id.startsWith('idea-')){ $('pMsg').value=''; releaseKeyboard(); closePanel(); }
   setTimeout(load, 1500); }
 $('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); setTimeout(load,1500); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);

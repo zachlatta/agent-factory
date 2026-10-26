@@ -202,3 +202,46 @@ func TestScoutAsksForSummaryAndDoneWhen(t *testing.T) {
 		}
 	}
 }
+
+func TestStartIdeaWithZachsChanges(t *testing.T) {
+	f, p := newTestFactory(t)
+	i, _ := f.addIdea(Body{Request: "Cache the board in memory", Title: "cache", Why: "slow"})
+	if _, err := f.Act("approve", Body{ID: i.ID, Message: "  Use a 5s TTL, not forever.  "}); err != nil {
+		t.Fatal(err)
+	}
+	r := p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(r) != 1 {
+		t.Fatalf("runs = %v", r)
+	}
+	prompt := r[0][len(r[0])-1]
+	brief := strings.Index(prompt, "Cache the board in memory")
+	note := strings.Index(prompt, "Zach's changes before starting (his own words; where they differ from the brief above, his win):\nUse a 5s TTL, not forever.")
+	if brief < 0 || note < brief {
+		t.Errorf("prompt lacks the marked note after the brief:\n%s", prompt)
+	}
+	got := f.ideas.List()[0]
+	if got.Note != "Use a 5s TTL, not forever." {
+		t.Errorf("idea note = %q", got.Note)
+	}
+	f.SetAgents([]Agent{card(got.Card, map[string]string{labelStage: "plan", labelOrigin: "idea"})})
+	if c, _ := f.card(got.Card); c.Idea == nil || c.Idea.Note != got.Note {
+		t.Errorf("started card idea = %+v", c.Idea)
+	}
+
+	// no text, or only whitespace: today's request, no note
+	for n, msg := range []string{"", " \n\t "} {
+		j, _ := f.addIdea(Body{Request: "Plain idea " + string(rune('a'+n)), Title: "plain " + string(rune('a'+n))})
+		if _, err := f.Act("approve", Body{ID: j.ID, Message: msg}); err != nil {
+			t.Fatal(err)
+		}
+		r = p.runsWithLabel(labelArg(labelOrigin, "idea"))
+		if prompt := r[len(r)-1][len(r[len(r)-1])-1]; strings.Contains(prompt, "Zach's changes before starting") {
+			t.Errorf("message %q added a note:\n%s", msg, prompt)
+		}
+		for _, k := range f.ideas.List() {
+			if k.ID == j.ID && k.Note != "" {
+				t.Errorf("message %q stored note %q", msg, k.Note)
+			}
+		}
+	}
+}

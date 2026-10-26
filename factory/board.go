@@ -213,7 +213,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 
 func ideaView(i Idea, queue int) *IdeaView {
 	return &IdeaView{ID: i.ID, Summary: i.Summary, Why: i.Why, DoneWhen: i.DoneWhen, By: i.By,
-		CreatedAt: iso(i.CreatedAt), Status: i.Status, Queue: queue, Agent: i.Agent}
+		CreatedAt: iso(i.CreatedAt), Status: i.Status, Queue: queue, Agent: i.Agent, Note: i.Note}
 }
 
 func short(id string) string {

@@ -122,8 +122,10 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 // startIdea turns a waiting idea into a planning card. When Zach starts it, agent (his pick in the
 // panel) wins, else the idea's suggested agent. The factory's own starts (by "auto") always use the
 // default agent: Zach picks Muse, Gemini and Codex by hand until automatic routing ships.
-func (f *Factory) startIdea(id, by, agent string) (map[string]string, error) {
+// note is Zach's own changes typed before starting; it follows the brief and overrides it.
+func (f *Factory) startIdea(id, by, agent, note string) (map[string]string, error) {
 	var res map[string]string
+	note = trunc(strings.TrimSpace(note), 4000)
 	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for n := range ideas {
 			i := &ideas[n]
@@ -133,6 +135,9 @@ func (f *Factory) startIdea(id, by, agent string) (map[string]string, error) {
 			req := i.Request
 			if i.Why != "" {
 				req += fmt.Sprintf("\n\nWhy (from %s): %s", i.By, i.Why)
+			}
+			if note != "" {
+				req += "\n\nZach's changes before starting (his own words; where they differ from the brief above, his win):\n" + note
 			}
 			switch {
 			case by == "auto":
@@ -144,7 +149,7 @@ func (f *Factory) startIdea(id, by, agent string) (map[string]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			i.Status, i.Card, i.StartedAt, i.StartedBy = "started", r["id"], f.Now(), by
+			i.Status, i.Card, i.StartedAt, i.StartedBy, i.Note = "started", r["id"], f.Now(), by, note
 			res = r
 			return ideas, nil
 		}
@@ -204,7 +209,7 @@ func (f *Factory) tickIdeas() error {
 		return nil
 	}
 	sort.Slice(waiting, func(a, b int) bool { return waiting[a].CreatedAt.Before(waiting[b].CreatedAt) })
-	if _, err := f.startIdea(waiting[0].ID, "auto", ""); err != nil {
+	if _, err := f.startIdea(waiting[0].ID, "auto", "", ""); err != nil {
 		return err
 	}
 	f.logf("started idea %s (%d/%d in flight, %d/%d today)", waiting[0].ID, inFlight+1, f.cfg.IdeaWIP,

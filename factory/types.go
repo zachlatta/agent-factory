@@ -123,6 +123,7 @@ type Idea struct {
 	Card      string    `json:"card,omitempty"`
 	StartedAt time.Time `json:"startedAt,omitzero"`
 	StartedBy string    `json:"startedBy,omitempty"` // auto or zach
+	Note      string    `json:"note,omitempty"`      // Zach's changes typed when he started it
 }
 
 // IdeaView is the reviewable part of an idea on a card. The request (the builder's brief) is left
@@ -137,6 +138,7 @@ type IdeaView struct {
 	Status    string `json:"status"`
 	Queue     int    `json:"queue,omitempty"` // waiting ideas: 1 = next to start
 	Agent     string `json:"agent,omitempty"` // AgentChoice id it will be built with ("" = default)
+	Note      string `json:"note,omitempty"`  // started ideas: Zach's changes before starting
 }
 
 // Body is the JSON body of every POST /api/<action>.
@@ -144,7 +146,7 @@ type Body struct {
 	ID          string       `json:"id"`
 	Stage       string       `json:"stage"`
 	Kind        string       `json:"kind"`
-	Message     string       `json:"message"`
+	Message     string       `json:"message"` // send: the message; starting an idea: Zach's changes
 	Attachments []Attachment `json:"attachments"`
 	Request     string       `json:"request"`
 	Repo        string       `json:"repo"`
