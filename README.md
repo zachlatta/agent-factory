@@ -9,6 +9,10 @@ the `paseo` CLI for every move (labels on agents are the state: `factory.stage`,
 and so on, see `factory/labels.go`). It serves the board on `127.0.0.1:7478`; the deployer puts
 it on the tailnet with `tailscale serve`.
 
+**Unread** on a card: its agent finished a turn you have not opened. Opening the card or loading its
+transcript page marks it seen (`factory.seen`) until the agent is sent another message and finishes
+again; a running card is never unread.
+
 ## How a card moves
 
 Plan → Plan review → Building → Code review → Landing → Done, with **Needs Zach** for anything

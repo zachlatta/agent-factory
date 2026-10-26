@@ -37,6 +37,7 @@ const (
 	labelReviewed   = "reviewed"     // the HEAD the last code review saw: landing must put exactly that on main
 	labelDirtyAsks  = "dirty-asks"   // times the builder was asked to commit before code review
 	labelLandReview = "land-review"  // agents outside the card flow: last landing review, <verdict>@<sha>
+	labelSeen       = "seen"         // unix seconds Zach last opened the card on the board or its transcript
 	labelTitled     = "titled"       // the card's title is settled: given (by the caller), planner (renamed) or kept
 	labelParked     = "parked"       // archived by the idle reap with its column kept; a send resumes it (reap.go)
 )

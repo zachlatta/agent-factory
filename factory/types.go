@@ -31,7 +31,8 @@ type Agent struct {
 	SessionID         string
 	Status            string // running, idle, closed, ...
 	CreatedAt         time.Time
-	LastActivityAt    time.Time
+	LastActivityAt    time.Time // also moves on label writes: not a sign the agent worked
+	LastUserMessageAt time.Time // the last message sent to the agent; label writes leave it alone
 	ArchivedAt        time.Time
 	Labels            map[string]string
 	RequiresAttention bool

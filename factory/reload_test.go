@@ -59,7 +59,9 @@ func writeAgents(t *testing.T, f *Factory, agents ...Agent) {
 			labels = map[string]string{}
 		}
 		b, _ := json.Marshal(map[string]any{"id": a.ID, "title": a.Title, "cwd": a.Cwd, "lastStatus": a.Status,
-			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": labels})
+			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": labels,
+			"requiresAttention": a.RequiresAttention, "attentionReason": a.AttentionReason,
+			"lastUserMessageAt": iso(a.LastUserMessageAt)})
 		writeFile(t, agentFile(f.cfg.Home, a.ID), string(b))
 	}
 }

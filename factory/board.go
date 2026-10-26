@@ -3,6 +3,7 @@ package factory
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -169,8 +170,8 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				c.Stage = "zach" // shown only: its labels keep the column, and it returns when activity resumes
 			}
 		}
-		c.Unread = a.RequiresAttention && a.AttentionReason == "finished"
-		if a.RequiresAttention && !c.Unread {
+		c.Unread = unread(a)
+		if a.RequiresAttention && a.AttentionReason != "finished" {
 			f := "needs attention"
 			if a.AttentionReason != "" {
 				f += ": " + a.AttentionReason
@@ -213,6 +214,25 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Idea: ideaView(i, n+1)})
 	}
 	return out
+}
+
+// unread: the agent finished a turn Zach has not opened. Paseo never clears its finished attention
+// (Zach reads cards here, not in Paseo), so factory.seen marks his last look and a newer message to
+// the agent starts a new turn. lastActivityAt cannot be the clock: every label write, factory.seen
+// included, moves it. A running card has nothing new to read yet.
+func unread(a Agent) bool {
+	if !a.RequiresAttention || a.AttentionReason != "finished" || a.Status == "running" {
+		return false
+	}
+	seen, err := strconv.ParseInt(a.L(labelSeen), 10, 64)
+	if err != nil {
+		return true
+	}
+	last := a.LastUserMessageAt
+	if last.IsZero() {
+		last = a.CreatedAt
+	}
+	return last.Unix() > seen
 }
 
 func ideaView(i Idea, queue int) *IdeaView {

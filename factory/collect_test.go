@@ -23,7 +23,7 @@ func TestLoadAgents(t *testing.T) {
 		`[{"workspaceId":"w1","projectId":"p1","branch":"feat","kind":"worktree"}]`)
 	writeFile(t, home+"/.paseo/agents/a/open.json", `{"id":"open","title":"Open card","provider":"claude",
 		"cwd":"/x","workspaceId":"w1","createdAt":"2026-10-25T19:00:00.000Z","lastActivityAt":"2026-10-25T19:59:00.000Z",
-		"lastStatus":"running","labels":{"factory.stage":"building"},"config":{"model":"claude-opus-5-5"},
+		"lastUserMessageAt":"2026-10-25T19:30:00.000Z","lastStatus":"running","labels":{"factory.stage":"building"},"config":{"model":"claude-opus-5-5"},
 		"requiresAttention":false,"persistence":{"sessionId":"s1"}}`)
 	writeFile(t, home+"/.paseo/agents/a/old.json", `{"id":"old","archivedAt":"2026-10-20T00:00:00.000Z",
 		"lastActivityAt":"2026-10-20T00:00:00.000Z","lastStatus":"idle"}`)
@@ -48,7 +48,8 @@ func TestLoadAgents(t *testing.T) {
 	}
 	a := by["open"]
 	if a.Repo != "example/desk" || a.Branch != "feat" || a.Model != "claude-opus-5-5" || a.Status != "running" ||
-		a.Labels[labelPrefix+labelStage] != "building" || a.SessionID != "s1" || a.Host != "host1" {
+		a.Labels[labelPrefix+labelStage] != "building" || a.SessionID != "s1" || a.Host != "host1" ||
+		!a.LastUserMessageAt.Equal(time.Date(2026, 10, 25, 19, 30, 0, 0, time.UTC)) {
 		t.Errorf("open = %+v", a)
 	}
 	if by["loose"].Repo != "hackclub/merch" {

@@ -167,3 +167,28 @@ console.log(JSON.stringify([
 		t.Errorf("labels = %s, want %s", got, want)
 	}
 }
+
+// Opening a card or its transcript marks it seen. The call is quiet: a read-only canary answers
+// 403, and that must not toast, so it does not go through post().
+func TestPagesMarkSeen(t *testing.T) {
+	page := boardPage(t)
+	open := regexp.MustCompile(`function openPanel\(id\)\{[^\n]*seen\(`)
+	if !open.MatchString(page) {
+		t.Error("openPanel does not call seen()")
+	}
+	f, _ := newTestFactory(t, card("c1", nil))
+	rec := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/t/c1", nil))
+	for name, p := range map[string]string{"board": page, "transcript": rec.Body.String()} {
+		def := regexp.MustCompile(`function seen\([^)]*\)\{[^\n]*fetch\('[./]*api/seen'[^\n]*catch\(`).FindString(p)
+		if def == "" {
+			t.Errorf("%s: no quiet seen() posting api/seen", name)
+		}
+		if strings.Contains(def, "post(") || strings.Contains(def, "toast(") {
+			t.Errorf("%s: seen() can toast: %s", name, def)
+		}
+	}
+	if !regexp.MustCompile(`poll\(\)\.then\([^\n]*seen\(`).MatchString(rec.Body.String()) {
+		t.Error("transcript page does not mark the card seen on load")
+	}
+}

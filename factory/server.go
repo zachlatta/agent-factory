@@ -48,6 +48,7 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /host-metrics.js", page("host-metrics.js"))
 	mux.HandleFunc("GET /api/host", f.handleHost)
 	mux.HandleFunc("GET /api/hosts", f.handleHosts)
+	mux.HandleFunc("POST /api/seen", f.handleSeen)
 	mux.HandleFunc("POST /api/{action}", f.handleAction)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -257,6 +258,44 @@ func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	f.poke()
 	writeJSON(w, 200, res)
+}
+
+// handleSeen marks a card seen: Zach opened it on the board or its transcript. Only an unread card
+// gets the factory.seen label, so a panel opened on the phone costs at most one paseo call per
+// finished turn. The board is rebuilt with no paseo calls, and the loop is not kicked: no rule
+// depends on the mark.
+func (f *Factory) handleSeen(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Factory") != "1" {
+		writeJSON(w, 403, map[string]string{"error": "missing X-Factory header"})
+		return
+	}
+	if f.cfg.ReadOnly {
+		writeJSON(w, 403, map[string]string{"error": "read-only factory (deploy canary)"})
+		return
+	}
+	var b Body
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&b); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "bad json: " + err.Error()})
+		return
+	}
+	c, found := f.card(b.ID)
+	if !found {
+		writeJSON(w, 404, map[string]string{"error": "unknown card"})
+		return
+	}
+	if !c.Unread {
+		writeJSON(w, 200, ok)
+		return
+	}
+	if err := f.setLabels(c.ID, map[string]string{labelSeen: strconv.FormatInt(f.Now().Unix(), 10)}); err != nil {
+		f.logf("seen %s failed: %v", short(c.ID), err)
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := f.reload(); err != nil {
+		f.logf("board reload after seen failed: %v", err)
+	}
+	writeJSON(w, 200, ok)
 }
 
 // handleLandReview reports an agent's latest landing review (running, or done with verdict and findings).

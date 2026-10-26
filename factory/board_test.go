@@ -1,6 +1,8 @@
 package factory
 
 import (
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -136,5 +138,45 @@ func TestBuildBoardShowsScoutsInIdeas(t *testing.T) {
 	}
 	if c := cards[1]; c.Stage != "landed" {
 		t.Errorf("archived scout stage = %q, want landed", c.Stage)
+	}
+}
+
+// Unread: the agent finished a turn Zach has not opened. Paseo never clears its finished
+// attention, so factory.seen (unix seconds) marks the last look, compared with the agent's last
+// incoming message: label writes move lastActivityAt, never lastUserMessageAt.
+func TestBuildBoardUnread(t *testing.T) {
+	msg := t0.Add(-10 * time.Minute)
+	finished := func(status string, labels map[string]string) Agent {
+		a := card("c", labels)
+		a.Status, a.RequiresAttention, a.AttentionReason, a.LastUserMessageAt = status, true, "finished", msg
+		return a
+	}
+	unix := func(t time.Time) string { return strconv.FormatInt(t.Unix(), 10) }
+	noMsg := finished("idle", map[string]string{labelSeen: unix(t0.Add(-2 * time.Hour))}) // created at t0-1h
+	noMsg.LastUserMessageAt = time.Time{}
+	cases := []struct {
+		name string
+		a    Agent
+		want bool
+	}{
+		{"finished, never seen", finished("idle", nil), true},
+		{"seen after the last message", finished("idle", map[string]string{labelSeen: unix(msg.Add(time.Minute))}), false},
+		{"seen in the second of the last message", finished("idle", map[string]string{labelSeen: unix(msg)}), false},
+		{"messaged again after seen and finished", finished("idle", map[string]string{labelSeen: unix(msg.Add(-time.Minute))}), true},
+		{"running: nothing new to read yet", finished("running", nil), false},
+		{"bad seen value counts as unseen", finished("idle", map[string]string{labelSeen: "soon"}), true},
+		{"no message: created after seen", noMsg, true},
+		{"not finished", card("c", nil), false},
+	}
+	for _, c := range cases {
+		if got := BuildBoard([]Agent{c.a}, nil, t0)[0].Unread; got != c.want {
+			t.Errorf("%s: unread = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// other attention reasons keep their flag, seen or not
+	perm := card("c", map[string]string{labelSeen: unix(t0)})
+	perm.RequiresAttention, perm.AttentionReason = true, "permission"
+	if c := BuildBoard([]Agent{perm}, nil, t0)[0]; c.Unread || !slices.Contains(c.Flags, "needs attention: permission") {
+		t.Errorf("permission card = %+v", c)
 	}
 }

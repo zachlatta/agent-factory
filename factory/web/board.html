@@ -603,7 +603,9 @@ async function move(id, stage){ const c=B.cards.find(x=>x.id===id); if(!c||c.sta
   if(stage==='landed' && !confirm('Move to Done archives this agent in Paseo. Continue?')) return;
   await post('stage',{id,stage}); toast('Moved to '+B.stages.find(s=>s[0]===stage)[1]); c.stage=stage; render(); refresh(); }
 
-function openPanel(id){ sel=id; fillPanel(B.cards.find(c=>c.id===id), true); render(); }
+function openPanel(id){ sel=id; const c=B.cards.find(c=>c.id===id); seen(c); fillPanel(c, true); render(); }
+// seen marks an unread card read (factory.seen). Quiet: a read-only canary answers 403, no toast.
+function seen(c){ if(!c||!c.unread) return; c.unread=false; fetch('api/seen', {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify({id:c.id})}).catch(()=>{}); }
 function closePanel(){ sel=null; $('panel').classList.remove('open'); render(); }
 
 function fillPanel(c, fresh){

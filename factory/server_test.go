@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -273,5 +274,53 @@ func BenchmarkHandleAgents(b *testing.B) {
 		if rec.Code != 200 {
 			b.Fatal(rec.Code)
 		}
+	}
+}
+
+// POST /api/seen marks an unread card seen with a factory.seen label, rebuilds the board so the
+// next GET shows it read, and never kicks the loop. A card that is not unread costs no paseo call.
+func TestServerSeen(t *testing.T) {
+	unread := card("c1", map[string]string{labelStage: "zach"})
+	unread.RequiresAttention, unread.AttentionReason, unread.LastUserMessageAt = true, "finished", t0.Add(-10*time.Minute)
+	read := card("c2", map[string]string{labelStage: "zach"})
+	f, p := newDiskFactory(t, unread, read)
+	h := f.Handler()
+	seen := func(id string, header bool) int {
+		req := httptest.NewRequest("POST", "/api/seen", strings.NewReader(`{"id":"`+id+`"}`))
+		if header {
+			req.Header.Set("X-Factory", "1")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if !boardCard(t, f, "c1").Unread {
+		t.Fatal("c1 should start unread")
+	}
+	if code := seen("c1", false); code != 403 {
+		t.Errorf("no X-Factory header: %d, want 403", code)
+	}
+	if code := seen("nope", true); code != 404 {
+		t.Errorf("unknown card: %d, want 404", code)
+	}
+	if code := seen("c1", true); code != 200 {
+		t.Fatalf("seen c1: %d", code)
+	}
+	if got := p.labels("c1")[labelSeen]; got != strconv.FormatInt(t0.Unix(), 10) {
+		t.Errorf("factory.seen = %q, want %d (calls %v)", got, t0.Unix(), p.calls)
+	}
+	if boardCard(t, f, "c1").Unread {
+		t.Error("c1 still unread after seen")
+	}
+	if len(f.kick) != 0 {
+		t.Error("seen kicked the loop")
+	}
+	n := len(p.calls)
+	if code := seen("c2", true); code != 200 || len(p.calls) != n {
+		t.Errorf("seen on a read card: %d, calls %v", code, p.calls[n:])
+	}
+	f.cfg.ReadOnly = true
+	if code := seen("c1", true); code != 403 || len(p.calls) != n {
+		t.Errorf("read-only: %d, calls %v", code, p.calls[n:])
 	}
 }

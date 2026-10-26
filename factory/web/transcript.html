@@ -456,7 +456,9 @@ $('scroll').addEventListener('scroll', () => $('jump').style.display = nearBotto
 $('jump').onclick = toBottom;
 $('zoom').onclick = () => $('zoom').style.display = 'none';
 document.addEventListener('keydown', e => { if (e.key === 'Escape') $('zoom').style.display = 'none'; if (e.key === '/' && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); $('q').focus(); } });
-poll().then(() => setTimeout(toBottom, 50));
+// opening the transcript marks the card read (factory.seen); quiet, since a read-only canary answers 403
+function seen(){ fetch('../api/seen', {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify({id: AID})}).catch(() => {}); }
+poll().then(() => { setTimeout(toBottom, 50); seen(); });
 </script>
 </body>
 </html>
