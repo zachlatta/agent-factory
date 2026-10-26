@@ -46,7 +46,8 @@ func newRepos(t *testing.T) repos {
 	r := repos{main: filepath.Join(root, "main"), other: filepath.Join(root, "other"), wt: filepath.Join(root, "wt")}
 	gitRun(t, root, "init", "-q", "--bare", "-b", "main", "up.git")
 	gitRun(t, root, "clone", "-q", "up.git", "main")
-	commitFile(t, r.main, "README.md", "desk\n")
+	commitFile(t, r.main, ".gitattributes", "*.bin -diff\n")
+	commitFile(t, r.main, "README.md", "one\ntwo\nthree\nfour\n")
 	gitRun(t, r.main, "push", "-q", "origin", "main")
 	gitRun(t, root, "clone", "-q", "up.git", "other")
 	gitRun(t, r.main, "worktree", "add", "-q", "-b", "card", r.wt, "origin/main")
@@ -77,20 +78,55 @@ func realGitFactory(t *testing.T) *Factory {
 
 func TestLandedAsReviewed(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		ok   bool
+		name    string
+		ok      bool
+		wantWhy string
+		review  func(t *testing.T, r repos) string
 		// after review, before landing
 		between func(t *testing.T, r repos)
 	}{
 		{name: "clean rebase over another agent's push", ok: true, between: func(t *testing.T, r repos) {
 			r.otherPushes(t, "bin/tool")
 		}},
+		{name: "clean rebase over a context-line change", ok: true,
+			review: func(t *testing.T, r repos) string {
+				return commitFile(t, r.wt, "README.md", "one\ntwo\nthree\nfour-card\n")
+			},
+			between: func(t *testing.T, r repos) {
+				gitRun(t, r.other, "pull", "-q", "--rebase", "origin", "main")
+				commitFile(t, r.other, "README.md", "one\ntwo-other\nthree\nfour\n")
+				gitRun(t, r.other, "push", "-q", "origin", "main")
+			},
+		},
+		{name: "clean rebase of -diff binary file", ok: true,
+			review: func(t *testing.T, r repos) string {
+				return commitFile(t, r.wt, "data.bin", "v1\n")
+			},
+			between: func(t *testing.T, r repos) {
+				r.otherPushes(t, "bin/tool")
+			},
+		},
 		{name: "already up to date", ok: true, between: func(t *testing.T, r repos) {}},
 		{name: "rebased twice before landing", ok: true, between: func(t *testing.T, r repos) {
 			r.otherPushes(t, "x")
 			gitRun(t, r.wt, "fetch", "-q", "origin", "main")
 			gitRun(t, r.wt, "rebase", "-q", "origin/main")
 		}},
+		{name: "reviewed commit +/- lines changed", wantWhy: "reviewed commit not on origin/main: ", between: func(t *testing.T, r repos) {
+			r.otherPushes(t, "x")
+			os.WriteFile(filepath.Join(r.wt, "work/a/README.md"), []byte("different work\n"), 0o644)
+			gitRun(t, r.wt, "commit", "-q", "-a", "--amend", "-m", "edited")
+		}},
+		{name: "reviewed -diff binary file changed", wantWhy: "reviewed commit not on origin/main: ",
+			review: func(t *testing.T, r repos) string {
+				return commitFile(t, r.wt, "data.bin", "v1\n")
+			},
+			between: func(t *testing.T, r repos) {
+				r.otherPushes(t, "x")
+				os.WriteFile(filepath.Join(r.wt, "data.bin"), []byte("v2\n"), 0o644)
+				gitRun(t, r.wt, "commit", "-q", "-a", "--amend", "-m", "edited bin")
+			},
+		},
 		{name: "commit after review", between: func(t *testing.T, r repos) {
 			commitFile(t, r.wt, "work/a/extra.txt", "unreviewed\n")
 		}},
@@ -116,7 +152,13 @@ func TestLandedAsReviewed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRepos(t)
-			reviewed := commitFile(t, r.wt, "work/a/README.md", "the work\n")
+			review := tc.review
+			if review == nil {
+				review = func(t *testing.T, r repos) string {
+					return commitFile(t, r.wt, "work/a/README.md", "the work\n")
+				}
+			}
+			reviewed := review(t, r)
 			tc.between(t, r)
 			r.land(t)
 			f := realGitFactory(t)
@@ -124,8 +166,8 @@ func TestLandedAsReviewed(t *testing.T) {
 				t.Fatal("not on main")
 			}
 			ok, why := f.landedAsReviewed(r.wt, reviewed)
-			if ok != tc.ok {
-				t.Errorf("landedAsReviewed = %v (%s), want %v; reflog:\n%s", ok, why, tc.ok,
+			if ok != tc.ok || (tc.wantWhy != "" && !strings.Contains(why, tc.wantWhy)) {
+				t.Errorf("landedAsReviewed = %v (%s), want %v (%s); reflog:\n%s", ok, why, tc.ok, tc.wantWhy,
 					gitRun(t, r.wt, "reflog", "--format=%gs"))
 			}
 		})

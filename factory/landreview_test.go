@@ -293,9 +293,15 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 }
 
 func TestLandingChecksTheReviewedCommit(t *testing.T) {
+	const diffFlags = "diff --no-ext-diff --no-textconv --no-color --full-index --src-prefix=a/ --dst-prefix=b/ -U0 "
 	landed := map[string]string{
-		"reflog show --format=%H%x09%gs HEAD": "n2\trebase (finish): x\nn2\trebase (pick): w\nm\trebase (start): checkout origin/main\nh1\tcommit: w\n",
-		"cherry origin/main h1":               "- h1\n",
+		"reflog show --format=%H%x09%gs HEAD":  "n2\trebase (finish): x\nn2\trebase (pick): w\nm\trebase (start): checkout origin/main\nh1\tcommit: w\n",
+		"merge-base origin/main h1":            "m\n",
+		"rev-list --reverse --no-merges m..h1": "h1\n",
+		"rev-list --no-merges m..origin/main":  "n2\no1\n",
+		diffFlags + "h1^ h1":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -4 +4 @@\n-old\n+new\n",
+		diffFlags + "o1^ o1":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -2 +2,2 @@\n-ctx\n+ctx1\n+ctx2\n",
+		diffFlags + "n2^ n2":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5 +5 @@\n-old\n+new\n",
 	}
 	for _, tc := range []struct {
 		name, stage string
@@ -304,7 +310,9 @@ func TestLandingChecksTheReviewedCommit(t *testing.T) {
 		{"as reviewed", "landed", landed},
 		{"commit after review", "zach", withAnswers(landed, "reflog show --format=%H%x09%gs HEAD",
 			"n3\trebase (finish): x\nn3\trebase (pick): more\nn2\tcommit: more\nh1\tcommit: w\n")},
-		{"reviewed commit missing", "zach", withAnswers(landed, "cherry origin/main h1", "+ h1\n")},
+		{"reviewed commit diff changed", "zach", withAnswers(landed, diffFlags+"n2^ n2",
+			"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5 +5 @@\n-old\n+edited\n")},
+		{"reviewed commit missing", "zach", withAnswers(landed, "rev-list --no-merges m..origin/main", "o1\n")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelReviewed: "h1"})

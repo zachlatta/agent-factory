@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -62,18 +63,47 @@ func unreviewedMoves(es []reflogEntry, reviewed string) ([]string, error) {
 }
 
 // landedAsReviewed reports whether a landed card put exactly its reviewed commits on main: every
-// reviewed commit is on origin/main (patch-equivalent, so rebased is fine), and nothing but landing
-// moves happened in the worktree after review. Call after landedOnMain, which fetches.
+// reviewed commit is on origin/main by context-free (-U0) patch-id, and nothing but landing moves
+// happened in the worktree after review. Like git cherry, git patch-id ignores whitespace-only
+// differences; omitting context lines lets a clean rebase over a nearby edit pass while the reflog
+// check still rejects any amend, new commit, reset, or conflict fix. An empty patch-id (such as an
+// empty commit that was not fast-forwarded onto origin/main) counts as a miss. Call after
+// landedOnMain, which fetches.
 func (f *Factory) landedAsReviewed(cwd, reviewed string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	out, err := f.GitOut(ctx, cwd, "cherry", "origin/main", reviewed)
+	base, err := f.GitOut(ctx, cwd, "merge-base", "origin/main", reviewed)
 	if err != nil {
-		return false, "git cherry: " + err.Error()
+		return false, "git merge-base: " + err.Error()
 	}
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "+") {
-			return false, "reviewed commit not on origin/main: " + short(strings.TrimSpace(line[1:]))
+	base = strings.TrimSpace(base)
+	revs, err := f.GitOut(ctx, cwd, "rev-list", "--reverse", "--no-merges", base+".."+reviewed)
+	if err != nil {
+		return false, "git rev-list: " + err.Error()
+	}
+	if commits := strings.Fields(revs); len(commits) > 0 {
+		mainOut, err := f.GitOut(ctx, cwd, "rev-list", "--no-merges", base+"..origin/main")
+		if err != nil {
+			return false, "git rev-list: " + err.Error()
+		}
+		mainIDs := map[string]bool{}
+		for _, c := range strings.Fields(mainOut) {
+			id, err := f.patchID(ctx, cwd, c)
+			if err != nil {
+				return false, err.Error()
+			}
+			if id != "" {
+				mainIDs[id] = true
+			}
+		}
+		for _, c := range commits {
+			id, err := f.patchID(ctx, cwd, c)
+			if err != nil {
+				return false, err.Error()
+			}
+			if id == "" || !mainIDs[id] {
+				return false, "reviewed commit not on origin/main: " + short(c)
+			}
 		}
 	}
 	es, err := f.headReflog(ctx, cwd)
@@ -88,6 +118,25 @@ func (f *Factory) landedAsReviewed(cwd, reviewed string) (bool, string) {
 		return false, "changed after review: " + strings.Join(bad, "; ")
 	}
 	return true, ""
+}
+
+// patchID returns the context-free (`git diff -U0 <c>^ <c> | git patch-id --stable`) patch-id of c,
+// with diff flags pinned so repo or host git config cannot alter the diff format or shorten binary
+// blob hashes on the index line.
+func (f *Factory) patchID(ctx context.Context, cwd, c string) (string, error) {
+	diff, err := f.GitOut(ctx, cwd, "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+		"--full-index", "--src-prefix=a/", "--dst-prefix=b/", "-U0", c+"^", c)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "git", "patch-id", "--stable")
+	cmd.Stdin = strings.NewReader(diff)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git patch-id: %w", err)
+	}
+	id, _, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
+	return id, nil
 }
 
 // isLinkedWorktree reports whether dir is a `git worktree add` checkout (its git dir differs from the
