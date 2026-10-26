@@ -148,9 +148,26 @@ func TestUsageGroupsModelsAndStages(t *testing.T) {
 	writeFile(t, filepath.Join(f.cfg.Home, ".claude/projects/demo/sess-a.jsonl"), `{"type":"assistant","timestamp":"2026-10-25T19:10:00Z","message":{"id":"msg-a","model":"model-a","usage":{"input_tokens":10,"output_tokens":5}}}
 {"type":"assistant","timestamp":"2026-10-25T19:50:00Z","message":{"id":"msg-b","model":"model-b","usage":{"input_tokens":20,"output_tokens":10}}}`+"\n")
 	f.timings.cards["card-a"] = &CardTiming{Events: []TimingEvent{{Stage: "plan", At: t0.Add(-time.Hour)}, {Stage: "building", At: t0.Add(-30 * time.Minute)}}}
+	childPath := filepath.Join(f.cfg.Home, ".claude/projects/demo/sess-a/subagents/agent-a.jsonl")
+	writeFile(t, childPath, `{"type":"assistant","isSidechain":true,"timestamp":"2026-10-25T19:50:00Z","message":{"id":"msg-b","model":"model-b","usage":{"input_tokens":7,"output_tokens":3}}}`+"\n")
 	r, _ := f.collectTokenUsage(context.Background())
-	if len(r.Rows) != 2 || r.Totals.Total != 45 || r.Rows[0].Stage != "plan" || r.Rows[0].Model != "model-a" || r.Rows[1].Stage != "building" || r.Rows[1].Model != "model-b" || r.Rows[1].Plan != "Claude Max" || r.Rows[1].Role != "fellow" {
+	if len(r.Rows) != 2 || r.Totals.Total != 55 || r.Coverage.Readable != 2 || r.Rows[0].Stage != "plan" || r.Rows[0].Model != "model-a" || r.Rows[1].Stage != "building" || r.Rows[1].Counts.Total != 40 || r.Rows[1].Card != "card-a" || r.Rows[1].Agent != "card-a" || r.Rows[1].Model != "model-b" || r.Rows[1].Plan != "Claude Max" || r.Rows[1].Role != "fellow" {
 		t.Fatalf("groups = %+v", r)
+	}
+	if err := os.Remove(filepath.Join(f.cfg.Home, ".claude/projects/demo/sess-a.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := f.collectTokenUsage(context.Background()); r.Totals.Total != 10 || r.Coverage.Missing != 1 || r.Coverage.Readable != 1 {
+		t.Fatal(r)
+	}
+	writeFile(t, childPath, "{broken}\n")
+	if r, _ := f.collectTokenUsage(context.Background()); r.Coverage.Errors != 1 || r.Totals.Total != 0 {
+		t.Fatal(r)
+	}
+	usageAgentFile(t, f, "codex-a", "codex", "sess-c", nil)
+	writeFile(t, filepath.Join(f.cfg.Home, ".codex/sessions/2026/01/01/rollout-demo-sess-c.jsonl"), `{"type":"event_msg","timestamp":"2026-10-25T19:50:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"output_tokens":2}}}}`+"\n")
+	if r, _ := f.collectTokenUsage(context.Background()); r.Totals.Total != 7 || r.Coverage.Readable != 1 {
+		t.Fatal(r)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

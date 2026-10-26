@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -223,6 +224,24 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 	})
 	seen := map[string]bool{}
 	rows := map[UsageTokenRow]TokenCounts{}
+	readPath := func(path, key, provider string) tokenRead {
+		if path == "" {
+			return tokenRead{status: "missing"}
+		}
+		st, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return tokenRead{status: "missing"}
+			}
+			return tokenRead{status: "error"}
+		}
+		sources["session:"+key] = true
+		if st.Size() > tokenFileLimit || used+st.Size() > 128<<20 {
+			return tokenRead{status: "limited"}
+		}
+		used += st.Size()
+		return readTokenFile(ctx, path, provider)
+	}
 	for _, id := range ids {
 		if ctx.Err() != nil {
 			v.Coverage.Limited = true
@@ -241,6 +260,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 			row.Role = "unassigned"
 		}
 		read := tokenRead{status: "missing"}
+		var reads []tokenRead
 		switch {
 		case a.Provider != "claude" && a.Provider != "codex" && a.Provider != "muse":
 			read.status = "unsupported"
@@ -250,50 +270,63 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 		default:
 			seen[key] = true
 			path := tokenPath(f.cfg.Home, a)
-			if path != "" {
-				st, err := os.Stat(path)
-				if err != nil {
-					read.status = "error"
-				} else {
-					sources["session:"+key] = true
-					if st.Size() > tokenFileLimit || used+st.Size() > 128<<20 {
-						read.status = "limited"
-					} else {
-						used += st.Size()
-						read = readTokenFile(ctx, path, a.Provider)
+			read = readPath(path, key, a.Provider)
+			if a.Provider == "claude" {
+				dir := strings.TrimSuffix(path, ".jsonl")
+				if dir == "" {
+					dir = firstFile(filepath.Join(f.cfg.Home, ".claude/projects/*", nativeSessionID(a.SessionID)))
+				}
+				if dir != "" {
+					entries, err := os.ReadDir(filepath.Join(dir, "subagents"))
+					if err != nil && !os.IsNotExist(err) {
+						v.Coverage.Errors++
+					}
+					for _, entry := range entries {
+						if ctx.Err() != nil {
+							v.Coverage.Limited = true
+							break
+						}
+						if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+							reads = append(reads, readPath(filepath.Join(dir, "subagents", entry.Name()), key+"/"+entry.Name(), a.Provider))
+						}
 					}
 				}
 			}
 		}
-		switch read.status {
-		case "readable":
-			v.Coverage.Readable++
-		case "missing":
-			v.Coverage.Missing++
-		case "unsupported":
-			v.Coverage.Unsupported++
-		case "duplicate":
-			v.Coverage.Duplicates++
-		case "limited":
-			v.Coverage.Skipped++
-			v.Coverage.Limited = true
-		default:
-			v.Coverage.Errors++
-		}
-		row.Status = read.status
-		if len(read.events) == 0 {
-			rows[row] = TokenCounts{}
-		}
-		for _, e := range read.events {
-			r := row
-			if e.Model != "" {
-				r.Model = e.Model
+		reads = append(reads, read)
+		for _, read := range reads {
+			switch read.status {
+			case "readable":
+				v.Coverage.Readable++
+			case "missing":
+				v.Coverage.Missing++
+			case "unsupported":
+				v.Coverage.Unsupported++
+			case "duplicate":
+				v.Coverage.Duplicates++
+			case "limited":
+				v.Coverage.Skipped++
+				v.Coverage.Limited = true
+			default:
+				v.Coverage.Errors++
 			}
-			r.Stage, r.Span, r.Round = tokenStage(e, allTiming[owner], now)
-			c := rows[r]
-			c.add(e.Counts)
-			rows[r] = c
-			v.Totals.add(e.Counts)
+			row.Status = read.status
+			if len(read.events) == 0 {
+				if _, exists := rows[row]; !exists {
+					rows[row] = TokenCounts{}
+				}
+			}
+			for _, e := range read.events {
+				r := row
+				if e.Model != "" {
+					r.Model = e.Model
+				}
+				r.Stage, r.Span, r.Round = tokenStage(e, allTiming[owner], now)
+				c := rows[r]
+				c.add(e.Counts)
+				rows[r] = c
+				v.Totals.add(e.Counts)
+			}
 		}
 	}
 	for row, c := range rows {

@@ -156,6 +156,9 @@ stage. `totals` sums those disjoint rows. Input includes cached input; cache rea
 reasoning columns are subsets, so total is input plus output. Claude messages are counted
 once, Codex cumulative snapshots become increments, and Muse model completions are counted
 without their duplicate attribution records. Unsupported providers show unavailable counts.
+Claude's built-in sub-agent files are included under their owning agent, card and stage,
+even when the main file is missing. Coverage counts include those files and their errors
+or scan limits; they use the same per-file and overall budgets as main sessions.
 
 Stage attribution uses the same timing events as the board and metrics. `span` identifies
 each visit to a stage, including repeated building visits; `round` identifies a recorded
@@ -166,7 +169,8 @@ Sessions shared by conflicting agent/card roles also remain unassigned and are f
 Coverage reports missing/unsupported sessions, errors, duplicate session references, timing
 entries without agent metadata and scan limits. Scans are bounded to 2,000 metadata files,
 32 MiB per session, 128 MiB of session data and 20 seconds per refresh; newer agents are
-read first and limit-skipped sessions are counted separately from errors. Partial readings
+read first within the metadata-file cap and limit-skipped sessions are counted separately
+from errors. Partial readings
 are flagged. A process remembers previously observed sources and reports their disappearance
 on subsequent complete scans. Restarting forgets that inventory. Totals can shrink after
 cleanup; they describe retained local records, not every device's activity or a subscription
