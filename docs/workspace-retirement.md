@@ -34,8 +34,11 @@ ownership records are reconciled by their owner. Never rename a branch for clean
 
 Protect primary checkouts, protected branches, anchors, parked cards, unfinished or
 unlanded work, active users, and unknown ownership. Include agents using an overlapping
-directory even when they have a different workspace ID. Overlapping workspace records
-block exclusive directory ownership. Archived records remain relevant to ownership.
+directory even when they have a different workspace ID. `local_checkout` records
+are recognized primary checkouts, and agents in `error` remain unfinished. These
+protections block retirement locally without invalidating the whole inventory.
+Overlapping workspace records block exclusive directory ownership. Archived records
+remain relevant to ownership.
 Tracked changes, untracked files and any ignored files block removal.
 
 Completed-card candidates require independent result evidence and fresh landing proof.

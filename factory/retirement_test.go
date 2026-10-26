@@ -259,3 +259,58 @@ func TestRetirementRejectsUnenumeratedAgentDirectory(t *testing.T) {
 		t.Fatal("unread inventory treated as complete")
 	}
 }
+
+func TestRetirementLocalCheckoutIsProtectedWithoutGlobalProblem(t *testing.T) {
+	f := newRetirementFixture(t)
+	retirementJSON(t, filepath.Join(f.home, ".paseo/projects/workspaces.json"), []any{
+		map[string]any{"workspaceId": "owned", "cwd": f.tree, "worktreeRoot": f.tree, "mainRepoRoot": f.root, "kind": "worktree", "isPaseoOwnedWorktree": true, "branch": "meaningful-title"},
+		map[string]any{"workspaceId": "primary", "cwd": f.root, "mainRepoRoot": f.root, "kind": "local_checkout", "branch": "main"},
+	})
+	r := InventoryRetirement(context.Background(), f.home, time.Unix(100, 0))
+	if len(r.Problems) != 0 || len(r.Workspaces) != 2 {
+		t.Fatalf("supported primary checkout invalidated inventory: %+v", r.Problems)
+	}
+	for _, w := range r.Workspaces {
+		if !hasRetirementCheck(w, "complete-records", "observed") {
+			t.Fatal("primary checkout blocked unrelated inventory")
+		}
+		if w.Kind == "local_checkout" && (w.ExpectedDirectory != "preserve" || !hasRetirementCheck(w, "owned-worktree", "blocked")) {
+			t.Fatal("primary checkout not protected")
+		}
+	}
+}
+
+func TestRetirementErrorAgentIsIncludedAndBlocked(t *testing.T) {
+	f := newRetirementFixture(t)
+	retirementJSON(t, filepath.Join(f.home, ".paseo/agents/test/done.json"), map[string]any{"id": "done", "workspaceId": "owned", "cwd": f.tree, "lastStatus": "error", "labels": map[string]string{"factory.stage": "landed"}})
+	r := f.inventory(t)
+	w := r.Workspaces[0]
+	if len(r.Problems) != 0 || len(w.Agents) != 1 || !hasRetirementCheck(w, "complete-records", "observed") || !hasRetirementCheck(w, "completion", "blocked") {
+		t.Fatalf("error agent must be included and protected: %+v", r)
+	}
+}
+
+func TestRetirementExclusiveDirectoryCheckIsAggregated(t *testing.T) {
+	f := newRetirementFixture(t)
+	retirementJSON(t, filepath.Join(f.home, ".paseo/projects/workspaces.json"), []any{
+		map[string]any{"workspaceId": "one", "cwd": f.root, "kind": "directory"},
+		map[string]any{"workspaceId": "two", "cwd": f.root, "kind": "directory"},
+		map[string]any{"workspaceId": "three", "cwd": f.root, "kind": "directory"},
+		map[string]any{"workspaceId": "unknown", "cwd": "relative", "kind": "directory"},
+	})
+	r := InventoryRetirement(context.Background(), f.home, time.Unix(100, 0))
+	for _, w := range r.Workspaces {
+		count := 0
+		for _, c := range w.Checks {
+			if c.Name == "exclusive-directory" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("workspace %s has %d overlap checks", w.ID, count)
+		}
+		if w.ID != "unknown" && !hasRetirementCheck(w, "exclusive-directory", "blocked") {
+			t.Fatal("unknown path obscured known overlap")
+		}
+	}
+}

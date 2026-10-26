@@ -94,7 +94,7 @@ func InventoryRetirement(ctx context.Context, home string, now time.Time) Retire
 	seen := map[string]bool{}
 	for _, path := range files {
 		var a retirementAgentRecord
-		if !retirementRead(path, &a) || a.ID == "" || seen[a.ID] || !filepath.IsAbs(a.Cwd) || (a.LastStatus != "idle" && a.LastStatus != "closed" && a.LastStatus != "running") || !retirementTimes(a.ArchivedAt, a.LastActivityAt, a.LastUserMessageAt) {
+		if !retirementRead(path, &a) || a.ID == "" || seen[a.ID] || !filepath.IsAbs(a.Cwd) || !slices.Contains([]string{"idle", "closed", "running", "error"}, a.LastStatus) || !retirementTimes(a.ArchivedAt, a.LastActivityAt, a.LastUserMessageAt) {
 			r.Problems = append(r.Problems, "agent record malformed, duplicated or unsupported")
 			continue
 		}
@@ -103,7 +103,7 @@ func InventoryRetirement(ctx context.Context, home string, now time.Time) Retire
 	}
 	seen = map[string]bool{}
 	for _, record := range records {
-		if record.WorkspaceID == "" || seen[record.WorkspaceID] || (record.Kind != "directory" && record.Kind != "worktree") || (record.ArchivedAt != "" && parseTime(record.ArchivedAt).IsZero()) {
+		if record.WorkspaceID == "" || seen[record.WorkspaceID] || !slices.Contains([]string{"directory", "worktree", "local_checkout"}, record.Kind) || (record.ArchivedAt != "" && parseTime(record.ArchivedAt).IsZero()) {
 			r.Problems = append(r.Problems, "workspace record malformed, duplicated or unsupported")
 		}
 		seen[record.WorkspaceID] = true
@@ -123,24 +123,25 @@ func InventoryRetirement(ctx context.Context, home string, now time.Time) Retire
 			w.CanonicalPath = path
 			check("canonical-directory", "observed", "resolved existing directory")
 		}
-		shared := false
+		exclusiveState, exclusiveReason := "observed", "no overlapping persisted workspace record"
 		for _, other := range records {
 			if other.WorkspaceID == record.WorkspaceID {
 				continue
 			}
 			p := retirementPath(other.Cwd)
 			if p == "" {
-				check("exclusive-directory", "unknown", "another workspace path cannot be resolved")
-				shared = true
+				if exclusiveState != "blocked" {
+					exclusiveState, exclusiveReason = "unknown", "another workspace path cannot be resolved"
+				}
 				continue
 			}
 			if retirementOverlap(w.CanonicalPath, p) {
-				shared = true
-				check("exclusive-directory", "blocked", "another workspace references an overlapping directory")
+				exclusiveState, exclusiveReason = "blocked", "another workspace references an overlapping directory"
 			}
 		}
-		if !shared {
-			check("exclusive-directory", "observed", "no overlapping persisted workspace record")
+		check("exclusive-directory", exclusiveState, exclusiveReason)
+		if record.Kind == "local_checkout" {
+			check("primary-checkout", "blocked", "primary checkout must be preserved")
 		}
 		completion := "observed"
 		for _, a := range agents {
@@ -273,6 +274,9 @@ func retirementCompletion(a retirementAgentRecord, all []retirementAgentRecord) 
 	if a.LastStatus == "running" || a.RequiresAttention {
 		return "active-or-waiting", "blocked"
 	}
+	if a.LastStatus == "error" {
+		return "agent-error", "blocked"
+	}
 	if l["role"] != "" || (l["factory.role"] != "" && l["factory.role"] != "reviewer") {
 		return "anchor-or-external-role", "blocked"
 	}
@@ -288,7 +292,7 @@ func retirementCompletion(a retirementAgentRecord, all []retirementAgentRecord) 
 	if l["factory.role"] == "reviewer" {
 		if l["factory.applied"] != "" && a.ArchivedAt != "" {
 			for _, p := range all {
-				if p.ID == l["factory.review-of"] && p.Labels["factory.stage"] == "landed" && p.Labels["factory.parked"] == "" && p.LastStatus != "running" {
+				if p.ID == l["factory.review-of"] && p.Labels["factory.stage"] == "landed" && p.Labels["factory.parked"] == "" && (p.LastStatus == "idle" || p.LastStatus == "closed") && !p.RequiresAttention {
 					return "applied-reviewer", "unknown"
 				}
 			}
