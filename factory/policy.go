@@ -598,6 +598,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			err = f.send(target, msg)
 		}
 	}
+	f.recordRound(target, kind, rounds, rev.CreatedAt, verdict)
 	f.logf("%s verdict %s for %s (round %d, tier %s)", kind, verdict, short(target), rounds, tier)
 	return err
 }
@@ -720,6 +721,7 @@ func (f *Factory) Tick() {
 		f.logf("idea error: %v", err)
 	}
 	f.reap(now)
+	f.checkReplies(now)
 	f.probeMail()
 }
 
@@ -812,6 +814,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 					labelNote: "landed diff differs from the reviewed one: " + trunc(why, 200)})
 			}
 		}
+		f.recordLanded(a, c.Cwd)
 		// landed: Done only when the agent says nothing is left (remaining.go)
 		reply, err := f.lastReply(a)
 		if err != nil {
@@ -947,6 +950,7 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 		return f.setLabels(a.ID, map[string]string{labelStage: "zach",
 			labelNote: "direct card changed files outside its work item without review: " + trunc(strings.Join(outside, ", "), 150)})
 	}
+	f.recordLanded(a, c.Cwd)
 	f.logf("%s done in one pass", short(a.ID))
 	return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "done in one pass"})
 }

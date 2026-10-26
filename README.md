@@ -192,6 +192,32 @@ request, under `Zach's request from closed duplicate card <id> (<RFC 5322 date>)
 same end line. It holds only Zach's words (the reviewer's notes follow the block), and it adds to the
 kept card's request rather than overriding it.
 
+### Card timing
+
+Every factory card (one with a `factory.stage` label that is not a reviewer, Scout or repo picker)
+records its times in `timings.json` in the state directory, so a restart keeps them
+(`factory/timing.go`). Entries are dropped 30 days after their last event.
+
+- **Asked**: the email's `- Date:` line or the voice memo's `- Recorded:` line in an email card's
+  first prompt; else the card's creation.
+- **Columns**: each column the card entered, read from the board the factory already builds, so it
+  costs no paseo call. Only reads the board accepted count. A move is dated by `factory.since`
+  when it set one, else when the factory saw it (within one poll).
+- **Reviews**: each round's start (the reviewer's creation), end (its verdict applied) and verdict.
+- **Landed**: the commit time of the card's HEAD when the factory verifies the landing; a card
+  that lands again keeps the last one.
+- **Replied** (email and voice cards): 5 minutes after Done, one read of the card's thread takes
+  the last message the mailbox sent after he asked and by Done plus 5 minutes. The factory's own
+  emails (Needs Zach notes, answer confirmations) are recorded when sent and never count.
+- **Partial**: a card first seen past its start (in flight when timing began, or created while the
+  factory was down) has an incomplete history.
+
+The card panel shows it as one Timeline line. `GET /api/metrics?days=7` (1 to 30) gives the
+median and p90, in seconds, of end to end (asked to replied, else to landed) and of the time in
+Needs Zach, by source (`board`, `email`, `voice`, `idea`), by tier, and by both. It counts cards
+that reached Done in the window and landed; dropped or closed cards and partial ones are only
+counted in `excluded`.
+
 ## Public repos: review and secret scan
 
 Repos listed in `FACTORY_GUARDED_REPOS` (default: this one) are public, so everything that lands

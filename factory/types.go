@@ -93,6 +93,9 @@ type Card struct {
 	WorkspaceID    string    `json:"-"`
 	Decided        bool      `json:"-"` // factory.zach-decided: reviews treat Zach's rulings as settled
 
+	// when Zach asked, each column, reviews, landing and reply (timing.go)
+	Timing *TimingView `json:"timing,omitempty"`
+
 	// set only for reviewer prompts: Zach's request and follow-ups from the session file
 	Request *CardRequest `json:"-"`
 }

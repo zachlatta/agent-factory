@@ -325,6 +325,9 @@ func (fu FollowUp) label() string {
 type CardRequest struct {
 	Base      string
 	FollowUps []FollowUp
+	Read      bool   // the first prompt has been read
+	AskedKind string // email-date or voice-recorded: the first prompt's line saying when Zach asked (timing.go)
+	Asked     string // that line's value
 }
 
 // brief is the request on one line for /api/peers (each part cut to peerRequestCap, the newest
@@ -401,7 +404,9 @@ func (f *Factory) cardRequest(a Agent) CardRequest {
 }
 
 func (e *peerRequest) copy() CardRequest {
-	return CardRequest{Base: e.req.Base, FollowUps: append([]FollowUp(nil), e.req.FollowUps...)}
+	r := e.req
+	r.FollowUps = append([]FollowUp(nil), e.req.FollowUps...)
+	return r
 }
 
 // readOnce reads a non-Claude session the old way, whole.
@@ -468,6 +473,8 @@ func (e *peerRequest) take(ev Event) {
 	if !e.based {
 		e.based = true
 		e.req.Base = requestOf(ev.Text)
+		e.req.Read = true
+		e.req.AskedKind, e.req.Asked = askedOf(ev.Text)
 		return
 	}
 	for _, fu := range followUpsOf(ev.Text) {

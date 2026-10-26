@@ -195,7 +195,7 @@ func (f *Factory) confirmAnswer(a Agent, messageID, line string) {
 	defer cancel()
 	h := `<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328">` +
 		html.EscapeString(line) + `</div>`
-	if _, err := f.Mail.Call(ctx, "reply_to_message", map[string]any{"message_id": messageID, "text": line,
+	if _, err := f.sendMail(ctx, a.ID, "reply_to_message", map[string]any{"message_id": messageID, "text": line,
 		"html": h, "omit_quote": true}); err != nil {
 		f.logf("%s: confirming the email answer: %v", short(a.ID), err)
 	}

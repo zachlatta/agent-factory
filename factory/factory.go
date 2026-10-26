@@ -98,7 +98,8 @@ type Factory struct {
 	fleet       *hostFleet
 	// landReviews: landing reviews asked for by agents outside the card flow (landreview.go)
 	landReviews *LandReviewStore
-	GitHubAPI   string // base URL for repo visibility lookups
+	timings     *TimingStore // card timings (timing.go)
+	GitHubAPI   string       // base URL for repo visibility lookups
 	Now         func() time.Time
 	Git         func(ctx context.Context, dir string, args ...string) error           // runs `git -C dir args...`
 	GitOut      func(ctx context.Context, dir string, args ...string) (string, error) // same, returns stdout
@@ -159,6 +160,8 @@ func New(cfg Config, p Paseo) *Factory {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}
 		f.Git, f.GitOut = f.dryRunGit(runGit, runGitOut)
 	}
+	f.timings = newTimingStore(filepath.Join(cfg.StateDir, "timings.json"), func() time.Time { return f.Now() }, f.cfg.Location)
+	f.timings.readOnly = cfg.ReadOnly
 	f.Scan = f.runScan
 	f.Usage = f.readProviderUsage
 	f.fleet = newHostFleet(cfg.MetricHosts, cfg.Host)
@@ -186,12 +189,26 @@ func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 	agents = f.withArchiveMarks(agents)
 	cards := BuildBoard(agents, f.ideas.List(), f.Now())
 	f.fillAsks(cards, agents, fetch)
+	asked := map[string]CardRequest{} // first prompts of email and voice cards not yet timed (timing.go)
+	for _, a := range f.timings.needsAsked(agents) {
+		asked[a.ID] = f.cardRequest(a)
+	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if seq < f.boardSeq {
+		f.mu.Unlock()
 		return false
 	}
-	f.list, f.cards, f.updated, f.boardSeq = agents, cards, f.Now(), seq
+	// timings change only on an accepted read, so an older read cannot step a card back
+	now := f.Now()
+	changed := f.timings.observe(cards, agents, seq, now, asked)
+	f.timings.fillTiming(cards, now)
+	f.list, f.cards, f.updated, f.boardSeq = agents, cards, now, seq
+	f.mu.Unlock()
+	if changed {
+		if err := f.timings.save(); err != nil {
+			f.logf("timings not saved: %v", err)
+		}
+	}
 	return true
 }
 

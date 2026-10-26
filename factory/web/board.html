@@ -252,6 +252,26 @@ const LANE_NAMES = new Proxy({}, {get:(_,k)=>(LANES[k]||{}).name});
 const LANDS = new Proxy({}, {get:(_,k)=>(LANES[k]||{}).lands});
 async function loadLanes(){ try{ Object.assign(LANES, await (await fetch('api/lanes')).json()); }catch(e){} }
 
+// the card's timing in one line: when Zach asked, each column and how long, reviews, landing, reply, total
+function dur(sec){ const m=Math.round(sec/60); return m<60 ? m+'m' : Math.floor(m/60)+'h '+(m%60)+'m'; }
+function clock(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+function timeline(t){
+  const names = Object.fromEntries(B.stages.map(s=>[s[0], s[1]]));
+  const rounds = {'plan-review': (t.rounds||[]).filter(r=>r.kind==='plan'), review: (t.rounds||[]).filter(r=>r.kind==='code')};
+  const parts = t.requestedAt ? ['asked '+clock(t.requestedAt)] : [];
+  let done = '';
+  for(const s of t.stages){
+    if(s.stage==='landed'){ done = 'done '+clock(s.start); continue; }
+    const r = (rounds[s.stage]||[]).shift();
+    parts.push(`${names[s.stage]||s.stage} ${dur(s.secs)}${r?` (r${r.n} ${r.verdict})`:''}`);
+  }
+  if(t.landedAt) parts.push('landed '+clock(t.landedAt));
+  if(t.repliedAt) parts.push('replied '+clock(t.repliedAt));
+  if(done) parts.push(done);
+  if(t.totalSecs) parts.push(dur(t.totalSecs)+' in all');
+  if(t.zachSecs) parts.push(dur(t.zachSecs)+' waiting on Zach');
+  return (t.partial ? 'partial (seen mid-flight): ' : '') + parts.join(' · ');
+}
 function ago(iso){ if(!iso) return ''; const s=(Date.now()-Date.parse(iso))/1000; if(s<90) return 'just now'; if(s<3600) return Math.round(s/60)+' min ago'; if(s<86400) return Math.round(s/3600)+' h ago'; return Math.round(s/86400)+' d ago'; }
 function toast(t){ const e=$('toast'); e.textContent=t; e.style.display='block'; clearTimeout(e._t); e._t=setTimeout(()=>e.style.display='none',3500); }
 // releaseKeyboard drops focus from a text field (its text stays). On a phone a field left focused
@@ -620,6 +640,7 @@ function fillPanel(c, fresh){
   const kv = [['Column', (B.stages[idx]||[])[1] + (c.labelled?'':' (from Paseo status)')],
     ['Tier', c.tier ? c.tier + ': ' + ((B.tiers||{})[c.tier]||'') : 'not set yet (the plan review sets it)'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
     ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Reviews', `plan ${c.rounds.plan} · code ${c.rounds.code} (cap 3 each)`],
+    ...(c.timing ? [['Timeline', timeline(c.timing)]] : []),
     ['Sub-agents', c.children.map(k=>`${k.role==='reviewer'?k.kind+' review':k.title||k.short} (${k.archived?'archived':k.status}${k.verdict?', '+k.verdict:''})`).join('; ')||'none'],
     ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');

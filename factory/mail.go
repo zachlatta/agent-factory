@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -147,12 +148,12 @@ func (f *Factory) deliver(a Agent, m email) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), mailTimeout)
 	defer cancel()
 	if th := emailThread(a); th != "" {
-		return "", f.replyInThread(ctx, th, m)
+		return "", f.replyInThread(ctx, a.ID, th, m)
 	}
 	if th := a.L(labelZachThread); th != "" {
-		return "", f.replyInThread(ctx, th, m)
+		return "", f.replyInThread(ctx, a.ID, th, m)
 	}
-	out, err := f.Mail.Call(ctx, "send_email", map[string]any{"to": []string{f.cfg.ZachEmail},
+	out, err := f.sendMail(ctx, a.ID, "send_email", map[string]any{"to": []string{f.cfg.ZachEmail},
 		"subject": m.Subject, "text": m.Text, "html": m.HTML})
 	if err != nil {
 		return "", err
@@ -169,7 +170,11 @@ func (f *Factory) deliver(a Agent, m email) (string, error) {
 type threadMsg struct {
 	ID       string   `json:"id"`
 	LabelIDs []string `json:"label_ids"`
+	Date     string   `json:"date,omitempty"`
 }
+
+// sent: the mailbox sent this message.
+func (m threadMsg) sent() bool { return slices.Contains(m.LabelIDs, "SENT") }
 
 // latestFromZach is the newest message in a thread that the mailbox did not send, and the newest
 // message overall.
@@ -189,7 +194,7 @@ func latestFromZach(msgs []threadMsg) (zach, last string) {
 
 // replyInThread answers Zach's latest message in thread, or the latest one (addressed to Zach) when
 // the mailbox wrote every message in it.
-func (f *Factory) replyInThread(ctx context.Context, thread string, m email) error {
+func (f *Factory) replyInThread(ctx context.Context, id, thread string, m email) error {
 	out, err := f.Mail.Call(ctx, "get_thread", map[string]any{"thread_id": thread, "latest": 5})
 	if errors.Is(err, ErrMailMaybeSent) {
 		return errors.New("get_thread timed out") // a read: safe to retry
@@ -213,7 +218,7 @@ func (f *Factory) replyInThread(ctx context.Context, thread string, m email) err
 	default:
 		return fmt.Errorf("thread %s has no message to answer", short(thread))
 	}
-	_, err = f.Mail.Call(ctx, "reply_to_message", args)
+	_, err = f.sendMail(ctx, id, "reply_to_message", args)
 	return err
 }
 
