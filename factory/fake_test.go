@@ -11,7 +11,7 @@ import (
 )
 
 // fakePaseo records every paseo CLI call and answers `logs`, `run`, `inspect` and `archive` from
-// canned data. inspect reports archived[id] and status[id] (default: not archived, idle).
+// canned data; `send` unarchives, as Paseo does. inspect reports archived[id] and status[id] (default: not archived, idle).
 type fakePaseo struct {
 	mu         sync.Mutex // guards the fields below; background refreshes call Run concurrently
 	lsCalls    atomic.Int32
@@ -109,6 +109,8 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 			return "", fmt.Errorf("paseo archive %s: Error: Agent %s is currently running", args[1], args[1])
 		}
 		p.archived[args[1]] = true
+	case "send":
+		p.archived[args[len(args)-2]] = false // like Paseo: a send unarchives the agent
 	}
 	return "", nil
 }

@@ -228,7 +228,8 @@ func TestTickAppliesFinishedReviewersOnce(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low"}), r, done, young)
 	p.logs["r1"] = "VERDICT: approve"
 	f.Tick()
-	if !p.called("archive", "r1") || p.called("archive", "r2") || p.called("archive", "r3") {
+	// r2's verdict is not read again (the idle reap archives it); r3 is too young to apply
+	if !p.called("archive", "r1") || p.called("logs", "r2") || p.called("archive", "r3") {
 		t.Errorf("calls = %v", p.calls)
 	}
 }

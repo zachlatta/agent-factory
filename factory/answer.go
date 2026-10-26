@@ -101,7 +101,7 @@ func (f *Factory) waitingCard(thread string) (Agent, error) {
 	var waiting []Agent
 	found := false
 	for _, a := range f.agents() {
-		if a.archived() || a.L(labelStage) == "" || a.L(labelRole) != "" {
+		if a.gone() || a.L(labelStage) == "" || a.L(labelRole) != "" {
 			continue
 		}
 		if a.L(labelZachThread) != thread && emailThread(a) != thread {

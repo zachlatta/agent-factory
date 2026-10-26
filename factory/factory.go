@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,9 +25,11 @@ type Config struct {
 	Port      int
 	Window    time.Duration // archived agents stay in Done this long
 	Poll      time.Duration
-	ReworkCap int // review rounds per gate before the card goes to Zach
-	IdeaWIP   int // agent-suggested cards in flight at once
-	IdeaDaily int // agent-suggested cards started per day
+	ReworkCap int           // review rounds per gate before the card goes to Zach
+	IdeaWIP   int           // agent-suggested cards in flight at once
+	IdeaDaily int           // agent-suggested cards started per day
+	IdleTTL   time.Duration // a Needs Zach card idle this long is parked (reap.go)
+	IdleCap   int           // more live idle factory agents than this parks the longest idle (reap.go)
 	Location  *time.Location
 	Rev       string // commit this binary was built from (shown by /api/health)
 	ReadOnly  bool   // serve and refresh only: no Tick, no actions, no provider diagnostic (deploy canary)
@@ -60,6 +63,12 @@ func (c *Config) defaults() {
 	}
 	if c.IdeaDaily == 0 {
 		c.IdeaDaily = 5
+	}
+	if c.IdleTTL == 0 {
+		c.IdleTTL = defaultIdleTTL
+	}
+	if c.IdleCap == 0 {
+		c.IdleCap = defaultIdleCap
 	}
 	if c.LanesFile == "" {
 		c.LanesFile = filepath.Join(c.Home, ".config/agent-factory/lanes.json")
@@ -115,6 +124,8 @@ type Factory struct {
 	// files show the archive (or archiveMarkTTL passes), so a Refresh that read an agent file before
 	// Paseo wrote the archive cannot make the card look live again.
 	archivedNow map[string]time.Time
+	parkedNow   map[string]string // agents the reap parked: their factory.parked value, applied like archivedNow
+	lastReap    *ReapReport       // the last reap that changed anything, for /api/health
 
 	provMu  sync.Mutex
 	prov    providers // Paseo provider status, for the agent choices
@@ -140,7 +151,7 @@ func New(cfg Config, p Paseo) *Factory {
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), errs: map[string]string{},
-		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, mailRetry: map[string]time.Time{},
+		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}}
 	if cfg.DryRun {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}
@@ -191,6 +202,7 @@ func (f *Factory) withArchiveMarks(agents []Agent) []Agent {
 	for id, at := range f.archivedNow {
 		if now.Sub(at) > archiveMarkTTL {
 			delete(f.archivedNow, id)
+			delete(f.parkedNow, id)
 		}
 	}
 	if len(f.archivedNow) == 0 {
@@ -203,8 +215,13 @@ func (f *Factory) withArchiveMarks(agents []Agent) []Agent {
 		case !ok:
 		case out[i].archived() && !out[i].ArchivedAt.Equal(at):
 			delete(f.archivedNow, out[i].ID) // Paseo's own archive time: the files have caught up
+			delete(f.parkedNow, out[i].ID)
 		default:
 			out[i].ArchivedAt = at
+			if v, ok := f.parkedNow[out[i].ID]; ok {
+				out[i].Labels = maps.Clone(out[i].Labels)
+				out[i].Labels[labelPrefix+labelParked] = v
+			}
 		}
 	}
 	return out
@@ -220,6 +237,24 @@ func (f *Factory) markArchived(id string) {
 	list, seq := f.list, f.boardSeq
 	f.mu.Unlock()
 	f.setAgents(list, seq, false)
+}
+
+// unmarkArchived drops the board's archive mark for id (a parked card Zach just woke): the snapshot
+// shows it live again, and the next Refresh reads Paseo's unarchive.
+func (f *Factory) unmarkArchived(id string) {
+	f.mu.Lock()
+	delete(f.archivedNow, id)
+	delete(f.parkedNow, id)
+	list, seq := slices.Clone(f.list), f.boardSeq
+	for i := range list {
+		if list[i].ID == id {
+			list[i].ArchivedAt = time.Time{}
+			list[i].Labels = maps.Clone(list[i].Labels)
+			delete(list[i].Labels, labelPrefix+labelParked)
+		}
+	}
+	f.mu.Unlock()
+	f.setAgents(list, seq, false) // like markArchived: a newer read wins, and shows Paseo's unarchive
 }
 
 // Refresh reloads agents from disk, with pending permissions and new Needs Zach detail. Those
@@ -381,8 +416,32 @@ func (f *Factory) send(id, msg string, images ...string) error {
 	for _, p := range images {
 		args = append(args, "--image", p)
 	}
-	_, err := f.paseo(append(args, id, msg)...)
-	return err
+	if _, err := f.paseo(append(args, id, msg)...); err != nil {
+		return err
+	}
+	f.resume(id)
+	return nil
+}
+
+// resume clears the parked state of agent id after a send, which unarchived it in Paseo. Every
+// message to an agent (board reply, email answer, verdict) goes through send, so all of them wake a
+// parked card. A label that fails to clear is cleared by the next reap (reap.go).
+func (f *Factory) resume(id string) {
+	f.mu.Lock()
+	_, marked := f.parkedNow[id]
+	f.mu.Unlock()
+	if a, ok := f.agentOK(id); !marked && (!ok || a.L(labelParked) == "") {
+		return
+	}
+	id = f.agent(id).ID
+	if id == "" {
+		return
+	}
+	if err := f.setLabels(id, map[string]string{labelParked: ""}); err != nil {
+		f.logf("%s: clearing parked: %v", short(id), err)
+	}
+	f.logf("%s resumed from parked", short(id))
+	f.unmarkArchived(id)
 }
 
 // archiveAgent archives agent id and marks the snapshot archived. `paseo archive` refuses a running

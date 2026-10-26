@@ -38,6 +38,7 @@ const (
 	labelDirtyAsks  = "dirty-asks"   // times the builder was asked to commit before code review
 	labelLandReview = "land-review"  // agents outside the card flow: last landing review, <verdict>@<sha>
 	labelTitled     = "titled"       // the card's title is settled: given (by the caller), planner (renamed) or kept
+	labelParked     = "parked"       // archived by the idle reap with its column kept; a send resumes it (reap.go)
 )
 
 // labelArg is the `paseo --label` value that sets factory label k to v.

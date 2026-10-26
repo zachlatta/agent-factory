@@ -438,10 +438,11 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	t, ok := f.agentOK(target)
 	if ok {
-		// Zach may have dropped the card while it was in review: a message would revive it
-		gone := t.archived()
-		if !gone {
-			if gone, _, err = f.liveState(t.ID); err != nil {
+		// Zach may have dropped the card while it was in review: a message would revive it. A parked
+		// card is only waiting on Zach, so its verdict is sent (which wakes it).
+		gone := t.gone()
+		if !gone && !t.parked() {
+			if gone, err = f.liveGone(t); err != nil {
 				return err // nothing recorded yet, so the next Tick retries
 			}
 		}
@@ -693,6 +694,7 @@ func (f *Factory) Tick() {
 	if err := f.tickIdeas(); err != nil {
 		f.logf("idea error: %v", err)
 	}
+	f.reap(now)
 	f.probeMail()
 }
 
@@ -948,7 +950,7 @@ func (f *Factory) stillStopped(a Agent) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if archived {
+	if archived { // parked too: the factory never wakes a parked card on its own
 		f.logf("%s archived since the last poll, no move", short(a.ID))
 	}
 	return !archived && !running, nil

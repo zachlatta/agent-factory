@@ -65,7 +65,7 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 		if a.Labels == nil {
 			a.Labels = map[string]string{}
 		}
-		if a.archived() && a.ArchivedAt.Before(cutoff) {
+		if a.archived() && a.ArchivedAt.Before(cutoff) && !(a.parked() && a.ArchivedAt.After(now.Add(-parkedKeep))) {
 			continue
 		}
 		if !a.archived() && a.Status == "closed" && a.LastActivityAt.Before(cutoff) {

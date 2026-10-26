@@ -48,7 +48,27 @@ The planner (the "Fellow") first picks a track:
   (the log names the port). That meets the check's data rule: it reads the real cards, ideas and
   transcripts, and its buttons only log what they would do. Bind the tailnet address, never `0.0.0.0`.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
-  for it are not forwarded.
+  for it are not forwarded. Its running reviewers are stopped and archived with it.
+
+### Idle agents
+
+An idle agent stays loaded in Paseo until it is archived, so every Tick reaps the factory's own
+idle agents (`factory/reap.go`), at most 20 archives per Tick:
+
+- A Done card is archived once it has been idle 5 minutes; a reviewer once its verdict is applied.
+- A Needs Zach card is **parked** when it has been idle `FACTORY_IDLE_TTL` (default 3 h), or when
+  more than `FACTORY_IDLE_CAP` (default 10) factory agents are idle: then the longest idle go
+  first, none idle under 30 minutes. Parked means labelled `factory.parked`, then archived: the
+  card stays in Needs Zach for up to 14 days, and Zach's reply on the board or by email wakes it,
+  because `paseo send` unarchives an agent and reloads its session. The factory never wakes a
+  parked card on its own. Paseo's archive keeps the worktree; nothing may remove a parked card's
+  worktree while it is parked.
+- Cards in other columns are not parked or counted against the cap: the factory moves them on,
+  or to Needs Zach, within minutes. Running agents and agents the factory did not start (email
+  agents, schedules, your own sessions) are never touched, only counted.
+
+`/api/health` reports live, running, idle and parked agents, per kind and per card (a card's own
+agent plus its reviewers and sub-agents), and the last reap; the `/host` page shows them.
 
 ### Repo and agent per card
 
@@ -228,6 +248,8 @@ approve, 2 on changes, 3 when Zach must decide.
 | `FACTORY_GUARDED_REPOS` | `-guarded` | comma-separated public repos (default this one) |
 | `FACTORY_PRIVATE_RULES` | `-private-rules` | private scan patterns (default `~/.config/agent-factory/denylist`) |
 | `FACTORY_LANES` | `-lanes` | board lane names per repo, `{"owner/repo": {"name": "...", "lands": "..."}}` (default `~/.config/agent-factory/lanes.json`) |
+| `FACTORY_IDLE_TTL` | `-idle-ttl` | park a Needs Zach card idle this long (default `3h`) |
+| `FACTORY_IDLE_CAP` | `-idle-cap` | park the longest idle Needs Zach cards while more factory agents than this are idle (default 10) |
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
@@ -244,7 +266,7 @@ Cards can start in any checkout under `~/dev/<owner>/<repo>`.
 - `cmd/factory-deploy`, `deployer/`: the self-deployer; `deploy/`: the systemd units.
 - `factory/policy.go`: tiers, prompts, verdicts, the automatic moves (`Tick`).
 - `factory/guard.go`: guarded (public) repos. `factory/scan/`: the secret scanner.
-- `factory/route.go`: Repo Auto. `factory/agents.go`: the agent choices.
+- `factory/route.go`: Repo Auto. `factory/agents.go`: the agent choices. `factory/reap.go`: the idle reap.
 - `factory/board.go`, `collect.go`, `ask.go`, `ideas.go`, `inbox.go`, `actions.go`,
   `transcript.go`, `server.go`; the board and transcript pages are in `factory/web/`.
 - `factory/transcript.go`, `transcript_providers.go`: the transcript page reads each agent's own

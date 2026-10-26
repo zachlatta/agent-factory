@@ -45,6 +45,13 @@ func (a Agent) L(k string) string { return a.Labels[labelPrefix+k] }
 
 func (a Agent) archived() bool { return !a.ArchivedAt.IsZero() }
 
+// parked: archived by the idle reap while it waits on Zach (reap.go). It keeps its column, and
+// Zach's next message unarchives it.
+func (a Agent) parked() bool { return a.archived() && a.L(labelParked) != "" }
+
+// gone: archived for good (done, dropped or closed), not parked.
+func (a Agent) gone() bool { return a.archived() && !a.parked() }
+
 // stopped: the agent is not working and not archived, so the factory may act on it.
 func (a Agent) stopped() bool { return (a.Status == "idle" || a.Status == "closed") && !a.archived() }
 
@@ -76,6 +83,7 @@ type Card struct {
 	CreatedAt      string    `json:"createdAt"`
 	LastActivityAt string    `json:"lastActivityAt"`
 	ArchivedAt     string    `json:"archivedAt"`
+	Parked         string    `json:"parked,omitempty"` // when the idle reap archived it; ArchivedAt stays "" (reap.go)
 	Children       []Child   `json:"children"`
 	Reviewing      bool      `json:"reviewing"`
 	Ask            *Ask      `json:"ask,omitempty"`  // Needs Zach only: what he is asked and how to answer

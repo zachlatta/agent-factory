@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -48,6 +49,8 @@ func main() {
 	private := flag.String("private-rules", os.Getenv("FACTORY_PRIVATE_RULES"), "file of private scan patterns (env FACTORY_PRIVATE_RULES; default ~/.config/agent-factory/denylist)")
 	zachEmail := flag.String("zach-email", os.Getenv("FACTORY_ZACH_EMAIL"), "address cards with no email thread email Zach at (env FACTORY_ZACH_EMAIL)")
 	metricHosts := flag.String("metric-hosts", os.Getenv("FACTORY_METRIC_HOSTS"), "comma-separated SSH aliases whose load the board shows besides this host (env FACTORY_METRIC_HOSTS)")
+	idleTTL := flag.Duration("idle-ttl", envDuration("FACTORY_IDLE_TTL"), "park a Needs Zach card idle this long (env FACTORY_IDLE_TTL; default 3h)")
+	idleCap := flag.Int("idle-cap", envInt("FACTORY_IDLE_CAP"), "park the longest idle Needs Zach cards while more factory agents than this are idle (env FACTORY_IDLE_CAP; default 10)")
 	tick := flag.Bool("tick", true, "run the pipeline; -tick=false only serves the board (deploy canary)")
 	listen := flag.String("listen", "", "address to serve on (default 127.0.0.1:<port>; host:0 picks a free port)")
 	dryRun := flag.Bool("dry-run", false, "serve real data, change nothing: buttons only log the paseo and git writes they would make")
@@ -55,7 +58,7 @@ func main() {
 
 	cfg := factory.Config{Host: host, Home: home, StateDir: *state, Port: *port, BoardURL: *boardURL,
 		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail,
-		DryRun: *dryRun}
+		DryRun: *dryRun, IdleTTL: *idleTTL, IdleCap: *idleCap}
 	if *metricHosts != "" {
 		cfg.MetricHosts = splitList(*metricHosts)
 	}
@@ -166,6 +169,31 @@ func scanCmd(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// envDuration and envInt read an optional setting; a bad value stops the factory at start.
+func envDuration(k string) time.Duration {
+	v := os.Getenv(k)
+	if v == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		log.Fatalf("%s: %v", k, err)
+	}
+	return d
+}
+
+func envInt(k string) int {
+	v := os.Getenv(k)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		log.Fatalf("%s: %v", k, err)
+	}
+	return n
 }
 
 func envOr(k, def string) string {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -22,15 +23,111 @@ const hungAfter = 15 * time.Minute
 // A Refresh error (Paseo down, ~/.paseo unreadable) shows in RefreshErr and on the board; it
 // leaves Live and OK alone, so a Paseo outage never restarts or rolls back the factory.
 type Health struct {
-	Rev            string `json:"rev"`
-	Started        string `json:"started,omitempty"`
-	Refreshed      bool   `json:"refreshed"`
-	RefreshErr     string `json:"refreshErr,omitempty"`
-	TickRunningFor string `json:"tickRunningFor,omitempty"`
-	LastLoopDone   string `json:"lastLoopDone,omitempty"`
-	Mail           string `json:"mail,omitempty"` // last mailbox check: "ok" or its error; never fails the check (mail.go)
-	Live           bool   `json:"live"`
-	OK             bool   `json:"ok"`
+	Rev            string      `json:"rev"`
+	Started        string      `json:"started,omitempty"`
+	Refreshed      bool        `json:"refreshed"`
+	RefreshErr     string      `json:"refreshErr,omitempty"`
+	TickRunningFor string      `json:"tickRunningFor,omitempty"`
+	LastLoopDone   string      `json:"lastLoopDone,omitempty"`
+	Mail           string      `json:"mail,omitempty"` // last mailbox check: "ok" or its error; never fails the check (mail.go)
+	Live           bool        `json:"live"`
+	OK             bool        `json:"ok"`
+	Agents         AgentCounts `json:"agents"`
+}
+
+// AgentCounts is how many of this host's Paseo agents are loaded, for the idle reap (reap.go).
+// Live: not archived and not closed (closed sessions hold no process). Idle: live and not running.
+type AgentCounts struct {
+	Live     int            `json:"live"`
+	Running  int            `json:"running"`
+	Idle     int            `json:"idle"`
+	Parked   int            `json:"parked"`
+	ByKind   map[string]int `json:"byKind"` // live agents: card, reviewer, scout, picker, other
+	IdleTTL  string         `json:"idleTTL"`
+	IdleCap  int            `json:"idleCap"`
+	Cards    []CardAgents   `json:"cards"` // cards with a live agent, or parked; longest idle first
+	LastReap *ReapReport    `json:"lastReap,omitempty"`
+}
+
+// CardAgents counts one card's live agents: its own and its reviewers and sub-agents.
+type CardAgents struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Stage   string `json:"stage"`
+	Live    int    `json:"live"`
+	Idle    int    `json:"idle"`
+	IdleMin int    `json:"idleMin"` // the card's own agent, while it is not running
+	Parked  bool   `json:"parked,omitempty"`
+}
+
+func agentKind(a Agent) string {
+	switch {
+	case a.L(labelRole) != "":
+		return a.L(labelRole)
+	case a.L(labelRouting) != "":
+		return "picker"
+	case a.L(labelStage) != "":
+		return "card"
+	}
+	return "other"
+}
+
+func (f *Factory) agentCounts() AgentCounts {
+	now := f.Now()
+	agents := f.agents()
+	f.mu.Lock()
+	last := f.lastReap
+	f.mu.Unlock()
+	n := AgentCounts{ByKind: map[string]int{}, IdleTTL: f.cfg.IdleTTL.String(), IdleCap: f.cfg.IdleCap,
+		Cards: []CardAgents{}, LastReap: last}
+	cards := map[string]*CardAgents{}
+	var order []string
+	for _, a := range agents {
+		if a.L(labelStage) == "" || a.L(labelRole) != "" || a.gone() {
+			continue
+		}
+		c := &CardAgents{ID: a.ID, Title: a.Title, Stage: Derive(a), Parked: a.parked()}
+		if !a.archived() && a.Status != "running" {
+			c.IdleMin = int(idleSince(a, now).Minutes())
+		}
+		cards[a.ID] = c
+		order = append(order, a.ID)
+	}
+	for _, a := range agents {
+		if a.parked() {
+			n.Parked++
+		}
+		if a.archived() || a.Status == "closed" {
+			continue
+		}
+		n.Live++
+		n.ByKind[agentKind(a)]++
+		running := a.Status == "running"
+		if running {
+			n.Running++
+		} else {
+			n.Idle++
+		}
+		owner := a.ID
+		if r := a.L(labelReviewOf); r != "" {
+			owner = r
+		} else if p := a.Labels["paseo.parent-agent-id"]; p != "" {
+			owner = p
+		}
+		if c := cards[owner]; c != nil {
+			c.Live++
+			if !running {
+				c.Idle++
+			}
+		}
+	}
+	for _, id := range order {
+		if c := cards[id]; c.Live > 0 || c.Parked {
+			n.Cards = append(n.Cards, *c)
+		}
+	}
+	sort.SliceStable(n.Cards, func(i, j int) bool { return n.Cards[i].IdleMin > n.Cards[j].IdleMin })
+	return n
 }
 
 func (f *Factory) noteRefreshed() {
@@ -84,6 +181,7 @@ func (f *Factory) Health() Health {
 		h.Live = false
 	}
 	h.OK = h.Live && refreshed
+	h.Agents = f.agentCounts()
 	return h
 }
 

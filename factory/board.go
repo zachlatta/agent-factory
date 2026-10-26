@@ -35,7 +35,7 @@ const stallMinutes = 20 // running with no activity this long = stalled
 // finished and he has not looked yet. Email agents already answered him by email, scheduled runs
 // are routine, and closed sessions have nothing left to do, so those count as done.
 func Derive(a Agent) string {
-	if a.archived() {
+	if a.gone() {
 		return "landed"
 	}
 	if st := a.L(labelStage); validStage(st) {
@@ -132,6 +132,10 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Rounds:    Rounds{Plan: atoi(a.L(labelPlanRounds)), Code: atoi(a.L(labelCodeRounds))},
 			CreatedAt: iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
 			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != ""}
+		if a.parked() {
+			c.ArchivedAt, c.Parked = "", iso(a.ArchivedAt)
+			c.Flags = append(c.Flags, parkedFlag)
+		}
 		if c.Title == "" {
 			c.Title = "(untitled)"
 		}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Host load · Factory</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#1f2328;background:#f6f8fa}body{margin:0}header,main{max-width:1000px;margin:auto;padding:20px}a{color:#0969da}h1{margin:16px 0 8px;font-size:28px}p{line-height:1.5}.muted{color:#59636e;font-size:14px}#hostStatus{min-height:1.5em}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.metric{background:#fff;border:1px solid #d1d9e0;border-radius:10px;padding:18px;min-width:0}.metric h3{font-size:16px;margin:0 0 10px}.host{margin-bottom:28px}.host h2{font-size:20px;margin:0 0 4px}.hnote{margin:0 0 12px}.hnote[data-failed=true]{color:#b42318}.value{font-size:28px;font-weight:650;font-variant-numeric:tabular-nums}.detail{min-height:3em;font-size:14px;color:#59636e;line-height:1.5;margin:8px 0}svg{display:block;width:100%;height:80px;background:#f6f8fa;border-radius:4px}polyline{fill:none;stroke:#0969da;stroke-width:2;vector-effect:non-scaling-stroke}.key{display:flex;justify-content:space-between;font-size:12px;color:#59636e;margin-top:5px}#hostStatus[data-failed=true]{color:#b42318}polyline.memory{stroke:#8250df}@media(max-width:600px){header,main{padding:14px}.metrics{grid-template-columns:1fr}h1{font-size:24px}.metric{padding:14px}}
+:root{font-family:system-ui,sans-serif;color:#1f2328;background:#f6f8fa}body{margin:0}header,main{max-width:1000px;margin:auto;padding:20px}a{color:#0969da}h1{margin:16px 0 8px;font-size:28px}p{line-height:1.5}.muted{color:#59636e;font-size:14px}#hostStatus{min-height:1.5em}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.metric{background:#fff;border:1px solid #d1d9e0;border-radius:10px;padding:18px;min-width:0}.metric h3{font-size:16px;margin:0 0 10px}.host{margin-bottom:28px}.host h2{font-size:20px;margin:0 0 4px}.hnote{margin:0 0 12px}.hnote[data-failed=true]{color:#b42318}.value{font-size:28px;font-weight:650;font-variant-numeric:tabular-nums}.detail{min-height:3em;font-size:14px;color:#59636e;line-height:1.5;margin:8px 0}svg{display:block;width:100%;height:80px;background:#f6f8fa;border-radius:4px}polyline{fill:none;stroke:#0969da;stroke-width:2;vector-effect:non-scaling-stroke}.key{display:flex;justify-content:space-between;font-size:12px;color:#59636e;margin-top:5px}#hostStatus[data-failed=true]{color:#b42318}polyline.memory{stroke:#8250df}@media(max-width:600px){header,main{padding:14px}.metrics{grid-template-columns:1fr}h1{font-size:24px}.metric{padding:14px}}#agents{margin-top:16px}#agentCards{width:100%;font-size:14px;border-collapse:collapse}#agentCards td{padding:4px 6px;border-top:1px solid #d1d9e0}
 </style>
 </head>
 <body>
@@ -16,7 +16,33 @@
 <div id="hosts"></div>
 <p class="muted">Refreshes every 2 seconds. Trends keep up to 5 minutes of samples while this page is open and reset on reload. Gaps indicate unavailable samples. Load counts running tasks and tasks waiting for disk; sustained load above the CPU count can indicate contention.</p>
 <p class="muted">RAM used is total minus available, so reclaimable cache counts as available; on macOS, available is free, inactive and speculative pages, an estimate. Disk shows each host's home filesystem, not disk activity. Reserved disk space can make used plus available smaller than total.</p>
+<section class="metric" id="agents"><h2>Paseo agents</h2><div class="value" id="agentsValue">—</div><p class="detail" id="agentsDetail">Loading agent counts</p><table id="agentCards"></table></section>
+<p class="muted">Each idle agent stays loaded until it is archived. The factory archives Done cards and applied reviewers, and parks Needs Zach cards idle past the limit: a parked card is archived but keeps its column, and a reply wakes it.</p>
 </main>
+<script>
+(()=>{
+  const $=id=>document.getElementById(id);
+  async function load(){
+    try{
+      const r=await fetch('/api/health',{cache:'no-store'});const a=(await r.json()).agents;if(!a)return;
+      $('agentsValue').textContent=`${a.live} live · ${a.idle} idle`;
+      const kinds=Object.entries(a.byKind||{}).map(([k,n])=>`${n} ${k}`).join(', ');
+      let d=`${a.running} running, ${a.parked} parked. ${kinds}. Parks Needs Zach cards idle ${a.idleTTL}, or the longest idle while over ${a.idleCap} idle.`;
+      if(a.lastReap)d+=` Last reap ${new Date(a.lastReap.at).toLocaleTimeString()}: ${(a.lastReap.archived||[]).length} archived, ${(a.lastReap.parked||[]).length} parked${(a.lastReap.errors||[]).length?`, ${a.lastReap.errors.length} failed`:''}.`;
+      $('agentsDetail').textContent=d;
+      const t=$('agentCards');t.replaceChildren();
+      for(const c of a.cards){
+        const tr=t.insertRow();
+        tr.insertCell().textContent=c.title;
+        tr.insertCell().textContent=c.parked?'parked':c.stage;
+        tr.insertCell().textContent=`${c.live} live, ${c.idle} idle`;
+        tr.insertCell().textContent=c.idleMin?`idle ${c.idleMin} min`:'';
+      }
+    }catch(e){$('agentsDetail').textContent='Agent counts unavailable'}
+  }
+  load();setInterval(load,15000);
+})();
+</script>
 <script src="/host-metrics.js" defer></script>
 </body>
 </html>
