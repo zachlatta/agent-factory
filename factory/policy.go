@@ -937,6 +937,9 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	}
 	f.markDepLanded(a)
 	f.tickDelegate(a, now)
+	if landedWaiting(a) && (a.stopped() || a.parked()) {
+		return f.recheckLanded(a)
+	}
 	if !a.stopped() {
 		return nil
 	}
@@ -1010,12 +1013,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if err != nil {
 			f.logf("%s landing reply not read: %v", short(a.ID), err)
 		}
-		if note := remainingNote(reply); note != "" {
-			f.logf("%s landed with work left: %s", short(a.ID), note)
-			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note, labelLandedVerified: "1"})
-		}
-		f.logf("%s finished landing", short(a.ID))
-		return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "landed", labelLandedVerified: "1"})
+		return f.landed(a, c, reply)
 	case a.L(labelStage) == "zach" && isDepAskNote(a.L(labelNote)) && a.L(labelWaitsOn) != "" &&
 		depState(f.agents(), a, a.L(labelWaitsOn)) == depLanded:
 		return f.tickHeld(a, c)

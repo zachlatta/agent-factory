@@ -53,6 +53,10 @@ const (
 // It survives follow-up work and closure.
 const labelLandedVerified = "landed-verified"
 
+// labelRemainingChecked marks a landed card in Needs Zach whose last reply was read for NEEDS FROM ZACH
+// (remaining.go): it needs Zach, so it is not read again.
+const labelRemainingChecked = "remaining-checked"
+
 // labelArg is the `paseo --label` value that sets factory label k to v.
 // labelArg is a factory label for `paseo --label`. Paseo reads --label as comma-separated k=v pairs,
 // so a comma in a value would split it and fail the whole update: commas become semicolons.

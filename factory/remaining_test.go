@@ -104,3 +104,132 @@ func TestLandingRuleIsNotTheAnswer(t *testing.T) {
 		t.Errorf("labels = %v", l)
 	}
 }
+
+func TestLandedNext(t *testing.T) {
+	const nothing = "DECISION: None. It is landed and live.\nOVERVIEW: The fix is on main.\nNEEDS FROM ZACH: Nothing.\n\n"
+	for _, tc := range []struct {
+		name, reply, stage, note string
+		followUp                 []string
+	}{
+		{"none", nothing + "REMAINING: none", "landed", "landed", nil},
+		{"no line", nothing + "Landed.", "zach", "landed; did not say what remains", nil},
+		{"nothing needed, agent work left", nothing + "REMAINING:\n- agent: the phone-width check, was not run",
+			"landed", "landed; left for agents: the phone-width check was not run", []string{"the phone-width check, was not run"}},
+		{"nothing now", "DECISION: Stopped.\nNEEDS FROM ZACH: Nothing now.\n\nREMAINING:\n- retry the drill",
+			"landed", "landed; left for agents: retry the drill", []string{"retry the drill"}},
+		{"nothing for this fix", "DECISION: Landed.\nNEEDS FROM ZACH: nothing for this fix.\n\nREMAINING: confirm the land prompt",
+			"landed", "landed; left for agents: confirm the land prompt", []string{"confirm the land prompt"}},
+		{"none in bold", "**DECISION:** Landed.\n**NEEDS FROM ZACH:** **None.**\n\nREMAINING:\n- Agent: rerun the check",
+			"landed", "landed; left for agents: rerun the check", []string{"rerun the check"}},
+		{"a real ask", "DECISION: Save the admin login.\nNEEDS FROM ZACH: Save the admin login in the vault.\n\nREMAINING:\n- rerun the videos",
+			"zach", "landed; still to do: rerun the videos", nil},
+		{"nothing now but a login", "DECISION: Landed.\nNEEDS FROM ZACH: Nothing now, but please log in to the admin page.\n\nREMAINING:\n- rerun the videos",
+			"zach", "landed; still to do: rerun the videos", nil},
+		{"a Zach item", nothing + "REMAINING:\n- agent: rerun the check\n- Zach: set the billing limit",
+			"zach", "landed; still to do: agent: rerun the check; Zach: set the billing limit", nil},
+		{"a question", nothing + "QUESTION: Rerun it now?\n- Yes (recommended)\n- No\n\nREMAINING:\n- rerun it",
+			"zach", "landed; still to do: rerun it", nil},
+		{"no overview", "Landed.\nREMAINING:\n- rerun the check", "zach", "landed; still to do: rerun the check", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stage, note, followUp := landedNext(tc.reply)
+			if stage != tc.stage || note != tc.note || !reflect.DeepEqual(followUp, tc.followUp) {
+				t.Errorf("landedNext = %q, %q, %q; want %q, %q, %q", stage, note, followUp, tc.stage, tc.note, tc.followUp)
+			}
+		})
+	}
+}
+
+// The rule asks agents to run their own checks, name who does each leftover, and keep NEEDS FROM ZACH
+// in step with it.
+func TestRemainingRuleNamesWhoDoesWhatIsLeft(t *testing.T) {
+	for _, want := range []string{"Zach:", "agent:", "NEEDS FROM ZACH", "Run every check"} {
+		if !strings.Contains(remainingRule, want) {
+			t.Errorf("remainingRule lacks %q: %s", want, remainingRule)
+		}
+	}
+}
+
+func TestLandingNeedsNothingGoesToDone(t *testing.T) {
+	const reply = "DECISION: None. It is landed and live.\nNEEDS FROM ZACH: Nothing.\n\nLanded abc1234.\nREMAINING:\n- agent: the phone-width check was not run"
+	for _, tc := range []struct {
+		name, title string
+		ideas       int
+	}{
+		{"files a follow-up", "Card summaries load fast", 1},
+		{"a follow-up files none", "Follow up on landed abcdef1: Card summaries load fast", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelTier: "risky"})
+			c.Cwd, c.Title = t.TempDir(), tc.title
+			f, p := newTestFactory(t, c)
+			f.Git = func(context.Context, string, ...string) error { return nil }
+			p.logs["c1"] = reply
+			f.Tick()
+			l := p.labels("c1")
+			if l[labelStage] != "landed" || l[labelNote] != "landed; left for agents: the phone-width check was not run" {
+				t.Errorf("labels = %v", l)
+			}
+			ideas := f.ideas.List()
+			if len(ideas) != tc.ideas {
+				t.Fatalf("ideas = %+v", ideas)
+			}
+			if tc.ideas == 1 {
+				i := ideas[0]
+				if !strings.HasPrefix(i.Title, "Follow up on landed c1: ") || i.Tier != "risky" || i.Repo != "example/desk" ||
+					!strings.Contains(i.Request, "the phone-width check was not run") {
+					t.Errorf("idea = %+v", i)
+				}
+			}
+		})
+	}
+}
+
+// Cards that landed before this rule and wait in Needs Zach are read once: those that need nothing
+// from Zach go to Done, the rest are marked checked and not read again.
+func TestLandedCardsInNeedsZachAreCheckedOnce(t *testing.T) {
+	needsNothing := "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nREMAINING:\n- the phone-width check was not run"
+	realAsk := "DECISION: Save the login.\nNEEDS FROM ZACH: Save the admin login in the vault.\n\nREMAINING:\n- rerun the videos"
+	waiting := func(id string) Agent {
+		return card(id, map[string]string{labelStage: "zach", labelLandedVerified: "1", labelSince: ago(time.Hour),
+			labelNote: "landed; still to do: x"})
+	}
+	free, ask := waiting("c1"), waiting("c2")
+	parked := waiting("c3")
+	parked.ArchivedAt, parked.Labels[labelPrefix+labelParked] = t0.Add(-time.Minute), "1"
+	replied := card("c4", map[string]string{labelStage: "building", labelAutoReview: "code", labelLandedVerified: "1",
+		labelSince: ago(time.Minute), labelNote: "landed; still to do: x"})
+	replied.Status = "running"
+	checked := waiting("c5")
+	checked.Labels[labelPrefix+labelRemainingChecked] = "1"
+	f, p := newTestFactory(t, free, ask, parked, replied, checked)
+	for id, text := range map[string]string{"c1": needsNothing, "c2": realAsk, "c3": needsNothing, "c4": needsNothing, "c5": needsNothing} {
+		storeLog(t, f, p, id, text)
+	}
+	f.Tick()
+	for _, id := range []string{"c1", "c3"} {
+		if got := p.labels(id)[labelStage]; got != "landed" {
+			t.Errorf("%s stage = %q, want landed (%v)", id, got, p.labels(id))
+		}
+	}
+	for _, id := range []string{"c4", "c5"} { // replied to, or read before: untouched
+		if l := p.labels(id); len(l) != 0 {
+			t.Errorf("%s changed: %v", id, l)
+		}
+	}
+	if l := p.labels("c1"); l[labelNote] != "landed; left for agents: the phone-width check was not run" {
+		t.Errorf("c1 note = %q", l[labelNote])
+	}
+	if l := p.labels("c2"); l[labelRemainingChecked] != "1" || l[labelStage] != "" || l[labelNote] != "" {
+		t.Errorf("c2 labels = %v", l)
+	}
+	if p.called("send", "c3") {
+		t.Error("parked card woken")
+	}
+	if v, ok := p.labels("c3")[labelParked]; !ok || v != "" {
+		t.Errorf("c3 park not dropped: %v", p.labels("c3"))
+	}
+	if n := len(f.ideas.List()); n != 2 {
+		t.Errorf("ideas = %d, want 2 (c1 and c3)", n)
+	}
+}

@@ -86,7 +86,12 @@ The planner (the "Fellow") first picks a track:
   left" or "Landed: did it finish?", and emailed like any other wait): reply to send the agent on, or
   mark it Done. REMAINING lists only this card's own request: another card's work, a problem the
   change did not cause (an expired login, an unrelated failing test) and follow-ups go in the summary
-  or become ideas, so they never hold a finished card. A landing whose commits differ from the
+  or become ideas, so they never hold a finished card. Each item starts with who must do it, `Zach:`
+  or `agent:`. When the message's `NEEDS FROM ZACH:` says nothing (and names no ask), it has no
+  question and no item is Zach's, the card goes to Done instead, with the list in its note
+  (`landed; left for agents: ...`), and the list is filed as one idea, "Follow up on landed <id>: ..."
+  (a card started from such an idea files none). Landed cards already waiting with work left are
+  read once the same way (`factory.remaining-checked`). A landing whose commits differ from the
   reviewed ones waits as "Landed something other than what was reviewed".
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
   the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
