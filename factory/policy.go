@@ -106,7 +106,7 @@ var persona = map[string]string{
 func init() { persona["land"], rubric["land"] = persona["code"], rubric["code"] }
 
 var rubric = map[string]string{
-	"plan": `Check the plan (the builder's latest messages) against Zach's request (its first message):
+	"plan": `Check the plan (the builder's latest messages) against Zach's request and follow-ups (section below):
 - Does it solve what Zach actually asked, not a nearby problem?
 - Diagnosis: is the cause or approach grounded in evidence the agent looked at?
 - Files, tests, risks and open questions named? Missing facts recorded as questions, not guessed?
@@ -114,7 +114,7 @@ var rubric = map[string]string{
 - Cheaper or safer approach available?
 - Refactor or cleanup: does it cover the whole app (rule below)?
 - Tier: is the builder's TIER right? Set your own.`,
-	"code": `Check the work against Zach's request (the builder's first message) and its plan if any:
+	"code": `Check the work against Zach's request and follow-ups (section below) and its plan if any:
 - Read the diff: ` + "`git -C <cwd> log --oneline origin/main..HEAD`, `git -C <cwd> diff origin/main...HEAD`" + `
   (the worktree was clean when this review started: the committed work is what lands). If the work already
   landed, find its commits on origin/main.
@@ -164,6 +164,8 @@ Read the builder's whole conversation first: `+"`paseo logs %s --tail 200`"+`.
 
 %s
 
+%s
+
 Rules:
 - Read-only. Do not edit, commit, push, land, send email, create PDW mutations, or message the builder.
   Use a scratch copy (/tmp) if you need to try something.
@@ -179,7 +181,27 @@ Rules:
 End your final message with exactly two lines:
 TIER: <low|risky|architecture>
 VERDICT: <approve|nits|changes|escalate|close>
-`, persona[kind], c.Title, c.ID, c.Host, cwd, c.Repo, branch, c.ID, r, tierRules, wholeAppRule, questionRule)
+`, persona[kind], c.Title, c.ID, c.Host, cwd, c.Repo, branch, c.ID, requestSection(c.Request), r, tierRules, wholeAppRule, questionRule)
+}
+
+// requestSection shows reviewers Zach's request and his follow-ups (see peers.go).
+func requestSection(r *CardRequest) string {
+	b := []string{"Zach's request and follow-ups (newest last; a follow-up overrides the first request where they conflict):"}
+	if r == nil || (r.Base == "" && len(r.FollowUps) == 0) {
+		return b[0] + "\nNot found in the session file: read the builder's first message and any later messages from Zach."
+	}
+	if r.Base != "" {
+		b = append(b, "Request:\n"+truncWords(r.Base, reviewBlockCap))
+	}
+	fus := r.FollowUps
+	if n := len(fus) - reviewFollowUpCap; n > 0 {
+		b = append(b, fmt.Sprintf("(%d earlier follow-ups not shown: they are in the builder's conversation.)", n))
+		fus = fus[n:]
+	}
+	for _, fu := range fus {
+		b = append(b, "Follow-up ("+fu.Date+"):\n"+truncWords(fu.Text, reviewBlockCap))
+	}
+	return strings.Join(b, "\n\n")
 }
 
 // decidedRule is added to reviews of a card where Zach accepted the builder's recommendations.
@@ -585,6 +607,10 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 	}
 	if c.Cwd != "" {
 		args = append(args, "--cwd", c.Cwd)
+	}
+	if a, ok := f.agentOK(c.ID); ok && c.Request == nil {
+		r := f.cardRequest(a)
+		c.Request = &r
 	}
 	prompt := strings.ReplaceAll(ReviewPrompt(c, kind, f.cfg.Port, vis), "<errands>", f.errandsName())
 	if f.guarded(c.Repo) {

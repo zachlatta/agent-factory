@@ -1,11 +1,17 @@
 package factory
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/mail"
+	"os"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,21 +37,22 @@ var peerStages = map[string]bool{"plan": true, "plan-review": true, "building": 
 	"zach": true, "landing": true}
 
 type Peer struct {
-	ID       string   `json:"id"`
-	Short    string   `json:"short"`
-	Title    string   `json:"title"`
-	Repo     string   `json:"repo"`
-	Stage    string   `json:"stage"`
-	Tier     string   `json:"tier,omitempty"`
-	Status   string   `json:"status"`
-	Source   string   `json:"source"`
-	StageMin int      `json:"inStageMinutes"` // since its last move (factory.since), else since it started
-	Request  string   `json:"request,omitempty"`
-	Files    []string `json:"files"`
-	FilesErr string   `json:"filesError,omitempty"` // git failed: files unknown
-	Overlap  []string `json:"overlap,omitempty"`    // files shared with the asking card
-	Head     string   `json:"head,omitempty"`       // done cards: short HEAD of the worktree
-	DoneAt   string   `json:"doneAt,omitempty"`
+	ID        string   `json:"id"`
+	Short     string   `json:"short"`
+	Title     string   `json:"title"`
+	Repo      string   `json:"repo"`
+	Stage     string   `json:"stage"`
+	Tier      string   `json:"tier,omitempty"`
+	Status    string   `json:"status"`
+	Source    string   `json:"source"`
+	StageMin  int      `json:"inStageMinutes"`    // since its last move (factory.since), else since it started
+	Request   string   `json:"request,omitempty"` // the request, then the follow-up count and the newest one
+	FollowUps []string `json:"followUps,omitempty"`
+	Files     []string `json:"files"`
+	FilesErr  string   `json:"filesError,omitempty"` // git failed: files unknown
+	Overlap   []string `json:"overlap,omitempty"`    // files shared with the asking card
+	Head      string   `json:"head,omitempty"`       // done cards: short HEAD of the worktree
+	DoneAt    string   `json:"doneAt,omitempty"`
 }
 
 type PeerIdea struct {
@@ -72,12 +79,14 @@ type peerFiles struct {
 	err   string
 }
 
-// peerCache keeps git results per worktree (peerFilesTTL) and each card's request (fixed for life).
+// peerCache keeps git results per worktree (peerFilesTTL) and each card's request, which is read
+// again only as far as its session file grew.
 type peerCache struct {
-	mu      sync.Mutex
-	files   map[string]peerFiles
-	heads   map[string]peerFiles
-	request map[string]string
+	mu        sync.Mutex
+	files     map[string]peerFiles
+	heads     map[string]peerFiles
+	request   map[string]*peerRequest
+	bytesRead atomic.Int64 // session-file bytes read for requests (tests)
 }
 
 // Peers builds the brief for agent forID (may be empty or unknown); repo is used when forID is not
@@ -188,7 +197,8 @@ func (f *Factory) Peers(forID, repo string) Peers {
 // peer describes one card; withFiles reads its changed files from git.
 func (f *Factory) peer(c Card, a Agent, now time.Time, withFiles bool) Peer {
 	p := Peer{ID: c.ID, Short: c.Short, Title: c.Title, Repo: c.Repo, Stage: c.Stage, Tier: c.Tier, Status: c.Status,
-		Source: c.Source, Files: []string{}, Request: f.peerRequest(a)}
+		Source: c.Source, Files: []string{}}
+	p.Request, p.FollowUps = f.cardRequest(a).brief()
 	moved := parseTime(a.L(labelSince))
 	if moved.IsZero() {
 		moved = a.CreatedAt
@@ -280,55 +290,231 @@ func (f *Factory) peerHead(cwd string, now time.Time) string {
 	return head
 }
 
-// peerRequest is Zach's request from a board card's first message (the Fellow prompt's "Zach's
-// request:" block), cut to peerRequestCap; "" for other cards, whose title says what they do.
-func (f *Factory) peerRequest(a Agent) string {
+// The blocks the email dispatcher writes into an email card's prompts, a contract with it: see
+// README "Prompt blocks parsed from email cards". Each is a whole line.
+const (
+	boardHeader    = "Zach's request:"          // the Fellow prompt (newCardPrompt)
+	emailHeader    = "Zach's email:"            // the first prompt of an email card
+	followUpPrefix = "Zach's follow-up email (" // + RFC 5322 date + followUpSuffix: a steered follow-up
+	followUpSuffix = "):"
+	emailEnd       = "(end of Zach's email)" // closes either email block
+	subjectLine    = "- Subject: "           // older email cards: the subject is the request
+)
+
+const (
+	reviewBlockCap    = 4000 // characters of each block in a reviewer prompt
+	reviewFollowUpCap = 8    // newest follow-ups in a reviewer prompt
+)
+
+// FollowUp is one of Zach's follow-up emails: its date header and his words.
+type FollowUp struct{ Date, Text string }
+
+// CardRequest is Zach's request for a card and his follow-ups, oldest first.
+type CardRequest struct {
+	Base      string
+	FollowUps []FollowUp
+}
+
+// brief is the request on one line for /api/peers (each part cut to peerRequestCap, the newest
+// follow-up always shown) and each follow-up on one line.
+func (r CardRequest) brief() (string, []string) {
+	line := func(s string) string { return truncWords(strings.Join(strings.Fields(s), " "), peerRequestCap) }
+	out := line(r.Base)
+	var fus []string
+	for _, fu := range r.FollowUps {
+		fus = append(fus, line(fu.Text))
+	}
+	if len(fus) > 0 {
+		tail := fmt.Sprintf("Follow-ups (%d), newest: %s", len(fus), fus[len(fus)-1])
+		if out == "" {
+			return tail, fus
+		}
+		out += " | " + tail
+	}
+	return out, fus
+}
+
+// peerRequest is one card's request read from its session file so far.
+type peerRequest struct {
+	mu     sync.Mutex
+	path   string
+	offset int64 // bytes of the file read, all whole lines
+	size   int64
+	mtime  time.Time
+	based  bool // the first user message has been seen
+	req    CardRequest
+}
+
+// cardRequest is Zach's request and follow-ups for agent a. A Claude session file is read once,
+// then only from where the last read stopped, so a new follow-up shows on the next call. Other
+// providers' files are read once (no follow-ups after that). Empty when there is no file yet.
+func (f *Factory) cardRequest(a Agent) CardRequest {
 	if a.ID == "" || a.SessionID == "" {
-		return ""
+		return CardRequest{}
 	}
 	pc := &f.peerCache
 	pc.mu.Lock()
-	if r, ok := pc.request[a.ID]; ok {
-		pc.mu.Unlock()
-		return r
-	}
-	pc.mu.Unlock()
-	r, ok := firstRequest(f.cfg.Home, a)
-	if !ok {
-		return "" // no session file yet: try again next time
-	}
-	pc.mu.Lock()
 	if pc.request == nil {
-		pc.request = map[string]string{}
+		pc.request = map[string]*peerRequest{}
 	}
-	pc.request[a.ID] = r
+	e := pc.request[a.ID]
+	if e == nil {
+		e = &peerRequest{}
+		pc.request[a.ID] = e
+	}
 	pc.mu.Unlock()
-	return r
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if a.Provider != "claude" {
+		if !e.based {
+			e.readOnce(f.cfg.Home, a)
+		}
+		return e.copy()
+	}
+	id := nativeSessionID(a.SessionID)
+	if id == "" {
+		return CardRequest{}
+	}
+	if e.path == "" {
+		e.path = claudePath(f.cfg.Home, a.Cwd, id)
+	}
+	if e.path != "" {
+		e.update(&pc.bytesRead)
+	}
+	return e.copy()
 }
 
-// firstRequest reads the first user message of the agent's session file. ok is false when the file
-// or the message is not there yet. The result is cached, so the file is read once per card.
-func firstRequest(home string, a Agent) (string, bool) {
+func (e *peerRequest) copy() CardRequest {
+	return CardRequest{Base: e.req.Base, FollowUps: append([]FollowUp(nil), e.req.FollowUps...)}
+}
+
+// readOnce reads a non-Claude session the old way, whole.
+func (e *peerRequest) readOnce(home string, a Agent) {
 	res, err := ReadTranscript(home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
 	if err != nil || res.Fallback {
-		return "", false
+		return
 	}
-	for _, e := range res.Events {
-		if e.Kind == "user" && strings.TrimSpace(e.Text) != "" {
-			return requestOf(e.Text), true
-		}
+	for _, ev := range res.Events {
+		e.take(ev)
 	}
-	return "", false
 }
 
-// requestOf cuts Zach's request out of a Fellow prompt, on one line, or "" if it is not one.
-func requestOf(prompt string) string {
-	_, rest, ok := strings.Cut(prompt, "Zach's request:\n")
-	if !ok {
-		return ""
+// update reads the lines added to the session file since the last call.
+func (e *peerRequest) update(read *atomic.Int64) {
+	st, err := os.Stat(e.path)
+	if err != nil {
+		return
 	}
-	rest, _, _ = strings.Cut(rest, "\n\nWork in this repo")
-	return truncWords(strings.Join(strings.Fields(rest), " "), peerRequestCap)
+	if st.Size() < e.offset { // replaced: start again
+		e.offset, e.size, e.mtime, e.based, e.req = 0, 0, time.Time{}, false, CardRequest{}
+	}
+	if st.Size() == e.size && st.ModTime().Equal(e.mtime) {
+		return
+	}
+	fh, err := os.Open(e.path)
+	if err != nil {
+		return
+	}
+	defer fh.Close()
+	if _, err := fh.Seek(e.offset, io.SeekStart); err != nil {
+		return
+	}
+	r := bufio.NewReaderSize(fh, 1<<16)
+	n := 0
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			break // EOF: a partial last line waits for the next call
+		}
+		e.offset += int64(len(line))
+		read.Add(int64(len(line)))
+		n++
+		// after the first message only follow-up blocks matter: skip decoding every other line
+		if e.based && !bytes.Contains(line, []byte("follow-up email (")) {
+			continue
+		}
+		for _, ev := range claudeLineEvents(n, line) {
+			e.take(ev)
+		}
+	}
+	e.size, e.mtime = st.Size(), st.ModTime()
+}
+
+// take adds one transcript event: the first user message gives the request, later ones the
+// follow-ups. Only user messages count, never tool results.
+func (e *peerRequest) take(ev Event) {
+	if ev.Kind != "user" || strings.TrimSpace(ev.Text) == "" {
+		return
+	}
+	if !e.based {
+		e.based = true
+		e.req.Base = requestOf(ev.Text)
+		return
+	}
+	e.req.FollowUps = append(e.req.FollowUps, followUpsOf(ev.Text)...)
+}
+
+// requestOf cuts Zach's request out of a card's first prompt: the board's "Zach's request:" block,
+// else the email's "Zach's email:" block, else (older email cards) the subject; "" if none.
+func requestOf(prompt string) string {
+	lines := strings.Split(prompt, "\n")
+	for i, l := range lines {
+		if l == boardHeader {
+			rest, _, _ := strings.Cut(strings.Join(lines[i+1:], "\n"), "\n\nWork in this repo")
+			return strings.TrimSpace(rest)
+		}
+	}
+	for i, l := range lines {
+		if l == emailHeader {
+			if text, _, ok := blockEnd(lines[i+1:]); ok {
+				return text
+			}
+		}
+	}
+	for _, l := range lines {
+		if s, ok := strings.CutPrefix(l, subjectLine); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+// followUpsOf is every follow-up block in one message, in order. A header counts only as a whole
+// line with a date that parses, and only with its end line, so quoted contract text is no block.
+func followUpsOf(msg string) []FollowUp {
+	var out []FollowUp
+	lines := strings.Split(msg, "\n")
+	for i := 0; i < len(lines); i++ {
+		d, ok := strings.CutPrefix(lines[i], followUpPrefix)
+		if !ok {
+			continue
+		}
+		if d, ok = strings.CutSuffix(d, followUpSuffix); !ok {
+			continue
+		}
+		if _, err := mail.ParseDate(d); err != nil {
+			continue
+		}
+		text, end, ok := blockEnd(lines[i+1:])
+		if !ok {
+			continue
+		}
+		if text != "" {
+			out = append(out, FollowUp{Date: d, Text: text})
+		}
+		i += end + 1
+	}
+	return out
+}
+
+// blockEnd is the text up to the emailEnd line and that line's index; ok is false when there is none.
+func blockEnd(lines []string) (string, int, bool) {
+	for j, l := range lines {
+		if l == emailEnd {
+			return strings.TrimSpace(strings.Join(lines[:j], "\n")), j, true
+		}
+	}
+	return "", 0, false
 }
 
 // Text is the brief as agents read it: plain lines, at most peerLineCap.

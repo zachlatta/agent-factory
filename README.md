@@ -61,6 +61,24 @@ An email dispatcher (not in this repo) can start agents as cards with labels
 `factory.source=email|voice` and `gmail-thread=<id>`. Those cards follow the same tracks and
 report back in their email thread when they land or need a person.
 
+#### Prompt blocks parsed from email cards
+
+The email dispatcher writes Zach's own words into an email card's prompts in these blocks, and the
+factory reads them from the card's Claude session file to show the card's request and follow-ups
+(`/api/peers`, reviewer prompts; `factory/peers.go`). The same text is in the dispatcher's README.
+Change both or neither.
+
+- `Zach's email:` is the header line in the first prompt.
+- `Zach's follow-up email (<RFC 5322 date>):` is the header line in each steered follow-up.
+- `(end of Zach's email)` closes either block.
+- Between the header and the end line: Zach's own words, with the quoted history cut.
+
+Each line must be whole (from the start of a line, nothing after it), the date must parse, and a
+block without its end line is ignored, so text that only quotes this format is not a follow-up.
+Only user messages count, not tool output. An email card with no `Zach's email:` block (older
+cards, or an empty body) uses its `- Subject:` line. A follow-up overrides the first request where
+they conflict. Only Claude session files are read again as they grow.
+
 ## Public repos: secret scan and approval
 
 Repos listed in `FACTORY_GUARDED_REPOS` (default: this one) are public, so everything that lands

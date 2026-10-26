@@ -157,39 +157,51 @@ func scanLines(path string, after int, fn func(n int, line []byte)) (int, error)
 
 // readClaude reads ~/.claude/projects/<cwd>/<session>.jsonl.
 func readClaude(home, cwd, id string, after int) (Transcript, bool, error) {
-	dir := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
-	path := firstFile(filepath.Join(home, ".claude/projects", dir, id+".jsonl"),
-		filepath.Join(home, ".claude/projects/*", id+".jsonl"))
+	path := claudePath(home, cwd, id)
 	if path == "" {
 		return Transcript{}, false, nil
 	}
 	res := Transcript{Events: []Event{}, Path: path}
 	next, err := scanLines(path, after, func(n int, line []byte) {
-		var d struct {
-			Type, Timestamp     string
-			IsSidechain, IsMeta bool
-			Message             struct{ Content json.RawMessage }
-		}
-		if json.Unmarshal(line, &d) != nil || (d.Type != "user" && d.Type != "assistant") || d.IsSidechain {
-			return
-		}
-		var blocks []map[string]any
-		var s string
-		if json.Unmarshal(d.Message.Content, &s) == nil {
-			blocks = []map[string]any{{"type": "text", "text": s}}
-		} else {
-			json.Unmarshal(d.Message.Content, &blocks)
-		}
-		for _, b := range blocks {
-			ev, keep := event(d.Type, d.IsMeta, b)
-			if keep {
-				ev.Ts, ev.Line = d.Timestamp, n
-				res.Events = append(res.Events, ev)
-			}
-		}
+		res.Events = append(res.Events, claudeLineEvents(n, line)...)
 	})
 	res.Next = next
 	return res, true, err
+}
+
+// claudePath is the Claude session file for id, or "" when there is none.
+func claudePath(home, cwd, id string) string {
+	dir := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
+	return firstFile(filepath.Join(home, ".claude/projects", dir, id+".jsonl"),
+		filepath.Join(home, ".claude/projects/*", id+".jsonl"))
+}
+
+// claudeLineEvents are the events of line n of a Claude session file.
+func claudeLineEvents(n int, line []byte) []Event {
+	var d struct {
+		Type, Timestamp     string
+		IsSidechain, IsMeta bool
+		Message             struct{ Content json.RawMessage }
+	}
+	if json.Unmarshal(line, &d) != nil || (d.Type != "user" && d.Type != "assistant") || d.IsSidechain {
+		return nil
+	}
+	var blocks []map[string]any
+	var s string
+	if json.Unmarshal(d.Message.Content, &s) == nil {
+		blocks = []map[string]any{{"type": "text", "text": s}}
+	} else {
+		json.Unmarshal(d.Message.Content, &blocks)
+	}
+	var out []Event
+	for _, b := range blocks {
+		ev, keep := event(d.Type, d.IsMeta, b)
+		if keep {
+			ev.Ts, ev.Line = d.Timestamp, n
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
