@@ -223,7 +223,9 @@ Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/
 The decision and needs fields describe the concrete choice and its consequence; overview prose
 stays in details. Existing `QUESTION:` blocks provide up to four questions, with the recommendation
 first. Approval and recommendation require every question to be answered. Drop and Other do not.
-Select the action and press Submit once; Other sends typed
+Every action requires an explicit choice, including cards with only one action. Named reply choices
+keep their hints and recommendation. Send question answers through a reply choice; completion, retry,
+stop and drop refuse to discard filled answers or instructions. Select the action and press Submit once; Other sends typed
 instructions without approving. Drop still asks for confirmation. Emails retain their existing format.
 
 For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`

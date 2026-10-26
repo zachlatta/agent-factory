@@ -564,7 +564,8 @@ function askMarkdown(text, id){
   return template.innerHTML;
 }
 function decisionChoices(a){
-  const choices=a.actions.map((x,i)=>[x,i]).filter(([x])=>x.id!=='reply'&&x.id!=='pickrepo');
+  const choices=a.actions.map((x,i)=>[x,i]);
+  if((a.questions||[]).length&&!a.actions.some(x=>x.id==='reply')) choices.unshift([{id:'reply',label:'Send answers',hint:'Anything else? (optional)'},'answers']);
   if(!(a.questions||[]).length && a.yes==='say' && a.no==='say') {
     choices.unshift([{id:'send',label:'Yes',message:'Yes.'},'yes'],[{id:'send',label:'No',message:'No.'},'no']);
   }
@@ -586,15 +587,17 @@ function askHtml(c){
     <button class="opt ${picks[qi]==='o'?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},'o')">Other…</button></div>
     <input class="other" id="o-${c.id}-${qi}" aria-label="Other answer: ${esc(q.text)}" placeholder="Your own answer" style="display:${picks[qi]==='o'?'block':'none'}" oninput="askOpen.add('${c.id}')"></div>`).join('');
   const choices=decisionChoices(a);
-  const selected=askActions[c.id]??(choices.length===1?choices[0][1]:undefined);
-  const actionChoices=choices.length>1?choices.map(([x,i])=>`<button class="opt ${selected===i?'on':''}" data-action="${i}" onclick="askChoose('${c.id}',${typeof i==='string'?"'"+i+"'":i})">${esc(x.label)}${x.primary?' (recommended)':''}</button>`).join(''):choices.length?`<span>${esc(choices[0][0].label)}</span>`:'';
-  const other=selected==='other';
+  const selected=askActions[c.id];
+  const chosen=choices.find(([,i])=>i===selected)?.[0];
+  const actionChoices=choices.map(([x,i])=>`<button class="opt ${selected===i?'on':''}" data-action="${i}" onclick="askChoose('${c.id}',${typeof i==='string'?"'"+i+"'":i})">${esc(x.label)}${x.primary?' (recommended)':''}</button>`).join('');
+  const other=selected==='other', writing=other||chosen?.id==='reply';
+  const hint=chosen?.id==='reply'?(chosen.hint||'Message to the agent'):'What should the agent do?';
   return `<div class="ask" onclick="event.stopPropagation()"><div class="from">Original task</div>${request}${followups}
     <div class="from">Needs your input</div><div class="q">${esc(ov.decision||a.title)}</div><div class="needs">${esc(ov.needs||a.why)}</div>
     ${evidence?`<div class="evidence">${evidence}</div>`:''}${quiz}
     <div class="qq"><div class="opts actions">${actionChoices}<button class="opt ${other?'on':''}" data-action="other" onclick="askChoose('${c.id}','other')">Other…</button></div></div>
-    <textarea id="r-${c.id}" aria-label="Other instructions" placeholder="What should the agent do?" style="display:${other?'block':'none'}" oninput="askOpen.add('${c.id}')"></textarea>
-    ${c.routing?`<select id="p-${c.id}" aria-label="Other repo" style="display:${selected===a.actions.findIndex(x=>x.id==='pickrepo')?'block':'none'}">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select><button class="opt" data-action="${a.actions.findIndex(x=>x.id==='pickrepo')}" onclick="askChoose('${c.id}',${a.actions.findIndex(x=>x.id==='pickrepo')})">Other repo…</button>`:''}
+    <textarea id="r-${c.id}" aria-label="${other?'Other instructions':'Reply instructions'}" placeholder="${esc(hint)}" style="display:${writing?'block':'none'}" oninput="askOpen.add('${c.id}')"></textarea>
+    ${c.routing?`<select id="p-${c.id}" aria-label="Other repo" style="display:${selected===a.actions.findIndex(x=>x.id==='pickrepo')?'block':'none'}">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}
     <div class="btns"><button class="primary" onclick="askSubmit('${c.id}')">Submit</button></div>
     <details class="report" ontoggle="if(this.open)askOpen.add('${c.id}');else if(!askPicks['${c.id}']&&askActions['${c.id}']===undefined)askOpen.delete('${c.id}')"><summary>Full details</summary><div class="detail full">${ov.overview?`<p class="gist">${esc(ov.overview)}</p>`:''}${(a.report||a.detail)?askMarkdown(a.report||a.detail,c.id):''}</div><div class="why">${esc(a.title)} · ${esc(a.why)}</div><a href="t/${c.id}">Transcript</a></details></div>`;
 }
@@ -608,9 +611,13 @@ function askChoose(id, choice){
   askActions[id]=choice;askOpen.add(id);
   const card=document.querySelector(`.card[data-id="${id}"]`);if(!card)return;
   card.querySelectorAll('[data-action]').forEach(b=>b.classList.toggle('on',b.dataset.action===String(choice)));
-  const t=$('r-'+id);t.style.display=choice==='other'?'block':'none';if(choice==='other')t.focus();
-  const c=B.cards.find(x=>x.id===id),repo=$('p-'+id);
-  if(repo)repo.style.display=c.ask.actions[choice]?.id==='pickrepo'?'block':'none';
+  const c=B.cards.find(x=>x.id===id),x=decisionChoices(c.ask).find(([,i])=>i===choice)?.[0],repo=$('p-'+id);
+  const t=$('r-'+id),writing=choice==='other'||x?.id==='reply';
+  t.style.display=writing?'block':'none';
+  t.placeholder=x?.id==='reply'?(x.hint||'Message to the agent'):'What should the agent do?';
+  t.setAttribute('aria-label',choice==='other'?'Other instructions':'Reply instructions');
+  if(writing)t.focus();
+  if(repo)repo.style.display=x?.id==='pickrepo'?'block':'none';
 }
 function decisionAnswers(c,required=true){
   const p=askPicks[c.id]||{},out=[];
@@ -622,24 +629,29 @@ function decisionAnswers(c,required=true){
   return out.length?"Zach's answers:\n"+out.join('\n'):'';
 }
 function askSent(id){releaseKeyboard();askOpen.delete(id);delete $('grid').dataset.html;}
-function askDone(id,msg){askSent(id);delete askPicks[id];delete askActions[id];toast(msg);refresh();}
+function askDone(id,msg){const t=$('r-'+id);if(t)t.value='';askSent(id);delete askPicks[id];delete askActions[id];toast(msg);refresh();}
 async function askSubmit(id){
-  const c=B.cards.find(x=>x.id===id),a=c.ask;
-  const choices=decisionChoices(a);
-  const choice=askActions[id]??(choices.length===1?choices[0][1]:undefined);
+  const c=B.cards.find(x=>x.id===id),a=c.ask,choice=askActions[id];
   if(choice===undefined){toast('Choose what happens next');return;}
-  const x=choices.find(([,i])=>i===choice)?.[0]||a.actions[choice];
-  const bypass=choice==='other'||x?.id==='close';
-  const answers=decisionAnswers(c,!bypass);
-  if(answers===null){toast('Answer each question first');return;}
-  const body={id};if(answers)body.message=answers;
-  if(choice==='other'){
-    const text=$('r-'+id).value.trim();if(!text){toast('Write your instructions first');return;}
-    body.message=(answers?answers+'\n\n':'')+text;
+  const x=decisionChoices(a).find(([,i])=>i===choice)?.[0];
+  const text=($('r-'+id)?.value||'').trim(),partial=decisionAnswers(c,false);
+  const body={id};
+  if(choice==='other'||x?.id==='reply'){
+    if(!text&&!partial){toast('Write your instructions or answer the questions first');return;}
+    if(!text&&decisionAnswers(c)===null){toast('Answer each question first');return;}
+    body.message=(partial?partial+(text?'\n\n':''):'')+text;
     await post('send',body);askDone(id,'Instructions sent');return;
   }
   if(!x)return;
-  if(x.message)body.message=x.message;
+  const acceptsAnswers=x.id==='recommend'||x.id==='send'||(x.id==='approve'&&!c.routing&&!x.repo);
+  if(!acceptsAnswers&&(partial||text)){
+    toast('Choose a reply option to send your answers and instructions first');return;
+  }
+  if(acceptsAnswers){
+    const answers=decisionAnswers(c);if(answers===null){toast('Answer each question first');return;}
+    if(answers||text)body.message=[answers,text].filter(Boolean).join('\n\n');
+  }
+  if(x.message)body.message=[x.message,body.message].filter(Boolean).join('\n\n');
   if(x.id==='close'&&!confirm('Drop this card? The agent is archived.'))return;
   if(x.repo)body.repo=x.repo;
   if(x.id==='pickrepo')body.repo=$('p-'+id).value;

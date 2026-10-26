@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -65,6 +64,10 @@ func TestDecisionPreview(t *testing.T) {
 	add("stop-card", "Stop a waiting agent", map[string]string{labelStage: "zach"}, "Waiting on permission.")
 	agents[len(agents)-1].Status = "running"
 	agents[len(agents)-1].Pending = "permission"
+	add("done-question-card", "Finished question", map[string]string{labelStage: "zach"}, "DECISION: Which database?\nNEEDS FROM ZACH: Choose a database.\n\nQUESTION: Database?\n- Postgres\n- SQLite")
+	add("work-left-card", "Work remains", map[string]string{labelStage: "zach", labelNote: "landed; still to do: finish the check"}, "DECISION: Finish the remaining work?\nNEEDS FROM ZACH: Send instructions to continue.")
+	add("scan-card", "Scan stopped", map[string]string{labelStage: "zach", labelNote: "secret scan stopped"}, "DECISION: Fix the scan finding?\nNEEDS FROM ZACH: Tell the agent to fix the commit.")
+	add("escalated-card", "Answer an escalation", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}, "DECISION: Which store?\nNEEDS FROM ZACH: Choose or write instructions.\n\nQUESTION: Store?\n- Postgres\n- SQLite")
 	f.SetAgents(agents)
 	// Keep snapshots stable while fake actions run. No real runner or production data is used.
 	handler := f.Handler()
@@ -80,9 +83,15 @@ func TestDecisionPreview(t *testing.T) {
 				if f.cards[i].Ask == nil {
 					continue
 				}
+				if f.cards[i].ID == "done-question-card" {
+					f.cards[i].Ask.Actions = []Action{primary("done", "Got it, mark done")}
+				}
+				if f.cards[i].ID == "stop-card" {
+					f.cards[i].Ask.Actions = []Action{act("stop", "Stop it")}
+				}
 				task := "Simplify the sample decision screen."
 				if f.cards[i].ID == "plan-card" {
-					task += " " + strings.Repeat("Show the original request clearly and keep the choices easy to answer. ", 4)
+					task += " Keep the original request visible while making the action clear. Show relevant comparisons when available. Let the reader choose an option or send instructions. Keep the full report available without opening it automatically."
 				}
 				f.cards[i].Ask.Request = &CardRequest{Base: task, FollowUps: []FollowUp{{Text: "Keep the choice labels clear."}}}
 			}
