@@ -442,20 +442,36 @@ function render(){
   });
 }
 
+// latestReviews: begin
+// latestReviews keeps the newest reviewer of each kind; children arrive oldest first.
+function latestReviews(children){
+  const last = {};
+  children.forEach(k=>{ if(k.role==='reviewer') last[k.kind||''] = k; });
+  return Object.values(last);
+}
+// reviewLabel names a reviewer's round and verdict. The round counter only counts applied
+// verdicts, so a running reviewer is on the next round.
+function reviewLabel(k, rounds){
+  const running = k.status==='running' && !k.archived;
+  const n = ((k.kind && rounds[k.kind]) || 0) + (running && !k.verdict ? 1 : 0);
+  return (k.kind||'review') + (n ? ' round '+n : '') + (k.verdict ? ': '+k.verdict : running ? ' (running)' : '');
+}
+// latestReviews: end
 function cardHtml(c){
   const dot = c.archivedAt?'arch':c.status==='running'?'running':(c.flags.length?'attn':'');
   const v = c.verdict ? `<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>` : '';
   const note = c.note && !c.ask ? `<span class="flag note">${esc(c.note)}</span>` : '';
-  const r = (c.rounds.plan||c.rounds.code) ? `<span class="kid">rounds p${c.rounds.plan}/c${c.rounds.code}</span>` : '';
   let kids = c.children.filter(k=>k.role==='reviewer' || $('showKids').checked);
   const hidden = c.children.length - kids.length;
-  const kh = kids.slice(-6).map(k=>`<span class="kid ${k.role} ${k.status==='running'&&!k.archived?'running':''}">${k.role==='reviewer'?(k.kind||'')+' review'+(k.verdict?': '+esc(k.verdict):k.status==='running'?' (running)':''):esc((k.title||k.short).slice(0,22))}</span>`).join('');
+  const chip = (k, text) => `<span class="kid ${k.role} ${k.status==='running'&&!k.archived?'running':''}">${esc(text)}</span>`;
+  const kh = latestReviews(c.children).map(k=>chip(k, reviewLabel(k, c.rounds))).join('')
+    + kids.filter(k=>k.role!=='reviewer').slice(-6).map(k=>chip(k, (k.title||k.short).slice(0,22))).join('');
   return `<div class="card ${sel===c.id?'sel':''}" draggable="true" data-id="${c.id}">
     <div class="t"><span class="dot ${dot}"></span><span>${esc(c.title)}</span></div>
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${esc(c.host)} · ${esc(c.source)} · ${ago(c.lastActivityAt)}${hidden?` · ${hidden} sub-agent${hidden>1?'s':''}`:''}</div>
     <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
-    ${(kh||r)?`<div class="kids">${r}${kh}</div>`:''}
+    ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?askHtml(c):''}
   </div>`;
 }

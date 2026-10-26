@@ -2,6 +2,7 @@ package factory
 
 import (
 	"net/http/httptest"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -119,5 +120,50 @@ func TestBoardShowsLoadFailureAtPhoneWidth(t *testing.T) {
 	}
 	if !strings.Contains(page, `$('grid').innerHTML`) {
 		t.Error("a failed first load leaves #grid blank")
+	}
+}
+
+func TestBoardPageReviewChipsCollapse(t *testing.T) {
+	page := boardPage(t)
+	if strings.Contains(page, "rounds p") {
+		t.Error("cards still show the separate rounds chip")
+	}
+	if !strings.Contains(page, "latestReviews(c.children)") {
+		t.Error("cardHtml does not collapse reviewers with latestReviews")
+	}
+	// the panel still lists every child and both round counts
+	for _, want := range []string{
+		"['Sub-agents', c.children.map(",
+		"plan ${c.rounds.plan} · code ${c.rounds.code}",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("panel lost %q", want)
+		}
+	}
+	const begin, end = "// latestReviews: begin", "// latestReviews: end"
+	i, j := strings.Index(page, begin), strings.Index(page, end)
+	if i < 0 || j < i {
+		t.Fatal("no latestReviews markers in the page")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := page[i:j] + `
+const rv = (kind, status, verdict, archived) => ({role:'reviewer', kind, status, verdict, archived:!!archived});
+const labels = (kids, rounds) => latestReviews(kids).map(k => reviewLabel(k, rounds));
+console.log(JSON.stringify([
+  labels([rv('plan','closed','changes',1), rv('plan','closed','changes',1), rv('plan','closed','nits',1),
+          {role:'subagent', status:'running'}, rv('code','closed','nits',1)], {plan:3, code:1}),
+  labels([rv('plan','closed','changes',1), rv('plan','closed','nits',1), rv('plan','running','')], {plan:2, code:0}),
+  labels([rv('','closed','')], {plan:0, code:0}),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `[["plan round 3: nits","code round 1: nits"],["plan round 3 (running)"],["review"]]`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("labels = %s, want %s", got, want)
 	}
 }
