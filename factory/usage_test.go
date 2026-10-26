@@ -305,10 +305,84 @@ func TestReadAntigravityUsage(t *testing.T) {
 	}
 }
 
+// waitForAgentRefreshes joins work already started by /api/agents. Callers must
+// stop making API reads before waiting, since a read can start another refresh.
+func waitForAgentRefreshes(t *testing.T, f *Factory) {
+	t.Helper()
+	f.usageMu.Lock()
+	usageDone := f.usage.refreshing
+	f.usageMu.Unlock()
+	f.provMu.Lock()
+	providerDone := f.prov.refreshing
+	f.provMu.Unlock()
+	for _, refresh := range []struct {
+		name string
+		done <-chan struct{}
+	}{{"usage", usageDone}, {"provider", providerDone}} {
+		if refresh.done == nil {
+			continue
+		}
+		select {
+		case <-refresh.done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for %s refresh", refresh.name)
+		}
+	}
+}
+
+func TestUsageCacheWaitsForRefreshes(t *testing.T) {
+	for _, refresh := range []string{"provider", "usage"} {
+		t.Run(refresh, func(t *testing.T) {
+			f, p := newTestFactory(t)
+			release := make(chan struct{})
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+				waitForAgentRefreshes(t, f)
+			}()
+			if refresh == "provider" {
+				p.lsBlock = release
+			}
+			var usageCalls atomic.Int32
+			f.Usage = func(_ context.Context, provider string) AgentUsage {
+				usageCalls.Add(1)
+				if refresh == "usage" {
+					<-release
+				}
+				return unknownUsage()
+			}
+			f.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+			waitFor(t, "refresh started", func() bool {
+				return p.lsCalls.Load() > 0 && usageCalls.Load() > 0
+			})
+			done := make(chan struct{})
+			go func() {
+				waitForAgentRefreshes(t, f)
+				close(done)
+			}()
+			select {
+			case <-done:
+				t.Error("wait returned while refresh was blocked")
+			case <-time.After(25 * time.Millisecond):
+			}
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("wait did not return after refresh was released")
+			}
+		})
+	}
+}
+
 func TestUsageCacheAndAgentsAPI(t *testing.T) {
 	f, _ := newTestFactory(t)
 	now := t0
 	f.Now = func() time.Time { return now }
+	defer waitForAgentRefreshes(t, f)
 	var calls atomic.Int32
 	var pct atomic.Int32
 	pct.Store(80)
@@ -376,6 +450,7 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 	firstCalls := calls.Load()
 
 	// Within 5m TTL: cached (no new calls), and age updates dynamically from UpdatedAt.
+	waitForAgentRefreshes(t, f)
 	now = t0.Add(3 * time.Minute)
 	agents = callAPI()
 	if got := calls.Load(); got != firstCalls {
@@ -387,6 +462,7 @@ func TestUsageCacheAndAgentsAPI(t *testing.T) {
 
 	// Past 5m TTL: the read returns the stale values and kicks a background refresh;
 	// the new values replace them once it lands.
+	waitForAgentRefreshes(t, f)
 	now = t0.Add(2 * time.Hour)
 	pct.Store(65)
 	agents = callAPI()
