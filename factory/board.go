@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -99,16 +100,19 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 	}
 	children := map[string][]Agent{}
 	var tops []Agent
+	owner := cardOwners(agents, anchors)
 	for _, a := range agents {
-		switch parent := a.Labels["paseo.parent-agent-id"]; {
+		switch o, folded := owner[a.ID]; {
 		case anchors[a.ID]:
-		case a.L(labelRole) == "reviewer":
-			children[a.L(labelReviewOf)] = append(children[a.L(labelReviewOf)], a)
-		case parent != "" && byID[parent] && !anchors[parent]:
-			children[parent] = append(children[parent], a)
+		case folded:
+			children[o] = append(children[o], a)
 		default:
 			tops = append(tops, a)
 		}
+	}
+	running := map[string]bool{} // agents running now, for the sub-agent still running flag
+	for _, a := range agents {
+		running[a.ID] = a.Status == "running" && !a.archived()
 	}
 	// Ideas behind cards: started ones by their card, waiting ones in start order (oldest first).
 	fromIdea := map[string]*IdeaView{}
@@ -164,7 +168,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				c.Stage = "zach" // shown only, like a stall: nobody else answers the prompt
 			}
 		}
-		if a.Status == "running" && idle > stallMinutes*time.Minute {
+		if a.Status == "running" && idle > stallMinutes*time.Minute && !subagentActive(agents, a.ID, now) {
 			c.Flags = append(c.Flags, fmt.Sprintf("stalled %d min", int(idle.Minutes())))
 			if c.Labelled && !a.archived() {
 				c.Stage = "zach" // shown only: its labels keep the column, and it returns when activity resumes
@@ -195,11 +199,18 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			if role == "" {
 				role = "subagent"
 			}
-			ch := Child{ID: k.ID, Short: short(k.ID), Title: k.Title, Status: k.Status,
+			ch := Child{ID: k.ID, Short: short(k.ID), Title: k.Title, Model: k.Model, Status: k.Status,
 				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Verdict: k.L(labelVerdict)}
-			if ch.Blocked = blockedWhy(k, now); ch.Blocked != "" {
+			if ch.Model == "" {
+				ch.Model = k.Provider
+			}
+			if ch.Blocked = blockedWhy(agents, k, now); ch.Blocked != "" {
 				ch.Permission = k.Pending
 				c.Flags = append(c.Flags, role+" "+ch.Blocked)
+			} else if role == "subagent" && running[k.ID] && !running[k.Labels["paseo.parent-agent-id"]] &&
+				!slices.Contains(c.Flags, subagentRunningFlag) {
+				// the agent that started it stopped: it should have archived it first (delegateRule)
+				c.Flags = append(c.Flags, subagentRunningFlag)
 			}
 			c.Children = append(c.Children, ch)
 			if role == "reviewer" && k.Status == "running" && !k.archived() {
@@ -215,6 +226,47 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Source: "idea", Stage: "idea", Labelled: true, Flags: []string{}, Note: "from " + i.By, Tier: i.Tier,
 			Origin: "idea", CreatedAt: iso(i.CreatedAt), LastActivityAt: iso(i.CreatedAt), Children: []Child{},
 			Idea: ideaView(i, n+1)})
+	}
+	return out
+}
+
+// cardOwners maps each agent that folds into a card to that card's id: a reviewer to the card it
+// reviews, a sub-agent (paseo.parent-agent-id) to its parent's card, at any depth, so a reviewer's
+// own sub-agents fold into the card too. Top-level agents are not in the map. A sub-agent whose
+// parent is not listed (or is an anchor) is top-level; a reviewer is folded even when its card is not.
+func cardOwners(agents []Agent, anchors map[string]bool) map[string]string {
+	byID := map[string]Agent{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	up := func(a Agent) (string, bool) {
+		if a.L(labelRole) == "reviewer" {
+			return a.L(labelReviewOf), true
+		}
+		p := a.Labels["paseo.parent-agent-id"]
+		if _, ok := byID[p]; p != "" && ok && !anchors[p] {
+			return p, true
+		}
+		return "", false
+	}
+	out := map[string]string{}
+	for _, a := range agents {
+		o, ok := up(a)
+		if !ok || anchors[a.ID] {
+			continue
+		}
+		for depth := 0; depth < 10; depth++ { // bounded: a label loop cannot hang the board
+			next, ok := byID[o]
+			if !ok {
+				break
+			}
+			p, ok := up(next)
+			if !ok {
+				break
+			}
+			o = p
+		}
+		out[a.ID] = o
 	}
 	return out
 }

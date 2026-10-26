@@ -112,6 +112,28 @@ agent plus its reviewers and sub-agents), and the last reap; the `/host` page sh
   for Claude, every account `cswap` reports is listed by account number and email, with the
   active one marked (organization names and ids are not shown).
 
+### Sub-agents
+
+A card's agent and its reviewers may hand parts of their work to sub-agents, on any provider Paseo
+has available, so Opus can ask Codex, Gemini or Muse and the other way round (`factory/delegate.go`).
+
+- The Fellow and reviewer prompts list, for each available agent choice, the exact
+  `paseo run -d -q --provider …` command, its plan, remaining usage and where it sends the work. Run
+  from the agent's shell, `paseo run` labels the new agent with `paseo.parent-agent-id` and puts it in
+  the caller's workspace, so a sub-agent works in the card's worktree.
+- Agents wait with `paseo wait <id> --timeout 100` (inside Claude Code's 120-second shell limit),
+  read the answer with `paseo logs <id> --filter text --tail 1`, and archive each sub-agent once
+  answered. Before ending any turn they archive every sub-agent they started
+  (`paseo ls -g -q --label paseo.parent-agent-id=$PASEO_AGENT_ID`), since Paseo archives children
+  only with their parent and a card is archived only once Done.
+- At most 3 running at once per agent; no secrets in their prompts. A card's sub-agents edit only
+  the files it assigns them and never commit; a reviewer's sub-agents are read-only. An agent's own
+  sub-agent tool (Claude's Agent tool, say) is allowed too.
+- On the board, sub-agents fold into their card at any depth (a reviewer's own sub-agents too),
+  with their model. A sub-agent on a permission prompt or stalled flags the card as other children
+  do; a card agent or reviewer waiting on a working sub-agent is not counted as stalled; and
+  "sub-agent still running" flags one left running after the agent that started it stopped.
+
 ### Ideas
 
 Any agent can suggest work with `POST /api/idea` (header `X-Factory: 1`; `repo`, `title`,
@@ -340,6 +362,7 @@ Cards can start in any checkout under `~/dev/<owner>/<repo>`.
   `FACTORY_METRIC_HOSTS` alias gets one read-only SSH stream (`ssh -o BatchMode=yes`, a fixed
   script on stdin, Linux or macOS), shared by all viewers, run only while someone polls
   `/api/hosts` and stopped a minute after the last poll.
+- `factory/delegate.go`: the sub-agent prompt section and the sub-agent checks.
 - Tests sit beside the code, with a fake `paseo` (`factory/fake_test.go`).
 
 ## License

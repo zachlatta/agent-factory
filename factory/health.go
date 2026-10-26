@@ -106,6 +106,7 @@ func (f *Factory) agentCounts() AgentCounts {
 		cards[a.ID] = c
 		order = append(order, a.ID)
 	}
+	owners := cardOwners(agents, nil)
 	for _, a := range agents {
 		if a.parked() {
 			n.Parked++
@@ -122,10 +123,8 @@ func (f *Factory) agentCounts() AgentCounts {
 			n.Idle++
 		}
 		owner := a.ID
-		if r := a.L(labelReviewOf); r != "" {
-			owner = r
-		} else if p := a.Labels["paseo.parent-agent-id"]; p != "" {
-			owner = p
+		if o, ok := owners[a.ID]; ok {
+			owner = o
 		}
 		if c := cards[owner]; c != nil {
 			c.Live++

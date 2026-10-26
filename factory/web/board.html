@@ -643,7 +643,7 @@ function fillPanel(c, fresh){
     ['Tier', c.tier ? c.tier + ': ' + ((B.tiers||{})[c.tier]||'') : 'not set yet (the plan review sets it)'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
     ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Reviews', `plan ${c.rounds.plan} · code ${c.rounds.code} (cap 3 each)`],
     ...(c.timing ? [['Timeline', timeline(c.timing)]] : []),
-    ['Sub-agents', c.children.map(k=>`${k.role==='reviewer'?k.kind+' review':k.title||k.short} (${k.archived?'archived':k.status}${k.verdict?', '+k.verdict:''})`).join('; ')||'none'],
+    ['Sub-agents', c.children.map(k=>`${k.role==='reviewer'?k.kind+' review':k.title||k.short} (${k.model&&k.role!=='reviewer'?k.model+', ':''}${k.archived?'archived':k.status}${k.verdict?', '+k.verdict:''})`).join('; ')||'none'],
     ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
   const busy = c.status==='running';

@@ -778,6 +778,7 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 	if kind != "plan" && f.uiChange(c) {
 		prompt += uiReviewRule
 	}
+	prompt += f.delegateRule(true)
 	if kind == "land" {
 		if why == "" {
 			why = "(none given)"
@@ -1023,7 +1024,7 @@ func unappliedStoppedReviewer(agents []Agent, id string) bool {
 // waiting on a permission prompt (reviewerBlocked).
 func hasBlockedReviewer(agents []Agent, id string, now time.Time) bool {
 	for _, r := range agents {
-		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && reviewerBlocked(r, now) {
+		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && reviewerBlocked(agents, r, now) {
 			return true
 		}
 	}
@@ -1037,7 +1038,7 @@ func hasBlockedReviewer(agents []Agent, id string, now time.Time) bool {
 // Zach with a re-run, and a verdict it gives later is still applied.
 func reviewPending(agents []Agent, id string, now time.Time) bool {
 	for _, r := range agents {
-		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.archived() || reviewerBlocked(r, now) {
+		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.archived() || reviewerBlocked(agents, r, now) {
 			continue
 		}
 		if r.Status == "running" || r.L(labelApplied) == "" {

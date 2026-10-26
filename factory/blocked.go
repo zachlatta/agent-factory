@@ -19,28 +19,30 @@ func permissionWait(a Agent) bool {
 }
 
 // blockedWhy says why a running child agent (reviewer or sub-agent) will not move on its own: it
-// waits on a permission prompt, or it has had no activity for over stallMinutes. "" when neither.
-func blockedWhy(a Agent, now time.Time) string {
+// waits on a permission prompt, or it has had no activity for over stallMinutes while no sub-agent
+// of its own works (subagentActive). "" when neither.
+func blockedWhy(agents []Agent, a Agent, now time.Time) string {
 	if a.Status != "running" || a.archived() {
 		return ""
 	}
 	if permissionWait(a) {
 		return "waiting on permission"
 	}
-	if idle := now.Sub(a.LastActivityAt); idle > stallMinutes*time.Minute {
+	if idle := now.Sub(a.LastActivityAt); idle > stallMinutes*time.Minute && !subagentActive(agents, a.ID, now) {
 		return fmt.Sprintf("stalled %d min", int(idle.Minutes()))
 	}
 	return ""
 }
 
 // reviewerBlocked reports whether a running reviewer will give no verdict without someone stepping
-// in: on a permission prompt for at least stuckAfter since its last activity, or stalled.
-func reviewerBlocked(r Agent, now time.Time) bool {
+// in: on a permission prompt for at least stuckAfter since its last activity, or stalled (with no
+// working sub-agent of its own).
+func reviewerBlocked(agents []Agent, r Agent, now time.Time) bool {
 	if r.Status != "running" || r.archived() {
 		return false
 	}
 	idle := now.Sub(r.LastActivityAt)
-	return (permissionWait(r) && idle >= stuckAfter) || idle > stallMinutes*time.Minute
+	return (permissionWait(r) && idle >= stuckAfter) || (idle > stallMinutes*time.Minute && !subagentActive(agents, r.ID, now))
 }
 
 // addPending fills each agent's Pending from `paseo permit ls --json`, one call for all agents,

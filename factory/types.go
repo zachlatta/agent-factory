@@ -110,6 +110,7 @@ type Child struct {
 	ID       string `json:"id"`
 	Short    string `json:"short"`
 	Title    string `json:"title"`
+	Model    string `json:"model,omitempty"` // the sub-agent's model, or its provider when Paseo has none
 	Status   string `json:"status"`
 	Archived bool   `json:"archived"`
 	Role     string `json:"role"`
