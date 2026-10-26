@@ -13,6 +13,10 @@ it on the tailnet with `tailscale serve`.
 transcript page marks it seen (`factory.seen`) until the agent is sent another message and finishes
 again; a running card is never unread.
 
+The board remembers the Lanes grouping you last picked, in your browser's local storage, and
+restores it on the next visit; an unrecognized or unavailable saved value falls back to grouping
+by repo.
+
 ## How a card moves
 
 Plan → Plan review → Building → Code review → Landing → Done, with **Needs Zach** for anything

@@ -262,6 +262,24 @@ const LANE_NAMES = new Proxy({}, {get:(_,k)=>(LANES[k]||{}).name});
 const LANDS = new Proxy({}, {get:(_,k)=>(LANES[k]||{}).lands});
 async function loadLanes(){ try{ Object.assign(LANES, await (await fetch('api/lanes')).json()); }catch(e){} }
 
+// laneGroup: begin
+// The Lanes picker (#group) is sticky: the browser remembers the last grouping.
+// A saved value counts only while it is still one of the picker's options, and
+// blocked storage (private mode) just falls back to the default.
+const LANE_GROUP_KEY = 'factory.laneGroup';
+function laneStorage(){ try{ return window.localStorage; }catch(e){ return null; } }
+function savedLaneGroup(storage, options){
+  try{ const v = storage && storage.getItem(LANE_GROUP_KEY); return v && options.includes(v) ? v : null; }catch(e){ return null; }
+}
+function saveLaneGroup(storage, v, options){
+  if(!options.includes(v)) return;
+  try{ if(storage) storage.setItem(LANE_GROUP_KEY, v); }catch(e){}
+}
+// laneGroup: end
+const laneGroupOptions = [...$('group').options].map(o=>o.value);
+const savedGroup = savedLaneGroup(laneStorage(), laneGroupOptions);
+if(savedGroup) $('group').value = savedGroup;
+
 // timeline: begin
 // the card's timing in one line: when Zach asked, each column and how long, reviews, landing, reply, total
 function dur(sec){ const m=Math.round(sec/60); return m<60 ? m+'m' : Math.floor(m/60)+'h '+(m%60)+'m'; }
@@ -795,6 +813,7 @@ $('nGo').onclick = async()=>{
 // newSubmission: end
 $('nAgent').onchange = ()=>{ $('nAgent').dataset.picked = '1'; const v = $('nAgent').value; $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); };
 ['q','group','host','showLanded','showKids'].forEach(id=>$(id).addEventListener('input', render));
+$('group').addEventListener('input', ()=>saveLaneGroup(laneStorage(), $('group').value, laneGroupOptions));
 phone.addEventListener('change', render);
 $('activity').onclick=()=>$('activity').classList.toggle('open');
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePanel(); });

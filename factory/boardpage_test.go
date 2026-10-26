@@ -209,6 +209,57 @@ console.log(JSON.stringify([
 	}
 }
 
+// The Lanes picker is sticky: the browser remembers the last grouping across reloads.
+func TestBoardPageLaneGroupSticky(t *testing.T) {
+	page := boardPage(t)
+	const begin, end = "// laneGroup: begin", "// laneGroup: end"
+	i, j := strings.Index(page, begin), strings.Index(page, end)
+	if i < 0 || j < i {
+		t.Fatal("no laneGroup markers in the page")
+	}
+	// the saved choice is restored before the first load() draws the board, and
+	// changing the picker saves it
+	restore := strings.Index(page, "savedLaneGroup(laneStorage()")
+	if restore < 0 {
+		t.Fatal("board does not restore the saved lane grouping")
+	}
+	if firstLoad := strings.Index(page, "\nload();"); firstLoad < 0 || restore > firstLoad {
+		t.Error("lane grouping is restored after the first load()")
+	}
+	if !strings.Contains(page, "saveLaneGroup(laneStorage()") {
+		t.Error("board does not save the lane grouping on change")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := page[i:j] + `
+const opts = ['repo','host','source','none'];
+const mem = () => { const m = {}; return {getItem: k => (k in m ? m[k] : null), setItem: (k,v) => { m[k] = v; }, dump: () => m}; };
+const boom = {getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }};
+const a = mem(); saveLaneGroup(a, 'host', opts);
+const b = mem(); saveLaneGroup(b, 'bogus', opts);
+let threw = false; try { saveLaneGroup(boom, 'host', opts); } catch(e) { threw = true; }
+console.log(JSON.stringify([
+  savedLaneGroup(a, opts),
+  a.dump(),
+  savedLaneGroup(b, opts),
+  b.dump(),
+  savedLaneGroup(mem(), opts),
+  savedLaneGroup(boom, opts),
+  threw,
+  savedLaneGroup(null, opts),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `["host",{"factory.laneGroup":"host"},null,{},null,null,false,null]`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("laneGroup = %s, want %s", got, want)
+	}
+}
+
 // Opening a card or its transcript marks it seen. The call is quiet: a read-only canary answers
 // 403, and that must not toast, so it does not go through post().
 func TestPagesMarkSeen(t *testing.T) {
