@@ -40,6 +40,19 @@ QUESTION: <one short question>
 - <option>
 Use 2 to 6 options, one line each, not in a code block. A yes/no question needs no block.`
 
+// ideaRule lets a card's Fellow or reviewer hand out-of-scope work to the Ideas column (POST /api/idea);
+// by names the suggester; note adds a role-specific line.
+func ideaRule(port int, by, note string) string {
+	return fmt.Sprintf(`
+Ideas. If you find work worth doing outside this card's scope (a bug, a gap, a follow-up), do not do it
+here: suggest it as an idea, at most 2 per card, only with a concrete payoff. %sIt never replaces
+finishing this card. First check it is not already an idea or a card in flight:
+`+"`curl -s localhost:%d/api/ideas`"+` and the peers brief. Then:
+curl -s -X POST localhost:%d/api/idea -H 'X-Factory: 1' -H 'Content-Type: application/json' \
+  -d '{"repo":"<owner/repo>","by":"%s","tier":"<low|risky|architecture>","title":"<outcome, at most 60 characters>","summary":"<1-2 plain sentences>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
+`, note, port, port, by)
+}
+
 const wholeAppRule = `Refactors and cleanups cover the whole app: find every instance of the pattern across the repo
 (grep for it) and change all of them, or list each one left alone and why. A partial refactor that
 leaves two ways of doing the same thing is a blocking finding. If that is too big for one card,
@@ -150,6 +163,7 @@ func ReviewPrompt(c Card, kind string, port int, vis string) string {
 	if c.Decided {
 		r += "\n" + decidedRule
 	}
+	r += ideaRule(port, "reviewer of "+c.Short, "Posting an idea is the only write you may make. ")
 	return fmt.Sprintf(`%s
 
 Card: "%s" (Paseo agent %s on %s).

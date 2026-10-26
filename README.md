@@ -55,7 +55,9 @@ idea, at most 2 in flight and 5 a day; a person can Start or Dismiss any idea. T
 a waiting, dismissed or recently started idea are rejected. "Suggest ideas" on the board starts a
 read-only Scout that submits up to 3, guided by the dialog's prompt; with Repo Auto, a picker first
 chooses the repo from that prompt, as for new cards. The text in “What should it do?” is passed to the Scout
-as guidance; leave it empty for general suggestions.
+as guidance; leave it empty for general suggestions. A running Scout shows in the Ideas column, then in Done.
+Every Fellow and reviewer is told how to suggest out-of-scope work it finds as an idea (at most 2 per
+card) instead of doing it in its card; agents started before this rule do not have it.
 
 ### Email and voice-memo cards
 

@@ -274,6 +274,7 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	}
 	prompt := fmt.Sprintf(strings.ReplaceAll(newCardPrompt, "<errands>", f.errandsName()), req, repo, fellowPeersRule(f.cfg.Port, f.Peers("", repo).Text(f.cfg.Location)),
 		tierRules, wholeAppRule, questionRule)
+	prompt += ideaRule(f.cfg.Port, "fellow <first 7 characters of $PASEO_AGENT_ID>", "")
 	if f.guarded(repo) {
 		prompt += publicCardNote
 	}

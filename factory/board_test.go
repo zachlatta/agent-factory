@@ -124,3 +124,17 @@ func TestStalledFactoryCardShowsInNeedsZach(t *testing.T) {
 		t.Errorf("active card stage = %q", c.Stage)
 	}
 }
+
+func TestBuildBoardShowsScoutsInIdeas(t *testing.T) {
+	running := Agent{ID: "s1", Title: "Scout: ideas for example/desk", Status: "running", LastActivityAt: t0,
+		Labels: map[string]string{labelPrefix + labelRole: "scout"}}
+	finished := Agent{ID: "s2", Status: "closed", ArchivedAt: t0, LastActivityAt: t0,
+		Labels: map[string]string{labelPrefix + labelRole: "scout"}}
+	cards := BuildBoard([]Agent{running, finished}, nil, t0)
+	if c := cards[0]; c.Source != "scout" || c.Stage != "idea" || c.Note != "looking for ideas" {
+		t.Errorf("running scout = %+v, want it in Ideas", c)
+	}
+	if c := cards[1]; c.Stage != "landed" {
+		t.Errorf("archived scout stage = %q, want landed", c.Stage)
+	}
+}

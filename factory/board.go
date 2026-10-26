@@ -8,7 +8,7 @@ import (
 
 // Stages are the board's columns, in order: id, name, help text.
 var Stages = [][3]string{
-	{"idea", "Ideas", "Suggested by agents. Start on their own, a few at a time."},
+	{"idea", "Ideas", "Suggested by agents, and Scouts looking for them. Ideas start on their own, a few at a time."},
 	{"plan", "Plan", "Agent writes a plan. No code yet."},
 	{"plan-review", "Plan review", "A different agent tries to find fault with the plan."},
 	{"building", "Building", "Agent is working."},
@@ -143,6 +143,9 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			if c.Stage == "plan" {
 				c.Flags = append(c.Flags, "picking a repo")
 			}
+		}
+		if c.Source == "scout" && !a.archived() {
+			c.Stage, c.Note = "idea", "looking for ideas" // beside the ideas it submits; Done once archived
 		}
 		if c.Source == "schedule" && c.Tier == "" {
 			c.Tier = "routine"

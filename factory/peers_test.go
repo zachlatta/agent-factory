@@ -115,6 +115,9 @@ func TestPeersListsOtherCardsInFlight(t *testing.T) {
 	if !slices.Equal(p.Schedules, []string{"Feed picks hourly"}) {
 		t.Errorf("schedules = %v", p.Schedules)
 	}
+	if len(p.Ideas) != 0 {
+		t.Errorf("a running scout is listed as an idea: %+v", p.Ideas)
+	}
 }
 
 func TestPeersTextBrief(t *testing.T) {
@@ -271,6 +274,16 @@ func TestPromptsTellAgentsAboutPeers(t *testing.T) {
 	}
 	if pr := ReviewPrompt(c, "code", 7478, "unknown"); !strings.Contains(pr, "rebased on it") {
 		t.Errorf("code review prompt lacks the peers check")
+	}
+	if !strings.Contains(prompt, "localhost:7478/api/idea") || !strings.Contains(prompt, `"by":"fellow `) {
+		t.Errorf("Fellow prompt does not offer ideas")
+	}
+	for _, kind := range []string{"plan", "code"} {
+		pr := ReviewPrompt(Card{ID: "c1", Short: "c1", Repo: "r"}, kind, 7478, "unknown")
+		if !strings.Contains(pr, "localhost:7478/api/idea") || !strings.Contains(pr, `"by":"reviewer of c1"`) ||
+			!strings.Contains(pr, "only write you may make") {
+			t.Errorf("%s review prompt does not offer ideas", kind)
+		}
 	}
 	if _, err := f.Act("scout", Body{Repo: "example/desk"}); err != nil {
 		t.Fatal(err)

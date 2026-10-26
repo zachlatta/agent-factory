@@ -121,6 +121,7 @@ func (f *Factory) Peers(forID, repo string) Peers {
 			continue
 		}
 		switch {
+		case c.Source == "scout": // a running Scout sits in the Ideas column but is not an idea
 		case c.Stage == "idea":
 			if len(out.Ideas) < peerIdeaCap {
 				out.Ideas = append(out.Ideas, PeerIdea{ID: c.ID, Title: c.Title, Tier: c.Tier, Repo: c.Repo})
@@ -129,7 +130,6 @@ func (f *Factory) Peers(forID, repo string) Peers {
 			if c.Status == "running" && c.ArchivedAt == "" {
 				out.Schedules = append(out.Schedules, c.Title)
 			}
-		case c.Source == "scout":
 		case c.ArchivedAt == "" && peerStages[c.Stage]:
 			flight = append(flight, c)
 		case c.Stage == "landed" && c.Repo == out.Repo:
