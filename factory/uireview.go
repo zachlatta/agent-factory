@@ -8,14 +8,9 @@ import (
 // uiReviewRule is added to code and landing reviews of a change that touches a user interface: the
 // reviewer runs it and clicks through it with computer use, and reports UI feedback in a
 // block the factory forwards to the builder (uiFeedback).
-const uiReviewRule = `
-
+const uiReviewRule = "\n\n" + computerUseRule + `
 UI check: this change touches a user interface. Test it with computer use:
-- Read the openai-computer-use skill first, and reach the computer-use browser as it describes.
-- Run the builder's version from a scratch copy (/tmp), on test or fake data, or on real data only through a
-  dry-run mode the repo's README documents (one that changes nothing): never the live service itself. Bind it to
-  this host's tailnet IP from ` + "`tailscale ip -4`" + ` (for example ` + "`\"$(tailscale ip -4):0\"`" + `), not 127.0.0.1, 0.0.0.0
-  or ` + "`hostname`" + ` (which can resolve to a loopback address), so the computer-use browser can reach it.
+- Run the builder's version from a scratch copy (/tmp), using the safe test setup above.
 - Click through every flow the change touches, at desktop width and at phone width (about 390 px). Read the page
   text and take screenshots; check it does what the request asked.
 - Blocking: a broken flow, a layout broken at either width, or console errors the change causes.
@@ -23,7 +18,6 @@ UI check: this change touches a user interface. Test it with computer use:
   are recorded and not run.
 - If it cannot run safely here, or the computer-use gateway is full, say why and skip the check; a skip alone is not
   a blocking finding.
-- Close every tab you opened and stop every server you started before your final message.
 - Put usability, copy and layout feedback (not blocking) in your final message, before the TIER line, as:
 UI feedback:
 - <one item per line>`

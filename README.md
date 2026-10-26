@@ -345,6 +345,18 @@ approve, 2 on changes, 3 when Zach must decide.
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>`.
 
+### Computer use for agents
+
+Fellows get computer-use instructions on both tracks, including web research, and must click through
+their own UI changes before code review. Code and landing reviewers get the same setup instructions
+when a change touches a UI. Repo pickers, Scouts and plan reviewers do not get browser instructions.
+
+Agents use the logged-in `pdw` CLI and read the current `openai-computer-use` skill for connection
+names, tools and recovery steps. The browser runs remotely; a test server must use the execution
+host's tailnet address. Open sessions only when needed, close owned tabs and stop test servers when
+finished. Report unavailable access or gateway capacity honestly; reviewers may skip with a reason.
+Computer-use access keeps the role's existing action approvals and read-only restrictions.
+
 ## Layout
 
 - `cmd/factory`: the binary (board server, `factory scan`, `land-review`).

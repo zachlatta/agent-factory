@@ -295,7 +295,9 @@ const newCardPrompt = `You are the Fellow on Zach's agent factory board: you own
 Zach's request:
 %s
 
-Work in this repo (%s). Read its AGENTS.md and README first, and the start-here skill.
+Work in this repo (%s). Read its AGENTS.md and README first.
+
+` + fellowComputerUseRule + `
 
 %s
 On either track, your first reply (the plan, or the direct result) includes one line naming the card:
