@@ -246,13 +246,13 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <div class="bd">
     <div id="pFlags"></div>
     <div class="kv" id="pKv"></div>
-    <div id="pKids"></div>
     <div class="idea" id="pIdea"></div>
     <div class="acts" id="pActs"></div>
     <textarea id="pMsg" placeholder="Send a message to this agent (it resumes the session)"></textarea>
     <div class="acts"><button id="pSend">Send message</button>
       <select id="pMove"></select><button id="pMoveBtn">Move</button></div>
     <a class="primary" id="pOpen" style="display:block;text-align:center;padding:8px;border-radius:8px;background:var(--blue);color:#fff;text-decoration:none;font-weight:600;margin:12px 0 4px">Open full transcript and chat →</a>
+    <div id="pKids"></div>
     <h4 style="margin:14px 0 6px" id="pLogsHd">Latest messages</h4>
     <pre class="logs" id="pLogs">…</pre>
   </div>
@@ -588,12 +588,21 @@ function kidRow(k){
     ${sub&&kidOpen.has(k.id)?`<div class="kmsg"><textarea placeholder="Message this sub-agent" oninput="kidDraft[this.closest('.krow').dataset.kid]=this.value">${esc(kidDraft[k.id]||'')}</textarea><button class="primary" onclick="kidSend(this)">Send</button></div>`:''}
   </div>`;
 }
+// kidList: open ones first, then archived ones, the newest 6 unless the card's list is unfolded.
+const kidAll = new Set();
+function kidList(c, ks, what){
+  const open = ks.filter(k=>!k.archived), arch = ks.filter(k=>k.archived);
+  const shown = kidAll.has(c.id+what) ? arch : arch.slice(-6), more = arch.length - shown.length;
+  return open.concat(shown).map(kidRow).join('')
+    + (more ? `<div class="more" onclick="kidUnfold('${what}')">Show ${more} older archived ${what}</div>` : '');
+}
 function kidsHtml(c){
   const subs = c.children.filter(k=>k.role!=='reviewer'), revs = c.children.filter(k=>k.role==='reviewer');
-  return `<h4 class="kids-hd">Sub-agents <small>${subs.length?esc(kidSummary(c.children)):'none'}</small></h4>` + subs.map(kidRow).join('')
-    + (revs.length ? `<h4 class="kids-hd">Reviews <small>${revs.length}</small></h4>` + revs.map(kidRow).join('') : '');
+  return `<h4 class="kids-hd">Sub-agents <small>${subs.length?esc(kidSummary(c.children)):'none'}</small></h4>` + kidList(c, subs, 'sub-agents')
+    + (revs.length ? `<h4 class="kids-hd">Reviews <small>${revs.length}</small></h4>` + kidList(c, revs, 'reviews') : '');
 }
 // subagents: end
+function kidUnfold(what){ kidAll.add(sel+what); fillPanel(B.cards.find(c=>c.id===sel), false); }
 function kidId(el){ return el.closest('.krow').dataset.kid; }
 function kidToggle(el){ const id = kidId(el); kidOpen.has(id) ? kidOpen.delete(id) : kidOpen.add(id); fillPanel(B.cards.find(c=>c.id===sel), false);
   const t = document.querySelector(`.krow[data-kid="${CSS.escape(id)}"] textarea`); if(t) t.focus(); }

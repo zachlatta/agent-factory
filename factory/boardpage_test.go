@@ -462,13 +462,21 @@ console.log(JSON.stringify({
   archived: [/kidAct\('stop',this\)" disabled/.test(rows[1]), /kidAct\('archive',this\)" disabled/.test(rows[1]),
     rows[1].includes('&lt;b&gt;old&lt;/b&gt;'), rows[1].includes('kidSend')],
   review: [rows[2].includes('plan review: approve'), rows[2].includes('href="t/r1"'), rows[2].includes('kidAct')],
+  long: (() => {
+    const many = Array.from({length: 10}, (_, n) => ({id:'a'+n, short:'a'+n, title:'t'+n, status:'closed', archived:true, role:'subagent'}));
+    many.splice(3, 0, {id:'live', short:'live', title:'live', status:'running', archived:false, role:'subagent'});
+    const h = kidsHtml({id:'c', children: many}), ids = [...h.matchAll(/data-kid="([^"]+)"/g)].map(m => m[1]);
+    kidAll.add('csub-agents');
+    return [ids.join(','), h.includes('Show 4 older archived sub-agents'), kidsHtml({id:'c', children: many}).split('class="krow"').length - 1];
+  })(),
 }));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 	want := `{"summary":"2 sub-agents · 1 running","card":["s-run"],"all":["s-run","s-old"],"chip":"Computer use check · 6.1-sol",` +
-		`"rows":3,"running":[true,true,true,true,true],"archived":[true,true,true,false],"review":[true,true,false]}`
+		`"rows":3,"running":[true,true,true,true,true],"archived":[true,true,true,false],"review":[true,true,false],` +
+		`"long":["live,a4,a5,a6,a7,a8,a9",true,11]}`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("sub-agents =\n%s\nwant\n%s", got, want)
 	}
