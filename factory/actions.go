@@ -50,7 +50,11 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if !validStage(b.Stage) {
 			return nil, errors.New("bad stage")
 		}
-		if b.Stage == "landed" && c.ArchivedAt == "" {
+		if c.Parked != "" && b.Stage != "landed" && b.Stage != "zach" {
+			// archived: no move would come for it in a working column
+			return nil, errors.New("this card is parked: reply to it to wake it first")
+		}
+		if b.Stage == "landed" && c.ArchivedAt == "" { // archiveAgent drops a parked card's park
 			if err := f.archiveAgent(c.ID); err != nil {
 				return nil, err
 			}
@@ -154,7 +158,13 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	case "rerun":
 		return ok, f.rerun(c)
 	case "done":
-		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landed", labelNote: "marked done by Zach"})
+		if err := f.setLabels(c.ID, map[string]string{labelStage: "landed", labelNote: "marked done by Zach"}); err != nil {
+			return nil, err
+		}
+		if c.Parked != "" {
+			return ok, f.unpark(c.ID)
+		}
+		return ok, nil
 	case "close":
 		if err := f.setLabels(c.ID, map[string]string{labelNote: "closed by Zach"}); err != nil {
 			return nil, err

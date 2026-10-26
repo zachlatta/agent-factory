@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -60,6 +61,18 @@ type CardAgents struct {
 	Parked  bool   `json:"parked,omitempty"`
 }
 
+// shortDuration is d without zero trailing units: 3h, 90m, 1h30m.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
 func agentKind(a Agent) string {
 	switch {
 	case a.L(labelRole) != "":
@@ -78,7 +91,7 @@ func (f *Factory) agentCounts() AgentCounts {
 	f.mu.Lock()
 	last := f.lastReap
 	f.mu.Unlock()
-	n := AgentCounts{ByKind: map[string]int{}, IdleTTL: f.cfg.IdleTTL.String(), IdleCap: f.cfg.IdleCap,
+	n := AgentCounts{ByKind: map[string]int{}, IdleTTL: shortDuration(f.cfg.IdleTTL), IdleCap: f.cfg.IdleCap,
 		Cards: []CardAgents{}, LastReap: last}
 	cards := map[string]*CardAgents{}
 	var order []string

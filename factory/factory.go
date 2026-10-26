@@ -242,13 +242,32 @@ func (f *Factory) markArchived(id string) {
 // unmarkArchived drops the board's archive mark for id (a parked card Zach just woke): the snapshot
 // shows it live again, and the next Refresh reads Paseo's unarchive.
 func (f *Factory) unmarkArchived(id string) {
+	f.clearPark(id, true)
+}
+
+// unpark drops parked agent id for good: it stays archived, without the parked label, so it is
+// Done like any archived card.
+func (f *Factory) unpark(id string) error {
+	if err := f.setLabels(id, map[string]string{labelParked: ""}); err != nil {
+		return err
+	}
+	f.clearPark(id, false)
+	return nil
+}
+
+// clearPark removes id's parked label and park mark from the snapshot (and its archive, if live).
+func (f *Factory) clearPark(id string, live bool) {
 	f.mu.Lock()
-	delete(f.archivedNow, id)
 	delete(f.parkedNow, id)
+	if live {
+		delete(f.archivedNow, id)
+	}
 	list, seq := slices.Clone(f.list), f.boardSeq
 	for i := range list {
 		if list[i].ID == id {
-			list[i].ArchivedAt = time.Time{}
+			if live {
+				list[i].ArchivedAt = time.Time{}
+			}
 			list[i].Labels = maps.Clone(list[i].Labels)
 			delete(list[i].Labels, labelPrefix+labelParked)
 		}
@@ -447,7 +466,13 @@ func (f *Factory) resume(id string) {
 // archiveAgent archives agent id and marks the snapshot archived. `paseo archive` refuses a running
 // agent, so only then is it stopped first (an idle agent costs one paseo call, not two); stop can
 // return before the run has wound down, so a "currently running" archive is retried for a few seconds.
+//
+// A parked agent is archived already: archiving it for good only clears the park, so it leaves
+// Needs Zach.
 func (f *Factory) archiveAgent(id string) error {
+	if a, ok := f.agentOK(id); ok && a.parked() {
+		return f.unpark(a.ID)
+	}
 	_, err := f.paseo("archive", id)
 	if err != nil && strings.Contains(err.Error(), "currently running") {
 		// Paseo refuses a running agent without touching it: stop it, then retry while it winds down

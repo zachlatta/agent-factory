@@ -280,7 +280,7 @@ func TestHealthCountsAgents(t *testing.T) {
 	if h.ByKind["card"] != 2 || h.ByKind["reviewer"] != 1 || h.ByKind["other"] != 1 {
 		t.Errorf("by kind %v", h.ByKind)
 	}
-	if h.IdleCap != defaultIdleCap || h.IdleTTL != defaultIdleTTL.String() {
+	if h.IdleCap != defaultIdleCap || h.IdleTTL != "3h" {
 		t.Errorf("limits %v %v", h.IdleTTL, h.IdleCap)
 	}
 	var got *CardAgents
@@ -291,5 +291,51 @@ func TestHealthCountsAgents(t *testing.T) {
 	}
 	if got == nil || got.Live != 2 || got.Idle != 2 || got.IdleMin != 120 {
 		t.Errorf("card1 per-card count %+v", got)
+	}
+}
+
+func TestDropParkedCard(t *testing.T) {
+	for _, action := range []string{"close", "archive", "done", "stage"} {
+		t.Run(action, func(t *testing.T) {
+			c := idleFor(card("zach1", map[string]string{labelStage: "zach"}), 4*time.Hour)
+			f, p := newTestFactory(t, c)
+			f.reap(t0)
+			if c, _ := f.card("zach1"); c.Parked == "" {
+				t.Fatal("not parked")
+			}
+			before := p.countCalls("stop", "") + p.countCalls("archive", "")
+			if _, err := f.Act(action, Body{ID: "zach1", Stage: "landed"}); err != nil {
+				t.Fatal(err)
+			}
+			if n := p.countCalls("stop", "") + p.countCalls("archive", ""); n != before {
+				t.Error("a parked card is archived already: no stop or archive (stop fails on an unloaded agent)")
+			}
+			if got, ok := p.labels("zach1")[labelParked]; !ok || got != "" {
+				t.Errorf("parked label should be cleared: %v", p.labels("zach1"))
+			}
+			if c, _ := f.card("zach1"); c.Parked != "" || c.Stage != "landed" || c.ArchivedAt == "" {
+				t.Errorf("a dropped parked card is Done and archived: %+v", c)
+			}
+			// after the marks expire, as Paseo's files would show it
+			a := f.agent("zach1")
+			f.mu.Lock()
+			clear(f.archivedNow)
+			f.mu.Unlock()
+			if Derive(a) != "landed" {
+				t.Errorf("Derive = %q", Derive(a))
+			}
+		})
+	}
+}
+
+func TestStageMoveOfParkedCardRefused(t *testing.T) {
+	f, p := newTestFactory(t, idleFor(card("zach1", map[string]string{labelStage: "zach"}), 4*time.Hour))
+	f.reap(t0)
+	before := len(p.verbs("zach1"))
+	if _, err := f.Act("stage", Body{ID: "zach1", Stage: "building"}); err == nil {
+		t.Error("moving a parked card to a working column should be refused")
+	}
+	if len(p.verbs("zach1")) != before {
+		t.Errorf("no call on a refused move: %v", p.verbs("zach1"))
 	}
 }

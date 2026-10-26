@@ -59,10 +59,12 @@ idle agents (`factory/reap.go`), at most 20 archives per Tick:
 - A Needs Zach card is **parked** when it has been idle `FACTORY_IDLE_TTL` (default 3 h), or when
   more than `FACTORY_IDLE_CAP` (default 10) factory agents are idle: then the longest idle go
   first, none idle under 30 minutes. Parked means labelled `factory.parked`, then archived: the
-  card stays in Needs Zach for up to 14 days, and Zach's reply on the board or by email wakes it,
+  card stays in Needs Zach for 14 days (then it leaves the board, and an email reply no longer
+  finds it), and Zach's reply on the board or by email wakes it,
   because `paseo send` unarchives an agent and reloads its session. The factory never wakes a
-  parked card on its own. Paseo's archive keeps the worktree; nothing may remove a parked card's
-  worktree while it is parked.
+  parked card on its own. Close, Archive or Done on a parked card drops the park and it is Done.
+  Paseo's archive keeps the worktree; nothing may remove a parked card's worktree while it is
+  parked.
 - Cards in other columns are not parked or counted against the cap: the factory moves them on,
   or to Needs Zach, within minutes. Running agents and agents the factory did not start (email
   agents, schedules, your own sessions) are never touched, only counted.
