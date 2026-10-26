@@ -102,7 +102,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			return nil, err
 		}
 		if a := f.agent(c.ID); !sub && c.ArchivedAt == "" && a.L(labelStage) != "" {
-			if err := f.setLabels(c.ID, replyLabels(a, now)); err != nil {
+			if err := f.setLabels(c.ID, replyLabels(a, now, f.guarded(c.Repo))); err != nil {
 				return nil, err
 			}
 		}
@@ -224,11 +224,25 @@ func planPending(a Agent) bool {
 		!strings.HasPrefix(v, "plan approve") && !strings.HasPrefix(v, "plan nits") && !strings.HasPrefix(v, "plan fixes") && !strings.HasPrefix(v, "code")
 }
 
+// errandPass reports whether card a is doing a one-pass errand: on its first pass (in plan, with no
+// plan written or reviewed yet) or marked direct with no plan review since. Zach's reply keeps it in
+// plan, so its TRACK: direct ending (or an inbox card's missing TIER line) still finishes it there.
+func errandPass(a Agent) bool {
+	if a.L(labelPlanRounds) != "" {
+		return false
+	}
+	if a.L(labelTrack) == "direct" {
+		return true
+	}
+	return a.L(labelStage) == "plan" && a.L(labelCodeRounds) == "" && a.L(labelVerdict) == ""
+}
+
 // replyLabels places a factory card after Zach replies to it, so its next move is queued once the
 // agent answers: a landing card stays in Landing (the landing check runs when it stops), a plan that
-// has not passed goes back to plan review, anything else gets a code review. Nothing is left in
-// Building with no move queued.
-func replyLabels(a Agent, now string) map[string]string {
+// has not passed goes back to plan review, an errand stays in plan, anything else gets a code
+// review. A guarded (public) repo has no direct track, so its errands get a code review too. Nothing
+// is left in Building with no move queued.
+func replyLabels(a Agent, now string, guarded bool) map[string]string {
 	switch {
 	case a.L(labelRouting) != "":
 		// a repo picker answers with a new REPO line, which the Tick routes again
@@ -237,6 +251,8 @@ func replyLabels(a Agent, now string) map[string]string {
 		return map[string]string{labelStage: "landing", labelSince: now}
 	case planPending(a):
 		return map[string]string{labelStage: "plan", labelSince: now, labelNote: "revising plan for Zach"}
+	case !guarded && errandPass(a):
+		return map[string]string{labelStage: "plan", labelSince: now, labelAutoReview: "", labelNote: "answering Zach"}
 	}
 	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code"}
 }

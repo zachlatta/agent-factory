@@ -315,3 +315,37 @@ func TestLabelValuesHaveNoCommas(t *testing.T) {
 		t.Errorf("old comma-separated candidates not read: %+v", a)
 	}
 }
+
+func TestGuardedReplyKeepsCodeReview(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+	}{
+		{"first pass", map[string]string{labelStage: "plan", labelSource: "email"}},
+		{"direct card", map[string]string{labelStage: "zach", labelSource: "email", labelTrack: "direct", labelNote: "public repo: finished without review"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p := newTestFactory(t, publicCard("c1", tc.labels))
+			if _, err := f.Act("send", Body{ID: "c1", Message: "one more thing"}); err != nil {
+				t.Fatal(err)
+			}
+			if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != "code" {
+				t.Errorf("labels = %v", l)
+			}
+		})
+	}
+}
+
+func TestGuardedDirectReplyStillGetsCodeReview(t *testing.T) {
+	c := publicCard("c1", map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: "code", labelSince: ago(10 * time.Minute)})
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.Git = func(context.Context, string, ...string) error { return nil }
+	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": "bbb\n"})
+	p.logs["c1"] = "Pushed the fix.\nTRACK: direct"
+	f.Tick()
+	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
+	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "code")) {
+		t.Fatalf("code review not started: %v", p.calls)
+	}
+}

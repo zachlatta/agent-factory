@@ -866,6 +866,11 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
+		if a.L(labelAutoReview) == "code" && a.L(labelPlanRounds) == "" && !f.guarded(c.Repo) && f.directReply(a) {
+			// a direct card sent to code review (say, by a reply before errandPass): its work is
+			// already on main, so finish it as direct instead of asking Zach to approve landing
+			return f.markDirect(a, c)
+		}
 		_, err := f.StartReview(c, a.L(labelAutoReview))
 		return err
 	case a.L(labelStage) == "plan" && (a.L(labelSource) == "board" || fromInbox(a)) && acted:
@@ -878,13 +883,13 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			f.nameCard(a, text)
 		}
 		if err == nil && ParseTrack(text) == "direct" {
-			return f.finishDirect(a, c)
+			return f.markDirect(a, c)
 		}
 		if fromInbox(a) {
 			// an inbox card that wrote no plan (no TIER line) did an errand, as email agents did before;
 			// its last reply may be a line after its final command, so read the recent log
 			if text, err := f.lastText(a.ID, 60); err == nil && ParseTier(text) == "" {
-				return f.finishDirect(a, c)
+				return f.markDirect(a, c)
 			}
 		}
 		_, err = f.StartReview(c, "plan")
@@ -1072,6 +1077,26 @@ func waitNote(a Agent) string {
 		return n
 	}
 	return "waiting on Zach"
+}
+
+// directReply reports whether card a's last reply ends with TRACK: direct and its recent log has no
+// TIER line (a plan).
+func (f *Factory) directReply(a Agent) bool {
+	reply, err := f.lastReply(a)
+	if err != nil || ParseTrack(reply) != "direct" {
+		return false
+	}
+	text, err := f.lastText(a.ID, 60)
+	return err == nil && ParseTier(text) == ""
+}
+
+// markDirect labels card a as a direct-track card, so Zach's later replies keep it on that track
+// (errandPass), then finishes it.
+func (f *Factory) markDirect(a Agent, c Card) error {
+	if err := f.setLabels(a.ID, map[string]string{labelTrack: "direct", labelAutoReview: ""}); err != nil {
+		return err
+	}
+	return f.finishDirect(a, c)
 }
 
 // finishDirect closes a card the builder did in one pass (TRACK: direct): no plan or code review,

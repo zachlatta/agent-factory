@@ -22,6 +22,9 @@ The planner (the "Fellow") first picks a track:
 
 - **Direct track**: errands that change no code (a question, research, a report). Done in one pass;
   the factory checks the work reached `origin/main`, then moves it to Done.
+  Zach's message to an errand card (before its first plan, or after it finished direct) keeps it
+  on the direct track: it is not sent to code review, so it never asks to approve landing work it
+  already landed. Public repos have no direct track, so their cards still get a code review.
 - **Build track**: everything else. The plan ends with `TIER:`; the plan reviewer sets its own and
   the card takes the higher. A code reviewer can raise the tier, never lower it.
 - The planner names the card once, from the `TITLE:` line of its first plan or direct result; titles

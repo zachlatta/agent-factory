@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"testing"
@@ -1142,4 +1143,129 @@ func TestPlanReworkCapSmallFixOnArchitectureWaitsForZachPlanApproval(t *testing.
 	}
 }
 
+// stopsAfterReply plays a card agent answering Zach's message: it acts a minute after the move the
+// reply made, then stops with reply as its last message.
+func stopsAfterReply(f *Factory, p *fakePaseo, c Agent, reply string) {
+	c.Labels = maps.Clone(c.Labels)
+	for k, v := range p.labels(c.ID) {
+		c.Labels[labelPrefix+k] = v
+	}
+	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
+	c.LastActivityAt = t0.Add(time.Minute)
+	f.SetAgents([]Agent{c})
+	p.logs[c.ID] = reply
+}
 
+func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, via, reply string
+	}{
+		{"board message, then TRACK: direct", "board", "", "Sent Zach the deck with the memos.\nTRACK: direct"},
+		{"inbox card, email follow-up, no TIER line", "email", "email", "Sent Zach the fixed deck."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "plan", labelSource: tc.source, labelSince: ago(10 * time.Minute)})
+			c.Labels["gmail-thread"] = "t1"
+			c.Cwd = t.TempDir()
+			f, p := newTestFactory(t, c)
+			f.Git = func(context.Context, string, ...string) error { return nil }
+			f.GitOut = gitStub(directOK)
+			if _, err := f.Act("send", Body{ID: "c1", Message: "include the memos from this morning", Via: tc.via}); err != nil {
+				t.Fatal(err)
+			}
+			if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "" {
+				t.Fatalf("after the message: labels = %v", l)
+			}
+			stopsAfterReply(f, p, c, tc.reply)
+			f.Tick()
+			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
+				t.Fatalf("review started for an errand: %v", runs)
+			}
+			if l := p.labels("c1"); l[labelStage] != "landed" || l[labelTrack] != "direct" {
+				t.Errorf("labels = %v", l)
+			}
+		})
+	}
+}
+
+func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: ago(10 * time.Minute)})
+	c.Labels["gmail-thread"] = "t1"
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.Git = func(context.Context, string, ...string) error { return nil }
+	f.GitOut = gitStub(directOK)
+	p.logs["c1"] = "Sent Zach the deck.\nTRACK: direct"
+	f.Tick()
+	if l := p.labels("c1"); l[labelStage] != "landed" || l[labelTrack] != "direct" {
+		t.Fatalf("first pass: labels = %v", l)
+	}
+	if _, err := f.Act("send", Body{ID: "c1", Message: "The file is corrupted", Via: "email"}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "" {
+		t.Fatalf("after the follow-up: labels = %v", l)
+	}
+	stopsAfterReply(f, p, c, "Sent Zach a fixed copy.\nTRACK: direct")
+	f.Tick()
+	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
+		t.Fatalf("review started for an errand: %v", runs)
+	}
+	if l := p.labels("c1"); l[labelStage] != "landed" {
+		t.Errorf("labels = %v", l)
+	}
+}
+
+func TestDirectCardWithAPlanAfterAFollowUpGetsPlanReview(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landed", labelSource: "board", labelTrack: "direct", labelSince: ago(10 * time.Minute)})
+	f, p := newTestFactory(t, c)
+	if _, err := f.Act("send", Body{ID: "c1", Message: "now change the code too"}); err != nil {
+		t.Fatal(err)
+	}
+	stopsAfterReply(f, p, c, "PLAN\nGoal: ...\nTIER: low")
+	f.Tick()
+	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
+	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "plan")) {
+		t.Fatalf("plan review not started: %v", p.calls)
+	}
+}
+
+func TestTickFinishesDirectCardQueuedForCodeReview(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply string
+		labels      map[string]string
+		review      bool
+	}{
+		{"TRACK: direct, no plan review", "Sent Zach the files.\nTRACK: direct", nil, false},
+		{"no TRACK line", "Fixed it and committed.", nil, true},
+		{"a plan with TIER", "PLAN\nGoal: ...\nTIER: low\nTRACK: direct", nil, true},
+		{"its plan passed review", "Sent Zach the files.\nTRACK: direct", map[string]string{labelPlanRounds: "1"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: "code", labelSince: ago(10 * time.Minute)}
+			for k, v := range tc.labels {
+				l[k] = v
+			}
+			c := card("c1", l)
+			c.Cwd = t.TempDir()
+			f, p := newTestFactory(t, c)
+			f.Git = func(context.Context, string, ...string) error { return nil }
+			f.GitOut = gitStub(directOK, map[string]string{"status --porcelain": "", "rev-parse HEAD": "bbb\n"})
+			p.logs["c1"] = tc.reply
+			f.Tick()
+			runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
+			if tc.review {
+				if len(runs) != 1 {
+					t.Fatalf("code review not started: %v", p.calls)
+				}
+				return
+			}
+			if len(runs) != 0 {
+				t.Fatalf("code review started for a direct card: %v", runs)
+			}
+			if got := p.labels("c1"); got[labelStage] != "landed" || got[labelAutoReview] != "" {
+				t.Errorf("labels = %v", got)
+			}
+		})
+	}
+}

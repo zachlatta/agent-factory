@@ -103,7 +103,12 @@ func TestReplyKeepsCardWhereTheAnswerBelongs(t *testing.T) {
 		{"landing stays landing", map[string]string{labelStage: "landing", labelNote: "auto-landing (low)", labelVerdict: "code approve", labelPlanRounds: "1"}, "landing", ""},
 		{"plan at rework cap goes back to plan", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "plan changes", labelPlanRounds: "3"}, "plan", ""},
 		{"after plan passed, code review queued", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}, "building", "code"},
-		{"done card, code review queued", map[string]string{labelStage: "landed", labelSource: "board", labelNote: "done in one pass"}, "building", "code"},
+		{"unlabeled done card, code review queued", map[string]string{labelStage: "landed", labelSource: "board", labelNote: "done in one pass"}, "building", "code"},
+		{"direct card done, back to plan", map[string]string{labelStage: "landed", labelSource: "board", labelNote: "done in one pass", labelTrack: "direct"}, "plan", ""},
+		{"direct card not on main, back to plan", map[string]string{labelStage: "zach", labelSource: "email", labelNote: "landing not verified", labelTrack: "direct"}, "plan", ""},
+		{"board errand on its first pass stays in plan", map[string]string{labelStage: "plan", labelSource: "board"}, "plan", ""},
+		{"inbox errand on its first pass stays in plan", map[string]string{labelStage: "plan", labelSource: "email"}, "plan", ""},
+		{"direct card whose plan passed, code review queued", map[string]string{labelStage: "landed", labelSource: "email", labelTrack: "direct", labelPlanRounds: "1"}, "building", "code"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, p := newTestFactory(t, card("c1", tc.labels))
