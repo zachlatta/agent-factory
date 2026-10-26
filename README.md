@@ -222,7 +222,8 @@ are folded into details. Missing original requests are labeled unavailable, with
 Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
 The decision and needs fields describe the concrete choice and its consequence; overview prose
 stays in details. Existing `QUESTION:` blocks provide up to four questions, with the recommendation
-first. Every question needs an answer. Select the action and press Submit once; Other sends typed
+first. Approval and recommendation require every question to be answered. Drop and Other do not.
+Select the action and press Submit once; Other sends typed
 instructions without approving. Drop still asks for confirmation. Emails retain their existing format.
 
 For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`

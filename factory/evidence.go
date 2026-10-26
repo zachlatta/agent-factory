@@ -24,17 +24,30 @@ var evidenceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.(png|jpg
 
 func validEvidenceName(name string) bool { return evidenceName.MatchString(name) }
 
+// parseEvidence reads only the contiguous attachment header immediately after the opening
+// overview. Non-filenames remain report text, including before/after copy examples.
 func parseEvidence(text string) (string, Evidence) {
+	trimmed := strings.TrimSpace(text)
+	if !overviewKey.MatchString(strings.SplitN(trimmed, "\n", 2)[0]) {
+		return text, Evidence{}
+	}
+	rest, overview := ParseOverview(trimmed)
+	if overview == nil || rest == "" || !strings.HasSuffix(trimmed, rest) {
+		return text, Evidence{}
+	}
+	prefix := trimmed[:len(trimmed)-len(rest)]
 	var ev Evidence
-	var rest []string
-	for _, line := range strings.Split(text, "\n") {
-		key, name, ok := strings.Cut(line, ":")
+	var kept []string
+	lines := strings.Split(rest, "\n")
+	i := 0
+	for ; i < len(lines); i++ {
+		key, name, ok := strings.Cut(lines[i], ":")
 		if !ok || (key != "BEFORE" && key != "AFTER") {
-			rest = append(rest, line)
-			continue
+			break
 		}
 		name = strings.TrimSpace(name)
 		if !validEvidenceName(name) {
+			kept = append(kept, lines[i])
 			continue
 		}
 		if key == "BEFORE" && ev.Before == "" {
@@ -44,7 +57,11 @@ func parseEvidence(text string) (string, Evidence) {
 			ev.After = name
 		}
 	}
-	return strings.TrimSpace(strings.Join(rest, "\n")), ev
+	if ev == (Evidence{}) {
+		return text, ev
+	}
+	kept = append(kept, lines[i:]...)
+	return prefix + strings.TrimSpace(strings.Join(kept, "\n")), ev
 }
 
 // readEvidence confines reads to the evidence directory and rejects substituted directories,

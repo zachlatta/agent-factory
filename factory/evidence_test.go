@@ -2,6 +2,7 @@ package factory
 
 import (
 	"bytes"
+	"fmt"
 	stdimage "image"
 	"image/png"
 	"net/http/httptest"
@@ -13,9 +14,22 @@ import (
 )
 
 func TestParseEvidence(t *testing.T) {
-	rest, ev := parseEvidence("Report.\n\nBEFORE: ../secret.png\nBEFORE: before.png\nBEFORE: ignored.png\nAFTER: after.jpg\n\nTIER: low")
-	if ev.Before != "before.png" || ev.After != "after.jpg" || !strings.Contains(rest, "Report.") || strings.Contains(rest, "BEFORE:") {
-		t.Fatalf("%q %+v", rest, ev)
+	const overview = "DECISION: Choose.\nNEEDS FROM ZACH: Pick one.\n\n"
+	for _, tc := range []struct {
+		name, in, want string
+		evidence       Evidence
+	}{
+		{"header", overview + "BEFORE: before.png\nAFTER: after.jpg\n\nReport.", overview + "Report.", Evidence{"before.png", "after.jpg"}},
+		{"text change", overview + "BEFORE: Needs review\nAFTER: Waiting on you\nend", overview + "BEFORE: Needs review\nAFTER: Waiting on you\nend", Evidence{}},
+		{"later report", overview + "Report.\nBEFORE: before.png\nAFTER: after.jpg", overview + "Report.\nBEFORE: before.png\nAFTER: after.jpg", Evidence{}},
+		{"copy report", "Copy change:\nBEFORE: Old wording\nAFTER: New wording\nend", "Copy change:\nBEFORE: Old wording\nAFTER: New wording\nend", Evidence{}},
+		{"no overview", "BEFORE: before.png\nAFTER: after.jpg", "BEFORE: before.png\nAFTER: after.jpg", Evidence{}},
+		{"invalid then valid", overview + "BEFORE: ../secret.png\nBEFORE: before.png\nAFTER: after.jpg\n\nReport.", overview + "BEFORE: ../secret.png\n\nReport.", Evidence{"before.png", "after.jpg"}},
+	} {
+		rest, ev := parseEvidence(tc.in)
+		if rest != tc.want || ev != tc.evidence {
+			t.Errorf("%s: %q %+v", tc.name, rest, ev)
+		}
 	}
 	for _, name := range []string{"../x.png", "/x.png", "a/b.png", `a\b.png`, "x.svg", ".", "x.png?token=1"} {
 		if validEvidenceName(name) {
@@ -124,11 +138,19 @@ func TestAskFullReport(t *testing.T) {
 }
 
 func TestEvidencePrompts(t *testing.T) {
-	for name, prompt := range map[string]string{"rule": overviewRule, "reminder": overviewReminder, "summary": summaryMsg, "brief": briefMsg("code", true, "notes", briefAsk(card("c", map[string]string{labelNote: "reviewer escalated"})))} {
+	for name, prompt := range map[string]string{
+		"new card": fmt.Sprintf(newCardPrompt, "task", "example/repo", "", tierRules, wholeAppRule, questionRule),
+		"review":   ReviewPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown"),
+	} {
 		for _, want := range []string{"BEFORE:", "AFTER:", ".factory-evidence/", "never commit"} {
-			if !strings.Contains(prompt, want) {
-				t.Errorf("%s lacks %s", name, want)
+			if strings.Count(prompt, want) != 1 {
+				t.Errorf("%s must teach %s once", name, want)
 			}
+		}
+	}
+	for name, prompt := range map[string]string{"reminder": overviewReminder, "summary": summaryMsg, "brief": briefMsg("code", true, "notes", briefAsk(card("c", map[string]string{labelNote: "reviewer escalated"})))} {
+		if strings.Contains(prompt, "BEFORE:") {
+			t.Errorf("%s repeats attachment instructions", name)
 		}
 	}
 }

@@ -351,7 +351,7 @@ const summaryMsg = "Your plan passed review, and because it is an architecture c
 	"NEEDS FROM ZACH: <approve the plan, or answer the questions below, and what happens after>\n" +
 	"Then at most 3 bullets: what could go wrong and how you will check it. Then any question he must answer, " +
 	"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
-	"start building; stop after the summary." + evidenceRule
+	"start building; stop after the summary. Use the evidence format already given when visuals help."
 
 const noLiveChangesRule = "Do not make live changes (install scripts, enable or restart services, resize VMs, change external settings) before code review: do them in the landing step after review and verify them."
 
@@ -448,7 +448,7 @@ func briefMsg(kind string, escalated bool, notes string, ask *Ask) string {
 	}
 	fmt.Fprintf(&b, "%d. Each decision Zach must make, with the options and the one you recommend, each as a "+
 		"QUESTION: block (below).\n", n)
-	b.WriteString(evidenceRule + "\nThe board shows each QUESTION: block as buttons he taps; his answers come to you as a " +
+	b.WriteString("Use the evidence format already given when visuals help.\nThe board shows each QUESTION: block as buttons he taps; his answers come to you as a " +
 		"message that quotes each question. " + questionRule + "\n\nThen stop. Do not build, edit files or land.")
 	return b.String()
 }

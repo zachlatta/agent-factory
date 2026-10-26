@@ -24,10 +24,8 @@ type Ask struct {
 	Questions []Question `json:"questions,omitempty"`
 	// Overview is the agent's DECISION / OVERVIEW / NEEDS FROM ZACH block (ParseOverview).
 	Overview *Overview `json:"overview,omitempty"`
-	// Yes and No say what the board's Yes and No buttons do when there are no Questions (then Zach
-	// gets a free-form reply and a Yes/No pair): an action id
-	// ("approve", "close"), "changes" (send the typed text as the change request; it needs text), or
-	// "say" (send "Yes."/"No." plus any typed text). Empty means no Yes/No button.
+	// Yes/No retain their action meanings for API compatibility. Open asks with both set to
+	// "say" get explicit Yes/No reply choices alongside Other on the board.
 	Yes string `json:"yes,omitempty"`
 	No  string `json:"no,omitempty"`
 }

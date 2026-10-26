@@ -31,13 +31,19 @@ await askSubmit('c1');assert.equal(sent.length,0);
 askPicks.c1={0:0,1:'o'};nodes['o-c1-1']={value:''};askActions.c1=0;
 await askSubmit('c1');assert.equal(sent.length,0);
 nodes['o-c1-1'].value='Purple';await askSubmit('c1');assert.equal(sent[0][0],'approve');assert(sent[0][1].message.includes('Purple'));
-askPicks.c1={0:1,1:0};askActions.c1='other';nodes['r-c1'].value='Revise first';await askSubmit('c1');assert.equal(sent[1][0],'send');assert(sent[1][1].message.includes('Revise first'));
-askPicks.c1={0:1,1:0};askActions.c1=2;await askSubmit('c1');assert.equal(confirmations,1);assert.equal(sent.length,2);
+askPicks.c1={};askActions.c1='other';nodes['r-c1'].value='Revise first';await askSubmit('c1');assert.equal(sent[1][0],'send');assert(sent[1][1].message.includes('Revise first'));
+askPicks.c1={};askActions.c1=2;await askSubmit('c1');assert.equal(confirmations,1);assert.equal(sent.length,2);
 acceptDrop=true;await askSubmit('c1');assert.equal(sent.at(-1)[0],'close');
 for(const action of ['recommend','rerun','stop','done']) {c.ask.actions=[{id:action,label:action}];c.ask.questions=[];delete askActions.c1;await askSubmit('c1');assert.equal(sent.at(-1)[0],action)}
 c.routing=true;c.ask.actions=[{id:'approve',label:'Repo',repo:'example/repo'},{id:'pickrepo',label:'Other repo'}];askActions.c1=0;await askSubmit('c1');assert.equal(sent.at(-1)[1].repo,'example/repo');askActions.c1=1;nodes['p-c1']={value:'example/repo'};await askSubmit('c1');assert.equal(sent.at(-1)[0],'approve');assert.equal(sent.at(-1)[1].repo,'example/repo');
 assert(allowedEvidenceSrc('/api/evidence/c1/before','c1'));for(const src of ['https://example.org/x.png','data:image/png;base64,x','file:///x.png','/api/evidence/other/before','/api/evidence/c1/before?x'])assert(!allowedEvidenceSrc(src,'c1'));
 c.ask.request=null;assert(askHtml(c).includes('Original task unavailable'));
+c.routing=false;c.ask.actions=[{id:'reply',label:'Reply'},{id:'done',label:'Mark done'}];c.ask.yes='say';c.ask.no='say';
+html=askHtml(c);assert(html.includes('>Yes</button>'));assert(html.includes('>No</button>'));assert(html.includes("askChoose('c1','yes')"));
+askActions.c1='yes';await askSubmit('c1');assert.equal(sent.at(-1)[0],'send');assert.equal(sent.at(-1)[1].message,'Yes.');
+askActions.c1='no';await askSubmit('c1');assert.equal(sent.at(-1)[1].message,'No.');
+html=askHtml({id:'c2',ask:{request:{Base:'Unique task text'},overview:{overview:'Overview text'},actions:[],questions:[]}});assert.equal(html.split('Unique task text').length-1,1);assert(html.includes('<p class="gist">Overview text</p>'));
+
 })().catch(e=>{console.error(e);process.exit(1)});`
 	if out, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
