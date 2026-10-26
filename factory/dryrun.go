@@ -111,11 +111,13 @@ func (f *Factory) uploadDir(id string) string {
 	return filepath.Join(f.cfg.Home, ".paseo/factory-uploads", id[:min(8, len(id))])
 }
 
+const dryRunPrefix = "agent-factory-dry-run-"
+
 // DryRunState copies the state directory's files into a new temporary directory and returns it, so a
 // dry run shows the real ideas and writes only to the copy. A missing state directory gives an
-// empty copy.
+// empty copy. The run removes it when it stops (RemoveDryRunState).
 func DryRunState(dir string) (string, error) {
-	tmp, err := os.MkdirTemp("", "agent-factory-dry-run-")
+	tmp, err := os.MkdirTemp("", dryRunPrefix)
 	if err != nil {
 		return "", err
 	}
@@ -139,4 +141,13 @@ func DryRunState(dir string) (string, error) {
 		}
 	}
 	return tmp, nil
+}
+
+// RemoveDryRunState deletes a stopped dry run's state copy, so a UI check leaves nothing for its agent
+// to delete outside its worktree. It removes only a DryRunState directory.
+func RemoveDryRunState(dir string) error {
+	if filepath.Dir(dir) != filepath.Clean(os.TempDir()) || !strings.HasPrefix(filepath.Base(dir), dryRunPrefix) {
+		return fmt.Errorf("%s is not a dry-run state copy", dir)
+	}
+	return os.RemoveAll(dir)
 }

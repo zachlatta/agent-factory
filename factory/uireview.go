@@ -10,7 +10,8 @@ import (
 // block the factory forwards to the builder (uiFeedback).
 const uiReviewRule = "\n\n" + computerUseRule + `
 UI check: this change touches a user interface. Test it with computer use:
-- Run the builder's version from a scratch copy (/tmp), using the safe test setup above.
+- Run the builder's version from a scratch copy in your worktree's .factory-scratch/ (listed in .git/info/exclude),
+  using the safe test setup above. Stop every server you start: a factory -dry-run deletes its copied state when it stops.
 - Click through every flow the change touches, at desktop width and at phone width (about 390 px). Read the page
   text and take screenshots; check it does what the request asked.
 - Blocking: a broken flow, a layout broken at either width, or console errors the change causes.

@@ -274,7 +274,7 @@ Read the builder's whole conversation first: `+"`paseo logs %s --tail 200`"+`.
 
 Rules:
 - Read-only. Do not edit, commit, push, land, send email, create PDW mutations, or message the builder.
-  Use a scratch copy (/tmp) if you need to try something.
+  Use a scratch copy in .factory-scratch/ (listed in .git/info/exclude) if you need to try something.
 - Blocking findings only: each one concrete (file:line or exact claim), with why it matters.
   Style preferences and nits are not blocking.
 - Allowed verdicts: approve, nits (approve; list nits, no new work), changes (blocking findings),

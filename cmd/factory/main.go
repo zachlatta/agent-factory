@@ -88,7 +88,13 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("agent factory %s on http://%s", rev, ln.Addr())
-	if err := f.Serve(ctx, ln, f.Handler(), 60*time.Second); err != nil {
+	err = f.Serve(ctx, ln, f.Handler(), 60*time.Second)
+	if *dryRun {
+		if rmErr := factory.RemoveDryRunState(cfg.StateDir); rmErr != nil {
+			log.Print(rmErr)
+		}
+	}
+	if err != nil {
 		log.Fatal(err)
 	}
 	log.Print("agent factory stopped")

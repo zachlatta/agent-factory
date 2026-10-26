@@ -238,6 +238,46 @@ func TestDryRunStateCopiesAndLeavesOriginal(t *testing.T) {
 	}
 }
 
+func TestDryRunStateIsRemovedWhenTheRunStops(t *testing.T) {
+	src := t.TempDir()
+	os.WriteFile(filepath.Join(src, "ideas.json"), []byte(`[]`), 0o644)
+	dst, err := DryRunState(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveDryRunState(dst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("copy still there: %v", err)
+	}
+	// only a dry run's own copy: never the real state directory or anything else
+	for _, dir := range []string{src, filepath.Dir(dst), filepath.Join(src, "agent-factory-dry-run-1")} {
+		os.MkdirAll(dir, 0o755)
+		if RemoveDryRunState(dir) == nil {
+			t.Errorf("removed %s", dir)
+		}
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s: %v", dir, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(src, "ideas.json")); err != nil {
+		t.Errorf("real state: %v", err)
+	}
+}
+
+func TestAgentsAreToldToRemoveOnlyInsideTheirWorktree(t *testing.T) {
+	for name, s := range map[string]string{"shellRule": shellRule, "uiReviewRule": uiReviewRule} {
+		if strings.Contains(s, "(/tmp)") {
+			t.Errorf("%s still sends scratch copies to /tmp", name)
+		}
+	}
+	if !strings.Contains(shellRule, "rm outside your worktree") || !strings.Contains(uiReviewRule, ".factory-scratch/") ||
+		!strings.Contains(uiReviewRule, "deletes its copied state when it stops") {
+		t.Errorf("rules:\n%s\n%s", shellRule, uiReviewRule)
+	}
+}
+
 func TestDryRunGitFakeIsSafeConcurrently(t *testing.T) {
 	var agents []Agent
 	for n := range 8 {
