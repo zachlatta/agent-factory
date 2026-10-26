@@ -74,7 +74,7 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 }
 
 func TestEmailLeadsWithTheOverview(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"})
 	f, p, m := mailFactory(t, c)
 	p.logs["c1"] = "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice."
 	f.Tick()

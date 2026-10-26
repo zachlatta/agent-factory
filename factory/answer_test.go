@@ -19,6 +19,7 @@ func TestParseAnswer(t *testing.T) {
 	brief := &Ask{Yes: "recommend", Actions: []Action{primary("recommend", btnRecommend), act("close", btnDrop)}}
 	briefQs := &Ask{Yes: "recommend", Actions: brief.Actions, Questions: qs}
 	rerun := &Ask{Actions: []Action{primary("rerun", "Re-run"), reply("Reply", "")}}
+	landedLeft := &Ask{Yes: "say", No: "say", Actions: []Action{reply("Send it on", ""), act("done", "Mark done")}}
 	for _, tc := range []struct {
 		ask        *Ask
 		text, want string
@@ -31,6 +32,10 @@ func TestParseAnswer(t *testing.T) {
 		{rerun, "yes", "send", "yes"},
 		{plan, "drop it", "close", ""},
 		{rerun, "drop", "send", "drop"},
+		{landedLeft, "done", "done", ""},
+		{landedLeft, "Mark done!", "done", ""},
+		{landedLeft, "mark it done", "done", ""},
+		{plan, "done", "send", "done"},
 		{plan, "ok, but drop step 3", "send", "ok, but drop step 3"},
 		{plan, "yes to 1A, no to 2", "send", "yes to 1A"},
 		{plan, "Please drop the second point and build", "send", "drop the second point"},
@@ -123,6 +128,22 @@ func TestEmailDropClosesTheCard(t *testing.T) {
 		t.Error("not archived")
 	}
 	if s := m.sends(); len(s) != 1 || !strings.HasPrefix(s[0].Args["text"].(string), "Dropped") {
+		t.Errorf("confirmation = %+v", s)
+	}
+}
+
+func TestEmailDoneMarksCardDoneAndConfirms(t *testing.T) {
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: browser check",
+		labelZachThread: "nt1"})
+	f, p, m := mailFactory(t, a)
+	res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "done"})
+	if err != nil || res.(map[string]string)["action"] != "done" {
+		t.Fatalf("res = %v, err = %v", res, err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "landed" || l[labelNote] != "marked done by Zach" {
+		t.Errorf("labels = %v", l)
+	}
+	if s := m.sends(); len(s) != 1 || s[0].Args["text"] != "Marked done." {
 		t.Errorf("confirmation = %+v", s)
 	}
 }

@@ -3,6 +3,7 @@ package factory
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,8 +68,29 @@ func (m PDWMailer) Call(ctx context.Context, tool string, args any) (json.RawMes
 	return out.Bytes(), nil
 }
 
+type mailAttachment struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
+	ContentID   string `json:"content_id,omitempty"`
+	DataBase64  string `json:"data_base64"`
+}
+
 // email is one message to Zach.
-type email struct{ Subject, Text, HTML string }
+type email struct {
+	Subject     string
+	Text        string
+	HTML        string
+	HTMLNoImage string
+	Attachments []mailAttachment
+}
+
+func (m email) withoutAttachments() email {
+	h := m.HTMLNoImage
+	if h == "" {
+		h = m.HTML
+	}
+	return email{Subject: m.Subject, Text: m.Text, HTML: h}
+}
 
 // mailable reports whether Zach is emailed about this ask: not for finished cards or hand moves.
 func mailable(ask *Ask) bool {
@@ -99,6 +121,9 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	}
 	detail, qs, ov := f.askDetail(c, ask)
 	ask.Questions, ask.Overview = qs, ov
+	if req := f.cardRequest(a); req.Base != "" || len(req.FollowUps) > 0 {
+		ask.Request = &req
+	}
 	m := f.composeEmail(a, c, ask, detail)
 	// told first: one email per wait even if the factory stops mid-send
 	if err := f.setLabels(a.ID, map[string]string{labelTold: note}); err != nil {
@@ -144,17 +169,31 @@ func (f *Factory) noteOnce(key, v string) bool {
 }
 
 // deliver sends m in the card's thread, or starts one. It returns a new thread's id, or "".
+// If sending with inline image attachments fails for a reason other than timeout, it retries once without them.
 func (f *Factory) deliver(a Agent, m email) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), mailTimeout)
 	defer cancel()
+	th, err := f.deliverOnce(ctx, a, m)
+	if err != nil && len(m.Attachments) > 0 && !errors.Is(err, ErrMailMaybeSent) {
+		f.logf("%s: sending with attachments failed (%v); retrying without images", short(a.ID), err)
+		return f.deliverOnce(ctx, a, m.withoutAttachments())
+	}
+	return th, err
+}
+
+func (f *Factory) deliverOnce(ctx context.Context, a Agent, m email) (string, error) {
 	if th := emailThread(a); th != "" {
-		return "", f.replyInThread(ctx, a.ID, th, m)
+		return "", f.replyInThread(ctx, a.ID, th, m, false)
 	}
 	if th := a.L(labelZachThread); th != "" {
-		return "", f.replyInThread(ctx, a.ID, th, m)
+		return "", f.replyInThread(ctx, a.ID, th, m, true)
 	}
-	out, err := f.sendMail(ctx, a.ID, "send_email", map[string]any{"to": []string{f.cfg.ZachEmail},
-		"subject": m.Subject, "text": m.Text, "html": m.HTML})
+	args := map[string]any{"to": []string{f.cfg.ZachEmail},
+		"subject": m.Subject, "text": m.Text, "html": m.HTML}
+	if len(m.Attachments) > 0 {
+		args["attachments"] = m.Attachments
+	}
+	out, err := f.sendMail(ctx, a.ID, "send_email", args)
 	if err != nil {
 		return "", err
 	}
@@ -193,8 +232,9 @@ func latestFromZach(msgs []threadMsg) (zach, last string) {
 }
 
 // replyInThread answers Zach's latest message in thread, or the latest one (addressed to Zach) when
-// the mailbox wrote every message in it.
-func (f *Factory) replyInThread(ctx context.Context, id, thread string, m email) error {
+// the mailbox wrote every message in it. When forceTo is set (a board card's labelZachThread),
+// it always sets to=f.cfg.ZachEmail even if an earlier reply in the thread came from another address.
+func (f *Factory) replyInThread(ctx context.Context, id, thread string, m email, forceTo bool) error {
 	out, err := f.Mail.Call(ctx, "get_thread", map[string]any{"thread_id": thread, "latest": 5})
 	if errors.Is(err, ErrMailMaybeSent) {
 		return errors.New("get_thread timed out") // a read: safe to retry
@@ -210,9 +250,15 @@ func (f *Factory) replyInThread(ctx context.Context, id, thread string, m email)
 	}
 	zach, last := latestFromZach(th.Messages)
 	args := map[string]any{"text": m.Text, "html": m.HTML, "omit_quote": true}
+	if len(m.Attachments) > 0 {
+		args["attachments"] = m.Attachments
+	}
 	switch {
 	case zach != "":
 		args["message_id"] = zach
+		if forceTo && f.cfg.ZachEmail != "" {
+			args["to"] = []string{f.cfg.ZachEmail}
+		}
 	case last != "" && f.cfg.ZachEmail != "":
 		args["message_id"], args["to"] = last, []string{f.cfg.ZachEmail}
 	default:
@@ -236,10 +282,16 @@ func askSource(c Card, ask *Ask) string {
 }
 
 // askDetail is the full Detail (not cut like the board's), its questions and its overview.
+// It also parses BEFORE:/AFTER: evidence filenames onto ask.Evidence.
 func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
 	text, err := f.askReply(f.agent(askSource(c, ask)))
 	if err != nil || strings.TrimSpace(text) == "" {
 		return unreadableReply(err), nil, nil
+	}
+	var ev Evidence
+	text, ev = parseEvidence(text)
+	if ask != nil {
+		ask.Evidence = ev
 	}
 	return parseReply(text)
 }
@@ -252,6 +304,9 @@ func replyWords(ask *Ask) []replyWord {
 	var out []replyWord
 	if yes := actionFor(ask, ask.Yes); yes != nil && (ask.Yes == "approve" || ask.Yes == "recommend") {
 		out = append(out, replyWord{"approve", "same as the \"" + yes.Label + "\" button"})
+	}
+	if x := actionFor(ask, "done"); x != nil {
+		out = append(out, replyWord{"done", "same as \"" + x.Label + "\""})
 	}
 	if x := actionFor(ask, "close"); x != nil {
 		out = append(out, replyWord{"drop", "same as \"" + x.Label + "\": the card is archived and nothing lands"})
@@ -287,7 +342,72 @@ func (f *Factory) cardLink(id string) string {
 
 func letter(i int) string { return string(rune('A' + i)) }
 
-// composeEmail writes the email for card a waiting on ask, with its full detail.
+// factoryCheckWait reports whether card a stopped for a check the Factory raised itself after
+// landing, a stall, a secret scan, or an unreviewed public-repo push, where the builder's last
+// reply was not written as a decision for Zach.
+func factoryCheckWait(a Agent) bool {
+	note := a.L(labelNote)
+	return strings.HasPrefix(note, "landed; still to do:") ||
+		note == "landed; did not say what remains" ||
+		note == "landing not verified" ||
+		strings.HasPrefix(note, "landed diff differs") ||
+		note == "stuck" ||
+		strings.HasPrefix(note, "secret scan") ||
+		strings.HasPrefix(note, "public repo: finished without review")
+}
+
+func requestSummary(r *CardRequest) string {
+	if r == nil {
+		return ""
+	}
+	var parts []string
+	if b := strings.TrimSpace(r.Base); b != "" {
+		parts = append(parts, truncWords(b, 120))
+	}
+	if n := len(r.FollowUps); n > 0 {
+		fu := r.FollowUps[n-1]
+		if txt := strings.TrimSpace(fu.Text); txt != "" {
+			parts = append(parts, fu.label()+": "+truncWords(txt, 80))
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+type evidenceSlot struct {
+	cid, label, name string
+	att              mailAttachment
+}
+
+func loadEvidenceSlots(cwd string, ev Evidence) []evidenceSlot {
+	var out []evidenceSlot
+	for _, s := range []struct{ cid, label, name string }{
+		{"before", "Before", ev.Before},
+		{"after", "After", ev.After},
+	} {
+		if s.name == "" {
+			continue
+		}
+		data, media, err := readEvidence(cwd, s.name)
+		if err != nil {
+			continue
+		}
+		out = append(out, evidenceSlot{
+			cid:   s.cid,
+			label: s.label,
+			name:  s.name,
+			att: mailAttachment{
+				Filename:    s.name,
+				ContentType: media,
+				ContentID:   s.cid,
+				DataBase64:  base64.StdEncoding.EncodeToString(data),
+			},
+		})
+	}
+	return out
+}
+
+// composeEmail writes the email for card a waiting on ask, putting the decision, original task,
+// inline evidence screenshots, questions, reply words and board link above the full Detail report.
 func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
 	title := c.Title
 	if title == "" {
@@ -297,12 +417,22 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
 	if repo == "" {
 		repo = "no repo"
 	}
+	cwd := c.Cwd
+	if cwd == "" {
+		cwd = a.Cwd
+	}
 	link := f.cardLink(a.ID)
 	words := replyWords(ask)
+	hideDecision := factoryCheckWait(a)
+	reqText := requestSummary(ask.Request)
+	slots := loadEvidenceSlots(cwd, ask.Evidence)
+	var atts []mailAttachment
+	for _, s := range slots {
+		atts = append(atts, s.att)
+	}
 
 	var t strings.Builder
-	if ov := ask.Overview; ov != nil {
-		// the agent's own overview leads; the factory's title and why follow it
+	if ov := ask.Overview; ov != nil && !hideDecision {
 		for _, l := range []string{ov.Decision, ov.Overview, prefixed("Needs from you: ", ov.Needs)} {
 			if l != "" {
 				t.WriteString(l + "\n")
@@ -310,7 +440,16 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
 		}
 		t.WriteString("\n")
 	}
-	fmt.Fprintf(&t, "%s\n%s\n\nCard: %s (%s)\n\n%s\n", ask.Title, ask.Why, title, repo, detail)
+	fmt.Fprintf(&t, "%s\n%s\n\nCard: %s (%s)\n", ask.Title, ask.Why, title, repo)
+	if ov := ask.Overview; ov != nil && hideDecision && ov.Overview != "" {
+		fmt.Fprintf(&t, "Summary: %s\n", ov.Overview)
+	}
+	if reqText != "" {
+		fmt.Fprintf(&t, "\nOriginal task:\n%s\n", reqText)
+	}
+	for _, s := range slots {
+		fmt.Fprintf(&t, "\n%s screenshot: %s (attached)\n", s.label, s.name)
+	}
 	if len(ask.Questions) > 0 {
 		t.WriteString("\nQuestions:\n")
 		for i, q := range ask.Questions {
@@ -328,46 +467,76 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
 	if link != "" {
 		fmt.Fprintf(&t, "\nOpen the board: %s\n", link)
 	}
+	if strings.TrimSpace(detail) != "" {
+		fmt.Fprintf(&t, "\nDetails:\n%s\n", detail)
+	}
 
 	e := html.EscapeString
-	var h strings.Builder
-	h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
-	if ov := ask.Overview; ov != nil {
-		if ov.Decision != "" {
-			fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(ov.Decision))
-		}
-		if ov.Overview != "" {
-			fmt.Fprintf(&h, `<p style="white-space:pre-wrap">%s</p>`, e(ov.Overview))
-		}
-		if ov.Needs != "" {
-			fmt.Fprintf(&h, `<div style="white-space:pre-wrap;background:#fff8c5;border-left:3px solid #d4a72c;`+
-				`padding:8px 12px;margin-bottom:12px"><b>Needs from you:</b> %s</div>`, e(ov.Needs))
-		}
-	}
-	fmt.Fprintf(&h, `<p><b>%s</b><br>%s</p><p style="color:#59636e">Card: %s (%s)</p>`, e(ask.Title), e(ask.Why), e(title), e(repo))
-	fmt.Fprintf(&h, `<div style="white-space:pre-wrap;border-left:3px solid #d1d9e0;padding-left:12px">%s</div>`, e(detail))
-	if len(ask.Questions) > 0 {
-		h.WriteString(`<h3 style="border-bottom:1px solid #d1d9e0">Questions</h3><ol>`)
-		for _, q := range ask.Questions {
-			fmt.Fprintf(&h, "<li>%s", e(q.Text))
-			for j, o := range q.Options {
-				fmt.Fprintf(&h, "<br>%s. %s", letter(j), e(o))
+	buildHTML := func(includeImages bool) string {
+		var h strings.Builder
+		h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
+		if ov := ask.Overview; ov != nil && !hideDecision {
+			if ov.Decision != "" {
+				fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(ov.Decision))
 			}
-			h.WriteString("</li>")
+			if ov.Overview != "" {
+				fmt.Fprintf(&h, `<p style="white-space:pre-wrap">%s</p>`, e(ov.Overview))
+			}
+			if ov.Needs != "" {
+				fmt.Fprintf(&h, `<div style="white-space:pre-wrap;background:#fff8c5;border-left:3px solid #d4a72c;`+
+					`padding:8px 12px;margin-bottom:12px"><b>Needs from you:</b> %s</div>`, e(ov.Needs))
+			}
 		}
-		h.WriteString("</ol>")
+		fmt.Fprintf(&h, `<p><b>%s</b><br>%s</p><p style="color:#59636e">Card: %s (%s)</p>`, e(ask.Title), e(ask.Why), e(title), e(repo))
+		if ov := ask.Overview; ov != nil && hideDecision && ov.Overview != "" {
+			fmt.Fprintf(&h, `<p style="white-space:pre-wrap"><b>Summary:</b> %s</p>`, e(ov.Overview))
+		}
+		if reqText != "" {
+			fmt.Fprintf(&h, `<div style="white-space:pre-wrap;background:#f6f8fa;border-left:3px solid #d1d9e0;`+
+				`padding:8px 12px;margin:12px 0"><b>Original task:</b><br>%s</div>`, e(reqText))
+		}
+		if includeImages && len(slots) > 0 {
+			for _, s := range slots {
+				fmt.Fprintf(&h, `<div style="margin:12px 0"><p style="margin:0 0 4px;font-weight:600">%s</p>`+
+					`<img src="cid:%s" alt="%s" style="max-width:100%%;border:1px solid #d1d9e0;border-radius:6px"></div>`,
+					e(s.label), e(s.cid), e(s.label))
+			}
+		}
+		if len(ask.Questions) > 0 {
+			h.WriteString(`<h3 style="border-bottom:1px solid #d1d9e0">Questions</h3><ol>`)
+			for _, q := range ask.Questions {
+				fmt.Fprintf(&h, "<li>%s", e(q.Text))
+				for j, o := range q.Options {
+					fmt.Fprintf(&h, "<br>%s. %s", letter(j), e(o))
+				}
+				h.WriteString("</li>")
+			}
+			h.WriteString("</ol>")
+		}
+		h.WriteString(`<h3 style="border-bottom:1px solid #d1d9e0">How to answer</h3><p>Reply with one of these alone:</p><ul>`)
+		for _, w := range words {
+			fmt.Fprintf(&h, "<li><b>%s</b>: %s</li>", e(w.Word), e(w.Does))
+		}
+		h.WriteString("<li>Anything else goes to the agent as your instructions.</li></ul>")
+		if link != "" {
+			fmt.Fprintf(&h, `<p><a href="%s" style="display:inline-block;background:#0969da;color:#ffffff;text-decoration:none;`+
+				`font-weight:600;padding:10px 18px;border-radius:6px">Open board</a></p>`, e(link))
+		}
+		if strings.TrimSpace(detail) != "" {
+			fmt.Fprintf(&h, `<h3 style="border-bottom:1px solid #d1d9e0;margin-top:20px">Details</h3>`+
+				`<div style="white-space:pre-wrap;border-left:3px solid #d1d9e0;padding-left:12px">%s</div>`, e(detail))
+		}
+		h.WriteString("</div>")
+		return h.String()
 	}
-	h.WriteString(`<h3 style="border-bottom:1px solid #d1d9e0">How to answer</h3><p>Reply with one of these alone:</p><ul>`)
-	for _, w := range words {
-		fmt.Fprintf(&h, "<li><b>%s</b>: %s</li>", e(w.Word), e(w.Does))
+
+	return email{
+		Subject:     "Needs you: " + truncWords(title, 80),
+		Text:        t.String(),
+		HTML:        buildHTML(true),
+		HTMLNoImage: buildHTML(false),
+		Attachments: atts,
 	}
-	h.WriteString("<li>Anything else goes to the agent as your instructions.</li></ul>")
-	if link != "" {
-		fmt.Fprintf(&h, `<p><a href="%s" style="display:inline-block;background:#0969da;color:#ffffff;text-decoration:none;`+
-			`font-weight:600;padding:10px 18px;border-radius:6px">Open board</a></p>`, e(link))
-	}
-	h.WriteString("</div>")
-	return email{Subject: "Needs you: " + truncWords(title, 80), Text: t.String(), HTML: h.String()}
 }
 
 // probeMail checks the mailbox every mailProbeEvery, for /api/health. It never fails the health check.

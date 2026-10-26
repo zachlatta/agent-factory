@@ -282,12 +282,15 @@ external image URL is used. Images become unavailable if their worktree or file 
 
 Every card that waits in Needs Zach is emailed to Zach once per wait reason, by the factory itself
 through the zrl-bot mailbox (`pdw call zrl_bot_email_control__*`, `factory/mail.go`). The email
-carries what the board's ask shows: the title and why, the card and repo, the full last message of
-the builder or reviewer (the plan, brief or findings), its questions numbered with lettered
-options, the words he can reply with, and an Open board button that opens the card.
+puts the decision, the title and why, the card and repo, the original task, any inline `Before` /
+`After` screenshots from `.factory-evidence/`, its numbered questions with lettered options, the
+words he can reply with, and an Open board button above the full `Details` report (and hides the
+agent's `Decision` and `Needs from you` lines on stops the factory raises itself after landing, a
+stall or a secret scan).
 
 - Inbox cards answer in their own thread. Other cards start one thread to `FACTORY_ZACH_EMAIL` on
-  their first wait (`factory.zach-thread`); later waits reply in it.
+  their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
+  `FACTORY_ZACH_EMAIL`. If sending with inline screenshots fails, it retries once without them.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
   A wait where the builder was just asked for a summary or brief (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).
@@ -305,6 +308,7 @@ acts:
 | Reply | Does |
 | --- | --- |
 | `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or recommend |
+| `done`, `mark done`, `mark it done` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
 | `1B 2A` (only numbers and letters of the email's questions) | answers them, with the Yes button when it approves |
 

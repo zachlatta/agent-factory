@@ -26,6 +26,7 @@ var (
 
 var (
 	approveWords = []string{"approve", "approved", "yes", "y", "ok", "okay", "lgtm", "go", "go ahead", "ship it"}
+	doneWords    = []string{"done", "mark done", "mark it done"}
 	dropWords    = []string{"drop", "drop it", "close", "close it", "cancel"}
 	letterReply  = regexp.MustCompile(`^\d[a-f]([ ,]+\d[a-f])*$`)
 	letterPair   = regexp.MustCompile(`(\d)([a-f])`)
@@ -65,6 +66,8 @@ func parseAnswer(text string, ask *Ask) answer {
 	switch {
 	case slices.Contains(approveWords, clean) && yesActs && actionFor(ask, ask.Yes) != nil:
 		return answer{Action: ask.Yes}
+	case slices.Contains(doneWords, clean) && actionFor(ask, "done") != nil:
+		return answer{Action: "done"}
 	case slices.Contains(dropWords, clean) && actionFor(ask, "close") != nil:
 		return answer{Action: "close"}
 	case letterReply.MatchString(clean):
@@ -172,6 +175,8 @@ func ackLine(action string, plan bool, err error, link string) string {
 		return s
 	}
 	switch {
+	case action == "done":
+		return "Marked done."
 	case action == "close":
 		return "Dropped: the card is archived and nothing lands."
 	case action == "recommend":
