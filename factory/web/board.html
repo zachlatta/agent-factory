@@ -125,7 +125,14 @@ dialog h3{margin:0 0 8px}
 .ask .opt{padding:7px 11px;border-radius:16px;text-align:left}
 .ask .opt.on{background:var(--blue);border-color:var(--blue);color:#fff}
 .ask input.other{width:100%;margin-top:6px;box-sizing:border-box}
-.ask button.yes{color:#1a7f37}.ask button.no{color:#b42318}
+.ask .needs{font-size:13px;white-space:pre-wrap;margin:5px 0}
+.ask .request{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.ask .request summary{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+.ask .request[open] summary{-webkit-line-clamp:1}
+.ask .report{margin-top:10px;font-size:12px}.ask summary{cursor:pointer}
+.ask .evidence{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.ask figure{margin:0;flex:1 1 120px;min-width:0}.ask figcaption{font-size:12px;font-weight:600}
+.ask img{max-width:100%;height:auto}.ask .unavailable{font-size:12px;color:var(--mute)}
 .zachc .card{border-color:#e7d38a}
 /* Ideas: what each one proposes, in plain words */
 .card .sum{font-size:12.5px;line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
@@ -543,98 +550,85 @@ function cardHtml(c){
 }
 
 const md = s => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(s||'', {gfm:true})) : `<pre>${esc(s)}</pre>`;
-function askHtml(c){
-  const a = c.ask, qs = a.questions||[], box = !c.routing; // the reply box is always open, except on repo pickers
-  // with the agent's overview on top, its full message shows open under it; without one, today's preview
-  const ov = a.overview;
-  const head = ov ? `<div class="ov">${ov.decision?`<div class="dec">${esc(ov.decision)}</div>`:''}
-      ${ov.overview?`<div class="gist">${esc(ov.overview)}</div>`:''}
-      ${ov.needs?`<div class="needs"><b>Needs from you:</b> ${esc(ov.needs)}</div>`:''}</div>
-    <div class="why">${esc(a.title)} · ${esc(a.why)}</div>`
-    : `<div class="q">${esc(a.title)}</div>
-    <div class="why">${esc(a.why)}</div>`;
-  const detail = a.detail && ov ? `<div class="detail full" id="d-${c.id}">${md(a.detail)}</div>`
-    : a.detail ? `<div class="detail ${askFull.has(c.id)?'full':''}" id="d-${c.id}">${md(a.detail)}</div>
-      <div class="more" onclick="event.stopPropagation(); askFull.has('${c.id}')?askFull.delete('${c.id}'):askFull.add('${c.id}'); render()">${askFull.has(c.id)?'Show less':'Show all'}</div>`
-    : `<div class="detail empty">${c.status==='running'?'The agent is writing it now…':'No message yet. Open the transcript.'}</div>`;
-  const picks = askPicks[c.id]||{};
-  const quiz = qs.length ? `<div class="qs">${qs.map((q,qi)=>`<div class="qq"><div class="qt">${qs.length>1?(qi+1)+'. ':''}${esc(q.text)}</div>
-      <div class="opts">${q.options.map((o,oi)=>`<button class="opt ${picks[qi]===oi?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},${oi})">${esc(o)}</button>`).join('')}
-        <button class="opt ${picks[qi]==='o'?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},'o')">Other…</button></div>
-      <input class="other" id="o-${c.id}-${qi}" placeholder="Your own answer" style="display:${picks[qi]==='o'?'block':'none'}" oninput="askOpen.add('${c.id}')"></div>`).join('')}
-    <div class="btns"><button class="${a.actions.some(x=>x.id==='approve')?'':'primary'}" onclick="askAnswers('${c.id}')">Send answers</button></div></div>` : '';
-  // with questions, approving sends the answers along; without, the box's Yes/No answer the ask
-  const acts = a.actions.map((x,i)=>[x,i]).filter(([x])=>!(box && x.id==='reply'));
-  const hint = (a.actions.find(x=>x.id==='reply')||{}).hint || 'Message to the agent';
-  return `<div class="ask" onclick="event.stopPropagation()">
-    ${head}
-    <div class="from">${a.from==='reviewer'?'Reviewer says':'Agent says'}</div>
-    ${detail}
-    ${quiz}
-    <div class="btns">${acts.map(([x,i])=>`<button class="${x.primary||withAnswers(a,x)?'primary':''} ${x.id==='close'?'danger':''}" onclick="askAct('${c.id}',${i})">${esc(withAnswers(a,x)?x.label+' with these answers':x.label)}</button>`).join('')}
-      <button onclick="location.href='t/${c.id}'">Transcript</button></div>
-    ${c.routing?`<div id="p-${c.id}" style="display:none"><select style="width:100%;margin:6px 0">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select>
-      <div class="btns"><button class="primary" onclick="askRepo('${c.id}')">Start there</button></div></div>`:''}
-    <div id="r-${c.id}" style="display:${box?'block':'none'}"><textarea placeholder="${esc(qs.length?'Anything else (optional; sent on its own)':hint)}" oninput="askOpen.add('${c.id}')"></textarea>
-      <div class="btns"><button class="primary" onclick="askSend('${c.id}')">Send</button>
-        ${!qs.length&&a.yes?`<button class="yes" onclick="askYesNo('${c.id}',true)">Yes</button><button class="no" onclick="askYesNo('${c.id}',false)">No</button>`:''}</div></div>
-  </div>`;
-}
-const askOpen = new Set(), askFull = new Set(), askPicks = {};
-// withAnswers: this approve button also sends Zach's picks (plan or landing approval). On a brief, "as it is"
-// ignores the open points, so answers go by Send answers instead.
-const withAnswers = (a, x) => (a.questions||[]).length>0 && x.id==='approve' && !x.repo && !a.actions.some(y=>y.id==='recommend');
-function askPick(id, qi, oi){
-  const p = askPicks[id] = askPicks[id]||{}; p[qi] = oi; askOpen.add(id);
-  const card = document.querySelector(`.card[data-id="${id}"]`); if(!card) return;
-  card.querySelectorAll(`.opt[data-q="${qi}"]`).forEach((b,k)=>b.classList.toggle('on', k===(oi==='o'?b.parentNode.children.length-1:oi)));
-  const o = $('o-'+id+'-'+qi); o.style.display = oi==='o'?'block':'none'; if(oi==='o') o.focus();
-}
-// answersText is Zach's picks as one message that quotes each question, or '' if none is answered
-function answersText(id){
-  const c = B.cards.find(x=>x.id===id), p = askPicks[id]||{}; const out = [];
-  (c.ask.questions||[]).forEach((q,qi)=>{
-    const ans = p[qi]==='o' ? ($('o-'+id+'-'+qi).value.trim()) : (p[qi]!==undefined ? q.options[p[qi]] : '');
-    if(ans) out.push(`${qi+1}. ${q.text}\n   → ${ans}`);
+// decision: begin
+const askOpen = new Set(), askPicks = {}, askActions = {};
+const evidencePath = (id, slot) => '/api/evidence/'+encodeURIComponent(id)+'/'+slot;
+function allowedEvidenceSrc(src, id){ return ['before','after'].some(slot=>src===evidencePath(id,slot)); }
+function askMarkdown(text, id){
+  const template = document.createElement('template'); template.innerHTML = window.DOMPurify ? DOMPurify.sanitize(md(text), {ALLOWED_TAGS:['p','br','hr','a','img','pre','code','blockquote','ul','ol','li','strong','em','del','h1','h2','h3','h4','h5','h6','table','thead','tbody','tr','th','td'], ALLOWED_ATTR:['href','src','alt','title','colspan','rowspan']}) : md(text);
+  template.content.querySelectorAll('img').forEach(img=>{
+    if(!allowedEvidenceSrc(img.getAttribute('src'),id)) img.replaceWith(document.createTextNode('[Image unavailable]'));
+    else { img.removeAttribute('srcset'); img.loading='lazy'; }
   });
-  return out.length ? "Zach's answers:\n"+out.join('\n') : '';
+  return template.innerHTML;
 }
-// askSent: the card's picks and boxes were changed in place, so the next render rebuilds the list
-function askSent(id){ releaseKeyboard(); askOpen.delete(id); delete $('grid').dataset.html; }
-function askDone(id, msg){ askSent(id); delete askPicks[id]; toast(msg); refresh(); }
-async function askAnswers(id){
-  const m = answersText(id); if(!m){ toast('Pick an answer first'); return; }
-  await post('send', {id, message:m}); askDone(id, 'Answers sent');
+function askHtml(c){
+  const a=c.ask, qs=a.questions||[], ov=a.overview||{}, picks=askPicks[c.id]||{}, req=a.request||{};
+  const request=req.Base ? `<details class="request"><summary>${esc(req.Base)}</summary><div>${esc(req.Base)}</div></details>`
+    : `Original task unavailable. <a href="t/${c.id}">Open transcript</a>`;
+  const followups=(req.FollowUps||[]).map(f=>`<details class="request"><summary>Later instructions${f.Date?' · '+esc(f.Date):''}</summary><div>${esc(f.Text)}</div></details>`).join('');
+  const evidence=['before','after'].filter(slot=>(a.evidence||{})[slot]).map(slot=>`<figure><figcaption>${slot==='before'?'Before':'After'}</figcaption>
+    <a href="${evidencePath(c.id,slot)}" target="_blank" rel="noopener"><img src="${evidencePath(c.id,slot)}" alt="${slot==='before'?'Before':'After'} screenshot" onerror="this.closest('figure').querySelector('.unavailable').hidden=false;this.parentNode.hidden=true"></a><div class="unavailable" hidden>Image unavailable</div></figure>`).join('');
+  const quiz=qs.map((q,qi)=>`<div class="qq"><div class="qt">${esc(q.text)}</div><div class="opts">${q.options.map((o,oi)=>`<button class="opt ${picks[qi]===oi?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},${oi})">${esc(o)}</button>`).join('')}
+    <button class="opt ${picks[qi]==='o'?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},'o')">Other…</button></div>
+    <input class="other" id="o-${c.id}-${qi}" aria-label="Other answer: ${esc(q.text)}" placeholder="Your own answer" style="display:${picks[qi]==='o'?'block':'none'}" oninput="askOpen.add('${c.id}')"></div>`).join('');
+  const choices=a.actions.map((x,i)=>[x,i]).filter(([x])=>x.id!=='reply'&&x.id!=='pickrepo');
+  const selected=askActions[c.id]??(choices.length===1?choices[0][1]:undefined);
+  const actionChoices=choices.length>1?choices.map(([x,i])=>`<button class="opt ${selected===i?'on':''}" data-action="${i}" onclick="askChoose('${c.id}',${i})">${esc(x.label)}${x.primary?' (recommended)':''}</button>`).join(''):choices.length?`<span>${esc(choices[0][0].label)}</span>`:'';
+  const other=selected==='other';
+  return `<div class="ask" onclick="event.stopPropagation()"><div class="from">Original task</div>${request}${followups}
+    <div class="from">Needs your input</div><div class="q">${esc(ov.decision||a.title)}</div><div class="needs">${esc(ov.needs||a.why)}</div>
+    ${evidence?`<div class="evidence">${evidence}</div>`:''}${quiz}
+    <div class="qq"><div class="opts actions">${actionChoices}<button class="opt ${other?'on':''}" data-action="other" onclick="askChoose('${c.id}','other')">Other…</button></div></div>
+    <textarea id="r-${c.id}" aria-label="Other instructions" placeholder="What should the agent do?" style="display:${other?'block':'none'}" oninput="askOpen.add('${c.id}')"></textarea>
+    ${c.routing?`<select id="p-${c.id}" aria-label="Other repo" style="display:${selected===a.actions.findIndex(x=>x.id==='pickrepo')?'block':'none'}">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select><button class="opt" data-action="${a.actions.findIndex(x=>x.id==='pickrepo')}" onclick="askChoose('${c.id}',${a.actions.findIndex(x=>x.id==='pickrepo')})">Other repo…</button>`:''}
+    <div class="btns"><button class="primary" onclick="askSubmit('${c.id}')">Submit</button></div>
+    <details class="report" ontoggle="if(this.open)askOpen.add('${c.id}');else if(!askPicks['${c.id}']&&askActions['${c.id}']===undefined)askOpen.delete('${c.id}')"><summary>Full details</summary><div class="detail full">${esc(ov.overview||'')}${(a.report||a.detail)?askMarkdown(a.report||a.detail,c.id):''}</div><div class="why">${esc(a.title)} · ${esc(a.why)}</div><a href="t/${c.id}">Transcript</a></details></div>`;
 }
-async function askAct(id, i){
-  const c = B.cards.find(x=>x.id===id); const x = c.ask.actions[i];
-  if(x.id==='reply'){ const r=document.getElementById('r-'+id); r.style.display='block'; askOpen.add(id);
-    const t=r.querySelector('textarea'); t.placeholder=x.hint||''; t.focus(); return; }
-  if(x.id==='pickrepo'){ const r=document.getElementById('p-'+id); r.style.display='block'; askOpen.add(id); return; }
-  if(x.id==='close' && !confirm('Drop this card? The agent is archived.')) return;
-  const body = {id}; if(x.repo) body.repo = x.repo;
-  if(withAnswers(c.ask, x)){ const m = answersText(id); if(m) body.message = m; }
-  await post(x.id, body); askDone(id, x.label+': done');
+function askPick(id, qi, oi){
+  const p=askPicks[id]=askPicks[id]||{};p[qi]=oi;askOpen.add(id);
+  const card=document.querySelector(`.card[data-id="${id}"]`);if(!card)return;
+  card.querySelectorAll(`.opt[data-q="${qi}"]`).forEach((b,k)=>b.classList.toggle('on',k===(oi==='o'?b.parentNode.children.length-1:oi)));
+  const o=$('o-'+id+'-'+qi);o.style.display=oi==='o'?'block':'none';if(oi==='o')o.focus();
 }
-// askYesNo answers a card with no questions: c.ask.yes / c.ask.no say what each button does (ask.go yesNo)
-async function askYesNo(id, yes){
-  const c = B.cards.find(x=>x.id===id), t = document.querySelector('#r-'+id+' textarea'), m = t.value.trim();
-  const what = yes ? c.ask.yes : c.ask.no;
-  if(what==='changes'){
-    if(!m){ t.placeholder='What should change? Write it here, then press No again.'; t.focus(); return; }
-    await post('send', {id, message:m}); t.value=''; askDone(id, 'Sent back with changes'); return;
+function askChoose(id, choice){
+  askActions[id]=choice;askOpen.add(id);
+  const card=document.querySelector(`.card[data-id="${id}"]`);if(!card)return;
+  card.querySelectorAll('[data-action]').forEach(b=>b.classList.toggle('on',b.dataset.action===String(choice)));
+  const t=$('r-'+id);t.style.display=choice==='other'?'block':'none';if(choice==='other')t.focus();
+  const c=B.cards.find(x=>x.id===id),repo=$('p-'+id);
+  if(repo)repo.style.display=c.ask.actions[choice]?.id==='pickrepo'?'block':'none';
+}
+function decisionAnswers(c){
+  const p=askPicks[c.id]||{},out=[];
+  for(const [qi,q] of (c.ask.questions||[]).entries()){
+    const ans=p[qi]==='o'?($('o-'+c.id+'-'+qi)?.value||'').trim():q.options[p[qi]];
+    if(!ans)return null;
+    out.push(`${qi+1}. ${q.text}\n   → ${ans}`);
   }
-  if(what==='say'){ await post('send', {id, message:(yes?'Yes.':'No.')+(m?'\n\n'+m:'')}); t.value=''; askDone(id, yes?'Said yes':'Said no'); return; }
-  const i = c.ask.actions.findIndex(x=>x.id===what); if(i>=0) await askAct(id, i);
+  return out.length?"Zach's answers:\n"+out.join('\n'):'';
 }
-async function askRepo(id){
-  const repo = document.querySelector('#p-'+id+' select').value;
-  await post('approve', {id, repo}); toast('Starting in '+repo); askSent(id); refresh();
+function askSent(id){releaseKeyboard();askOpen.delete(id);delete $('grid').dataset.html;}
+function askDone(id,msg){askSent(id);delete askPicks[id];delete askActions[id];toast(msg);refresh();}
+async function askSubmit(id){
+  const c=B.cards.find(x=>x.id===id),a=c.ask;
+  const answers=decisionAnswers(c);if(answers===null){toast('Answer each question first');return;}
+  const choices=a.actions.map((x,i)=>[x,i]).filter(([x])=>x.id!=='reply'&&x.id!=='pickrepo');
+  const choice=askActions[id]??(choices.length===1?choices[0][1]:undefined);
+  if(choice===undefined){toast('Choose what happens next');return;}
+  const body={id};if(answers)body.message=answers;
+  if(choice==='other'){
+    const text=$('r-'+id).value.trim();if(!text){toast('Write your instructions first');return;}
+    body.message=(answers?answers+'\n\n':'')+text;
+    await post('send',body);askDone(id,'Instructions sent');return;
+  }
+  const x=a.actions[choice];if(!x)return;
+  if(x.id==='close'&&!confirm('Drop this card? The agent is archived.'))return;
+  if(x.repo)body.repo=x.repo;
+  if(x.id==='pickrepo')body.repo=$('p-'+id).value;
+  await post(x.id==='pickrepo'?'approve':x.id,body);askDone(id,x.label+': done');
 }
-async function askSend(id){
-  const t = document.querySelector('#r-'+id+' textarea'); const m = t.value.trim(); if(!m) return;
-  await post('send', {id, message:m}); t.value=''; askSent(id); toast('Sent'); refresh();
-}
+// decision: end
 
 // A pressed button shows at once that it is working: its card's (or panel's or dialog's) buttons
 // are disabled and it says what it is doing until the board reloads (refresh). The click is caught

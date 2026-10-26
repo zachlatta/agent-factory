@@ -35,6 +35,7 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /index.html", gzipHandler(page("board.html")))
 	mux.HandleFunc("GET /usage", gzipHandler(page("usage.html")))
 	mux.HandleFunc("GET /t/{id}", gzipHandler(page("transcript.html")))
+	mux.HandleFunc("GET /api/evidence/{id}/{slot}", f.handleEvidence)
 	mux.HandleFunc("GET /api/board", gzipHandler(f.handleBoard))
 	mux.HandleFunc("GET /api/ideas", gzipHandler(f.handleIdeas))
 	mux.HandleFunc("GET /api/peers", gzipHandler(f.handlePeers))

@@ -148,9 +148,13 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelNote: "approved by Zach"})
 	case "recommend":
+		answers := ""
+		if m := strings.TrimSpace(b.Message); m != "" {
+			answers = "\n\nZach's answers:\n" + m + "\n\n"
+		}
 		// Zach accepts the builder's brief (rework cap or escalation): apply it, then code review as usual
 		if planPending(f.agent(c.ID)) {
-			if err := f.send(c.ID, "Zach accepts the recommendations in your brief. Revise the plan to match them, then "+
+			if err := f.send(c.ID, "Zach accepts the recommendations in your brief."+answers+" Revise the plan to match them, then "+
 				"build it as revised. "+noLiveChangesRule+" Commit on your branch, do NOT land, and stop with a short summary (including the deploy steps as built, if any). "+overviewReminder+" A code reviewer "+
 				"checks it next, and the factory lands it once the review passes."); err != nil {
 				return nil, err
@@ -158,7 +162,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
 				labelAwaiting: "", labelZachPlan: "approved", labelDecided: "1", labelNote: "building with Zach's choices"})
 		}
-		if err := f.send(c.ID, "Zach accepts the recommendations in your brief. Apply them, commit on your branch, do NOT "+
+		if err := f.send(c.ID, "Zach accepts the recommendations in your brief."+answers+" Apply them, commit on your branch, do NOT "+
 			"land, and stop with a short summary (including the deploy steps as built, if any). "+noLiveChangesRule+" "+overviewReminder+" A code reviewer checks it next, and the factory lands it once the "+
 			"review passes."); err != nil {
 			return nil, err

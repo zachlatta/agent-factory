@@ -3,3 +3,6 @@
 .env.*
 *.local
 /factory.bin
+
+# Decision screenshots stay local to the worktree.
+/.factory-evidence/

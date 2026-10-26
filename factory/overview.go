@@ -6,8 +6,8 @@ import (
 )
 
 // Overview is the three lines an agent writes for Zach at the top of a message where it stops: the
-// decision, what the work is, and what it needs from him. The board shows it on top of a Needs Zach
-// card and the email leads with it; with none, both show the agent's message as before.
+// decision, what the work is, and what it needs from him. The card shows the decision and needs;
+// overview prose stays in details. Email leads with the whole block.
 type Overview struct {
 	Decision string `json:"decision,omitempty"`
 	Overview string `json:"overview,omitempty"`
@@ -23,10 +23,30 @@ DECISION: <what Zach decides if this reaches him, one line>
 OVERVIEW: <what it changes, why, and the main risk; at most 3 short sentences>
 NEEDS FROM ZACH: <approve, choose or answer, and what happens after>
 Then the rest of the message. QUESTION: blocks stay as they are, and TIER:, VERDICT: and TRACK:
-lines stay last.`
+lines stay last.` + evidenceRule
 
 // overviewReminder goes in each factory message that asks an agent for a reply it stops on.
-const overviewReminder = "Start that reply with the DECISION:, OVERVIEW: and NEEDS FROM ZACH: lines for Zach."
+const overviewReminder = "Start that reply with the DECISION:, OVERVIEW: and NEEDS FROM ZACH: lines for Zach. Keep the choice and consequence concise. For visible decisions, save useful before/after PNG or JPEG screenshots in the card worktree’s .factory-evidence/ folder, excluded from Git before saving; never commit or force-add evidence. After the overview and a blank line, optionally write BEFORE: before.png and AFTER: after.png as separate whole lines. Use plain filenames, no paths or URLs, at most 5 MB and 20 megapixels each; copy captures from another host into the worktree first. The board serves these through its existing access boundary. Use QUESTION blocks with the recommendation first; the board adds Other."
+
+// evidenceRule is shared by every prompt that can produce a decision card.
+const evidenceRule = `
+Keep DECISION and NEEDS FROM ZACH concise: the concrete choice and what happens after it.
+The board shows the original task separately and folds the full report into details.
+When a visible change needs a decision, include useful before and after screenshots, or
+show the exact before and after text in the report when text is the evidence.
+Save screenshots directly in .factory-evidence/ inside the card's worktree. Exclude that
+folder from Git before saving: use the repo's ignore rule or its local Git exclude file;
+never commit or force-add evidence. Do not upload it to a public CDN.
+After the three-line overview and a blank line, write optional whole lines:
+BEFORE: before.png
+AFTER: after.png
+Each key appears at most once. Use a plain filename (letters, digits, underscores or hyphens;
+PNG or JPEG extension), never a path or URL. Each image must be valid PNG/JPEG, at most 5 MB
+and 20 megapixels. Factory serves only these named images through the board's access boundary.
+If capture runs on a different host, copy the image into this worktree before referencing it.
+Keep QUESTION blocks for choices, recommended first; the board adds Other. Do not repeat the
+original task, full report or action list inside NEEDS FROM ZACH.
+`
 
 var overviewKey = regexp.MustCompile(`^\s*\*{0,2}(DECISION|OVERVIEW|NEEDS FROM ZACH|NEEDS):\*{0,2}\s*(.*?)\s*$`)
 

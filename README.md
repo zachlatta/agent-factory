@@ -215,12 +215,35 @@ report back in their email thread when they land.
 
 ### Needs Zach overview
 
-Agents start every message where they stop (plan, build or rework summary, review, brief, handoff,
-result) with three lines: `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` (`factory/overview.go`).
-The factory takes the first such block (at least 2 of the 3 keys) out of the message shown on a
-Needs Zach card and puts it in the ask's `overview`. The board shows it in full on top of the card,
-with the agent's whole message open under it, and the email leads with it. A message with no block
-shows as before.
+Needs Zach cards show the original request, later instructions, the decision needed, optional
+before/after images, and choices with Other. The full agent report and operational explanation
+are folded into details. Missing original requests are labeled unavailable, with a transcript link.
+
+Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
+The decision and needs fields describe the concrete choice and its consequence; overview prose
+stays in details. Existing `QUESTION:` blocks provide up to four questions, with the recommendation
+first. Every question needs an answer. Select the action and press Submit once; Other sends typed
+instructions without approving. Drop still asks for confirmation. Emails retain their existing format.
+
+For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`
+folder, excluded from Git before saving. Never commit or force-add evidence. After the overview
+and a blank line, optional whole lines name the files:
+
+```text
+BEFORE: before.png
+AFTER: after.png
+```
+
+Each key occurs at most once. Filenames contain letters, digits, underscores or hyphens and a
+`.png`, `.jpg` or `.jpeg` extension. Images must decode as PNG or JPEG, at most 5 MB and
+20 megapixels. Copy captures from another machine into the worktree before referencing them.
+For text decisions, show the exact before and after text in the report instead.
+
+Factory serves only the current ask's named images at `/api/evidence/{card}/{before|after}`
+under the board's existing access boundary. It rejects symlinks, paths, special files, unsupported
+formats and oversized images; it disables caching and content sniffing. The card accepts images
+only from these generated routes, including inside report Markdown. No public image service or
+external image URL is used. Images become unavailable if their worktree or file is removed.
 
 ### Needs Zach email
 

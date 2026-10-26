@@ -11,14 +11,18 @@ import (
 // Ask says, for a card in Needs Zach, what Zach is being asked, why, what to read (Detail, from the
 // builder's or the reviewer's last message), and which buttons answer it.
 type Ask struct {
-	Title   string   `json:"title"`
-	Why     string   `json:"why"`
-	From    string   `json:"from"` // builder or reviewer: whose last message is Detail
-	Detail  string   `json:"detail"`
-	Actions []Action `json:"actions"`
+	// Report retains the full parsed reply for board details; Detail keeps the email preview.
+	Report   string       `json:"report,omitempty"`
+	Request  *CardRequest `json:"request,omitempty"`
+	Evidence Evidence     `json:"evidence"`
+	Title    string       `json:"title"`
+	Why      string       `json:"why"`
+	From     string       `json:"from"` // builder or reviewer: whose last message is Detail
+	Detail   string       `json:"detail"`
+	Actions  []Action     `json:"actions"`
 	// Questions are the QUESTION: blocks in the agent's last reply (ParseQuestions), shown as choices.
 	Questions []Question `json:"questions,omitempty"`
-	// Overview is the agent's DECISION / OVERVIEW / NEEDS FROM ZACH lines (ParseOverview), shown on top.
+	// Overview is the agent's DECISION / OVERVIEW / NEEDS FROM ZACH block (ParseOverview).
 	Overview *Overview `json:"overview,omitempty"`
 	// Yes and No say what the board's Yes and No buttons do when there are no Questions (then Zach
 	// gets a free-form reply and a Yes/No pair): an action id
@@ -335,8 +339,22 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 		f.mu.Lock()
 		cached, ok := f.details[cards[n].ID]
 		f.mu.Unlock()
+		if fetch {
+			req := f.cardRequest(byID[cards[n].ID])
+			ask.Request = &req
+		} else if ok {
+			ask.Request = cached.request
+		}
 		if ok && (cached.key == key || !fetch) {
 			ask.Detail, ask.Questions, ask.Overview = cached.text, cached.questions, cached.overview
+			ask.Evidence = cached.evidence
+			ask.Report = cached.report
+			if fetch {
+				cached.request = ask.Request
+				f.mu.Lock()
+				f.details[cards[n].ID] = cached
+				f.mu.Unlock()
+			}
 			continue
 		}
 		if !fetch {
@@ -350,11 +368,13 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 			ask.Detail = unreadableReply(err)
 		} else {
 			// parse the whole reply: questions often close a long plan, past the Detail cut
+			text, ask.Evidence = parseEvidence(text)
 			text, ask.Questions, ask.Overview = parseReply(text)
+			ask.Report = text
 			ask.Detail = trunc(text, 6000)
 		}
 		f.mu.Lock()
-		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview}
+		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview, ask.Evidence, ask.Report, ask.Request}
 		f.mu.Unlock()
 	}
 }
@@ -364,6 +384,9 @@ type detailEntry struct {
 	text      string
 	questions []Question
 	overview  *Overview
+	evidence  Evidence
+	report    string
+	request   *CardRequest
 }
 
 // When an agent needs Zach's input it can ask multiple-choice questions, and he can always write his
