@@ -41,8 +41,8 @@ messages or the commit authors; and any change to the secret scan (factory/scan/
 
 // guardedLandMsg replaces the landing message for a guarded card.
 const guardedLandMsg = "Land it now with bin/land (it scans, tests, rebases and pushes HEAD:main). Land exactly the " +
-	"reviewed commits: do not commit anything else first. Never use --no-verify. Then run any deploy steps from your reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system), delete .factory-scratch/ if present so ignored files do not block worktree retirement, then stop with " +
-	"a one-line summary. " + overviewReminder
+	"reviewed commits: do not commit anything else first. Never use --no-verify. Then run any deploy steps from your reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system). Then stop with " +
+	"a one-line summary. " + overviewReminder + " " + shellRule + " " + scratchCleanupRule
 
 // scanCard runs the secret scan on what the card at cwd would publish (origin/main..HEAD). It
 // returns a short note: "" when clean, else what was found (rule and place, never the text). An

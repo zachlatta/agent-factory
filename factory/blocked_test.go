@@ -208,7 +208,9 @@ func TestPromptsCarryRmRule(t *testing.T) {
 	if !strings.Contains(buildMsg("Plan approved.", "none"), want) {
 		t.Error("build message lacks the rm rule")
 	}
-	if strings.Contains(shellRule, "%") {
-		t.Error("shellRule is formatted into newCardPrompt: no % allowed")
+	for name, rule := range map[string]string{"shellRule": shellRule, "scratchCleanupRule": scratchCleanupRule, "worktreeRule": worktreeRule} {
+		if strings.Contains(rule, "%") {
+			t.Errorf("%s is formatted into newCardPrompt: no %% allowed", name)
+		}
 	}
 }

@@ -86,15 +86,13 @@ func delegateText(opts []delegateOption, reviewer bool) string {
 	if reviewer {
 		b.WriteString("- Your sub-agents are read-only, like you: start each prompt with \"You are a read-only sub-agent " +
 			"of a factory reviewer. Edit nothing; do not commit, push, land, start agents, send email or message " +
-			"anyone. End with your answer.\" Their findings are yours to check before you use them. Starting and archiving them is allowed besides posting " +
+			"anyone. " + shellRule + " " + scratchCleanupRule + " End with your answer.\" Their findings are yours to check before you use them. Starting and archiving them is allowed besides posting " +
 			"ideas.\n")
 	} else {
-		b.WriteString("- A sub-agent works in this card's worktree, never in /tmp: put transient scratch in .factory-scratch/ " +
-			"listed in .git/info/exclude before first use. Start each prompt with \"You are a sub-agent of a " +
-			"factory card. Work in this worktree, never in /tmp (put transient scratch in .factory-scratch/ listed in " +
-			".git/info/exclude); edit only the files you assign it (or nothing); do not commit, push, land, start agents, " +
-			"send email or message anyone. End with your answer.\" Edit only the files you assign it, never the same " +
-			"file in two sub-agents at once. You review its work and make every commit yourself.\n")
+		b.WriteString("- Start each prompt with \"You are a sub-agent of a factory card. " + worktreeRule +
+			" Edit only the files you assign it (or nothing); do not commit, push, land, start agents, send email or " +
+			"message anyone. End with your answer.\" Edit only the files you assign it, never the same file in two " +
+			"sub-agents at once. You review its work and make every commit yourself.\n")
 	}
 	return b.String()
 }

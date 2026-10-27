@@ -1302,9 +1302,9 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		"recommend code": p.sent("c-code")[0],
 	}
 	for name, s := range worktreePrompts {
-		for _, want := range []string{"worktree", "/tmp", ".factory-scratch/", ".git/info/exclude"} {
+		for _, want := range []string{"worktree", "/tmp", ".factory-scratch/", ".git/info/exclude", "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {
 			if !strings.Contains(s, want) {
-				t.Errorf("%s lacks %q:\n%s", name, want, s)
+				t.Errorf("%s lacks %q", name, want)
 			}
 		}
 	}
@@ -1313,18 +1313,23 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 	}
 
 	deleteScratchPrompts := map[string]string{
-		"newCardPrompt":  planPrompt,
-		"worktreeRule":   worktreeRule,
-		"landMsg":        landMsg,
-		"guardedLandMsg": guardedLandMsg,
-		"landMsgFor":     f.landMsgFor(f.agent("c-code")),
-		"rerunLandMsg":   rerunLandMsg(false),
-		"rerunGuarded":   rerunLandMsg(true),
+		"newCardPrompt":     planPrompt,
+		"delegate builder":  delegateText(nil, false),
+		"delegate reviewer": delegateText(nil, true),
+		"review plan":       ReviewPrompt(c, "plan", 7478, "unknown"),
+		"review code":       ReviewPrompt(c, "code", 7478, "unknown"),
+		"review land":       ReviewPrompt(c, "land", 7478, "unknown"),
+		"worktreeRule":      worktreeRule,
+		"landMsg":           landMsg,
+		"guardedLandMsg":    guardedLandMsg,
+		"landMsgFor":        f.landMsgFor(f.agent("c-code")),
+		"rerunLandMsg":      rerunLandMsg(false),
+		"rerunGuarded":      rerunLandMsg(true),
 	}
 	for name, s := range deleteScratchPrompts {
-		for _, want := range []string{"delete .factory-scratch/", "retirement"} {
+		for _, want := range []string{"delete .factory-scratch/", "retirement", "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {
 			if !strings.Contains(s, want) {
-				t.Errorf("%s lacks %q:\n%s", name, want, s)
+				t.Errorf("%s lacks %q", name, want)
 			}
 		}
 	}

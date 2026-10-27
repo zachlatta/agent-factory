@@ -10,17 +10,21 @@ import (
 // nobody answers the prompt, so the agent hangs. It is formatted into newCardPrompt: no % in it.
 const shellRule = "Shell commands: Claude Code asks for permission before some rm commands even in bypass mode, and " +
 	"nobody responds to it, so you would hang. rm takes only literal absolute paths: no glob, $VAR, $(...) or ~, and " +
-	"no cd earlier in the same command (use git -C or absolute paths, or run cd as its own command)."
+	"no cd earlier in the same command. Never run cd X && git or any compound command combining cd and git; use git -C X instead."
 
-// worktreeRule keeps card agents in their own worktree instead of /tmp, with transient scratch
-// isolated in .factory-scratch/ (excluded from Git via .git/info/exclude) and deleted before the
-// card lands or finishes so ignored files never stay on disk or block worktree retirement.
-const worktreeRule = "Worktree, not /tmp: do all your work in this worktree, never in /tmp or another temp directory. " +
+// scratchCleanupRule is shared by every prompt that asks agents to remove scratch.
+const scratchCleanupRule = "Never run commands from inside .factory-scratch/. Keep your working directory at the worktree root. " +
+	"Before landing or finishing, delete .factory-scratch/ if present from the worktree root using its literal absolute path; " +
+	"never use a relative path, variable, substitution, glob, or ~. This keeps ignored files from blocking worktree retirement."
+
+// worktreeRule includes shell safety so follow-up prompts remain self-contained.
+// These constants are formatted into newCardPrompt: no % in them.
+const worktreeRule = shellRule + "\n\n" +
+	"Worktree, not /tmp: do all your work in this worktree, never in /tmp or another temp directory. " +
 	"Put real deliverables in tracked paths (for work items in work/, create work/YYYY-MM-DD-short-name/ first and keep " +
 	"the scripts and outputs that produced the deliverable inside it). Put transient scratch (JSON payloads, downloads, " +
 	"one-off helper scripts) in a .factory-scratch/ folder in the worktree, listed in .git/info/exclude " +
-	"(git rev-parse --git-path info/exclude) before first use; do not commit or force-add .factory-scratch/, and delete " +
-	".factory-scratch/ before the card lands or finishes so ignored files do not block worktree retirement."
+	"(git rev-parse --git-path info/exclude) before first use; do not commit or force-add .factory-scratch/. " + scratchCleanupRule
 
 // permissionWait reports whether agent a is stopped on a permission prompt: one Paseo lists for it
 // (Agent.Pending), or Paseo's own attention flag for it. The factory never answers these prompts.

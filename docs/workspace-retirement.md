@@ -92,6 +92,10 @@ protections block retirement locally without invalidating the whole inventory.
 Overlapping workspace records block exclusive directory ownership. Archived records
 remain relevant to ownership.
 Tracked changes, untracked files and any ignored files block removal.
+The future executor removes a leftover root `.factory-scratch/` only after exclusive-use
+authorization and ownership checks, and before the final Git cleanliness check. Scratch
+cleanup must remain confined to that directory and must not follow symlinks outside it
+or delete tracked content. The read-only inventory never performs this cleanup.
 
 Completed-card candidates require independent result evidence and fresh landing proof.
 Reviewers require an applied verdict and a completed target; their archive cannot
