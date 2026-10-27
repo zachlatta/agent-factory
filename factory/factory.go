@@ -111,6 +111,7 @@ type Factory struct {
 	Usage       func(ctx context.Context, provider string) AgentUsage                 // remaining subscription usage per provider
 	Mail        Mailer                                                                // zrl-bot mailbox for Needs Zach email; nil = none (mail.go)
 	kick        chan struct{}
+	hotKick     chan struct{} // the agent watcher marked agents hot (watch.go): a hot pass runs
 
 	mu        sync.Mutex
 	list      []Agent
@@ -148,6 +149,11 @@ type Factory struct {
 	started, tickStart, lastLoop time.Time
 	refreshed                    bool
 	stopping                     atomic.Bool // set when Run's context ends; Tick stops between agents
+
+	calls    callLog         // paseo calls in the last callWindow, for /api/health (paseocalls.go)
+	permitAt time.Time       // last `permit ls` that succeeded (addPending)
+	hot      map[string]bool // agents whose file changed in a way the rules act on (watch.go)
+	archiveQ *[]string       // during a Tick: reviewer and scout archives, run after the moves
 }
 
 const archiveMarkTTL = 10 * time.Minute
@@ -159,7 +165,7 @@ func New(cfg Config, p Paseo) *Factory {
 		steers:      &SteerStore{path: filepath.Join(cfg.StateDir, "steers.json")},
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
-		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), errs: map[string]string{},
+		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
 		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}}
 	if cfg.DryRun {
@@ -356,29 +362,59 @@ func (f *Factory) load(pending map[string]string) (bool, error) {
 	return f.setAgents(agents, seq, false), nil
 }
 
-// Run polls Paseo and applies the rules until ctx ends. A POST kicks an early refresh. When ctx
-// ends, a Tick in progress finishes the agent it is on and skips the rest; Run then returns.
+// Run polls Paseo and applies the rules until ctx ends. A POST kicks an early refresh; the agent
+// watcher (watch.go) kicks a hot pass for the agents whose files changed, and the loop also wakes
+// when a rule's grace window ends. When ctx ends, a Tick in progress finishes the agent it is on and
+// skips the rest; Run then returns.
 func (f *Factory) Run(ctx context.Context) {
 	t := time.NewTicker(f.cfg.Poll)
 	defer t.Stop()
 	stop := context.AfterFunc(ctx, func() { f.stopping.Store(true) })
 	defer stop()
+	defer f.startWatch()()
+	full := true
 	for {
 		f.loopStarted()
-		f.Refresh()
-		if !f.passive() {
-			f.Tick()
+		switch {
+		case full:
 			f.Refresh()
-			f.providerStatus("claude") // keeps the provider list fresh (re-read every providerListTTL)
-			f.providerUsages()         // same for agent usage: warmed here, never on the request path
+			if !f.passive() {
+				f.Tick()
+				f.Refresh()
+				f.providerStatus("claude") // keeps the provider list fresh (re-read every providerListTTL)
+				f.providerUsages()         // same for agent usage: warmed here, never on the request path
+			}
+		case f.passive():
+			f.mu.Lock()
+			clear(f.hot) // no rules run: the reload shows the change
+			f.mu.Unlock()
+			f.reload()
+		default:
+			f.hotPass()
 		}
 		f.loopDone()
+		var grace <-chan time.Time
+		due, ids := graceDue(f.agents(), f.Now())
+		if !due.IsZero() {
+			grace = time.After(due.Sub(f.Now()))
+		}
 		select {
 		case <-ctx.Done():
 			f.stopping.Store(true)
 			return
 		case <-t.C:
+			full = true
 		case <-f.kick:
+			full = true
+		case <-f.hotKick:
+			full = false
+		case <-grace:
+			f.mu.Lock()
+			for _, id := range ids {
+				f.hot[id] = true
+			}
+			f.mu.Unlock()
+			full = false
 		}
 	}
 }
@@ -438,7 +474,10 @@ func (f *Factory) logf(format string, args ...any) {
 func (f *Factory) paseo(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	return f.p.Run(ctx, args...)
+	start := time.Now()
+	out, err := f.p.Run(ctx, args...)
+	f.calls.add(f.Now(), args, time.Since(start))
+	return out, err
 }
 
 func (f *Factory) setLabels(id string, labels map[string]string) error {
@@ -577,15 +616,40 @@ func (c CLI) Run(ctx context.Context, args ...string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		version, err := runCLI(ctx, bin, "--version")
+		key, checked := archiveVersionOK(bin)
+		if !checked {
+			version, err := runCLI(ctx, bin, "--version")
+			if err != nil {
+				return "", err
+			}
+			if !fixedArchiveVersion(version) {
+				return "", fmt.Errorf("archive requires Paseo CLI >= 0.13.0 (stable); selected executable reports %q", strings.TrimSpace(version))
+			}
+			archiveVersions.Store(bin, key)
+		}
+		out, err := runCLI(ctx, bin, args...)
 		if err != nil {
-			return "", err
+			archiveVersions.Delete(bin) // the next archive checks the version again
 		}
-		if !fixedArchiveVersion(version) {
-			return "", fmt.Errorf("archive requires Paseo CLI >= 0.13.0 (stable); selected executable reports %q", strings.TrimSpace(version))
-		}
+		return out, err
 	}
 	return runCLI(ctx, bin, args...)
+}
+
+// archiveVersions: archive executables whose version check passed, by path, with the size and
+// modification time they had then. A replaced executable is checked again before its next archive.
+var archiveVersions sync.Map
+
+// archiveVersionOK reports whether bin passed the version check as the file it is now, and the
+// key to store when it passes.
+func archiveVersionOK(bin string) (string, bool) {
+	st, err := os.Stat(bin)
+	if err != nil {
+		return "", false
+	}
+	key := fmt.Sprint(st.Size(), " ", st.ModTime().UnixNano())
+	v, ok := archiveVersions.Load(bin)
+	return key, ok && v == key
 }
 
 func runCLI(ctx context.Context, bin string, args ...string) (string, error) {

@@ -4,10 +4,29 @@ A Kanban board and review pipeline for coding agents run by Paseo. You throw
 any request at the start of the queue; an agent plans it, other agents review the plan and the
 code, and the work lands on its own or waits for your approval, depending on how risky it is.
 
-One Go binary. It reads Paseo's agent files every 15 seconds, applies the rules below, and calls
-the `paseo` CLI for every move (labels on agents are the state: `factory.stage`, `factory.tier`
-and so on, see `factory/labels.go`). It serves the board on `127.0.0.1:7478`; the deployer puts
-it on the tailnet with `tailscale serve`.
+One Go binary. It reads Paseo's agent files every 15 seconds and whenever one changes, applies the
+rules below, and calls the `paseo` CLI for every move (labels on agents are the state:
+`factory.stage`, `factory.tier` and so on, see `factory/labels.go`). It serves the board on
+`127.0.0.1:7478`; the deployer puts it on the tailnet with `tailscale serve`.
+
+### Hand-offs and Paseo calls
+
+- **Agent watcher** (`factory/watch.go`, inotify on Linux). When an agent file's status, archive
+  time, attention flag or `factory.*` labels change, that agent is acted on within about a second:
+  the factory rereads the files (no paseo calls) and applies the rules to that agent first, even in
+  the middle of a pass; each agent is handled at most once per pass. Writes that change only
+  activity times are ignored. The 15-second poll stays as the fallback, and is all there is when
+  the watcher cannot start (not Linux, no `~/.paseo/agents`), which is logged once.
+- The loop also wakes when a rule's grace window ends (a reviewer's first minute, a card's 45 s
+  after a move) instead of waiting for the next poll.
+- Paseo calls stay in order: a card's move is check, labels, send, and moves of different cards
+  share the board and labels, so they never run at the same time. Instead, a finished reviewer's or
+  Scout's archive waits until the pass's moves are sent.
+- `paseo permit ls` runs at most every 15 seconds; reads in between keep the prompts it last found,
+  unless an agent's file flags a permission wait it did not see. The archive CLI's version check
+  runs once per executable (again if the file changes or an archive fails).
+- `/api/health` reports `paseoCalls`: the CLI calls of the last 10 minutes, with count and wall
+  time per command.
 
 **Unread** on a card: its agent finished a turn you have not opened. Opening the card or loading its
 transcript page marks it seen (`factory.seen`) until the agent is sent another message and finishes

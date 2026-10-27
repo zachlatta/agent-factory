@@ -72,15 +72,37 @@ func reviewerBlocked(agents []Agent, r Agent, now time.Time) bool {
 	return (permissionWait(r) && idle >= stuckAfter) || (idle > stallMinutes*time.Minute && !subagentActive(agents, r.ID, now))
 }
 
+// permitEvery: `permit ls` runs at most this often. Between reads each agent keeps the prompt the
+// last read found; Refreshes, board actions and watcher passes in between make no call.
+const permitEvery = 15 * time.Second
+
 // addPending fills each agent's Pending from `paseo permit ls --json`, one call for all agents,
-// made only when some agent is running. A failed read leaves Pending empty: the stall checks still
-// catch a blocked agent, later.
+// made only when some agent is running, and at most every permitEvery unless an agent's file says
+// it waits on permission. A failed read leaves Pending empty: the stall checks still catch a
+// blocked agent, later.
 func (f *Factory) addPending(agents []Agent) {
-	running := false
+	prev := map[string]string{}
+	for _, a := range f.agents() {
+		prev[a.ID] = a.Pending
+	}
+	running, flagged := false, false
 	for _, a := range agents {
-		running = running || (a.Status == "running" && !a.archived())
+		live := a.Status == "running" && !a.archived()
+		running = running || live
+		// a prompt Paseo flags that the last read did not see
+		flagged = flagged || (live && a.RequiresAttention && a.AttentionReason == "permission" && prev[a.ID] == "")
 	}
 	if !running {
+		return
+	}
+	now := f.Now()
+	f.mu.Lock()
+	due := f.permitAt.IsZero() || now.Sub(f.permitAt) >= permitEvery || now.Before(f.permitAt)
+	f.mu.Unlock()
+	if !due && !flagged {
+		for i := range agents {
+			agents[i].Pending = prev[agents[i].ID]
+		}
 		return
 	}
 	out, err := f.paseo("permit", "ls", "--json")
@@ -92,6 +114,9 @@ func (f *Factory) addPending(agents []Agent) {
 		f.logf("pending permissions not read: %v", err)
 		return
 	}
+	f.mu.Lock()
+	f.permitAt = now
+	f.mu.Unlock()
 	by := map[string]string{}
 	for _, p := range perms {
 		if by[p.AgentID] != "" {

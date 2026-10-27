@@ -175,12 +175,55 @@ func TestRefreshReadsPendingPermissions(t *testing.T) {
 	}
 	// a failed read leaves the agents without prompts; the poll itself still succeeds
 	p.permitErr = errors.New("daemon down")
+	f.Now = func() time.Time { return t0.Add(permitEvery) }
 	f.Refresh()
 	if a, ok := f.agentOK("r1"); !ok || a.Pending != "" {
 		t.Errorf("after a failed read: %+v %v", a, ok)
 	}
 	if h := f.errs[f.cfg.Host]; h != "" {
 		t.Errorf("refresh error = %q", h)
+	}
+}
+
+// permit ls runs at most every permitEvery: Refreshes in between keep the prompts the last read
+// found, unless an agent's file flags a permission wait that read did not see.
+func TestPermitReadsAreRateLimited(t *testing.T) {
+	f, p := newTestFactory(t)
+	writeFile(t, f.cfg.Home+"/.paseo/agents/a/r1.json", `{"id":"r1","lastStatus":"running",
+		"createdAt":"2026-10-25T19:00:00.000Z","lastActivityAt":"2026-10-25T19:59:00.000Z"}`)
+	p.permits = `[{"agentId":"r1","name":"Bash","description":"ls"}]`
+	f.Refresh()
+	f.Refresh()
+	if err := f.reload(); err != nil {
+		t.Fatal(err)
+	}
+	if n := p.countCalls("permit", "ls"); n != 1 {
+		t.Errorf("permit ls called %d times within %v, want 1", n, permitEvery)
+	}
+	if a := f.agent("r1"); a.Pending != "Bash: ls" {
+		t.Errorf("r1 pending = %q, want the last read's prompt", a.Pending)
+	}
+
+	// a file that flags a permission wait the last read did not see forces a read
+	writeFile(t, f.cfg.Home+"/.paseo/agents/a/r2.json", `{"id":"r2","lastStatus":"running","requiresAttention":true,
+		"attentionReason":"permission","createdAt":"2026-10-25T19:00:00.000Z","lastActivityAt":"2026-10-25T19:59:00.000Z"}`)
+	p.permits = `[{"agentId":"r1","name":"Bash","description":"ls"},{"agentId":"r2","name":"Edit","description":"x"}]`
+	f.Refresh()
+	if n := p.countCalls("permit", "ls"); n != 2 {
+		t.Errorf("permit ls called %d times after a flagged file, want 2", n)
+	}
+	if a := f.agent("r2"); a.Pending != "Edit: x" {
+		t.Errorf("r2 pending = %q", a.Pending)
+	}
+	f.Refresh() // r2's prompt is known now: no new read
+	if n := p.countCalls("permit", "ls"); n != 2 {
+		t.Errorf("permit ls called %d times for a known prompt, want 2", n)
+	}
+
+	f.Now = func() time.Time { return t0.Add(permitEvery) }
+	f.Refresh()
+	if n := p.countCalls("permit", "ls"); n != 3 {
+		t.Errorf("permit ls called %d times after %v, want 3", n, permitEvery)
 	}
 }
 

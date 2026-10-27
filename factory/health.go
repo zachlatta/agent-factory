@@ -34,6 +34,7 @@ type Health struct {
 	Live           bool        `json:"live"`
 	OK             bool        `json:"ok"`
 	Agents         AgentCounts `json:"agents"`
+	PaseoCalls     PaseoCalls  `json:"paseoCalls"` // paseo CLI calls in the last 10 minutes (paseocalls.go)
 }
 
 // AgentCounts is how many of this host's Paseo agents are loaded, for the idle reap (reap.go).
@@ -194,6 +195,7 @@ func (f *Factory) Health() Health {
 	}
 	h.OK = h.Live && refreshed
 	h.Agents = f.agentCounts()
+	h.PaseoCalls = f.calls.report(now)
 	return h
 }
 

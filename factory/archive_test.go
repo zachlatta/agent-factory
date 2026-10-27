@@ -269,3 +269,65 @@ func TestArchiveDryRunNeverInvokesArchiveExecutable(t *testing.T) {
 		t.Fatal("dry run did not simulate archive")
 	}
 }
+
+// The version check runs once per executable: two archives make one --version call, and a
+// replaced executable is checked again (and refused if it no longer qualifies).
+func TestArchiveVersionCheckedOncePerExecutable(t *testing.T) {
+	cli, log := archiveCLI(t, "0.13.2", "")
+	for _, id := range []string{"agent-001", "agent-002"} {
+		if _, err := cli.Run(context.Background(), "archive", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(archiveCalls(t, log), "--version"); n != 1 {
+		t.Fatalf("--version ran %d times for two archives, want 1", n)
+	}
+
+	// replace the executable with one reporting an unsupported version
+	fixture := strings.TrimSuffix(log, ".calls")
+	b, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s archiveFixture
+	json.Unmarshal(b, &s)
+	s.Version = "0.11.4"
+	b, _ = json.Marshal(s)
+	if err := os.WriteFile(fixture, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(cli.Bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cli.Bin, append(script, "# replaced\n"...), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.Run(context.Background(), "archive", "agent-003"); err == nil {
+		t.Fatal("replaced executable with an unsupported version archived")
+	}
+	calls := archiveCalls(t, log)
+	if n := strings.Count(calls, "--version"); n != 2 {
+		t.Fatalf("--version ran %d times after the executable changed, want 2", n)
+	}
+	if strings.Contains(calls, "archive agent-003") {
+		t.Fatal("unsupported CLI mutated")
+	}
+}
+
+// A failed archive forgets the check: the next archive runs --version again.
+func TestFailedArchiveRechecksVersion(t *testing.T) {
+	cli, log := archiveCLI(t, "0.13.2", "")
+	if _, err := cli.Run(context.Background(), "archive", "agent-001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.Run(context.Background(), "archive", "no-such-agent"); err == nil {
+		t.Fatal("archive of an unknown agent succeeded")
+	}
+	if _, err := cli.Run(context.Background(), "archive", "agent-002"); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(archiveCalls(t, log), "--version"); n != 2 {
+		t.Fatalf("--version ran %d times, want 2 (once more after the failure)", n)
+	}
+}

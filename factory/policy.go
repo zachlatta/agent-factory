@@ -580,7 +580,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 			return err
 		}
-		f.archiveStoppedAgent(rev.ID)
+		f.deferArchive(rev.ID)
 		return nil
 	}
 	t, ok := f.agentOK(target)
@@ -597,7 +597,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 				return err
 			}
-			f.archiveStoppedAgent(rev.ID)
+			f.deferArchive(rev.ID)
 			f.logf("reviewer %s: target %s archived, verdict not sent", short(rev.ID), short(target))
 			return nil
 		}
@@ -605,7 +605,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 		return err
 	}
-	defer f.archiveStoppedAgent(rev.ID)
+	defer f.deferArchive(rev.ID)
 	if !ok {
 		f.logf("reviewer %s: target %s not found", short(rev.ID), short(target))
 		return nil
@@ -888,14 +888,26 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 func (f *Factory) Tick() {
 	f.reconcileTimings()
 	now := f.Now()
+	p := f.beginPass()
+	defer f.endPass()
+	f.tickHot(p) // agents the watcher saw stop go first (watch.go)
 	for _, a := range f.agents() {
 		if f.stopping.Load() {
 			return
 		}
+		f.tickHot(p)
+		if p.done[a.ID] {
+			continue
+		}
+		if cur, ok := f.agentByID(a.ID); ok {
+			a = cur // a hot pass may have reread the files since this list was taken
+		}
+		p.done[a.ID] = true
 		if err := f.tickAgent(a, now); err != nil {
 			f.logf("rule error on %s: %v", short(a.ID), err)
 		}
 	}
+	f.drainArchives(p) // reviewer and scout archives, after every move
 	if f.stopping.Load() {
 		return
 	}
@@ -908,6 +920,9 @@ func (f *Factory) Tick() {
 	f.probeMail()
 }
 
+// actedGrace: a card counts as having acted only this long after its last move (see tickAgent).
+const actedGrace = 45 * time.Second
+
 func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	old := now.Sub(a.CreatedAt) > time.Minute
 	switch {
@@ -919,8 +934,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	case a.L(labelRole) == "scout":
 		if a.stopped() && old {
 			f.logf("scout %s finished", short(a.ID))
-			err := f.archiveStoppedAgent(a.ID)
-			return err
+			return f.deferArchive(a.ID)
 		}
 		return nil
 	}
@@ -951,7 +965,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	// "acted": the agent did something after the last move and is idle again. The 45 s grace covers
 	// the gap between `paseo send` and the agent flipping to running.
 	since := parseTime(a.L(labelSince))
-	acted := !since.IsZero() && a.LastActivityAt.After(since) && now.Sub(since) > 45*time.Second
+	acted := !since.IsZero() && a.LastActivityAt.After(since) && now.Sub(since) > actedGrace
 	c, ok := f.card(a.ID)
 	if !ok {
 		return nil
