@@ -23,6 +23,33 @@ UI check: this change touches a user interface. Test it with computer use:
 UI feedback:
 - <one item per line>`
 
+// boardLayoutRule applies only to this repo; other repos retain uiReviewRule.
+const boardLayoutRule = "\n\n" + computerUseRule + `
+UI check: this change touches the agent-factory board.
+- Follow README's Board layout checks. Run npm run board:screenshot -- --stage=zach
+  and add --card=preview-zach to inspect the panel. Inspect both 1280x800 and 390x844
+  PNGs and saved page text in .factory-evidence; use other fixture stages/cards as needed.
+- Use computer use for every changed interactive flow on fake data. Read the current
+  openai-computer-use skill first. Start cmd/board-preview bound to this host's tailnet IP
+  from ` + "`tailscale ip -4`" + ` so the remote browser can reach it. The layout preview
+  rejects mutations; use the README's documented dry run when testing action flows.
+- Phone layout is checked with the helper's exact viewport; computer use checks interaction.
+  Screenshots alone do not verify an approval, Drop confirmation, or other interactive flow.
+- Blocking: a broken flow, broken layout at either width, or console errors caused by this change.
+- Report failed or skipped checks and the exact reason; never call an incomplete check a pass.
+- Close your tabs and stop your servers. Keep captures in excluded .factory-evidence.
+- Put non-blocking usability, copy and layout feedback before TIER as:
+UI feedback:
+- <one item per line>`
+
+// Included in the shared Fellow template as a conditional instruction, without
+// teaching agents working in other repos to run this repo's helper.
+const boardBuilderRule = `For UI changes in zachlatta/agent-factory, follow README's Board layout checks:
+run npm run board:screenshot -- --stage=zach (add --card=preview-zach for the panel),
+inspect desktop and phone captures and page text, and use computer use for changed
+interactive flows on fake data or a documented dry run. The helper checks layout;
+it does not prove mutations work. In other repos follow their UI checking instructions.`
+
 // uiExt and uiDir name the files that make a change a frontend change.
 var (
 	uiExt = map[string]bool{".html": true, ".htm": true, ".css": true, ".scss": true, ".sass": true, ".less": true,

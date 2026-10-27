@@ -163,3 +163,29 @@ func TestUIReviewRuleServesOnTailnetIP(t *testing.T) {
 		t.Error("UI rule still tells the reviewer to serve on `hostname`")
 	}
 }
+
+func TestBoardLayoutRuleIsRepoSpecific(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review"}))
+	f.GitOut = gitStub(diffFiles("factory/web/board.html\n"))
+	if _, err := f.runReviewer(Card{ID: "c1", Cwd: "/w/c1", Repo: "zachlatta/agent-factory"}, "code", "public", "t", "", "h1"); err != nil {
+		t.Fatal(err)
+	}
+	runs := p.runsWithLabel(labelArg(labelReviewKind, "code"))
+	prompt := runs[0][len(runs[0])-1]
+	if !strings.Contains(prompt, "Computer use through PDW") || !strings.Contains(prompt, computerUseRule) {
+		t.Fatal("board review lacks the shared computer-use instructions")
+	}
+	if !strings.Contains(prompt, "npm run board:screenshot") {
+		t.Fatal("board review lacks screenshot command")
+	}
+	if strings.Contains(prompt, "Click through every flow the change touches, at desktop width and at phone width") {
+		t.Fatal("board review still requires browser resizing")
+	}
+	other, _ := reviewPrompt(t, "code", diffFiles("web/a.html\n"))
+	if strings.Contains(other, "npm run board:screenshot") || !strings.Contains(other, uiReviewRule) {
+		t.Fatal("other repo UI rule changed")
+	}
+	if !strings.Contains(newCardPrompt, "zachlatta/agent-factory") || !strings.Contains(newCardPrompt, "npm run board:screenshot") {
+		t.Fatal("builder lacks conditional board layout instructions")
+	}
+}

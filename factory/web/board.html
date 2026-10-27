@@ -469,11 +469,25 @@ function findCard(id){
   if(!id) return null;
   return (B.cards||[]).find(c => c.id===id || c.id.startsWith(id) || (c.replaces||[]).some(r => r===id || r.startsWith(id))) || null;
 }
-// a link to board#<card id> or ?card=<card id> (including a replaced predecessor id) opens that card once it loads
+// Apply a query stage once; retain hash precedence and replacement-card lookup.
+let linkApplied = false;
 function openFromHash(){
-  const q=typeof location!=='undefined'&&location.search?new URLSearchParams(location.search).get('card'):'', id=decodeURIComponent(location.hash.slice(1))||q||'';
-  const c=findCard(id);
-  if(c){ history.replaceState(null,'',location.pathname); openPanel(c.id); }
+  if(!B.updated) return;
+  const q = new URLSearchParams(location.search);
+  if(!linkApplied){
+    linkApplied = true;
+    const stage = q.get('stage');
+    if(B.stages.some(s=>s[0]===stage)){ tab=stage; render(); }
+  }
+  let hash = '';
+  try{ hash=decodeURIComponent(location.hash.slice(1)); }catch(e){}
+  const c = findCard(hash || q.get('card') || '');
+  if(c){
+    q.delete('card');
+    const search = q.toString();
+    history.replaceState(null,'',location.pathname+(search?'?'+search:''));
+    openPanel(c.id);
+  }
 }
 
 function visible(){

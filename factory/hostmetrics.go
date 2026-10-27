@@ -36,6 +36,7 @@ type hostSampler struct {
 	mu       sync.Mutex
 	last     hostMetrics
 	previous *cpuCounters
+	read     func(string) hostReading // nil uses the platform reader; previews inject synthetic samples
 }
 
 func (s *hostSampler) sample(now time.Time, path string, read func(string) hostReading) hostMetrics {
@@ -43,6 +44,9 @@ func (s *hostSampler) sample(now time.Time, path string, read func(string) hostR
 	defer s.mu.Unlock()
 	if !s.last.SampledAt.IsZero() && now.Sub(s.last.SampledAt) >= 0 && now.Sub(s.last.SampledAt) < 2*time.Second {
 		return s.last
+	}
+	if s.read != nil {
+		read = s.read
 	}
 	r := read(path)
 	if r.CPU != nil && s.previous != nil && now.Sub(s.last.SampledAt) > 0 && now.Sub(s.last.SampledAt) <= 6*time.Second {

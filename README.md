@@ -245,14 +245,13 @@ The planner (the "Fellow") first picks a track:
   "Landed something other than what was reviewed" and is emailed: something unreviewed is already
   public.
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check,
-  given to the panel's phone UX reviewer (or the single reviewer when git cannot list the files):
-  the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
-  `0.0.0.0`), and clicks through it with computer use. Its non-blocking "UI feedback:" block goes to
-  the builder, who repeats it in the landing summary. In this repo, build the card's binary in the
-  worktree's `.factory-scratch/` and run `factory -dry-run -listen "$(tailscale ip -4):0"` (the log names the
-  port); stopping it (SIGINT or SIGTERM) deletes the dry run's temp state copy. That meets the
-  check's data rule: it reads the real cards, ideas and transcripts, and its buttons only log what
-  they would do.
+  given to the panel's phone UX reviewer (or the single reviewer when git cannot list the files).
+  In this repo use the screenshot helper below for desktop and phone layout, and computer use
+  for interactive flows. Other repos retain computer-use checks at both widths. Reviewers return
+  non-blocking feedback under "UI feedback:" for the builder's landing summary.
+  For interactive action checks, build the binary in the worktree's `.factory-scratch/` and
+  run `factory -dry-run -listen "$(tailscale ip -4):0"`. It reads real data but only logs writes;
+  stopping it with SIGINT or SIGTERM deletes its temporary state copy.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
 - Every code approval, landing approval, landing retry and dependency release checks that HEAD
@@ -742,6 +741,60 @@ Where it runs, in order:
 CI is only a backstop: it runs after the push, and without the private patterns it catches
 credentials and generic leaks only. The checks that keep a leak from being published are the
 local ones and the factory's.
+
+## Board layout checks
+
+Use the checked-in headless helper for this board's layout checks. It builds the current
+`cmd/board-preview`, serves the real embedded page and API with fake Paseo/session inputs,
+then captures **1280x800 desktop** and **390x844 phone** viewports. It never connects to the
+live board or reads real card/state files. No pipeline runs; preview mutations are rejected.
+
+First exclude local outputs, then install the pinned development dependency:
+
+```sh
+printf '\n.factory-scratch/\n.factory-evidence/\nnode_modules/\n' >> "$(git rev-parse --git-path info/exclude)"
+npm ci --ignore-scripts --cache .factory-scratch/npm-cache
+npm run board:screenshot -- --stage=zach
+npm run board:screenshot -- --stage=zach --card=preview-zach
+```
+
+The helper uses Playwright's default shared browser cache. If Chromium is missing, it prints
+`npx playwright install chromium` and exits; it never downloads a browser automatically.
+Provision a missing browser through the host's approved setup process, outside a card build.
+
+Inspect both `.factory-evidence/desktop.png` and `phone.png`, plus their `.txt` page text.
+Each run replaces those files and `capture.json`; copy useful captures to distinct names before
+another run. Evidence stays excluded from Git. `--out` chooses another excluded output folder.
+A missing stage/card, incomplete load, page error, or failed request fails the capture.
+The helper owns and stops its preview server and browser, including on failure.
+
+Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `building`,
+`review`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture includes approval content,
+long text, and choices. Real API serialization and Ask/transcript parsing build the preview;
+when a UI needs a new scenario, extend the synthetic inputs in `factory/preview.go`.
+Run `npm run test:board` for browser regression checks.
+
+For computer use, serve the same navigation preview on the host's tailnet IP:
+
+```sh
+mkdir -p .factory-scratch
+TMPDIR="$PWD/.factory-scratch" go build -o .factory-scratch/board-preview ./cmd/board-preview
+.factory-scratch/board-preview -listen "$(tailscale ip -4):0"
+```
+
+The command prints its address. Append `/?stage=zach&card=preview-zach` to open a specific
+stage and card. A valid stage sets the phone tab; desktop shows all columns. Query selections
+apply once after loading, so closing a card keeps it closed during polling. Existing `#<id>`
+links still work. Invalid query values keep the normal view without opening an unknown card.
+Stop the server when finished; it removes its own temporary fixture directory.
+
+**Keep computer use for changed interactive flows.** Screenshots verify layout, not approval,
+Drop confirmation, or other actions. Read the current computer-use skill, click through changed
+flows, read page text, and inspect screenshots. For action flows that the navigation preview
+rejects, build the current `cmd/factory` under `.factory-scratch/` and use the documented
+`-dry-run -listen "$(tailscale ip -4):0"` mode. That mode reads real data but only logs writes;
+never test against the live service. Close your tabs and stop your servers. Report failed or
+skipped checks explicitly. Remove `.factory-scratch/` before finishing.
 
 ## Install
 

@@ -390,6 +390,8 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 ` + worktreeRule + `
 
+` + boardBuilderRule + `
+
 ` + overviewRule + `
 
 A different agent reviews the plan; Zach does not approve plans. He is asked before building only when
@@ -938,7 +940,11 @@ func (f *Factory) runReviewer(c Card, kind string, spec reviewSpec, vis, title, 
 		}
 	}
 	if spec.lens == lensUX || (spec.lens == "" && kind != "plan" && f.uiChange(c)) {
-		prompt += uiReviewRule
+		if c.Repo == "zachlatta/agent-factory" {
+			prompt += boardLayoutRule
+		} else {
+			prompt += uiReviewRule
+		}
 	}
 	if kind == "land" {
 		if why == "" {
