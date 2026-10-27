@@ -133,16 +133,18 @@ func (f *Factory) addPending(agents []Agent) {
 	}
 }
 
-// supersedeReviewers retires card id's reviewers whose verdict was not applied, before a re-run
-// starts a fresh one. Each is marked applied first, so a verdict it gives later never moves the
-// card, then stopped and archived.
+// supersedeReviewers retires card id's unapplied reviewers before new work replaces their
+// review. Archived reviewers need the applied marker too: their verdicts can still be read.
 func (f *Factory) supersedeReviewers(id string) error {
 	for _, r := range f.agents() {
-		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.archived() || r.L(labelApplied) != "" {
+		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.L(labelApplied) != "" {
 			continue
 		}
 		if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
 			return err
+		}
+		if r.archived() {
+			continue
 		}
 		if err := f.archiveAgent(r.ID); err != nil {
 			f.logf("reviewer %s superseded but not archived: %v", short(r.ID), err)

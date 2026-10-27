@@ -88,6 +88,13 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if a := f.agent(c.ID); a.L(labelNote) == limitNote {
 			return ok, f.resumeLimit(a, via+msg, b.Attachments)
 		}
+		if a := f.agent(c.ID); a.L(labelStage) == "zach" && strings.HasPrefix(a.L(labelNote), "history unavailable") {
+			// Retire the paused review before sending new work. Its file can appear
+			// later, but its verdict must never decide the response to this message.
+			if err := f.supersedeReviewers(c.ID); err != nil {
+				return nil, err
+			}
+		}
 		if c.Awaiting == "plan" {
 			// Zach's answer to an architecture plan: revise it, then plan review runs again
 			msg = "Zach read your plan and wants changes:\n\n" + msg + "\n\nRevise the plan, then restate the " +

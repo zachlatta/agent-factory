@@ -240,3 +240,67 @@ func TestDecisionHistoryOutsideLandingReviewEscalates(t *testing.T) {
 		})
 	}
 }
+
+func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		lateFile, archived bool
+	}{
+		{"history stays missing", false, false}, {"history appears", true, false},
+		{"archived history stays missing", false, true}, {"archived history appears", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "review", labelSource: "board", labelTier: "low", labelPlanRounds: "1", labelVerdict: "plan approve"})
+			r := reviewer("r1", c.ID, "code")
+			if tc.archived {
+				r = archived(r)
+			}
+			f, p := newTestFactory(t, c, r)
+			p.archived[r.ID] = tc.archived
+			f.p = hookPaseo{Paseo: p, onCall: func(args []string) {
+				if len(args) > 0 && args[0] == "send" && p.labels(r.ID)[labelApplied] != "1" {
+					t.Error("new instructions sent before superseding the old review")
+				}
+			}}
+			f.Now = func() time.Time { return t0.Add(time.Minute) }
+			if err := f.ApplyVerdict(r); err != nil {
+				t.Fatal(err)
+			}
+			c = withLabels(c, p.labels(c.ID))
+			f.SetAgents([]Agent{c, r})
+			if _, err := f.Act("send", Body{ID: c.ID, Message: "Fix the issue first"}); err != nil {
+				t.Fatal(err)
+			}
+			c, r = withLabels(c, p.labels(c.ID)), withLabels(r, p.labels(r.ID))
+			c.Status, p.status[c.ID] = "running", "running"
+			f.SetAgents([]Agent{c, r})
+			if tc.lateFile {
+				storeLog(t, f, p, r.ID, "TIER: low\nVERDICT: approve")
+			}
+			if err := f.tickAgent(r, f.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if p.labels(c.ID)[labelStage] != "building" || len(p.sent(c.ID)) != 1 {
+				t.Fatalf("old review moved card while replying: %v", p.labels(c.ID))
+			}
+			c.Status, p.status[c.ID] = "idle", "idle"
+			c.LastActivityAt = t0.Add(2 * time.Minute)
+			f.Now = func() time.Time { return t0.Add(3 * time.Minute) }
+			storeLog(t, f, p, c.ID, "Fixed the issue.\nTIER: low")
+			f.SetAgents([]Agent{c, r})
+			if err := f.tickAgent(r, f.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if p.labels(c.ID)[labelStage] != "building" {
+				t.Fatalf("old review paused the fresh reply again: %v", p.labels(c.ID))
+			}
+			if err := f.tickAgent(c, f.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if p.labels(r.ID)[labelVerdict] != "superseded" || p.labels(c.ID)[labelCodeRounds] != "" || p.labels(c.ID)[labelStage] != "review" || p.runs != 1 {
+				t.Fatalf("reply did not get a fresh review: %v, old reviewer: %v", p.labels(c.ID), p.labels(r.ID))
+			}
+			noLogsCalls(t, p)
+		})
+	}
+}
