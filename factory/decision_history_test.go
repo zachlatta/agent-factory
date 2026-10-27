@@ -189,3 +189,54 @@ func TestDecisionHistoryAskExplainsPause(t *testing.T) {
 		t.Fatalf("history wait misrepresented: %+v", ask)
 	}
 }
+
+func TestDecisionHistoryOutsideLandingReviewEscalates(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		t.Run(map[bool]string{false: "requester absent", true: "requester present"}[present], func(t *testing.T) {
+			requester := card("outside", nil)
+			r := reviewer("r1", requester.ID, "land")
+			f, p := newTestFactory(t, r)
+			if present {
+				f.SetAgents([]Agent{requester, r})
+			}
+			if err := f.landReviews.put(LandReview{By: requester.ID, Review: r.ID, Status: "running", Head: "abc1234"}, t0); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.ApplyVerdict(r); err != nil {
+				t.Fatal(err)
+			}
+			pending, _ := f.landReviews.Get(requester.ID)
+			if pending.Status != "running" || p.labels(r.ID)[labelApplied] != "" {
+				t.Fatal("landing review did not wait for history")
+			}
+			f.Now = func() time.Time { return t0.Add(time.Minute) }
+			if err := f.ApplyVerdict(r); err != nil {
+				t.Fatal(err)
+			}
+			result, _ := f.landReviews.Get(requester.ID)
+			if result.Status != "done" || result.Verdict != "escalate" || !strings.Contains(result.Findings, "history unavailable") || result.DoneAt.IsZero() {
+				t.Fatalf("outside landing review held indefinitely: %+v", result)
+			}
+			if p.labels(r.ID)[labelApplied] != "1" || !p.called("archive", r.ID) {
+				t.Fatal("finished landing reviewer not retired")
+			}
+			labels := p.labels(requester.ID)
+			if labels[labelStage] != "" || labels[labelNote] != "" || labels[labelStuckFrom] != "" || len(p.sent(requester.ID)) != 0 || p.runs != 0 {
+				t.Fatalf("outside requester treated as a board card: %v", labels)
+			}
+			for k, v := range p.labels(r.ID) {
+				r.Labels[labelPrefix+k] = v
+			}
+			f.Now = func() time.Time { return t0.Add(30 * time.Minute) }
+			for range 3 {
+				if err := f.tickAgent(r, f.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if p.countCalls("archive", r.ID) != 1 {
+				t.Fatal("later ticks repeated the completed landing review")
+			}
+			noLogsCalls(t, p)
+		})
+	}
+}

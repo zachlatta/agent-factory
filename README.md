@@ -480,6 +480,8 @@ Factory decisions also read session files only: reviewer verdicts, plan tiers an
 landing replies and card names never load an agent through Paseo logs. If required history
 is unavailable, the factory retries for two minutes after the turn stops, then moves the
 card to Needs Zach. It leaves the review unapplied and does not infer a verdict or tier.
+Outside landing-review requests instead finish with an escalation and a history-unavailable
+finding after the same grace period; their requesters are not moved onto the board.
 Naming alone can wait for a later readable reply.
 
 ## Public repos: review and secret scan

@@ -557,6 +557,27 @@ func recommendDoes(ask *Ask) string {
 	return "apply it, then a code review runs before it lands"
 }
 
+// unreadableReview keeps outside landing requests in their own result protocol. They
+// are not board cards: after the history grace expires their caller receives an escalation.
+func (f *Factory) unreadableReview(rev Agent, cause error) error {
+	if rev.L(labelReviewKind) == "land" {
+		if f.Now().Before(historyDeadline(rev)) {
+			return nil
+		}
+		if err := f.finishLandReview(rev, "escalate", "history unavailable: landing review could not read its session file"); err != nil {
+			return err
+		}
+		if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: "escalate"}); err != nil {
+			return err
+		}
+		return f.deferArchive(rev.ID)
+	}
+	if target, ok := f.agentOK(rev.L(labelReviewOf)); ok {
+		return f.waitForHistory(target, rev, cause)
+	}
+	return cause
+}
+
 // ApplyVerdict moves a card after its reviewer finished. Runs once per reviewer (factory.applied).
 func (f *Factory) ApplyVerdict(rev Agent) error {
 	target, kind := rev.L(labelReviewOf), rev.L(labelReviewKind)
@@ -565,10 +586,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	text, err := storedText(f.cfg.Home, rev, 6)
 	if err != nil {
-		if t, ok := f.agentOK(target); ok {
-			return f.waitForHistory(t, rev, err)
-		}
-		return err
+		return f.unreadableReview(rev, err)
 	}
 	if t, ok := f.agentOK(target); ok && t.L(labelStage) == "zach" && strings.HasPrefix(t.L(labelNote), "history unavailable") {
 		return nil // history appearing later must not answer Zach's pending decision
@@ -576,10 +594,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	verdict := ParseVerdict(text)
 	full, err := f.storedReply(rev)
 	if err != nil {
-		if t, ok := f.agentOK(target); ok {
-			return f.waitForHistory(t, rev, err)
-		}
-		return err
+		return f.unreadableReview(rev, err)
 	}
 	notes := reviewNotes(full, text)
 	if kind == "land" {
@@ -1087,10 +1102,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 
 const stuckAfter = 2 * time.Minute
 
-// waitForHistory retries a stopped turn's unreadable session for two minutes. It never
-// substitutes empty text for a decision, consumes a verdict, or sends the agent a message.
-func (f *Factory) waitForHistory(card, source Agent, cause error) error {
-	f.logf("%s decision history not read: %v", short(card.ID), cause)
+func historyDeadline(source Agent) time.Time {
 	ref := source.LastActivityAt
 	if source.CreatedAt.After(ref) {
 		ref = source.CreatedAt
@@ -1098,7 +1110,14 @@ func (f *Factory) waitForHistory(card, source Agent, cause error) error {
 	if since := parseTime(source.L(labelSince)); since.After(ref) {
 		ref = since
 	}
-	if f.Now().Sub(ref) < stuckAfter || card.gone() || card.L(labelStage) == "zach" {
+	return ref.Add(stuckAfter)
+}
+
+// waitForHistory retries a stopped turn's unreadable session for two minutes. It never
+// substitutes empty text for a decision, consumes a verdict, or sends the agent a message.
+func (f *Factory) waitForHistory(card, source Agent, cause error) error {
+	f.logf("%s decision history not read: %v", short(card.ID), cause)
+	if f.Now().Before(historyDeadline(source)) || card.gone() || card.L(labelStage) == "zach" {
 		return nil
 	}
 	if live, err := f.stillStopped(card); !live {
