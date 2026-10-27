@@ -191,10 +191,18 @@ func TestScheduleAcknowledgmentConcurrentAndOverlap(t *testing.T) {
 	}
 	other := newScheduleFixture(t)
 	other.policy = f.policy
+	other.request.Release.RunID = "other-run"
+	other.request.Release.AgentID = "other-agent"
+	other.request.Release.WorkspaceID = "other-workspace"
 	other.request.Release.CanonicalPath = filepath.Join(f.workspace, "nested")
 	// Store protection also applies to conflicts from other run/workspace identities.
 	if err := scheduleClaim(other.policy, other.request.Release, other.now); err == nil {
 		t.Fatal("overlapping path accepted")
+	}
+	// With only the overlap removed, the same otherwise-distinct claim succeeds.
+	other.request.Release.CanonicalPath = other.workspace
+	if err := scheduleClaim(other.policy, other.request.Release, other.now); err != nil {
+		t.Fatal("disjoint claim refused:", err)
 	}
 	other.request.Release = f.request.Release
 	other.request.Release.CanonicalPath = other.workspace
@@ -362,5 +370,45 @@ func TestScheduleStoreRejectsAlteredRecord(t *testing.T) {
 	other.request.Release.RunID = "other"
 	if err := scheduleClaim(f.policy, other.request.Release, f.now); err == nil {
 		t.Fatal("altered store allowed new claim")
+	}
+}
+
+func TestScheduleIndependentEvidenceRejections(t *testing.T) {
+	cases := map[string]func(*testing.T, *scheduleFixture){
+		"retirement authorization": func(t *testing.T, f *scheduleFixture) {
+			f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) { m["retirementAuthorized"] = true })
+		},
+		"same size output alteration": func(t *testing.T, f *scheduleFixture) {
+			if err := os.WriteFile(f.output, []byte("RESULT"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"declaration digest": func(t *testing.T, f *scheduleFixture) {
+			// Keep all schema and identity bindings consistent except the original digest.
+			f.request.Declaration = scheduleEdit(f.request.Declaration, func(m map[string]any) { m["scheduleId"] = "other-schedule" })
+			f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) { m["scheduleId"] = "other-schedule" })
+			f.request.Release.ScheduleID = "other-schedule"
+		},
+		"future verification": func(t *testing.T, f *scheduleFixture) {
+			// Release ordering also enforces verifiedAt <= releasedAt <= now.
+			f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) { m["verifiedAt"] = f.now.Add(time.Second).Format(time.RFC3339Nano) })
+		},
+		"release before verification": func(t *testing.T, f *scheduleFixture) {
+			f.request.Release.ReleasedAt = f.now.Add(-21 * time.Second)
+		},
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newScheduleFixture(t)
+			if err := f.validate(); err != nil {
+				t.Fatal("valid control:", err)
+			}
+			edit(t, &f)
+			// Receipt edits are correctly bound to the release, isolating the evidence check.
+			f.request.Release.ReceiptDigest = scheduleHash(f.request.Receipt)
+			if err := f.validate(); err == nil {
+				t.Fatal("invalid evidence accepted")
+			}
+		})
 	}
 }
