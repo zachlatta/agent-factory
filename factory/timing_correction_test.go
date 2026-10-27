@@ -2,6 +2,7 @@ package factory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -222,5 +223,68 @@ func TestOtherCardFactoryNoticeIsNotAReply(t *testing.T) {
 	f.checkReplies(t0)
 	if ct := timing(t, f, "e1"); !ct.NoReply || !ct.RepliedAt.IsZero() {
 		t.Fatalf("factory notice counted as reply: %+v", ct)
+	}
+}
+
+func TestRepliedErrandsCountWithoutLandingSamples(t *testing.T) {
+	for _, source := range []string{"email", "voice"} {
+		t.Run(source, func(t *testing.T) {
+			asked := t0.Add(-time.Hour)
+			err := CardTiming{Repo: "owner/project", Source: source, RequestedAt: asked, RepliedAt: asked.Add(20 * time.Minute),
+				Events: []TimingEvent{{Stage: "plan", At: asked}, {Stage: "landed", At: asked.Add(50 * time.Minute)}}}
+			land := CardTiming{Source: "board", RequestedAt: asked, LandedAt: asked.Add(40 * time.Minute), Events: err.Events}
+			all := map[string]CardTiming{"reply": err, "commit": land}
+			f, _ := newTestFactory(t)
+			for id, ct := range all {
+				copy := ct
+				f.timings.cards[id] = &copy
+			}
+			for _, query := range []string{"", "?source=" + source, "?repo=owner/project", "?step=plan"} {
+				rec := httptest.NewRecorder()
+				f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/metrics"+query, nil))
+				var got Metrics
+				if e := json.Unmarshal(rec.Body.Bytes(), &got); e != nil {
+					t.Fatal(e)
+				}
+				wantN, wantE2E, wantLanded, wantLandedN := 2, 30*60, 40*60, 1
+				if query == "?source="+source || query == "?repo=owner/project" {
+					wantN, wantE2E, wantLanded, wantLandedN = 1, 20*60, 0, 0
+				}
+				if rec.Code != 200 || got.Cards != wantN || got.Turnaround.N != wantN || got.Turnaround.EndToEnd.Average != wantE2E || got.Turnaround.ToLanded.Average != wantLanded || got.Turnaround.LandedN != wantLandedN || got.Turnaround.ToDone.Average != 50*60 || got.Excluded.NotLanded != 0 {
+					t.Fatalf("%s: %+v", query, got)
+				}
+				if len(got.Steps) != 1 || got.Steps[0].Cards != wantN || got.Steps[0].CardSecs.Average != 50*60 {
+					t.Fatalf("lost step times: %+v", got.Steps)
+				}
+				for _, g := range got.BySource {
+					if g.Source == source && (g.N != 1 || g.LandedN != 0 || g.EndToEnd.Average != 20*60) {
+						t.Fatalf("source group: %+v", g)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTimingReconciliationDoesNotRewriteUnchangedFile(t *testing.T) {
+	f, _ := newTestFactory(t)
+	f.timings.cards["c"] = &CardTiming{Source: "board", RequestedAt: t0.Add(-time.Hour), LandedAt: t0, LandingChecked: true}
+	f.timings.dirty = true
+	if err := f.timings.save(); err != nil {
+		t.Fatal(err)
+	}
+	old := t0.Add(-24 * time.Hour)
+	if err := os.Chtimes(f.timings.path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		f.reconcileTimings()
+	}
+	st, err := os.Stat(f.timings.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.ModTime().Equal(old) {
+		t.Fatal("unchanged reconciliation rewrote timings")
 	}
 }

@@ -14,7 +14,7 @@ import (
 
 // GET /api/metrics?days=N (default 7, at most 30): card turnaround, per-step durations, and
 // per-turn agent durations from local transcripts joined to CardTiming.Sessions. It counts cards
-// that reached Done in the window and landed; inbox cards also need a confirmed reply.
+// that reached Done in the window and landed or are inbox cards with a confirmed reply.
 // Unanswered cards, cards that did not land and partial ones are counted
 // in excluded. Optional query parameters (repo, source, tier, role, provider, model, step) filter
 // the results.
@@ -60,7 +60,7 @@ type MetricsFilter struct {
 
 type MetricsSkipped struct {
 	NoReply   int `json:"noReply"`   // inbox cards without a confirmed reply
-	NotLanded int `json:"notLanded"` // dropped, closed or moved to Done without a landing
+	NotLanded int `json:"notLanded"` // no landing or confirmed inbox reply
 	Partial   int `json:"partial"`   // first seen mid-flight: history incomplete
 }
 
@@ -83,6 +83,7 @@ type MetricGroup struct {
 	Provider string   `json:"provider,omitempty"`
 	Model    string   `json:"model,omitempty"`
 	N        int      `json:"n"`
+	LandedN  int      `json:"landedN"`  // cards contributing a toLanded sample
 	EndToEnd Quantile `json:"endToEnd"` // seconds: asked to replied, else landed
 	ToLanded Quantile `json:"toLanded"` // seconds: asked to landed
 	ToDone   Quantile `json:"toDone"`   // seconds: asked to done
@@ -123,6 +124,7 @@ type Quantile struct {
 type metricRow struct {
 	id, repo, source, tier, provider, model string
 	e2e, toLanded, toDone, zach             int
+	hasLanding                              bool
 }
 
 type stepVisitRow struct {
@@ -293,6 +295,7 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 			(filter.Tier != "" && tier != filter.Tier) {
 			continue
 		}
+		hasLanding := t.LandedAt.After(t.RequestedAt)
 		switch {
 		case t.Partial || t.RequestedAt.IsZero():
 			m.Excluded.Partial++
@@ -300,7 +303,7 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 		case t.NoReply || (t.inbox() && t.RepliedAt.IsZero()):
 			m.Excluded.NoReply++
 			continue
-		case t.LandedAt.IsZero() || !t.LandedAt.After(t.RequestedAt):
+		case !hasLanding && !(t.inbox() && !t.RepliedAt.IsZero()):
 			m.Excluded.NotLanded++
 			continue
 		}
@@ -439,16 +442,17 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 
 		fellowProv, fellowModel := cardFellowAgent(t.Sessions)
 		rows = append(rows, metricRow{
-			id:       id,
-			repo:     repo,
-			source:   t.Source,
-			tier:     tier,
-			provider: fellowProv,
-			model:    fellowModel,
-			e2e:      max(0, secs(t.end().Sub(t.RequestedAt))),
-			toLanded: max(0, secs(t.LandedAt.Sub(t.RequestedAt))),
-			toDone:   max(0, secs(done.Sub(t.RequestedAt))),
-			zach:     secs(t.zach(done)),
+			id:         id,
+			repo:       repo,
+			source:     t.Source,
+			tier:       tier,
+			provider:   fellowProv,
+			model:      fellowModel,
+			e2e:        max(0, secs(t.end().Sub(t.RequestedAt))),
+			toLanded:   max(0, secs(t.LandedAt.Sub(t.RequestedAt))),
+			hasLanding: hasLanding,
+			toDone:     max(0, secs(done.Sub(t.RequestedAt))),
+			zach:       secs(t.zach(done)),
 		})
 		visits = append(visits, cardVisits...)
 		turns = append(turns, cardTurns...)
@@ -587,13 +591,16 @@ func groupRows(rows []metricRow, key func(metricRow) MetricGroup) []MetricGroup 
 			groups[k] = &acc{}
 		}
 		groups[k].e2e = append(groups[k].e2e, r.e2e)
-		groups[k].toLanded = append(groups[k].toLanded, r.toLanded)
+		if r.hasLanding {
+			groups[k].toLanded = append(groups[k].toLanded, r.toLanded)
+		}
 		groups[k].toDone = append(groups[k].toDone, r.toDone)
 		groups[k].zach = append(groups[k].zach, r.zach)
 	}
 	out := make([]MetricGroup, 0, len(groups))
 	for k, a := range groups {
 		k.N = len(a.e2e)
+		k.LandedN = len(a.toLanded)
 		k.EndToEnd = quantiles(a.e2e)
 		k.ToLanded = quantiles(a.toLanded)
 		k.ToDone = quantiles(a.toDone)

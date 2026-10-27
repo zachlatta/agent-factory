@@ -402,10 +402,14 @@ count, arithmetic mean (`average`), `median` and `p90`, in seconds, for:
   and `sessionTurnSecs` (summed turns per session), measured directly from local transcript files
   via `ReadTranscript` from each user prompt to the final assistant event of that turn.
 
-It counts cards that reached Done in the window and have a landing after Asked; inbox cards must
-also have a confirmed reply. Unanswered inbox cards are counted in `excluded.noReply`, including
-cards still awaiting their reply check. Dropped or closed cards and partial ones are only counted
-in `excluded`. Query parameters (`repo`, `source`, `tier`, `role`,
+It counts cards that reached Done in the window and have a landing after Asked, or are inbox cards
+with a confirmed reply. Replied email and voice errands count in turnaround, step and agent-turn
+metrics even when they commit nothing. Only cards with a landing after Asked contribute to
+`toLanded`; each turnaround group reports that sample count as `landedN`, separately from its
+overall card count `n`. With no landing samples, `landedN` is zero and `toLanded` has zero-valued
+quantiles. Unanswered inbox cards are counted in `excluded.noReply`, including cards still awaiting
+their reply check. Dropped or closed cards and partial ones are only counted in `excluded`.
+Query parameters (`repo`, `source`, `tier`, `role`,
 `provider`, `model`, `step`) filter the results (`?source=email`, `?repo=owner/name`,
 `?role=reviewer&step=review`).
 
