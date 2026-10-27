@@ -69,7 +69,7 @@ func TestLandingReadsWhatRemains(t *testing.T) {
 		{"none", "Landed abc1234.\nREMAINING: none", "landed", "landed"},
 		{"items", "Landed push 1.\nREMAINING:\n- push 2, not landed\n- check production",
 			"zach", "landed; still to do: push 2 not landed; check production"},
-		{"no line", "Landed abc1234.", "zach", "landed; did not say what remains"},
+		{"no line", "Landed abc1234.", "landing", "asking what remains"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute)})
@@ -100,7 +100,7 @@ func TestLandingRuleIsNotTheAnswer(t *testing.T) {
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	p.logs["c1"] = fmt.Sprintf("[User] Code review passed (low tier). %s\n[Shell] bin/land\nLanded it.", f.landMsgFor(c))
 	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != "landed; did not say what remains" {
+	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelNote] != "asking what remains" {
 		t.Errorf("labels = %v", l)
 	}
 }

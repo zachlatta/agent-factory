@@ -131,7 +131,11 @@ func rerunLandMsg(guarded bool) string {
 // needs nothing from Zach goes to Done, and what is left is filed as an idea for an agent.
 func (f *Factory) landed(a Agent, c Card, reply string) error {
 	stage, note, followUp := landedNext(reply)
-	labels := map[string]string{labelStage: stage, labelNote: note, labelLandedVerified: "1"}
+	labels := map[string]string{labelStage: stage, labelNote: note, labelLandedVerified: "1",
+		labelAutoReview: "", labelRemainingAsk: ""}
+	if _, found := ParseRemaining(reply); !found {
+		labels[labelRemainingAsk] = a.L(labelRemainingAsk)
+	}
 	switch {
 	case stage == "zach":
 		f.logf("%s landed with work left: %s", short(a.ID), note)
@@ -201,4 +205,24 @@ func (f *Factory) recheckLanded(a Agent) error {
 		labels[labelParked] = "" // Done drops the park, as the board's Done does
 	}
 	return f.setLabels(a.ID, labels)
+}
+
+// sendLanding starts a new landing attempt with a fresh completion clarification allowance.
+func (f *Factory) sendLanding(id, msg string) error {
+	if err := f.setLabels(id, map[string]string{labelRemainingAsk: "", labelRemainingChecked: ""}); err != nil {
+		return err
+	}
+	return f.send(id, msg)
+}
+
+// finishLanding asks once for an omitted completion line before involving a person.
+func (f *Factory) finishLanding(a Agent, c Card, reply string) error {
+	if _, found := ParseRemaining(reply); !found && a.L(labelRemainingAsk) == "" {
+		if err := f.setLabels(a.ID, map[string]string{labelStage: "landing", labelAutoReview: "", labelSince: iso(f.Now()),
+			labelLandedVerified: "1", labelRemainingAsk: "1", labelRemainingChecked: "", labelNote: "asking what remains"}); err != nil {
+			return err
+		}
+		return f.send(a.ID, "Your landing was verified, but your reply omitted the completion line. Report what remains of this card's request."+remainingRule)
+	}
+	return f.landed(a, c, reply)
 }

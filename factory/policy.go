@@ -720,7 +720,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 				if fb != "" {
 					msg += uiFeedbackLandMsg(fb)
 				}
-				err = f.send(target, msg)
+				err = f.sendLanding(target, msg)
 			}
 		}
 		if err == nil && fb != "" && labels[labelStage] == "zach" {
@@ -959,6 +959,18 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
+		if a.L(labelStage) == "building" && a.L(labelAutoReview) == "code" && a.L(labelLandedVerified) == "1" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			commits, err := f.GitOut(ctx, c.Cwd, "rev-list", "origin/main..HEAD")
+			cancel()
+			if err == nil && strings.TrimSpace(commits) == "" {
+				reply, err := f.storedReply(a)
+				if err != nil {
+					f.logf("%s completion reply not read: %v", short(a.ID), err)
+				}
+				return f.finishLanding(a, c, reply)
+			}
+		}
 		if a.L(labelAutoReview) == "code" && a.L(labelPlanRounds) == "" && !f.guarded(c.Repo) && f.directReply(a) {
 			// a direct card sent to code review (say, by a reply before errandPass): its work is
 			// already on main, so finish it as direct instead of asking Zach to approve landing
@@ -1011,7 +1023,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if err != nil {
 			f.logf("%s landing reply not read: %v", short(a.ID), err)
 		}
-		return f.landed(a, c, reply)
+		return f.finishLanding(a, c, reply)
 	case a.L(labelStage) == "zach" && isDepAskNote(a.L(labelNote)) && a.L(labelWaitsOn) != "" &&
 		depState(f.agents(), a, a.L(labelWaitsOn)) == depLanded:
 		return f.tickHeld(a, c)

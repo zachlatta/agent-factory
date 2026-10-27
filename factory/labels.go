@@ -72,3 +72,6 @@ func roundsLabel(kind string) string {
 	}
 	return kind + "-rounds"
 }
+
+// labelRemainingAsk marks the one completion clarification for the current landing.
+const labelRemainingAsk = "remaining-asked"

@@ -97,6 +97,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
 		}
+		if landingReply(f.agent(c.ID)) {
+			msg += remainingRule
+		}
 		files, err := f.chat(c.ID, via+msg, b.Attachments)
 		if err != nil {
 			return nil, err
@@ -143,7 +146,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				return nil, errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
 			}
 		}
-		if err := f.send(c.ID, "Zach approved this on the factory board."+answers+" "+msg); err != nil {
+		if err := f.sendLanding(c.ID, "Zach approved this on the factory board."+answers+" "+msg); err != nil {
 			return nil, err
 		}
 		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelNote: "approved by Zach"})
@@ -251,8 +254,8 @@ func replyLabels(a Agent, now string, guarded bool) map[string]string {
 	case a.L(labelRouting) != "":
 		// a repo picker answers with a new REPO line, which the Tick routes again
 		return map[string]string{labelStage: "plan", labelSince: now, labelAwaiting: "", labelNote: "picking a repo"}
-	case a.L(labelStage) == "landing":
-		return map[string]string{labelStage: "landing", labelSince: now}
+	case a.L(labelStage) == "landing" || landingReply(a):
+		return map[string]string{labelStage: "landing", labelSince: now, labelAutoReview: ""}
 	case planPending(a):
 		return map[string]string{labelStage: "plan", labelSince: now, labelNote: "revising plan for Zach"}
 	case !guarded && errandPass(a):
@@ -274,7 +277,7 @@ func (f *Factory) rerun(c Card) error {
 				return errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
 			}
 		}
-		if err := f.send(c.ID, rerunLandMsg(guarded)); err != nil {
+		if err := f.sendLanding(c.ID, rerunLandMsg(guarded)); err != nil {
 			return err
 		}
 		return f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run by Zach"})
@@ -425,4 +428,10 @@ func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
 		msg += "\n\nAttached files (saved on " + f.cfg.Host + "):\n- " + strings.Join(files, "\n- ")
 	}
 	return files, f.send(id, msg, images...)
+}
+
+// landingReply resumes verification or completion reporting without queuing a code review.
+func landingReply(a Agent) bool {
+	note := a.L(labelNote)
+	return note == "landing not verified" || note == "landed; did not say what remains"
 }

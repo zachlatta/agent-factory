@@ -248,3 +248,28 @@ func TestPeersRequestFromCodexSession(t *testing.T) {
 		t.Errorf("request = %+v", p.InFlight)
 	}
 }
+
+func TestMuseFollowUpResetsAskReply(t *testing.T) {
+	c := card("c1", map[string]string{})
+	c.Provider = "muse"
+	c.SessionID = `plugin:{"version":1,"data":{"sessionId":"synthetic-muse"}}`
+	f, _ := newTestFactory(t, c)
+	path := f.cfg.Home + "/.local/share/muse/sessions/2026/01/02/synthetic-muse/session.jsonl"
+	first := `{"payload_type":"runtime.session","payload":{"event":{"kind":"assistant_message_committed","text":"Previous build reply"}}}`
+	follow := `{"recorded_at":2000,"payload_type":"runtime.command_intake.received","payload":{"record":{"command":{"kind":"turn_submit","prompt":"Check completion"}}}}`
+	writeFile(t, path, first+"\n"+follow+"\n")
+	reply, err := f.askReply(c)
+	if strings.Contains(reply, "Previous build reply") || reply != "" {
+		t.Fatalf("stale reply: %q, %v", reply, err)
+	}
+	tr, _, err := readMuse(f.cfg.Home, "synthetic-muse", 1)
+	if err != nil || len(tr.Events) != 1 || tr.Events[0].Kind != "user" || tr.Events[0].Text != "Check completion" || tr.Events[0].Ts == "" || tr.Events[0].Line != 2 {
+		t.Fatalf("follow-up: %+v %v", tr, err)
+	}
+	answer := `{"payload_type":"runtime.session","payload":{"event":{"kind":"assistant_message_committed","text":"REMAINING: none"}}}`
+	writeFile(t, path, first+"\n"+follow+"\n"+answer+"\n")
+	reply, err = f.askReply(c)
+	if err != nil || reply != "REMAINING: none" {
+		t.Fatalf("new reply: %q, %v", reply, err)
+	}
+}

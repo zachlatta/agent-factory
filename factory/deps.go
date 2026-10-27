@@ -175,6 +175,6 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 		return err
 	}
 	f.logf("%s released: %s landed", short(a.ID), id)
-	return f.send(a.ID, fmt.Sprintf("Card %s, which this card waits on, has landed: rebase on origin/main first. "+
+	return f.sendLanding(a.ID, fmt.Sprintf("Card %s, which this card waits on, has landed: rebase on origin/main first. "+
 		"Code review passed (%s tier). %s", id, a.L(labelTier), f.landMsgFor(a)))
 }

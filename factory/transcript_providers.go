@@ -301,10 +301,16 @@ func readMuse(home, id string, after int) (Transcript, bool, error) {
 			RecordedAt  int64  `json:"recorded_at"`
 			PayloadType string `json:"payload_type"`
 			Payload     struct {
-				Event map[string]any
+				Event  map[string]any
+				Record struct {
+					Command struct {
+						Kind   string `json:"kind"`
+						Prompt string `json:"prompt"`
+					} `json:"command"`
+				} `json:"record"`
 			}
 		}
-		if json.Unmarshal(line, &d) != nil || d.PayloadType != "runtime.session" || d.Payload.Event == nil {
+		if json.Unmarshal(line, &d) != nil {
 			return
 		}
 		ts := ""
@@ -314,6 +320,16 @@ func readMuse(home, id string, after int) (Transcript, bool, error) {
 		add := func(ev Event) {
 			ev.Ts, ev.Line = ts, n
 			res.Events = append(res.Events, ev)
+		}
+		if d.PayloadType == "runtime.command_intake.received" {
+			c := d.Payload.Record.Command
+			if c.Kind == "turn_submit" && strings.TrimSpace(c.Prompt) != "" {
+				add(Event{Kind: "user", Text: c.Prompt})
+			}
+			return
+		}
+		if d.PayloadType != "runtime.session" || d.Payload.Event == nil {
+			return
 		}
 		e := d.Payload.Event
 		text := func(k string) string { return str(e, k) }
