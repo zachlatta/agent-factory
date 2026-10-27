@@ -134,6 +134,29 @@ The planner (the "Fellow") first picks a track:
   again. While the kept card is in review or Needs Zach the steer waits; if it is landing, landed or
   dropped, the request becomes an idea titled "From closed duplicate <id>: ..." (`factory/steer.go`).
 
+### Quiet factory agents
+
+Factory cards, builders, reviewers, repo pickers and Scouts carry a
+`paseo.parent-agent-id` label before their first turn. Paseo suppresses finished,
+permission and error attention notifications for these agents. Personal agents
+started in Paseo keep their notifications; factory requests reach the board and
+Needs Zach email instead.
+
+The factory keeps one idle `factory.role=quiet-anchor` agent in a dedicated
+workspace under its state directory. A live anchor in another workspace preserves
+Paseo workspace status and mark-unread behavior. The anchor's own bootstrap is
+quiet. It costs one short provider turn when created and retains an idle runtime;
+it is hidden on the board, counted separately by kind in health, and never reaped.
+Archiving the anchor detaches cross-workspace cards, so the factory recreates it
+and repairs their labels. Launches and follow-ups fail if quiet labeling fails.
+Real sub-agent parents are preserved, and quiet labels survive parking/resumption.
+
+Existing factory agents, including externally launched email/voice cards, are
+reconciled on each Tick. An external launcher must label cards before starting or
+resuming them for silence from the first event: reconciliation cannot prevent a
+notification before the factory observes a launch or a removed label. Read-only
+and dry-run modes create no anchor or quiet-label writes.
+
 ### Idle agents
 
 An idle agent stays loaded in Paseo until it is archived, so every Tick reaps the factory's own

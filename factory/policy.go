@@ -919,6 +919,9 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 
 // Tick runs the factory's automatic moves (Sinai's label-in / label-out stages).
 func (f *Factory) Tick() {
+	if err := f.reconcileQuiet(); err != nil {
+		f.logf("quiet labeling: %v", err)
+	}
 	f.reconcileTimings()
 	now := f.Now()
 	p := f.beginPass()
@@ -959,6 +962,8 @@ const actedGrace = 45 * time.Second
 func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	old := now.Sub(a.CreatedAt) > time.Minute
 	switch {
+	case quietAnchor(a):
+		return nil
 	case a.L(labelRole) == "reviewer":
 		if a.L(labelApplied) == "" && (a.Status == "idle" || a.Status == "closed") && old {
 			return f.ApplyVerdict(a)

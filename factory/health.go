@@ -107,7 +107,8 @@ func (f *Factory) agentCounts() AgentCounts {
 		cards[a.ID] = c
 		order = append(order, a.ID)
 	}
-	owners := cardOwners(agents, nil)
+	// Quiet anchors are grouping boundaries: each card still owns its own live agent.
+	owners := cardOwners(agents, quietBoundaries(agents, nil))
 	for _, a := range agents {
 		if a.parked() {
 			n.Parked++

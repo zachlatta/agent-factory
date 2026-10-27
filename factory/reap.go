@@ -47,7 +47,9 @@ func idleSince(a Agent, now time.Time) time.Duration {
 }
 
 // factoryAgent: an agent the factory started or moves (a card, reviewer, scout or picker).
-func factoryAgent(a Agent) bool { return a.L(labelStage) != "" || a.L(labelRole) != "" }
+func factoryAgent(a Agent) bool {
+	return !quietAnchor(a) && (a.L(labelStage) != "" || a.L(labelRole) != "")
+}
 
 func (f *Factory) reap(now time.Time) {
 	agents := f.agents()

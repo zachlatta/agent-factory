@@ -94,7 +94,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 	anchors := map[string]bool{}
 	for _, a := range agents {
 		byID[a.ID] = true
-		if InboxAnchorRole != "" && a.Labels["role"] == InboxAnchorRole {
+		if boardAnchor(a) {
 			anchors[a.ID] = true
 		}
 	}
@@ -239,6 +239,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 // own sub-agents fold into the card too. Top-level agents are not in the map. A sub-agent whose
 // parent is not listed (or is an anchor) is top-level; a reviewer is folded even when its card is not.
 func cardOwners(agents []Agent, anchors map[string]bool) map[string]string {
+	anchors = quietBoundaries(agents, anchors)
 	byID := map[string]Agent{}
 	for _, a := range agents {
 		byID[a.ID] = a

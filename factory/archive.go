@@ -66,6 +66,9 @@ func (f *Factory) archiveStoppedAgent(id string) error {
 }
 func (f *Factory) archiveChecked(id string, allowStop bool) error {
 	if a, ok := f.agentOK(id); ok {
+		if quietAnchor(a) {
+			return fmt.Errorf("quiet anchor cannot be archived by the factory")
+		}
 		id = a.ID
 		if a.parked() {
 			if allowStop {

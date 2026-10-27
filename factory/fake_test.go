@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -63,6 +65,9 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 			return "", p.runErr
 		}
 		p.runs++
+		if quietRunLabels(args)[labelPrefix+labelRole] == quietAnchorRole {
+			p.cwd[fmt.Sprintf("new-agent-%d", p.runs)] = argAfter(args, "--cwd")
+		}
 		return fmt.Sprintf("new-agent-%d\n", p.runs), nil
 	case "inspect":
 		if p.inspectErr != nil {
@@ -259,9 +264,28 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 		cwd: map[string]string{}, unknown: map[string]bool{}}
 	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: t.TempDir(), DefaultRepo: "example/desk"}, p)
 	f.Now = func() time.Time { return t0 }
+	// Most lifecycle tests begin with an already provisioned quiet anchor. Anchor bootstrap and
+	// recovery tests clear this cache explicitly and exercise the production path with fake Paseo.
+	f.quiet = quietState{id: "quiet-anchor", checked: t0}
+	p.cwd["quiet-anchor"] = filepath.Join(f.cfg.StateDir, "quiet-anchor")
 	f.Sleep = func(time.Duration) {}
 	f.GitOut = func(context.Context, string, ...string) (string, error) { return "", fmt.Errorf("no git in tests") }
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
+
+	managed := quietManaged(agents)
+	for i, a := range agents {
+		if !managed[a.ID] {
+			continue
+		}
+		a.Labels = maps.Clone(a.Labels)
+		if a.Labels[parentAgentLabel] == "" {
+			a.Labels[parentAgentLabel] = "quiet-anchor"
+		}
+		if a.L(labelQuiet) == "" {
+			a.Labels[labelPrefix+labelQuiet] = "quiet-anchor"
+		}
+		agents[i] = a
+	}
 	f.SetAgents(agents)
 	return f, p
 }

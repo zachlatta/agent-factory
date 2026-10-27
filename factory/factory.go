@@ -88,6 +88,8 @@ func (c *Config) defaults() {
 }
 
 type Factory struct {
+	quietMu     sync.Mutex
+	quiet       quietState
 	limitMu     sync.Mutex               // serializes error recovery ticks and explicit Resume
 	limitStates map[string]limitRecovery // latest persisted recovery across stale snapshots
 
@@ -472,6 +474,20 @@ func (f *Factory) logf(format string, args ...any) {
 }
 
 func (f *Factory) paseo(args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "run" && !f.cfg.DryRun {
+		if len(args) < 2 {
+			return "", fmt.Errorf("missing agent prompt")
+		}
+		var err error
+		args, err = f.quietLaunch(args)
+		if err != nil {
+			return "", err
+		}
+	}
+	return f.rawPaseo(args...)
+}
+
+func (f *Factory) rawPaseo(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -495,6 +511,9 @@ func (f *Factory) setLabels(id string, labels map[string]string) error {
 }
 
 func (f *Factory) send(id, msg string, images ...string) error {
+	if err := f.quietBeforeSend(id); err != nil {
+		return err
+	}
 	msg, mark := f.withDelegateRule(id, msg)
 	args := []string{"send", "--no-wait"}
 	for _, p := range images {

@@ -8,6 +8,7 @@ const labelPrefix = "factory."
 // Factory label keys, without labelPrefix.
 const (
 	labelLimit      = "limit-recovery" // persisted quota deadline and single recovery attempt
+	labelQuiet      = "quiet"          // anchor identity used to repair detached factory roots
 	labelStage      = "stage"
 	labelSince      = "since"
 	labelAutoReview = "auto-review"
