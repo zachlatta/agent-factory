@@ -148,6 +148,10 @@ permission from a missing directory, archived record, or previous partial succes
 
 ## Ordered implementation
 
+The proposed [upstream exclusion contract](workspace-exclusion.md) defines the
+required daemon coverage and strict record-only archive operation. It is design
+only: destructive retirement also requires separately proven host enforcement.
+
 This inventory is the first stage. Existing agent archive, reviewer retirement,
 picker handoff and waiting-card parking remain in their current paths because this
 stage adds observation only. They do not authorize workspace or branch deletion.
