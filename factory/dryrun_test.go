@@ -40,7 +40,7 @@ func (g *gitLog) all() [][]string {
 // and git calls reach the returned log only when the wrapper lets them through.
 func newDryRunFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *gitLog) {
 	t.Helper()
-	p := &fakePaseo{logs: map[string]string{}, archived: map[string]bool{}, status: map[string]string{},
+	p := &fakePaseo{archived: map[string]bool{}, status: map[string]string{},
 		busy: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
 		cwd: map[string]string{}, unknown: map[string]bool{}}
 	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: t.TempDir(), DefaultRepo: "example/desk", DryRun: true}, p)
@@ -73,26 +73,26 @@ func paseoWrites(p *fakePaseo) [][]string {
 
 func TestDryRunPaseoPassesOnlyReads(t *testing.T) {
 	f, p, _ := newDryRunFactory(t)
-	for _, args := range [][]string{{"inspect", "c1", "--json"}, {"logs", "c1", "--tail", "5"}, {"ls", "--json"},
+	for _, args := range [][]string{{"inspect", "c1", "--json"}, {"ls", "--json"},
 		{"permit", "ls", "--json"}, {"provider", "ls", "--json"}} {
 		if _, err := f.paseo(args...); err != nil {
 			t.Errorf("%v: %v", args, err)
 		}
 	}
-	if len(p.calls) != 5 {
-		t.Errorf("reads reached paseo %d times, want 5: %v", len(p.calls), p.calls)
+	if len(p.calls) != 4 {
+		t.Errorf("reads reached paseo %d times, want 4: %v", len(p.calls), p.calls)
 	}
 	long := strings.Repeat("x", 200)
 	writes := [][]string{{"agent", "update", "c1", "--label", "factory.stage=done"}, {"send", "--no-wait", "c1", long},
 		{"run", "--provider", "claude", "--background", "--quiet", "multi\nline"}, {"archive", "c1"}, {"stop", "c1"},
-		{"provider", "diagnostic", "claude"}, {"permit", "allow", "c1"}, {"brand-new", "c1"}, {}}
+		{"provider", "diagnostic", "claude"}, {"permit", "allow", "c1"}, {"brand-new", "c1"}, {"logs", "c1", "--tail", "5"}, {}}
 	for _, args := range writes {
 		if _, err := f.paseo(args...); err != nil {
 			t.Errorf("%v: %v", args, err)
 		}
 	}
-	if len(p.calls) != 5 {
-		t.Errorf("writes reached paseo: %v", p.calls[5:])
+	if len(p.calls) != 4 {
+		t.Errorf("writes reached paseo: %v", p.calls[4:])
 	}
 	log := strings.Join(f.log, "\n")
 	for _, want := range []string{"dry run: would paseo agent update c1 --label factory.stage=done",

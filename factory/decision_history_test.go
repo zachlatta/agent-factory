@@ -1,0 +1,191 @@
+package factory
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestDecisionHistoryWaitsThenAsks(t *testing.T) {
+	for _, stage := range []string{"plan", "landing", "building", "review"} {
+		t.Run(stage, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: stage, labelSource: "board", labelSince: ago(10 * time.Minute)})
+			c.LastActivityAt = t0.Add(-time.Minute)
+			if stage == "building" {
+				c.Labels[labelPrefix+labelAutoReview] = "code"
+			}
+			r := reviewer("r1", "c1", "code")
+			f, p := newTestFactory(t, c, r)
+			run := func() {
+				t.Helper()
+				a := c
+				if stage == "review" {
+					a = r
+				}
+				if err := f.tickAgent(a, f.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run()
+			if p.labels(c.ID)[labelStage] != "" || p.runs != 0 || p.labels(r.ID)[labelApplied] != "" {
+				t.Fatalf("missing history advanced card: %v", p.calls)
+			}
+			f.Now = func() time.Time { return t0.Add(time.Minute) }
+			run()
+			l := p.labels(c.ID)
+			if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "history unavailable") {
+				t.Fatalf("missing history did not escalate: %v", p.calls)
+			}
+			if p.runs != 0 || p.labels(r.ID)[labelApplied] != "" || p.called("archive", r.ID) {
+				t.Fatalf("missing history applied or restarted review: %v", p.calls)
+			}
+			noLogsCalls(t, p)
+		})
+	}
+}
+
+func TestDecisionHistoryLateFileResumesPlan(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	f, p := newTestFactory(t, c)
+	if err := f.tickAgent(c, t0); err != nil {
+		t.Fatal(err)
+	}
+	if p.runs != 0 {
+		t.Fatal("review started without history")
+	}
+	storeLog(t, f, p, c.ID, "Plan.\nTITLE: A clearer title\nTIER: low")
+	if err := f.tickAgent(c, t0); err != nil {
+		t.Fatal(err)
+	}
+	if p.labels(c.ID)[labelStage] != "plan-review" {
+		t.Fatalf("late file not used: %v", p.calls)
+	}
+	noLogsCalls(t, p)
+}
+
+func TestDecisionHistoryMissingDoesNotNameOrQualifyDirect(t *testing.T) {
+	c := card("c1", map[string]string{labelSource: "board"})
+	f, p := newTestFactory(t, c)
+	f.nameCard(c, "TITLE: Too early")
+	if direct, err := f.directReply(c); direct || !errors.Is(err, ErrNoHistory) || p.labels(c.ID)[labelTitled] != "" {
+		t.Fatal("missing history used as a reply")
+	}
+	noLogsCalls(t, p)
+}
+
+func TestDecisionHistoryDryRunBlocksLogs(t *testing.T) {
+	if paseoRead([]string{"logs", "c1"}) {
+		t.Fatal("dry-run permits a session-loading log read")
+	}
+}
+
+func TestDecisionHistoryReviewerLateFileAndHumanGate(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retry", true: "asked"}[expired], func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "review", labelPlanRounds: "1"})
+			r := reviewer("r1", c.ID, "code")
+			f, p := newTestFactory(t, c, r)
+			if expired {
+				f.Now = func() time.Time { return t0.Add(time.Minute) }
+			}
+			if err := f.ApplyVerdict(r); err != nil {
+				t.Fatal(err)
+			}
+			if expired {
+				for k, v := range p.labels(c.ID) {
+					c.Labels[labelPrefix+k] = v
+				}
+				f.SetAgents([]Agent{c, r})
+			}
+			storeLog(t, f, p, r.ID, "Finding.\nTIER: low\nVERDICT: changes")
+			if err := f.ApplyVerdict(r); err != nil {
+				t.Fatal(err)
+			}
+			if expired {
+				if p.labels(r.ID)[labelApplied] != "" || len(p.sent(c.ID)) != 0 {
+					t.Fatal("late history answered the human gate")
+				}
+			} else if p.labels(r.ID)[labelApplied] != "1" || p.labels(c.ID)[labelCodeRounds] != "1" {
+				t.Fatalf("late verdict not applied: %v", p.labels(c.ID))
+			}
+			noLogsCalls(t, p)
+		})
+	}
+}
+
+func TestDecisionHistoryPlanMustBeReadBeforeReviewConsumed(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "plan-review"})
+	r := reviewer("r1", c.ID, "plan")
+	f, p := newTestFactory(t, c, r)
+	storeLog(t, f, p, r.ID, "TIER: low\nVERDICT: approve")
+	if err := f.ApplyVerdict(r); err != nil {
+		t.Fatal(err)
+	}
+	if p.labels(r.ID)[labelApplied] != "" || len(p.sent(c.ID)) != 0 {
+		t.Fatal("review consumed without plan")
+	}
+	storeLog(t, f, p, c.ID, "Plan.\nTIER: risky\nWaits on: d0e1234")
+	if err := f.ApplyVerdict(r); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels(c.ID); l[labelTier] != "risky" || l[labelWaitsOn] != "d0e1234" || l[labelStage] != "building" {
+		t.Fatalf("stored plan decisions lost: %v", l)
+	}
+	noLogsCalls(t, p)
+}
+
+func TestDecisionHistoryUnavailableKinds(t *testing.T) {
+	for _, kind := range []string{"missing", "no-session", "unsupported", "invalid", "empty"} {
+		t.Run(kind, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: ago(10 * time.Minute)})
+			f, p := newTestFactory(t)
+			switch kind {
+			case "no-session":
+				c.SessionID = ""
+			case "unsupported":
+				c.Provider = "unknown"
+			case "invalid":
+				c.SessionID = "invalid/session"
+			case "empty":
+				writeFile(t, f.cfg.Home+"/.claude/projects/-test/"+c.SessionID+".jsonl", "")
+			}
+			f.SetAgents([]Agent{c})
+			f.Now = func() time.Time { return t0.Add(time.Minute) }
+			if err := f.tickAgent(c, f.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if p.labels(c.ID)[labelStage] != "zach" || p.labels(c.ID)[labelTrack] != "" || p.runs != 0 {
+				t.Fatalf("unavailable history misclassified: %v", p.labels(c.ID))
+			}
+			noLogsCalls(t, p)
+		})
+	}
+}
+
+func TestDecisionHistoryLandingWaitDoesNotWriteTiming(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute)})
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.Git = func(context.Context, string, ...string) error {
+		t.Error("verified landing before history was available")
+		return nil
+	}
+	f.GitOut = func(context.Context, string, ...string) (string, error) {
+		t.Error("read landing time before history was available")
+		return "", errors.New("no history")
+	}
+	if err := f.tickAgent(c, t0); err != nil {
+		t.Fatal(err)
+	}
+	noLogsCalls(t, p)
+}
+
+func TestDecisionHistoryAskExplainsPause(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused", labelStuckFrom: "review"})
+	ask := askFor(Card{Stage: "zach"}, c)
+	if ask == nil || !strings.Contains(ask.Title, "History unavailable") || !strings.Contains(ask.Why, "two minutes") || ask.Actions[0].ID != "rerun" {
+		t.Fatalf("history wait misrepresented: %+v", ask)
+	}
+}

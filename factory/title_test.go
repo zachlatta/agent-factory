@@ -128,7 +128,7 @@ func planStop(t *testing.T, labels map[string]string, reply string) (*Factory, *
 		l[k] = v
 	}
 	f, p := newTestFactory(t, card("c1", l))
-	p.logs["c1"] = "[Assistant] " + reply
+	storeLog(t, f, p, "c1", "[Assistant] "+reply)
 	return f, p
 }
 
@@ -285,7 +285,7 @@ func TestPlannerRenamesBranch(t *testing.T) {
 	if err := f.Git(context.Background(), wt, "branch", "cards-get-short-titles"); err != nil {
 		t.Fatal(err)
 	}
-	p.logs["c1"] = "[Assistant] Plan: ...\nTITLE: **Cards get short titles**\nTIER: low"
+	storeLog(t, f, p, "c1", "[Assistant] Plan: ...\nTITLE: **Cards get short titles**\nTIER: low")
 	f.Tick()
 	got, err := f.GitOut(context.Background(), wt, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -303,7 +303,7 @@ func TestPlannerRenamesBranch(t *testing.T) {
 	g.Branch = "ideas-keep-their-title"
 	f2, p2 := newTestFactory(t, g)
 	f2.Git, f2.GitOut = runGit, runGitOut
-	p2.logs["c2"] = "[Assistant] Plan\nTITLE: Another name\nTIER: low"
+	storeLog(t, f2, p2, "c2", "[Assistant] Plan\nTITLE: Another name\nTIER: low")
 	f2.Tick()
 	gotGiven, err := f2.GitOut(context.Background(), wtGiven, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {

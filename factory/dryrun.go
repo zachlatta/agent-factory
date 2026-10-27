@@ -16,7 +16,7 @@ import (
 
 // paseoReads are the paseo subcommands that only read. Anything else, including a subcommand the
 // factory starts using later, counts as a write.
-var paseoReads = map[string]bool{"inspect": true, "logs": true, "ls": true, "permit ls": true, "provider ls": true}
+var paseoReads = map[string]bool{"inspect": true, "ls": true, "permit ls": true, "provider ls": true}
 
 func paseoRead(args []string) bool {
 	if len(args) == 0 {

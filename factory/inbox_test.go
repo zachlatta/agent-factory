@@ -20,8 +20,8 @@ func TestInboxCardWithoutPlanFinishesDirect(t *testing.T) {
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
 		f.Git = func(context.Context, string, ...string) error { return nil }
-		f.GitOut = gitStub(directOK)                                              // no factory.base on inbox cards: the reflog still shows its own commits
-		p.logs["c1"] = "Replied to Zach with the answer and archived the thread." // no TRACK or TIER line
+		f.GitOut = gitStub(directOK)                                                        // no factory.base on inbox cards: the reflog still shows its own commits
+		storeLog(t, f, p, "c1", "Replied to Zach with the answer and archived the thread.") // no TRACK or TIER line
 		f.Tick()
 		if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
 			t.Fatalf("%s: review started for an errand: %v", src, runs)
@@ -35,7 +35,7 @@ func TestInboxCardWithoutPlanFinishesDirect(t *testing.T) {
 func TestInboxCardWithPlanGetsPlanReview(t *testing.T) {
 	c := inboxCard("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 	f, p := newTestFactory(t, c)
-	p.logs["c1"] = "PLAN\nGoal: ...\nTIER: risky"
+	storeLog(t, f, p, "c1", "PLAN\nGoal: ...\nTIER: risky")
 	f.Tick()
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
 		t.Fatalf("plan review not started: %v", p.calls)
@@ -45,7 +45,7 @@ func TestInboxCardWithPlanGetsPlanReview(t *testing.T) {
 func TestInboxCardLandsThenEmailsZach(t *testing.T) {
 	f, p := newTestFactory(t, inboxCard("c1", map[string]string{labelStage: "review", labelSource: "email", labelTier: "low", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestInboxCardLandsThenEmailsZach(t *testing.T) {
 func TestBoardCardLandMessageHasNoEmail(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "reply_to_message") {
 		t.Errorf("sent = %v", msgs)

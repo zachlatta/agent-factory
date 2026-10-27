@@ -89,7 +89,7 @@ func TestRemainingClarificationLifecycle(t *testing.T) {
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	f.Git = func(context.Context, string, ...string) error { return nil }
-	p.logs[c.ID] = "Finished"
+	storeLog(t, f, p, c.ID, "Finished")
 	f.Tick()
 	if l := p.labels(c.ID); l[labelStage] != "landing" || l[labelRemainingAsk] != "1" {
 		t.Fatalf("first omission: %v", l)
@@ -119,7 +119,7 @@ func TestRemainingClarificationLifecycle(t *testing.T) {
 		t.Fatalf("second omission: %v", l)
 	}
 	c.Labels[labelPrefix+labelStage] = "landing"
-	p.logs[c.ID] = "REMAINING: none"
+	storeLog(t, f, p, c.ID, "REMAINING: none")
 	advance()
 	c.Labels[labelPrefix+labelStage] = "landing"
 	f.SetAgents([]Agent{c})
@@ -131,7 +131,7 @@ func TestRemainingClarificationLifecycle(t *testing.T) {
 	advance()
 	c.Labels[labelPrefix+labelStage] = "landing"
 	f.SetAgents([]Agent{c})
-	p.logs[c.ID] = "Finished again"
+	storeLog(t, f, p, c.ID, "Finished again")
 	f.Tick()
 	if l := p.labels(c.ID); l[labelStage] != "landing" || l[labelRemainingAsk] != "1" {
 		t.Fatalf("second landing: %v", l)
@@ -158,7 +158,7 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 			case "approve", "rerun":
 				_, err = f.Act(route, Body{ID: c.ID})
 			case "code review":
-				p.logs["r1"] = "TIER: low\nVERDICT: approve"
+				storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 				err = f.ApplyVerdict(f.agent("r1"))
 			case "dependency":
 				err = f.tickHeld(c, Card{ID: c.ID, Repo: c.Repo, Cwd: c.Cwd})

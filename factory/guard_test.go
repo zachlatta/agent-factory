@@ -44,7 +44,7 @@ func TestGuardedZachCardLandsAfterCleanScan(t *testing.T) {
 		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: tier, labelSource: "board",
 			labelPlanRounds: "1", labelZachPlan: "approved"}), reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
-		p.logs["r1"] = "TIER: " + tier + "\nVERDICT: approve"
+		storeLog(t, f, p, "r1", "TIER: "+tier+"\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "landing" || !strings.Contains(l[labelNote], "scan passed") {
@@ -64,7 +64,7 @@ func TestGuardedInboxCardLandsAndReports(t *testing.T) {
 	c.Labels[gmailThreadLabel] = "t1"
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 	fakeScan(f, nil, nil)
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "landing" {
 		t.Errorf("labels = %v", l)
@@ -89,7 +89,7 @@ func TestGuardedAnyCardLandsAfterCleanScan(t *testing.T) {
 	} {
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
-		p.logs["r1"] = "VERDICT: nits"
+		storeLog(t, f, p, "r1", "VERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "landing" || !strings.Contains(l[labelNote], "scan passed") {
 			t.Errorf("%s: labels = %v", name, l)
@@ -113,7 +113,7 @@ func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 	} {
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
-		p.logs["r1"] = "VERDICT: approve"
+		storeLog(t, f, p, "r1", "VERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") {
 			t.Errorf("%s: labels = %v", name, l)
@@ -133,7 +133,7 @@ func TestGuardedScanHitStopsLanding(t *testing.T) {
 	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
 	fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || l[labelNote] != "secret scan failed: tailnet-hostname a.go:3" {
@@ -148,7 +148,7 @@ func TestGuardedScanErrorFailsClosed(t *testing.T) {
 	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
 	fakeScan(f, nil, errors.New("gitleaks not found"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], "secret scan could not run") {
 		t.Errorf("labels = %v", l)
@@ -181,7 +181,7 @@ func TestGuardedDirectTrackGoesToZach(t *testing.T) {
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	ranges := fakeScan(f, nil, nil)
-	p.logs["c1"] = "Pushed the fix.\nTRACK: direct"
+	storeLog(t, f, p, "c1", "Pushed the fix.\nTRACK: direct")
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], "public repo: finished without review") {
 		t.Errorf("labels = %v", l)
@@ -246,7 +246,7 @@ func TestUnguardedRepoUnchanged(t *testing.T) {
 		t.Fatal("scanned a repo that is not guarded")
 		return nil, nil
 	}
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "landing" {
 		t.Errorf("labels = %v", l)
@@ -344,7 +344,7 @@ func TestGuardedDirectReplyStillGetsCodeReview(t *testing.T) {
 	f, p := newTestFactory(t, c)
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": "bbb\n"})
-	p.logs["c1"] = "Pushed the fix.\nTRACK: direct"
+	storeLog(t, f, p, "c1", "Pushed the fix.\nTRACK: direct")
 	f.Tick()
 	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
 	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "code")) {

@@ -74,7 +74,8 @@ func TestAutomaticArchiveCallersPreserveProtections(t *testing.T) {
 					target.ArchivedAt = t0.Add(-time.Minute)
 				}
 				f, p := newTestFactory(t, a, target)
-				p.logs["subject"] = "TIER: low\nVERDICT: approve"
+				storeLog(t, f, p, "target", "Plan: make the requested change.\nTIER: low")
+				storeLog(t, f, p, "subject", "TIER: low\nVERDICT: approve")
 				if caller == "verdict-land" {
 					if err := f.landReviews.put(LandReview{By: "target", Review: "subject", Status: "running"}, t0); err != nil {
 						t.Fatal(err)

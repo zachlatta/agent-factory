@@ -54,8 +54,8 @@ func TestMaxTier(t *testing.T) {
 func TestPlanApprovedLowTierStartsBuild(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "[Assistant] plan is sound\nTIER: low\nVERDICT: approve"
-	p.logs["c1"] = "[Assistant] Plan ... TIER: low"
+	storeLog(t, f, p, "r1", "[Assistant] plan is sound\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "[Assistant] Plan ... TIER: low")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	for _, tier := range []string{"low", "risky"} {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: tier, labelPlanRounds: "1"}),
 			reviewer("r1", "c1", "code"))
-		p.logs["r1"] = "TIER: " + tier + "\nVERDICT: nits"
+		storeLog(t, f, p, "r1", "TIER: "+tier+"\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "landing" {
@@ -121,7 +121,7 @@ func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 func TestArchitectureApprovedByZachAutoLands(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelZachPlan: "approved", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "landing" {
 		t.Errorf("labels = %v", l)
@@ -132,7 +132,7 @@ func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
 	// raised to architecture at code review: the same preview stop before landing
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "it swapped the database\nTIER: architecture\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "it swapped the database\nTIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || l[labelTier] != "architecture" || l[labelNote] != previewNote {
@@ -146,7 +146,7 @@ func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
 func TestUntieredCardGoesToZachAfterReview(t *testing.T) {
 	// an existing session Zach sent to review by hand: no plan review, no tier
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review"}), reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") || l[labelTier] != "low" {
@@ -161,7 +161,7 @@ func TestHandReviewedCardWaitsForZachAfterRework(t *testing.T) {
 	// a hand-sent card whose first code review asked for changes now has a tier label, but no plan review
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelCodeRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") {
 		t.Errorf("labels = %v", l)
@@ -174,7 +174,7 @@ func TestHandReviewedCardWaitsForZachAfterRework(t *testing.T) {
 func TestChangesGoBackUntilReworkCap(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "[Assistant] - test is missing\nVERDICT: changes"
+	storeLog(t, f, p, "r1", "[Assistant] - test is missing\nVERDICT: changes")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelCodeRounds] != "2" {
@@ -186,7 +186,7 @@ func TestChangesGoBackUntilReworkCap(t *testing.T) {
 
 	f, p = newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "2"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "VERDICT: changes"
+	storeLog(t, f, p, "r1", "VERDICT: changes")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != "rework cap reached" {
 		t.Errorf("at cap: labels = %v", l)
@@ -197,7 +197,7 @@ func TestMissingVerdictRerunsOnceBeforeAskingZach(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "review", labelTier: "low"})
 	r1 := reviewer("r1", "c1", "code")
 	f, p := newTestFactory(t, c, r1)
-	p.logs["r1"] = "I ran out of time"
+	storeLog(t, f, p, "r1", "I ran out of time")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestMissingVerdictRerunsOnceBeforeAskingZach(t *testing.T) {
 	cAfterFirst := withLabels(c, l)
 	r2 := reviewer("r2", "c1", "code")
 	f.SetAgents([]Agent{cAfterFirst, r2})
-	p.logs["r2"] = "killed again"
+	storeLog(t, f, p, "r2", "killed again")
 	if err := f.ApplyVerdict(f.agent("r2")); err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +255,8 @@ func TestCardBeforeArchivedClosedReviewerStartsOnlyOneReviewer(t *testing.T) {
 	r.Status = "closed"
 	r.ArchivedAt = t0.Add(-time.Minute)
 	f, p := newTestFactory(t, c, r)
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", "Review interrupted before a verdict.")
 	f.Tick()
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
 		t.Fatalf("started %d reviewers in one Tick, want 1: %v", len(runs), p.calls)
@@ -317,6 +319,8 @@ func TestFailedAutoRerunGoesToZachOnNextTick(t *testing.T) {
 	c.LastActivityAt = t0.Add(-time.Hour)
 	r := reviewer("r1", "c1", "plan")
 	f, p := newTestFactory(t, c, r)
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", "Review interrupted before a verdict.")
 	p.runErr = errors.New("paseo run failed")
 	if err := f.ApplyVerdict(f.agent("r1")); err == nil {
 		t.Fatal("expected StartReview error when paseo run fails")
@@ -343,7 +347,8 @@ func TestVerdictAndDirtyCommitClearNoVerdictFlag(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelNoVerdict: "1"})
 	r := reviewer("r1", "c1", "plan")
 	f, p := newTestFactory(t, c, r)
-	p.logs["r1"] = "TIER: low\nVERDICT: changes\n- fix x"
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: changes\n- fix x")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -359,6 +364,7 @@ func TestVerdictAndDirtyCommitClearNoVerdictFlag(t *testing.T) {
 	cDirty.Cwd = "/w/c2"
 	rDirty := reviewer("r2", "c2", "code")
 	f2, p2 := newTestFactory(t, cDirty, rDirty)
+	storeLog(t, f2, p2, "r2", "Review interrupted before a verdict.")
 	f2.GitOut = gitStub(map[string]string{
 		"status --porcelain": " M a.go\n",
 		"rev-parse HEAD":     "abc123\n",
@@ -387,7 +393,7 @@ func TestTickAppliesFinishedReviewersOnce(t *testing.T) {
 	young := reviewer("r3", "c1", "code")
 	young.CreatedAt = t0.Add(-10 * time.Second)
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low"}), r, done, young)
-	p.logs["r1"] = "VERDICT: approve"
+	storeLog(t, f, p, "r1", "VERDICT: approve")
 	f.Tick()
 	// r2's verdict is not read again (the idle reap archives it); r3 is too young to apply
 	if !p.called("archive", "r1") || p.called("logs", "r2") || p.called("archive", "r3") {
@@ -398,6 +404,7 @@ func TestTickAppliesFinishedReviewersOnce(t *testing.T) {
 func TestTickStartsPlanReviewWhenPlannerStops(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 	f, p := newTestFactory(t, c)
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	f.Tick()
 	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
 	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "plan")) {
@@ -420,7 +427,7 @@ func TestTickFinishesDirectCardWithoutReview(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)
-			p.logs["c1"] = "Emailed Zach the answer and landed the work item.\nTRACK: direct"
+			storeLog(t, f, p, "c1", "Emailed Zach the answer and landed the work item.\nTRACK: direct")
 			f.GitOut = gitStub(directOK)
 			f.Git = func(_ context.Context, dir string, args ...string) error {
 				if args[0] == "merge-base" {
@@ -476,7 +483,7 @@ func TestTickFinishesLanding(t *testing.T) {
 				}
 				return nil
 			}
-			p.logs["c1"] = "Landed.\nREMAINING: none"
+			storeLog(t, f, p, "c1", "Landed.\nREMAINING: none")
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelStage] != tc.stage {
@@ -571,7 +578,7 @@ func TestVerdictForArchivedTargetIsNotSent(t *testing.T) {
 		}
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", "plan"))
 		p.archived["c1"] = true
-		p.logs["r1"] = "[Assistant] fix it\nTIER: risky\nVERDICT: changes"
+		storeLog(t, f, p, "r1", "[Assistant] fix it\nTIER: risky\nVERDICT: changes")
 		f.Tick()
 		if msgs := p.sent("c1"); len(msgs) != 0 {
 			t.Errorf("snapshot=%v: sent to archived target: %v", snapshot, msgs)
@@ -591,7 +598,7 @@ func TestVerdictForArchivedTargetIsNotSent(t *testing.T) {
 func TestVerdictWaitsWhenInspectFails(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "VERDICT: approve"
+	storeLog(t, f, p, "r1", "VERDICT: approve")
 	p.inspectErr = errors.New("daemon down")
 	if err := f.ApplyVerdict(f.agent("r1")); err == nil {
 		t.Error("want an error so the next tick retries")
@@ -606,8 +613,8 @@ func TestTickReadsTrackOnlyFromTheAgentsReply(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
-	p.logs["c1"] = "[User] You are the Fellow...\nTRACK: direct\nAnything else is the build track\n" +
-		"[Thought] planning\nPlan: fix the board.\nTIER: risky"
+	storeLog(t, f, p, "c1", "[User] You are the Fellow...\nTRACK: direct\nAnything else is the build track\n"+
+		"[Thought] planning\nPlan: fix the board.\nTIER: risky")
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	f.Tick()
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
@@ -639,7 +646,7 @@ func TestDirectCardNeedsACommitOfItsOwn(t *testing.T) {
 		c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute), labelBase: "base1"})
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
-		p.logs["c1"] = "Answered Zach and landed the work item.\nTRACK: direct"
+		storeLog(t, f, p, "c1", "Answered Zach and landed the work item.\nTRACK: direct")
 		f.Git = func(context.Context, string, ...string) error { return nil }
 		f.GitOut = gitStub(directOK, map[string]string{"rev-parse HEAD": tc.head + "\n"})
 		f.Tick()
@@ -728,7 +735,8 @@ func TestStuckCheckSkipsCardArchivedSinceSnapshot(t *testing.T) {
 func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelSince: ago(10 * time.Minute)}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "building" {
 		t.Errorf("labels = %v", l)
@@ -748,8 +756,7 @@ func withLabels(a Agent, l map[string]string) Agent {
 	return out
 }
 
-// longReview is a reviewer session whose final reply spans two text blocks and many lines; its
-// `paseo logs --tail 6` holds only the end.
+// longReview is a reviewer session whose final reply spans two text blocks and many lines.
 func longReview(t *testing.T, f *Factory, id, of, kind, verdict string, p *fakePaseo) Agent {
 	t.Helper()
 	r := reviewer(id, of, kind)
@@ -764,7 +771,6 @@ func longReview(t *testing.T, f *Factory, id, of, kind, verdict string, p *fakeP
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"- LAST finding: no test\nTIER: low\nVERDICT: ` + verdict + `"}]}}`,
 	}
 	writeFile(t, f.cfg.Home+"/.claude/projects/-w-"+of+"/s-"+id+".jsonl", strings.Join(lines, "\n")+"\n")
-	p.logs[id] = "- detail 19\n- LAST finding: no test\nTIER: low\nVERDICT: " + verdict
 	return r
 }
 
@@ -786,6 +792,7 @@ func briefFor(t *testing.T, labels map[string]string, kind, verdict string) (map
 	t.Helper()
 	f, p := newTestFactory(t)
 	c := card("c1", labels)
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", kind, verdict, p)})
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -1013,6 +1020,7 @@ func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 		f, p := newTestFactory(t,
 			card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: prev}),
 			reviewer("r1", "c1", "plan"))
+		storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 		storeLog(t, f, p, "r1", reviewText)
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 			t.Fatal(err)
@@ -1089,7 +1097,8 @@ func TestPlanReworkCapSmallFixOnArchitectureWaitsForZachPlanApproval(t *testing.
 		"SMALL FIX: add Ordering line for overlapping card\nTIER: architecture\nVERDICT: changes"
 	base := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: "2"})
 	f, p := newTestFactory(t, base, reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = archReview
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", archReview)
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -1146,7 +1155,7 @@ func TestPlanReworkCapSmallFixOnArchitectureWaitsForZachPlanApproval(t *testing.
 
 // stopsAfterReply plays a card agent answering Zach's message: it acts a minute after the move the
 // reply made, then stops with reply as its last message.
-func stopsAfterReply(f *Factory, p *fakePaseo, c Agent, reply string) {
+func stopsAfterReply(t *testing.T, f *Factory, p *fakePaseo, c Agent, reply string) {
 	c.Labels = maps.Clone(c.Labels)
 	for k, v := range p.labels(c.ID) {
 		c.Labels[labelPrefix+k] = v
@@ -1154,7 +1163,7 @@ func stopsAfterReply(f *Factory, p *fakePaseo, c Agent, reply string) {
 	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
 	c.LastActivityAt = t0.Add(time.Minute)
 	f.SetAgents([]Agent{c})
-	p.logs[c.ID] = reply
+	storeLog(t, f, p, c.ID, reply)
 }
 
 func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
@@ -1177,7 +1186,7 @@ func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
 			if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "" {
 				t.Fatalf("after the message: labels = %v", l)
 			}
-			stopsAfterReply(f, p, c, tc.reply)
+			stopsAfterReply(t, f, p, c, tc.reply)
 			f.Tick()
 			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
 				t.Fatalf("review started for an errand: %v", runs)
@@ -1196,7 +1205,7 @@ func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
 	f, p := newTestFactory(t, c)
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	f.GitOut = gitStub(directOK)
-	p.logs["c1"] = "Sent Zach the deck.\nTRACK: direct"
+	storeLog(t, f, p, "c1", "Sent Zach the deck.\nTRACK: direct")
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "landed" || l[labelTrack] != "direct" {
 		t.Fatalf("first pass: labels = %v", l)
@@ -1207,7 +1216,7 @@ func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
 	if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "" {
 		t.Fatalf("after the follow-up: labels = %v", l)
 	}
-	stopsAfterReply(f, p, c, "Sent Zach a fixed copy.\nTRACK: direct")
+	stopsAfterReply(t, f, p, c, "Sent Zach a fixed copy.\nTRACK: direct")
 	f.Tick()
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
 		t.Fatalf("review started for an errand: %v", runs)
@@ -1223,7 +1232,7 @@ func TestDirectCardWithAPlanAfterAFollowUpGetsPlanReview(t *testing.T) {
 	if _, err := f.Act("send", Body{ID: "c1", Message: "now change the code too"}); err != nil {
 		t.Fatal(err)
 	}
-	stopsAfterReply(f, p, c, "PLAN\nGoal: ...\nTIER: low")
+	stopsAfterReply(t, f, p, c, "PLAN\nGoal: ...\nTIER: low")
 	f.Tick()
 	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
 	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "plan")) {
@@ -1252,7 +1261,7 @@ func TestTickFinishesDirectCardQueuedForCodeReview(t *testing.T) {
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
 			f.GitOut = gitStub(directOK, map[string]string{"status --porcelain": "", "rev-parse HEAD": "bbb\n"})
-			p.logs["c1"] = tc.reply
+			storeLog(t, f, p, "c1", tc.reply)
 			f.Tick()
 			runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
 			if tc.review {
@@ -1378,8 +1387,8 @@ func TestParseSideEffects(t *testing.T) {
 func TestArchitecturePlanWithNoBuildSideEffectsBuildsFirst(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "plan is fine\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: approve"
-	p.logs["c1"] = "plan: new page\nBUILD SIDE EFFECTS: none\nTIER: architecture"
+	storeLog(t, f, p, "r1", "plan is fine\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "plan: new page\nBUILD SIDE EFFECTS: none\nTIER: architecture")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -1416,8 +1425,8 @@ func TestArchitecturePlanStopsEarlyUnlessReviewerFindsNoSideEffects(t *testing.T
 func TestArchitectureSmallFixWithNoSideEffectsBuilds(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: "2"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "SMALL FIX: add Ordering line\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: changes"
-	p.logs["c1"] = "plan\nBUILD SIDE EFFECTS: none"
+	storeLog(t, f, p, "r1", "SMALL FIX: add Ordering line\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: changes")
+	storeLog(t, f, p, "c1", "plan\nBUILD SIDE EFFECTS: none")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "building" || l[labelPlanFix] != "add Ordering line" || l[labelAwaiting] != "" {
@@ -1428,7 +1437,7 @@ func TestArchitectureSmallFixWithNoSideEffectsBuilds(t *testing.T) {
 func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelWriting] == "" {

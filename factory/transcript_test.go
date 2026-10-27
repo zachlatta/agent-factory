@@ -42,9 +42,9 @@ func TestReadTranscript(t *testing.T) {
 	if len(res2.Events) != 0 || res2.Next != 7 {
 		t.Errorf("incremental = %+v", res2)
 	}
-	// an agent with no session file falls back to paseo logs
+	// An agent with no session file reports that native history is unavailable.
 	res3, _ := ReadTranscript(home, TranscriptSource{Provider: "codex"}, 0)
 	if !res3.Fallback {
-		t.Error("codex with no session should fall back")
+		t.Error("codex with no session should report unavailable history")
 	}
 }

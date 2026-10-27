@@ -116,6 +116,11 @@ func baseAsk(c Card, a Agent) *Ask {
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case note == limitNote:
 		return limitAsk(a)
+	case strings.HasPrefix(note, "history unavailable"):
+		return &Ask{Title: "History unavailable: decision paused", From: "builder",
+			Why: "The factory could not read the session history needed for this decision within two minutes of the turn stopping. " +
+				"It has not applied a verdict or moved the work forward. Re-run the step or reply with instructions.",
+			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
 	case note == "stuck" && (a.L(labelStuckFrom) == "review" || a.L(labelStuckFrom) == "plan-review"):
@@ -301,28 +306,7 @@ func stageName(id string) string {
 	return id
 }
 
-var tagLine = regexp.MustCompile(`^\[[A-Z][A-Za-z_ -]{0,30}\]`)
 var trailer = regexp.MustCompile(`(?i)^\s*\**\s*(TIER|VERDICT):`)
-
-// lastMessage is the agent's last reply in `paseo logs --filter text` output: the untagged lines
-// after the last [User] line, without [Thought]/tool lines or the TIER/VERDICT trailer.
-func lastMessage(logs string) string {
-	lines := strings.Split(logs, "\n")
-	start := 0
-	for i, l := range lines {
-		if strings.HasPrefix(l, "[User]") {
-			start = i + 1
-		}
-	}
-	var out []string
-	for _, l := range lines[start:] {
-		if tagLine.MatchString(l) || trailer.MatchString(l) {
-			continue
-		}
-		out = append(out, l)
-	}
-	return strings.TrimSpace(strings.Join(out, "\n"))
-}
 
 type detailKey struct {
 	src  string // agent id the text came from
@@ -367,7 +351,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 			continue
 		}
 		if !fetch {
-			continue // no paseo logs here: the next loop fetches it
+			continue // the next loop reads fresh session detail
 		}
 		text, err := f.askReply(a)
 		if strings.TrimSpace(text) == "" {
@@ -466,20 +450,6 @@ func (f *Factory) storedReply(a Agent) (string, error) {
 		}
 	}
 	return stripTrailer(strings.Join(last, "\n\n")), nil
-}
-
-// lastReply is storedReply, falling back to `paseo logs` text (which cannot tell a multi-line
-// message to the agent from its answer) when there is no session file. Only for an agent whose
-// turn just ended, as lastText; every other read uses storedReply.
-func (f *Factory) lastReply(a Agent) (string, error) {
-	if text, err := f.storedReply(a); err == nil {
-		return text, nil
-	}
-	text, err := f.lastText(a.ID, 120)
-	if err != nil {
-		return "", err
-	}
-	return lastMessage(text), nil
 }
 
 // askReply is the text shown on a Needs Zach card and in its email, read from the session file only

@@ -10,8 +10,8 @@ import (
 // in Needs Zach; one whose NEEDS FROM ZACH says nothing goes to Done, and what is left goes to an agent
 // as a follow-up idea.
 
-// remainingRule ends every landing message. It stays on one line: the log fallback (lastMessage)
-// skips the whole [User] line, so the rule's own example is never read as the agent's answer.
+// remainingRule ends every landing message. Completion is read from the assistant reply,
+// so examples in the user prompt cannot count as the agent's answer.
 // It lists only this card's own unfinished work: anything else held finished cards in Needs Zach.
 const remainingRule = " End that summary with a line that says what is left of this card's own request: " +
 	"REMAINING: none only when everything this card was asked to do is landed and live; otherwise a line " +

@@ -239,6 +239,7 @@ func TestNoEmailForHandMovesOrWithoutAddress(t *testing.T) {
 
 func TestArchitecturePlanEmailWaitsForTheSummary(t *testing.T) {
 	f, p, m := mailFactory(t, card("c1", map[string]string{labelStage: "plan-review"}), reviewer("r1", "c1", "plan"))
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -579,7 +580,7 @@ func TestEmailIncludesOriginalTaskAndInlineEvidenceWithFallback(t *testing.T) {
 	c2.Cwd = dir
 	f2, p2, m2 := mailFactory(t, c2)
 	m2.attachmentErr = errors.New("attachment too large")
-	storeLog(t, f2, p2, "c2", p.logs["c1"])
+	storeLog(t, f2, p2, "c2", strings.ReplaceAll(replyBody, `\n`, "\n"))
 	f2.Tick()
 	sends2 := m2.sends()
 	if len(sends2) != 2 {

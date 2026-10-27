@@ -195,7 +195,7 @@ func TestParkedTargetGetsVerdict(t *testing.T) {
 	r := reviewer("rev1", "card1", "code")
 	f, p := newTestFactory(t, c, r)
 	p.archived["card1"] = true
-	p.logs["rev1"] = "Looks good.\nVERDICT: approve"
+	storeLog(t, f, p, "rev1", "Looks good.\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("rev1")); err != nil {
 		t.Fatal(err)
 	}

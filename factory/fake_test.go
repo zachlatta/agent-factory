@@ -12,14 +12,13 @@ import (
 	"time"
 )
 
-// fakePaseo records every paseo CLI call and answers `logs`, `run`, `inspect` and `archive` from
+// fakePaseo records every paseo CLI call and answers `run`, `inspect` and `archive` from
 // canned data; `send` unarchives, as Paseo does. inspect reports archived[id] and status[id] (default: not archived, idle).
 type fakePaseo struct {
 	mu         sync.Mutex // guards the fields below; background refreshes call Run concurrently
 	lsCalls    atomic.Int32
 	lsBlock    chan struct{} // when non-nil, `provider ls` waits for it to close
 	calls      [][]string
-	logs       map[string]string
 	runs       int
 	archived   map[string]bool
 	status     map[string]string
@@ -59,8 +58,6 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 	}
 	p.calls = append(p.calls, args)
 	switch args[0] {
-	case "logs":
-		return p.logs[args[1]], nil
 	case "run":
 		if p.runErr != nil {
 			return "", p.runErr
@@ -257,7 +254,7 @@ var t0 = time.Date(2026, 10, 25, 20, 0, 0, 0, time.UTC)
 
 func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	t.Helper()
-	p := &fakePaseo{logs: map[string]string{}, archived: map[string]bool{}, status: map[string]string{},
+	p := &fakePaseo{archived: map[string]bool{}, status: map[string]string{},
 		busy: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
 		cwd: map[string]string{}, unknown: map[string]bool{}}
 	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: t.TempDir(), DefaultRepo: "example/desk"}, p)
@@ -295,17 +292,17 @@ func testSession(id string) string { return "s-" + strings.NewReplacer("/", "-",
 var logTag = regexp.MustCompile(`^\[(User|Thought|[A-Z][A-Za-z_ -]{1,30})\]\s?(.*)$`)
 
 // storeLog gives agent id the history text, in `paseo logs --filter text` shape ("[User] …",
-// "[Thought] …", "[Tool] …" one-line entries, other lines the agent's text): as canned `paseo logs` output for the
-// reads of an agent whose turn just ended (lastText), and as the Claude session file at
-// testSession(id) that every other read uses.
-func storeLog(t *testing.T, f *Factory, p *fakePaseo, id, text string) {
+// "[Thought] …", "[Tool] …" one-line entries, other lines the agent's text), as a Claude
+// session file at testSession(id).
+func storeLog(t *testing.T, f *Factory, _ *fakePaseo, id, text string) {
 	t.Helper()
-	p.logs[id] = text
 	type entry struct{ typ, block, text string }
 	var es []entry
 	for _, line := range strings.Split(text, "\n") {
 		if m := logTag.FindStringSubmatch(line); m != nil {
 			switch m[1] {
+			case "Assistant":
+				es = append(es, entry{"assistant", "text", m[2]})
 			case "User":
 				es = append(es, entry{"user", "", m[2]})
 			case "Thought":
@@ -315,7 +312,7 @@ func storeLog(t *testing.T, f *Factory, p *fakePaseo, id, text string) {
 			}
 			continue
 		}
-		// as lastMessage reads it: lines after a [User] line are the reply
+		// Lines after a [User] line are the reply.
 		if n := len(es); n > 0 && es[n-1].block == "text" {
 			es[n-1].text += "\n" + line
 			continue

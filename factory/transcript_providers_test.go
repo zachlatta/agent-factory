@@ -183,7 +183,7 @@ func TestReadTranscriptFallbacks(t *testing.T) {
 			t.Errorf("%+v: %+v, %v", src, res, err)
 		}
 	}
-	// a file with nothing readable in it yet falls back too, so the page is never emptier than paseo logs
+	// A file with nothing readable in it yet reports unavailable native history.
 	writeFile(t, home+"/.codex/sessions/2026/01/02/rollout-x-sess-e.jsonl", `{"type":"session_meta"}`+"\n")
 	if res, _ := ReadTranscript(home, TranscriptSource{Provider: "codex", SessionID: "sess-e"}, 0); !res.Fallback {
 		t.Errorf("empty file: %+v", res)
@@ -200,14 +200,13 @@ func antigravityFile(t *testing.T, home, conv string, lines ...string) string {
 
 func TestAskDetailFromAntigravitySession(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"})
-	f, p := newTestFactory(t)
+	f, _ := newTestFactory(t)
 	c.Provider, c.Cwd = "antigravity", "/w/c1"
 	c.SessionID = antigravityFile(t, f.cfg.Home, "conv-a",
 		`{"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>\nPlan approved.\n</USER_REQUEST>"}`,
 		`{"step_index":1,"type":"PLANNER_RESPONSE","content":"Testing.","tool_calls":[{"name":"run_command","args":{"CommandLine":"go test"}}]}`,
 		`{"step_index":2,"type":"GENERIC","status":"DONE","content":"ok"}`,
 		`{"step_index":3,"type":"PLANNER_RESPONSE","thinking":"done","content":"I added --dry-run.\nTIER: low"}`)
-	p.logs["c1"] = "[User] Plan approved.\n[Shell] go test"
 	f.SetAgents([]Agent{c})
 	got, _ := f.card("c1")
 	if got.Ask.Detail != "I added --dry-run." {
@@ -224,8 +223,7 @@ func TestTickReadsTrackFromACodexReply(t *testing.T) {
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"You are the Fellow...\nTRACK: direct\nAnything else"}]}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Plan: fix the board.\nTIER: risky"}]}}`,
 	}, "\n")+"\n")
-	// paseo logs would end on the prompt's own TRACK line if the reply were read from there
-	p.logs["c1"] = "Plan: fix the board.\nTRACK: direct"
+	// The prompt's TRACK line must not be interpreted as the agent's reply.
 	f.SetAgents([]Agent{c})
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	f.Tick()

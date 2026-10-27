@@ -131,7 +131,7 @@ func TestPickerNotStartedTwice(t *testing.T) {
 	f.mu.Lock()
 	f.routing["pk"] = true // a click is starting it right now
 	f.mu.Unlock()
-	p.logs["pk"] = "[User] x\nREPO: example/desk"
+	storeLog(t, f, p, "pk", "[User] x\nREPO: example/desk")
 	f.Tick()
 	if err := f.pickRepo(a, "example/desk"); err == nil {
 		t.Error("second start allowed while the first is in progress")

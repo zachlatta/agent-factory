@@ -99,7 +99,7 @@ func TestLandVerdictIsStoredNotSent(t *testing.T) {
 	ag.Labels["paseo.schedule-id"] = "s1"
 	rev := reviewer("new-agent-1", "ag1", "land")
 	f.SetAgents([]Agent{ag, rev})
-	p.logs["new-agent-1"] = "[Assistant] Tests pass (go test ./... ok).\nTIER: low\nVERDICT: nits"
+	storeLog(t, f, p, "new-agent-1", "[Assistant] Tests pass (go test ./... ok).\nTIER: low\nVERDICT: nits")
 	f.Tick()
 	r, _ := f.landReviews.Get("ag1")
 	if r.Status != "done" || r.Verdict != "nits" || !strings.Contains(r.Findings, "Tests pass") {
@@ -259,6 +259,7 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: ago(10 * time.Minute)})
 	f, p := newTestFactory(t, c)
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "?? scratch.txt\n M x.go\n", "rev-parse HEAD": "h1\n"})
+	storeLog(t, f, p, "c1", "Built the requested change.\nTIER: low")
 	f.Tick()
 	if p.runs != 0 {
 		t.Fatalf("review started on a dirty tree: %v", p.calls)
@@ -274,6 +275,7 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 	// after two asks, Zach decides
 	c.Labels[labelPrefix+labelDirtyAsks] = "2"
 	f.SetAgents([]Agent{c})
+	storeLog(t, f, p, "c1", "Built the requested change.\nTIER: low")
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != "worktree not clean for review" {
 		t.Errorf("labels = %v", l)
@@ -283,6 +285,7 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 	c.Labels[labelPrefix+labelDirtyAsks] = "1"
 	f, p = newTestFactory(t, c)
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": "h1\n"})
+	storeLog(t, f, p, "c1", "Built the requested change.\nTIER: low")
 	f.Tick()
 	if p.runs != 1 {
 		t.Fatalf("no review: %v", p.calls)
@@ -320,7 +323,7 @@ func TestLandingChecksTheReviewedCommit(t *testing.T) {
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
 			f.GitOut = gitStub(tc.git)
-			p.logs["c1"] = "Landed.\nREMAINING: none"
+			storeLog(t, f, p, "c1", "Landed.\nREMAINING: none")
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelStage] != tc.stage {
@@ -350,7 +353,7 @@ func TestDirectCardOutsideItsWorkItemGoesToZach(t *testing.T) {
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
 			f.GitOut = gitStub(tc.git)
-			p.logs["c1"] = "Answered Zach.\nTRACK: direct"
+			storeLog(t, f, p, "c1", "Answered Zach.\nTRACK: direct")
 			f.Tick()
 			if l := p.labels("c1"); l[labelStage] != tc.stage || l[labelNote] != tc.note {
 				t.Errorf("labels = %v", l)

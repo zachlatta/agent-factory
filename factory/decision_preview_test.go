@@ -52,7 +52,7 @@ func TestDecisionPreview(t *testing.T) {
 		a := card(id, labels)
 		a.Title = title
 		a.Cwd = dir
-		p.logs[id] = "[User] go\n" + reply
+		storeLog(t, f, p, id, "[User] go\n"+reply)
 		agents = append(agents, a)
 	}
 	add("plan-card", "Approve a visible change", map[string]string{labelStage: "zach", labelAwaiting: "plan"}, "DECISION: Approve this layout?\nOVERVIEW: Fewer controls and clearer choices.\nNEEDS FROM ZACH: Approve to build, or send instructions.\n\nBEFORE: before.png\nAFTER: after.png\n\nThe full plan appears here.\n\nBEFORE: Old wording\nAFTER: New wording\n\nQUESTION: Which spacing?\n- Comfortable (recommended)\n- Compact\n\nQUESTION: Which accent?\n- Blue (recommended)\n- Green")

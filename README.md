@@ -476,6 +476,12 @@ links, and in-flight or interrupted turns may lack a final assistant event; `/ap
 sessions and incomplete turn boundaries stay visible. Session span is not uninterrupted work, and
 overlapping agents' durations are not card elapsed time.
 
+Factory decisions also read session files only: reviewer verdicts, plan tiers and tracks,
+landing replies and card names never load an agent through Paseo logs. If required history
+is unavailable, the factory retries for two minutes after the turn stops, then moves the
+card to Needs Zach. It leaves the review unapplied and does not infer a verdict or tier.
+Naming alone can wait for a later readable reply.
+
 ## Public repos: review and secret scan
 
 Repos listed in `FACTORY_GUARDED_REPOS` (default: this one) are public, so everything that lands
@@ -604,8 +610,7 @@ Computer-use access keeps the role's existing action approvals and read-only res
   (Claude `~/.claude/projects`, Codex `~/.codex/sessions`, Antigravity
   `~/.gemini/antigravity-cli/brain`, Muse `~/.local/share/muse/sessions`). With no readable file
   they say "history unavailable" and why; they never call `paseo logs`, which loads the agent in
-  Paseo (resuming an archived one). Only reads of an agent whose turn just ended use it
-  (`lastText` in `factory.go` lists them).
+  Paseo (resuming an archived one). Decision reads use the same session-file readers.
 - `factory/hostmetrics*.go`, `hostfleet.go`: host load for the header icon and `/host`. Each
   `FACTORY_METRIC_HOSTS` alias gets one read-only SSH stream (`ssh -o BatchMode=yes`, a fixed
   script on stdin, Linux or macOS), shared by all viewers, run only while someone polls

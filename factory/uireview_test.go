@@ -105,7 +105,7 @@ func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 	for _, verdict := range []string{"approve", "nits"} {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 			reviewer("r1", "c1", "code"))
-		p.logs["r1"] = reviewWithUI + verdict
+		storeLog(t, f, p, "r1", reviewWithUI+verdict)
 		f.ApplyVerdict(f.agent("r1"))
 		msgs := p.sent("c1")
 		if len(msgs) != 1 || !strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], "- the Save button is hard to see") ||
@@ -115,7 +115,7 @@ func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 	}
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "UI feedback") {
 		t.Errorf("no feedback: sent = %v", msgs)
@@ -126,7 +126,7 @@ func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
 	// no plan review, so the card waits for Zach after its code review
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board"}),
 		reviewer("r1", "c1", "code"))
-	p.logs["r1"] = reviewWithUI + "approve"
+	storeLog(t, f, p, "r1", reviewWithUI+"approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" {

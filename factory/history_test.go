@@ -237,7 +237,6 @@ func TestPlanReviewReadsBuilderFromSessionFile(t *testing.T) {
 		reviewer("r1", "c1", "plan"))
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "plan: replace the storage layer\nWaits on: keep123\nTIER: architecture")
-	delete(p.logs, "c1")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelTier] != "architecture" {
 		t.Errorf("builder tier not read from its file: %v", l)

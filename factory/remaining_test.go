@@ -76,7 +76,7 @@ func TestLandingReadsWhatRemains(t *testing.T) {
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
-			p.logs["c1"] = tc.reply
+			storeLog(t, f, p, "c1", tc.reply)
 			f.Tick()
 			if l := p.labels("c1"); l[labelStage] != tc.stage || l[labelNote] != tc.note {
 				t.Errorf("labels = %v", l)
@@ -98,7 +98,7 @@ func TestLandingRuleIsNotTheAnswer(t *testing.T) {
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	f.Git = func(context.Context, string, ...string) error { return nil }
-	p.logs["c1"] = fmt.Sprintf("[User] Code review passed (low tier). %s\n[Shell] bin/land\nLanded it.", f.landMsgFor(c))
+	storeLog(t, f, p, "c1", fmt.Sprintf("[User] Code review passed (low tier). %s\n[Shell] bin/land\nLanded it.", f.landMsgFor(c)))
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelNote] != "asking what remains" {
 		t.Errorf("labels = %v", l)
@@ -164,7 +164,7 @@ func TestLandingNeedsNothingGoesToDone(t *testing.T) {
 			c.Cwd, c.Title = t.TempDir(), tc.title
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
-			p.logs["c1"] = reply
+			storeLog(t, f, p, "c1", reply)
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelStage] != "landed" || l[labelNote] != "landed; left for agents: the phone-width check was not run" {

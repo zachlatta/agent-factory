@@ -236,7 +236,7 @@ func TestGzipFlushStreams(t *testing.T) {
 
 func benchFactory(b *testing.B, cards int) *Factory {
 	b.Helper()
-	p := &fakePaseo{logs: map[string]string{}, archived: map[string]bool{}, status: map[string]string{},
+	p := &fakePaseo{archived: map[string]bool{}, status: map[string]string{},
 		busy: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
 		cwd: map[string]string{}, unknown: map[string]bool{}}
 	f := New(Config{Host: "host1", Home: b.TempDir(), StateDir: b.TempDir(), DefaultRepo: "example/desk"}, p)

@@ -563,12 +563,24 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	if kind == "" {
 		kind = "code"
 	}
-	text, err := f.lastText(rev.ID, 6)
+	text, err := storedText(f.cfg.Home, rev, 6)
 	if err != nil {
+		if t, ok := f.agentOK(target); ok {
+			return f.waitForHistory(t, rev, err)
+		}
 		return err
 	}
+	if t, ok := f.agentOK(target); ok && t.L(labelStage) == "zach" && strings.HasPrefix(t.L(labelNote), "history unavailable") {
+		return nil // history appearing later must not answer Zach's pending decision
+	}
 	verdict := ParseVerdict(text)
-	full, _ := f.lastReply(rev)
+	full, err := f.storedReply(rev)
+	if err != nil {
+		if t, ok := f.agentOK(target); ok {
+			return f.waitForHistory(t, rev, err)
+		}
+		return err
+	}
 	notes := reviewNotes(full, text)
 	if kind == "land" {
 		if verdict == "" {
@@ -602,6 +614,20 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			return nil
 		}
 	}
+	// The plan's tier, build side effects and dependency must be readable before
+	// consuming its review; an absent plan cannot be treated as a low-tier plan.
+	builderTier, builderPlan, builderReply := "", "", ""
+	if ok && kind == "plan" {
+		builderPlan, err = storedText(f.cfg.Home, t, 60)
+		if err != nil {
+			return f.waitForHistory(t, rev, err)
+		}
+		builderReply, err = f.storedReply(t)
+		if err != nil {
+			return f.waitForHistory(t, rev, err)
+		}
+		builderTier = ParseTier(builderPlan)
+	}
 	if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
 		return err
 	}
@@ -620,12 +646,6 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	roundsKey := roundsLabel(kind)
 	rounds := atoi(t.L(roundsKey)) + 1
-	builderTier, builderPlan := "", ""
-	if kind == "plan" {
-		// the builder has been idle through the review (maybe unloaded): its file, never Paseo
-		builderPlan, _ = storedText(f.cfg.Home, t, 60)
-		builderTier = ParseTier(builderPlan)
-	}
 	tier := MaxTier(t.L(labelTier), ParseTier(text), builderTier)
 	if tier == "" && kind == "plan" {
 		tier = "low"
@@ -657,9 +677,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	if (verdict == "approve" || verdict == "nits" || smallFix != "") && kind == "plan" {
 		// the approved plan may name a card this one lands after (deps.go)
-		if plan, err := f.storedReply(t); err != nil {
-			f.logf("%s: plan not read for a Waits on line: %v", short(target), err)
-		} else if id := ParseWaitsOn(plan, t.ID); id != t.L(labelWaitsOn) {
+		if id := ParseWaitsOn(builderReply, t.ID); id != t.L(labelWaitsOn) {
 			labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
 		}
 	}
@@ -987,15 +1005,20 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			if err == nil && strings.TrimSpace(commits) == "" {
 				reply, err := f.storedReply(a)
 				if err != nil {
-					f.logf("%s completion reply not read: %v", short(a.ID), err)
+					return f.waitForHistory(a, a, err)
 				}
 				return f.finishLanding(a, c, reply)
 			}
 		}
-		if a.L(labelAutoReview) == "code" && a.L(labelPlanRounds) == "" && !f.guarded(c.Repo) && f.directReply(a) {
-			// a direct card sent to code review (say, by a reply before errandPass): its work is
-			// already on main, so finish it as direct instead of asking Zach to approve landing
-			return f.markDirect(a, c)
+		if a.L(labelAutoReview) == "code" && a.L(labelPlanRounds) == "" && !f.guarded(c.Repo) {
+			direct, err := f.directReply(a)
+			if err != nil {
+				return f.waitForHistory(a, a, err)
+			}
+			if direct {
+				// A direct card sent to code review: finish its errand instead of reviewing it.
+				return f.markDirect(a, c)
+			}
 		}
 		_, err := f.StartReview(c, a.L(labelAutoReview))
 		return err
@@ -1004,17 +1027,22 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return err
 		}
 		// only the agent's own last reply: the Fellow prompt itself has a "TRACK: direct" line
-		text, err := f.lastReply(a)
-		if err == nil {
-			f.nameCard(a, text)
+		text, err := f.storedReply(a)
+		if err != nil {
+			return f.waitForHistory(a, a, err)
 		}
-		if err == nil && ParseTrack(text) == "direct" {
+		f.nameCard(a, text)
+		if ParseTrack(text) == "direct" {
 			return f.markDirect(a, c)
 		}
 		if fromInbox(a) {
 			// an inbox card that wrote no plan (no TIER line) did an errand, as email agents did before;
-			// its last reply may be a line after its final command, so read the recent log
-			if text, err := f.lastText(a.ID, 60); err == nil && ParseTier(text) == "" {
+			// its last reply may be a line after its final command, so read recent session text
+			text, err := storedText(f.cfg.Home, a, 60)
+			if err != nil {
+				return f.waitForHistory(a, a, err)
+			}
+			if ParseTier(text) == "" {
 				return f.markDirect(a, c)
 			}
 		}
@@ -1025,6 +1053,11 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	case a.L(labelStage) == "landing" && acted:
 		if live, err := f.stillStopped(a); !live {
 			return err
+		}
+		// Read before recording a landing: history retries must not repeat that write.
+		reply, err := f.storedReply(a)
+		if err != nil {
+			return f.waitForHistory(a, a, err)
 		}
 		if ok, why := f.landedOnMain(c.Cwd, a.L(labelBase)); !ok {
 			// stays unarchived so Zach can read what the agent did
@@ -1039,11 +1072,6 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			}
 		}
 		f.recordLanded(a, c.Cwd)
-		// landed: Done only when the agent says nothing is left (remaining.go)
-		reply, err := f.lastReply(a)
-		if err != nil {
-			f.logf("%s landing reply not read: %v", short(a.ID), err)
-		}
 		return f.finishLanding(a, c, reply)
 	case a.L(labelStage) == "zach" && isDepAskNote(a.L(labelNote)) && a.L(labelWaitsOn) != "" &&
 		depState(f.agents(), a, a.L(labelWaitsOn)) == depLanded:
@@ -1058,6 +1086,29 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 }
 
 const stuckAfter = 2 * time.Minute
+
+// waitForHistory retries a stopped turn's unreadable session for two minutes. It never
+// substitutes empty text for a decision, consumes a verdict, or sends the agent a message.
+func (f *Factory) waitForHistory(card, source Agent, cause error) error {
+	f.logf("%s decision history not read: %v", short(card.ID), cause)
+	ref := source.LastActivityAt
+	if source.CreatedAt.After(ref) {
+		ref = source.CreatedAt
+	}
+	if since := parseTime(source.L(labelSince)); since.After(ref) {
+		ref = since
+	}
+	if f.Now().Sub(ref) < stuckAfter || card.gone() || card.L(labelStage) == "zach" {
+		return nil
+	}
+	if live, err := f.stillStopped(card); !live {
+		return err
+	}
+	return f.setLabels(card.ID, map[string]string{
+		labelStage: "zach", labelNote: "history unavailable: decision paused",
+		labelStuckFrom: card.L(labelStage), labelAutoReview: "",
+	})
+}
 
 // stuckWhy names what a card in a working column is missing, or "" when its next move is pending.
 var stuckWhy = map[string]string{
@@ -1203,15 +1254,18 @@ func waitNote(a Agent) string {
 	return "waiting on Zach"
 }
 
-// directReply reports whether card a's last reply ends with TRACK: direct and its recent log has no
+// directReply reports whether card a's last reply ends with TRACK: direct and its recent session text has no
 // TIER line (a plan).
-func (f *Factory) directReply(a Agent) bool {
-	reply, err := f.lastReply(a)
-	if err != nil || ParseTrack(reply) != "direct" {
-		return false
+func (f *Factory) directReply(a Agent) (bool, error) {
+	reply, err := f.storedReply(a)
+	if err != nil {
+		return false, err
 	}
-	text, err := f.lastText(a.ID, 60)
-	return err == nil && ParseTier(text) == ""
+	if ParseTrack(reply) != "direct" {
+		return false, nil
+	}
+	text, err := storedText(f.cfg.Home, a, 60)
+	return err == nil && ParseTier(text) == "", err
 }
 
 // markDirect labels card a as a direct-track card, so Zach's later replies keep it on that track
@@ -1266,8 +1320,8 @@ func (f *Factory) nameCard(a Agent, reply string) {
 		return
 	}
 	if ParseTrack(reply) != "direct" {
-		// the reply drops its TIER line (stripTrailer, lastMessage): look for it in the recent log
-		if text, err := f.lastText(a.ID, 60); err != nil || ParseTier(text) == "" {
+		// storedReply strips the TIER line: read it from the session text
+		if text, err := storedText(f.cfg.Home, a, 60); err != nil || ParseTier(text) == "" {
 			return
 		}
 	}

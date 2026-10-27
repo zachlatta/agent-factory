@@ -44,8 +44,8 @@ func TestPlanApprovalRecordsWaitsOn(t *testing.T) {
 func TestRevisedPlanWithoutWaitsOnClearsIt(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board",
 		labelWaitsOn: "d0e0001", labelWaitsDone: "1"}), reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
-	p.logs["c1"] = "[User] revise\nThe revised plan, no dependency.\nTIER: low"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "[User] revise\nThe revised plan, no dependency.\nTIER: low")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelWaitsOn] != "" || l[labelWaitsDone] != "" {
 		t.Errorf("labels = %v", l)
@@ -73,7 +73,7 @@ func heldCard(extra map[string]string) Agent {
 func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
 		labelWaitsOn: "d0e0001"}), reviewer("r1", "c1", "code"), dep("building", false))
-	p.logs["r1"] = "TIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 			agents = append(agents, d)
 		}
 		f, p := newTestFactory(t, append(agents, card("c1", labels))...)
-		p.logs["r1"] = "TIER: low\nVERDICT: approve"
+		storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "landing" || l[labelHeld] != "" {
 			t.Errorf("%s: labels = %v", name, l)
@@ -110,7 +110,7 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 func TestHeldCardWithUIFeedbackIsToldToWait(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
 		labelWaitsOn: "d0e0001"}), reviewer("r1", "c1", "code"), dep("review", false))
-	p.logs["r1"] = "Fine.\n\nUI feedback:\n- the button is small\n\nTIER: low\nVERDICT: approve"
+	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], "the button is small") ||
@@ -385,7 +385,7 @@ func TestFailedLandingDoesNotRecordVerifiedDependency(t *testing.T) {
 			return nil
 		}
 		f.GitOut = func(context.Context, string, ...string) (string, error) { return "", errors.New("review not verified") }
-		p.logs[c.ID] = "REMAINING: none"
+		storeLog(t, f, p, c.ID, "REMAINING: none")
 		f.Tick()
 		l := p.labels(c.ID)
 		if l[labelLandedVerified] != "" || l[labelStage] != "zach" {

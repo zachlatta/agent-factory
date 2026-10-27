@@ -196,7 +196,7 @@ func (f *Factory) nextRead() uint64 {
 
 // setAgents stores agents (read number seq) and their board unless a newer read is already
 // stored, and reports whether it stored. fetch lets fillAsks read new Needs Zach detail with
-// `paseo logs`; without it the board uses only the cached detail (board actions must stay fast).
+// session files; without it the board uses only cached detail (board actions must stay fast).
 func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 	agents = f.withArchiveMarks(agents)
 	cards := BuildBoard(agents, f.ideas.List(), f.Now())
@@ -550,16 +550,6 @@ func (f *Factory) liveState(id string) (archived, running bool, err error) {
 		return false, false, fmt.Errorf("paseo inspect %s: %v", short(id), err)
 	}
 	return s.Archived, s.Status == "running", nil
-}
-
-// lastText is the last n text entries of `paseo logs`. That read loads the agent in Paseo (resuming
-// its provider session, even when archived), so it is only for an agent whose turn just ended and is
-// still loaded: ApplyVerdict's reviewer (policy.go) and the stopped builder's TIER and TRACK reads in
-// the Tick (tickAgent, directReply, nameCard), plus lastReply's fallback for the same reads. Every
-// other read (board summary, transcript, Needs Zach text and email, Close, plan-review builder reads,
-// the repo picker) uses storedText or storedReply, which read only the session file.
-func (f *Factory) lastText(id string, n int) (string, error) {
-	return f.paseo("logs", id, "--tail", fmt.Sprint(n), "--filter", "text")
 }
 
 // Repos lists git checkouts under ~/dev/<owner>/<repo> that a new card can start in, the default first.

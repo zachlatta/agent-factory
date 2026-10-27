@@ -88,13 +88,6 @@ func TestAskFor(t *testing.T) {
 	}
 }
 
-func TestLastMessage(t *testing.T) {
-	logs := "[User] do it\nold answer\n[User] Plan approved\n[Thought] hmm\n[Bash] ls\nHere is the plan:\n- one\n\nTIER: low\nVERDICT: approve\n[Thought] done\n"
-	if got := lastMessage(logs); got != "Here is the plan:\n- one" {
-		t.Errorf("lastMessage = %q", got)
-	}
-}
-
 func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote})
 	r := reviewer("r1", "c1", "code")
@@ -107,7 +100,7 @@ func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	if got.Ask == nil || got.Ask.Detail != "- test missing at a.go:3" {
 		t.Errorf("reviewer detail = %+v", got.Ask)
 	}
-	// cached: no new logs call while nothing changed
+	// Cached detail stays unchanged while nothing changes.
 	n := len(p.calls)
 	f.SetAgents([]Agent{c, r})
 	if len(p.calls) != n {
@@ -118,7 +111,8 @@ func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 func TestArchitecturePlanAsksBuilderForSummary(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	p.logs["r1"] = "TIER: architecture\nVERDICT: approve"
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || !strings.Contains(msgs[0], "short version for Zach") || strings.Contains(msgs[0], "Build it now") {
@@ -157,7 +151,7 @@ func TestDoneMovesCardToDoneWithoutArchiving(t *testing.T) {
 func TestAskDetailFromClaudeSession(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"})
 	c.Provider, c.SessionID, c.Cwd = "claude", "s1", "/w/c1"
-	f, p := newTestFactory(t)
+	f, _ := newTestFactory(t)
 	lines := []string{
 		`{"type":"user","message":{"content":"Plan approved.\nReviewer notes:\n- Scope: nothing unasked-for"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Now the tests."},{"type":"thinking","thinking":"hmm"}]}}`,
@@ -165,7 +159,6 @@ func TestAskDetailFromClaudeSession(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"I added --dry-run.\n\n**Tests:** pass.\nTIER: low"}]}}`,
 	}
 	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s1.jsonl", strings.Join(lines, "\n")+"\n")
-	p.logs["c1"] = "[User] Plan approved.\n- Scope: nothing unasked-for\nI added --dry-run."
 	f.SetAgents([]Agent{c})
 	got, _ := f.card("c1")
 	if got.Ask.Detail != "I added --dry-run.\n\n**Tests:** pass." {
@@ -221,8 +214,8 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 		`{"type":"user","timestamp":"2026-10-26T04:03:10Z","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":"RAW_TOOL_OUTPUT_DO_NOT_MAIL"}]}}`,
 	}
 	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s-mid.jsonl", strings.Join(lines, "\n")+"\n")
-	if got, err := f.lastReply(r); err != nil || got != "" {
-		t.Fatalf("lastReply must stay empty when turn ends in a tool call: got %q, err %v", got, err)
+	if got, err := f.storedReply(r); err != nil || got != "" {
+		t.Fatalf("storedReply must stay empty when turn ends in a tool call: got %q, err %v", got, err)
 	}
 	f.SetAgents([]Agent{c, r})
 	got, _ := f.card("c1")
@@ -238,7 +231,7 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 		t.Errorf("detail leaked tool output: %q", got.Ask.Detail)
 	}
 
-	// Earlier assistant text in the same turn before a trailing tool call is used for the ask, while lastReply stays empty.
+	// Earlier assistant text in the same turn before a trailing tool call is used for the ask, while storedReply stays empty.
 	r2 := r
 	r2.SessionID = "s-assistant-before-tool"
 	r2.LastActivityAt = t0.Add(time.Minute)
@@ -247,8 +240,8 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hold on, checking one more file.\nTRACK: direct\nTIER: low"},{"type":"tool_use","id":"u2","name":"Read","input":{}}]}}`,
 	}
 	writeFile(t, f.cfg.Home+"/.claude/projects/-w-c1/s-assistant-before-tool.jsonl", strings.Join(lines2, "\n")+"\n")
-	if gotReply, _ := f.lastReply(r2); ParseTrack(gotReply) != "" {
-		t.Fatalf("lastReply leaked mid-turn TRACK line: %q", gotReply)
+	if gotReply, _ := f.storedReply(r2); ParseTrack(gotReply) != "" {
+		t.Fatalf("storedReply leaked mid-turn TRACK line: %q", gotReply)
 	}
 	f.SetAgents([]Agent{c, r2})
 	got, _ = f.card("c1")

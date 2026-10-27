@@ -195,7 +195,7 @@ func TestTimingStoreSkipsUnchangedAndPrunes(t *testing.T) {
 }
 
 func TestTimingReadOnlyWritesNothing(t *testing.T) {
-	p := &fakePaseo{logs: map[string]string{}}
+	p := &fakePaseo{}
 	dir := t.TempDir()
 	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: dir, ReadOnly: true}, p)
 	f.Now = func() time.Time { return t0 }
@@ -280,7 +280,7 @@ func TestTimingRecordsReviewRounds(t *testing.T) {
 	c.Labels[labelPrefix+labelTier] = "low"
 	c.Labels[labelPrefix+labelPlanRounds] = "1"
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
-	p.logs["r1"] = "VERDICT: approve"
+	storeLog(t, f, p, "r1", "VERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	ct := timing(t, f, "c1")
 	if len(ct.Rounds) != 1 {
@@ -305,7 +305,7 @@ func TestTimingRecordsLandingCommit(t *testing.T) {
 		f, p := newTestFactory(t, c)
 		f.Git = func(context.Context, string, ...string) error { return nil }
 		f.GitOut = gitStub(landedLog)
-		p.logs["c1"] = "Landed.\nREMAINING: none"
+		storeLog(t, f, p, "c1", "Landed.\nREMAINING: none")
 		f.Tick()
 		if got := timing(t, f, "c1").LandedAt; !got.Equal(parseTime(commit)) {
 			t.Errorf("landedAt = %v", got)
@@ -316,7 +316,7 @@ func TestTimingRecordsLandingCommit(t *testing.T) {
 		c.Labels[labelPrefix+labelSince] = ago(10 * time.Minute)
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
-		p.logs["c1"] = "Answered and landed the work item.\nTRACK: direct"
+		storeLog(t, f, p, "c1", "Answered and landed the work item.\nTRACK: direct")
 		f.GitOut = gitStub(landedLog, directOK)
 		f.Git = func(context.Context, string, ...string) error { return nil }
 		f.Tick()
@@ -431,7 +431,7 @@ func TestTimingReplyCheckSkips(t *testing.T) {
 func TestFactoryEmailsAreRecorded(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
 	f, p, _ := mailFactory(t, c)
-	p.logs["c1"] = "What now?"
+	storeLog(t, f, p, "c1", "What now?")
 	f.Tick()
 	ct := timing(t, f, "c1")
 	if len(ct.Mails) != 1 || ct.Mails[0].ID != "nm1" || !ct.Mails[0].At.Equal(t0) {
