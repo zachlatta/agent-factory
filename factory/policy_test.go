@@ -1312,19 +1312,36 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		t.Errorf("newCardPrompt direct track lacks work/YYYY-MM-DD-short-name/ instruction:\n%s", planPrompt)
 	}
 
-	deleteScratchPrompts := map[string]string{
-		"newCardPrompt":     planPrompt,
+	sharedScratchPrompts := map[string]string{
 		"delegate builder":  delegateText(nil, false),
 		"delegate reviewer": delegateText(nil, true),
 		"review plan":       ReviewPrompt(c, "plan", 7478, "unknown"),
 		"review code":       ReviewPrompt(c, "code", 7478, "unknown"),
 		"review land":       ReviewPrompt(c, "land", 7478, "unknown"),
-		"worktreeRule":      worktreeRule,
-		"landMsg":           landMsg,
-		"guardedLandMsg":    guardedLandMsg,
-		"landMsgFor":        f.landMsgFor(f.agent("c-code")),
-		"rerunLandMsg":      rerunLandMsg(false),
-		"rerunGuarded":      rerunLandMsg(true),
+	}
+	for name, s := range sharedScratchPrompts {
+		for _, want := range []string{"Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
+		}
+		for _, forbidden := range []string{"delete .factory-scratch/", "Before landing or finishing"} {
+			if strings.Contains(s, forbidden) {
+				t.Errorf("%s instructs a shared-worktree user to clean up: %q", name, forbidden)
+			}
+		}
+	}
+
+	deleteScratchPrompts := map[string]string{
+		"worktreeRule":   worktreeRule,
+		"landMsg":        landMsg,
+		"guardedLandMsg": guardedLandMsg,
+		"landMsgFor":     f.landMsgFor(f.agent("c-code")),
+		"rerunLandMsg":   rerunLandMsg(false),
+		"rerunGuarded":   rerunLandMsg(true),
+	}
+	for name, s := range worktreePrompts {
+		deleteScratchPrompts[name] = s
 	}
 	for name, s := range deleteScratchPrompts {
 		for _, want := range []string{"delete .factory-scratch/", "retirement", "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {

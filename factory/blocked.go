@@ -10,21 +10,28 @@ import (
 // nobody answers the prompt, so the agent hangs. It is formatted into newCardPrompt: no % in it.
 const shellRule = "Shell commands: Claude Code asks for permission before some rm commands even in bypass mode, and " +
 	"nobody responds to it, so you would hang. rm takes only literal absolute paths: no glob, $VAR, $(...) or ~, and " +
-	"no cd earlier in the same command. Never run cd X && git or any compound command combining cd and git; use git -C X instead."
+	"no cd earlier in the same command (run cd as its own command if needed). Never run cd X && git or any compound command combining cd and git; use git -C X instead."
 
-// scratchCleanupRule is shared by every prompt that asks agents to remove scratch.
-const scratchCleanupRule = "Never run commands from inside .factory-scratch/. Keep your working directory at the worktree root. " +
-	"Before landing or finishing, delete .factory-scratch/ if present from the worktree root using its literal absolute path; " +
-	"never use a relative path, variable, substitution, glob, or ~. This keeps ignored files from blocking worktree retirement."
+// scratchSafetyRule applies to every agent using the card's shared worktree.
+const scratchSafetyRule = "Never run commands from inside .factory-scratch/. Keep your working directory at the worktree root. " +
+	"Any authorized scratch removal must run from the worktree root using its literal absolute path; " +
+	"never use a relative path, variable, substitution, glob, or ~."
 
-// worktreeRule includes shell safety so follow-up prompts remain self-contained.
+// scratchCleanupRule assigns cleanup only to the card owner, never reviewers or sub-agents.
+const scratchCleanupRule = scratchSafetyRule + " Before landing or finishing, delete .factory-scratch/ if present. " +
+	"This keeps ignored files from blocking worktree retirement."
+
+// worktreeStorageRule includes shell safety without assigning cleanup of shared scratch.
 // These constants are formatted into newCardPrompt: no % in them.
-const worktreeRule = shellRule + "\n\n" +
+const worktreeStorageRule = shellRule + "\n\n" +
 	"Worktree, not /tmp: do all your work in this worktree, never in /tmp or another temp directory. " +
 	"Put real deliverables in tracked paths (for work items in work/, create work/YYYY-MM-DD-short-name/ first and keep " +
 	"the scripts and outputs that produced the deliverable inside it). Put transient scratch (JSON payloads, downloads, " +
 	"one-off helper scripts) in a .factory-scratch/ folder in the worktree, listed in .git/info/exclude " +
-	"(git rev-parse --git-path info/exclude) before first use; do not commit or force-add .factory-scratch/. " + scratchCleanupRule
+	"(git rev-parse --git-path info/exclude) before first use; do not commit or force-add .factory-scratch/."
+
+// worktreeRule is for the card owner; its helpers use storage and safety rules only.
+const worktreeRule = worktreeStorageRule + " " + scratchCleanupRule
 
 // permissionWait reports whether agent a is stopped on a permission prompt: one Paseo lists for it
 // (Agent.Pending), or Paseo's own attention flag for it. The factory never answers these prompts.

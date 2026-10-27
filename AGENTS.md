@@ -39,10 +39,11 @@ Host settings (board URL, default repo, private scan patterns, PATH) live in
 - Do all work in this worktree, never in `/tmp` or another temp directory. Put transient scratch
   (JSON payloads, downloads, one-off helper scripts) in `.factory-scratch/`, listed in
   `.git/info/exclude` (`git rev-parse --git-path info/exclude`) before first use; never commit or
-  force-add `.factory-scratch/`, and delete `.factory-scratch/` before landing or finishing so
-  ignored files do not block worktree retirement. Never run commands from inside that folder; keep
-  your working directory at the worktree root and delete scratch from there using its literal
-  absolute path, without variables, substitutions, globs or ~.
+  force-add `.factory-scratch/`. The card owner deletes it before landing or finishing so ignored
+  files do not block worktree retirement; reviewers and sub-agents leave shared scratch intact.
+  Never run commands from inside that folder; keep your working directory at the worktree root.
+  Any authorized scratch removal must run from there using its literal absolute path, without
+  variables, substitutions, globs or ~.
 - Never combine cd and git in a compound command (including cd X && git); use git -C X.
   For rm, use only literal absolute paths and no cd earlier in the same command.
 - The secret scan (`factory/scan`, `.gitleaks.toml`, `.githooks/`, `bin/`) is reviewed as

@@ -282,7 +282,7 @@ Rules:
   Architecture-tier work goes to Zach anyway; do not escalate just for that.
 - Keep it short: at most 8 bullets.
 - `+shellRule+`
-- `+scratchCleanupRule+`
+- `+scratchSafetyRule+`
 
 %s
 
