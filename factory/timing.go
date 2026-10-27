@@ -56,22 +56,24 @@ type FactoryMail struct {
 
 // CardTiming is one card's recorded times.
 type CardTiming struct {
-	Repo          string          `json:"repo,omitempty"`
-	Sessions      []TimingSession `json:"sessions,omitempty"`
-	RequestedAt   time.Time       `json:"requestedAt,omitzero"`
-	RequestedFrom string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
-	Source        string          `json:"source"`
-	Tier          string          `json:"tier,omitempty"`
-	Thread        string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
-	Partial       bool            `json:"partial,omitempty"`
-	Events        []TimingEvent   `json:"events"`
-	Rounds        []TimingRound   `json:"rounds,omitempty"`
-	LandedAt      time.Time       `json:"landedAt,omitzero"` // the last landing's commit time
-	RepliedAt     time.Time       `json:"repliedAt,omitzero"`
-	ReplyChecked  bool            `json:"replyChecked,omitempty"`
-	ReplyTries    int             `json:"replyTries,omitempty"`
-	ReplyRetry    time.Time       `json:"replyRetry,omitzero"`
-	Mails         []FactoryMail   `json:"mails,omitempty"`
+	Repo           string          `json:"repo,omitempty"`
+	Sessions       []TimingSession `json:"sessions,omitempty"`
+	RequestedAt    time.Time       `json:"requestedAt,omitzero"`
+	RequestedFrom  string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
+	Source         string          `json:"source"`
+	Tier           string          `json:"tier,omitempty"`
+	Thread         string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
+	Partial        bool            `json:"partial,omitempty"`
+	Events         []TimingEvent   `json:"events"`
+	Rounds         []TimingRound   `json:"rounds,omitempty"`
+	LandedAt       time.Time       `json:"landedAt,omitzero"` // the last landing's commit time
+	RepliedAt      time.Time       `json:"repliedAt,omitzero"`
+	NoReply        bool            `json:"noReply,omitempty"`
+	LandingChecked bool            `json:"landingChecked,omitempty"`
+	ReplyChecked   bool            `json:"replyChecked,omitempty"`
+	ReplyTries     int             `json:"replyTries,omitempty"`
+	ReplyRetry     time.Time       `json:"replyRetry,omitzero"`
+	Mails          []FactoryMail   `json:"mails,omitempty"`
 }
 
 func (t CardTiming) last() TimingEvent {
@@ -405,6 +407,7 @@ type TimingView struct {
 	ZachSecs      int         `json:"zachSecs"`
 	LandedAt      string      `json:"landedAt,omitempty"`
 	RepliedAt     string      `json:"repliedAt,omitempty"`
+	NoReply       bool        `json:"noReply,omitempty"`
 	TotalSecs     int         `json:"totalSecs,omitempty"` // asked to reply (else landing, Done or now)
 	Partial       bool        `json:"partial,omitempty"`
 }
@@ -428,7 +431,7 @@ func secs(d time.Duration) int { return int(d.Round(time.Second) / time.Second) 
 // view is t as the board shows it at now.
 func (t CardTiming) view(now time.Time) *TimingView {
 	v := &TimingView{RequestedAt: iso(t.RequestedAt), RequestedFrom: t.RequestedFrom, ZachSecs: secs(t.zach(now)),
-		LandedAt: iso(t.LandedAt), RepliedAt: iso(t.RepliedAt), Partial: t.Partial, Stages: []StageSpan{}}
+		LandedAt: iso(t.LandedAt), RepliedAt: iso(t.RepliedAt), NoReply: t.NoReply, Partial: t.Partial, Stages: []StageSpan{}}
 	for i, e := range t.Events {
 		sp := StageSpan{Stage: e.Stage, Start: iso(e.At)}
 		if e.Stage != "landed" {
@@ -475,20 +478,66 @@ func (f *Factory) recordRound(id, kind string, n int, start time.Time, verdict s
 	})
 }
 
-// recordLanded records that card a's work landed: the commit time of its HEAD, else now. A card
-// that lands again (part of its work first) keeps the last landing.
+// recordLanded records only a card-owned commit verified on its branch and main.
+// A failed read or a no-commit errand never substitutes a clock or unrelated HEAD.
 func (f *Factory) recordLanded(a Agent, cwd string) {
-	at := f.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	out, err := f.GitOut(ctx, cwd, "log", "-1", "--format=%cI", "HEAD")
-	cancel()
-	if t, perr := time.Parse(time.RFC3339, strings.TrimSpace(out)); err == nil && perr == nil {
-		at = t.UTC()
-	} else {
-		f.logf("%s landing time from the clock: no commit time (%v)", short(a.ID), err)
+	t, ok := f.timings.get(a.ID)
+	if !ok {
+		return
 	}
-	f.timings.update(a.ID, func(t *CardTiming) { t.LandedAt = at })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	at, _, err := f.ownLandingTime(ctx, cwd, t.RequestedAt)
+	if err != nil {
+		f.logf("%s landing time not verified: %v", short(a.ID), err)
+		return
+	}
+	f.timings.update(a.ID, func(t *CardTiming) { t.LandedAt, t.LandingChecked = at, true })
 }
+
+// reconcileTimings upgrades retained records without treating lost evidence as a contradiction.
+// At most three worktrees are inspected per Tick; the persisted marker makes this restart-safe.
+func (f *Factory) reconcileTimings() {
+	if f.passive() {
+		return
+	}
+	agents := map[string]Agent{}
+	for _, a := range f.agents() {
+		agents[a.ID] = a
+	}
+	n := 0
+	for id, t := range f.timings.all() {
+		early := !t.RequestedAt.IsZero() && !t.LandedAt.IsZero() && t.LandedAt.Before(t.RequestedAt)
+		noReply := t.inbox() && !t.doneAt().IsZero() && t.ReplyChecked && t.RepliedAt.IsZero()
+		if early || noReply != t.NoReply {
+			f.timings.update(id, func(t *CardTiming) {
+				if early {
+					t.LandedAt = time.Time{}
+				}
+				t.NoReply = noReply
+			})
+		}
+		if t.LandingChecked || t.LandedAt.IsZero() || n >= 3 || f.stopping.Load() {
+			continue
+		}
+		n++
+		a := agents[id]
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, own, err := f.ownLandingTime(ctx, a.Cwd, t.RequestedAt)
+		cancel()
+		f.timings.update(id, func(t *CardTiming) {
+			if err == nil && !own {
+				t.LandedAt = time.Time{}
+			}
+			t.LandingChecked = true
+		})
+	}
+	if err := f.timings.save(); err != nil {
+		f.logf("timing correction not saved: %v", err)
+	}
+}
+
+func (t CardTiming) inbox() bool { return t.Source == "email" || t.Source == "voice" }
 
 // sendMail sends one email for card id through the mailbox and records it as the factory's own, so
 // the reply check never takes it for the reply to Zach. Every factory email goes through here.
@@ -510,19 +559,24 @@ func (f *Factory) sendMail(ctx context.Context, id, tool string, args map[string
 	return out, nil
 }
 
-// checkReplies finds when the reply reached Zach for email and voice cards that landed: one thread
+// checkReplies finds when the reply reached Zach for completed email and voice cards: one thread
 // read per card, replyWait after Done, at most replyPerTick a Tick.
 func (f *Factory) checkReplies(now time.Time) {
-	if f.Mail == nil || f.cfg.DryRun {
+	if f.Mail == nil || f.passive() {
 		return
 	}
 	n := 0
-	for id, t := range f.timings.all() {
+	all := f.timings.all()
+	for id, t := range all {
 		if n >= replyPerTick || f.stopping.Load() {
 			return
 		}
 		done := t.doneAt()
-		if t.ReplyChecked || t.Thread == "" || t.LandedAt.IsZero() || done.IsZero() || now.Sub(done) < replyWait ||
+		if t.inbox() && t.Thread == "" && !t.ReplyChecked && !done.IsZero() && now.Sub(done) >= replyWait {
+			f.timings.update(id, func(t *CardTiming) { t.NoReply, t.ReplyChecked = true, true })
+			continue
+		}
+		if t.ReplyChecked || t.Thread == "" || done.IsZero() || now.Sub(done) < replyWait ||
 			now.Before(t.ReplyRetry) || (t.Source != "email" && t.Source != "voice") {
 			continue
 		}
@@ -534,11 +588,18 @@ func (f *Factory) checkReplies(now time.Time) {
 				t.ReplyTries++
 				t.ReplyRetry = now.Add(replyWait)
 				t.ReplyChecked = t.ReplyTries >= replyTries
+				t.NoReply = t.ReplyChecked && t.RepliedAt.IsZero()
 			})
 			continue
 		}
+		// A thread can hold several cards; none of their factory notices is an answer.
+		for otherID, other := range all {
+			if otherID != id && other.Thread == t.Thread {
+				t.Mails = append(t.Mails, other.Mails...)
+			}
+		}
 		at := replyTime(t, msgs)
-		f.timings.update(id, func(t *CardTiming) { t.RepliedAt, t.ReplyChecked = at, true })
+		f.timings.update(id, func(t *CardTiming) { t.RepliedAt, t.ReplyChecked, t.NoReply = at, true, at.IsZero() })
 	}
 }
 

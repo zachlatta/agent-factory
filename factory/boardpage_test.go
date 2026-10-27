@@ -183,6 +183,7 @@ func TestBoardPageTimeline(t *testing.T) {
 		page[i:j] + `
 clock = iso => iso.slice(11, 16);
 console.log(JSON.stringify([
+  timeline({stages: [], noReply:true}),
   timeline({
     stages: [{stage:'plan', secs:120}, {stage:'zach', secs:300}, {stage:'building', secs:180}],
     zachSecs: 300,
@@ -203,7 +204,7 @@ console.log(JSON.stringify([
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
-	want := `["Plan 2m · Needs Zach 5m · Building 3m · 10m so far","Plan 2m · Needs Zach 5m · Building 3m · done 14:10 · 10m in all","Plan 2m · Needs Zach 3m · Building 4m · Needs Zach 2m · done 14:11 · 11m in all · 5m waiting on Zach"]`
+	want := `["no reply","Plan 2m · Needs Zach 5m · Building 3m · 10m so far","Plan 2m · Needs Zach 5m · Building 3m · done 14:10 · 10m in all","Plan 2m · Needs Zach 3m · Building 4m · Needs Zach 2m · done 14:11 · 11m in all · 5m waiting on Zach"]`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("timeline = %s, want %s", got, want)
 	}

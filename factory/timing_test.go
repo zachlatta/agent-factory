@@ -294,7 +294,11 @@ func TestTimingRecordsReviewRounds(t *testing.T) {
 
 func TestTimingRecordsLandingCommit(t *testing.T) {
 	commit := "2026-10-25T19:40:00-04:00"
-	landedLog := map[string]string{"log -1 --format=%cI HEAD": commit + "\n"}
+	landedLog := map[string]string{
+		"rev-parse --path-format=absolute --git-dir --git-common-dir": "/r/.git/worktrees/c1\n/r/.git\n",
+		"reflog show --max-count=2001 --format=%H%x09%gs HEAD":        "aaa\tcommit: work\n",
+		"show -s --format=%cI aaa":                                    commit + "\n",
+	}
 	t.Run("landing", func(t *testing.T) {
 		c := moved(fresh("c1"), "landing", ago(10*time.Minute))
 		c.Cwd = t.TempDir()
@@ -313,7 +317,7 @@ func TestTimingRecordsLandingCommit(t *testing.T) {
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
 		p.logs["c1"] = "Answered and landed the work item.\nTRACK: direct"
-		f.GitOut = gitStub(directOK, landedLog)
+		f.GitOut = gitStub(landedLog, directOK)
 		f.Git = func(context.Context, string, ...string) error { return nil }
 		f.Tick()
 		if l := p.labels("c1"); l[labelStage] != "landed" {
@@ -450,7 +454,11 @@ func TestMetrics(t *testing.T) {
 			ev = append(ev, TimingEvent{Stage: "zach", At: start.Add(time.Minute)}, TimingEvent{Stage: "building", At: start.Add(time.Minute + zach)})
 		}
 		ev = append(ev, done(at))
-		return CardTiming{Source: source, Tier: tier, RequestedAt: start, LandedAt: end, Events: ev}
+		ct := CardTiming{Source: source, Tier: tier, RequestedAt: start, LandedAt: end, Events: ev}
+		if ct.inbox() {
+			ct.RepliedAt = end
+		}
+		return ct
 	}
 	all := map[string]CardTiming{}
 	for i := 1; i <= 10; i++ {

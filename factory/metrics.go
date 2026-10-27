@@ -14,7 +14,8 @@ import (
 
 // GET /api/metrics?days=N (default 7, at most 30): card turnaround, per-step durations, and
 // per-turn agent durations from local transcripts joined to CardTiming.Sessions. It counts cards
-// that reached Done in the window and landed; cards that did not land and partial ones are counted
+// that reached Done in the window and landed; inbox cards also need a confirmed reply.
+// Unanswered cards, cards that did not land and partial ones are counted
 // in excluded. Optional query parameters (repo, source, tier, role, provider, model, step) filter
 // the results.
 
@@ -58,6 +59,7 @@ type MetricsFilter struct {
 }
 
 type MetricsSkipped struct {
+	NoReply   int `json:"noReply"`   // inbox cards without a confirmed reply
 	NotLanded int `json:"notLanded"` // dropped, closed or moved to Done without a landing
 	Partial   int `json:"partial"`   // first seen mid-flight: history incomplete
 }
@@ -295,7 +297,10 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 		case t.Partial || t.RequestedAt.IsZero():
 			m.Excluded.Partial++
 			continue
-		case t.LandedAt.IsZero():
+		case t.NoReply || (t.inbox() && t.RepliedAt.IsZero()):
+			m.Excluded.NoReply++
+			continue
+		case t.LandedAt.IsZero() || !t.LandedAt.After(t.RequestedAt):
 			m.Excluded.NotLanded++
 			continue
 		}

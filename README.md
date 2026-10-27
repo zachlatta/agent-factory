@@ -374,11 +374,17 @@ records its times in `timings.json` in the state directory, so a restart keeps t
   costs no paseo call. Only reads the board accepted count. A move is dated by `factory.since`
   when it set one, else when the factory saw it (within one poll).
 - **Reviews**: each round's start (the reviewer's creation), end (its verdict applied) and verdict.
-- **Landed**: the commit time of the card's HEAD when the factory verifies the landing; a card
-  that lands again keeps the last one.
+- **Landed**: the last verified commit time from the card's own linked-worktree commits made
+  after Asked. The commit must be on the card's branch and main; a rebased version must match
+  the original patch. Errands that commit nothing have no landing time. Failed Git reads never
+  substitute the clock or another card's commit.
 - **Replied** (email and voice cards): 5 minutes after Done, one read of the card's thread takes
   the last message the mailbox sent after he asked and by Done plus 5 minutes. The factory's own
   emails (Needs Zach notes, answer confirmations) are recorded when sent and never count.
+  Reply checks also run for errands that commit nothing. A completed inbox card with no confirmed
+  reply has `noReply: true` in saved timing, board timing and the timing export; the Timeline says
+  “no reply”. This includes exhausted mailbox retries or a missing thread. A later reply outside
+  the original window is not attributed to that card; it remains excluded from completed metrics.
 - **Partial**: a card first seen past its start (in flight when timing began, or created while the
   factory was down) has an incomplete history.
 
@@ -396,10 +402,18 @@ count, arithmetic mean (`average`), `median` and `p90`, in seconds, for:
   and `sessionTurnSecs` (summed turns per session), measured directly from local transcript files
   via `ReadTranscript` from each user prompt to the final assistant event of that turn.
 
-It counts cards that reached Done in the window and landed; dropped or closed cards and partial
-ones are only counted in `excluded`. Query parameters (`repo`, `source`, `tier`, `role`,
+It counts cards that reached Done in the window and have a landing after Asked; inbox cards must
+also have a confirmed reply. Unanswered inbox cards are counted in `excluded.noReply`, including
+cards still awaiting their reply check. Dropped or closed cards and partial ones are only counted
+in `excluded`. Query parameters (`repo`, `source`, `tier`, `role`,
 `provider`, `model`, `step`) filter the results (`?source=email`, `?repo=owner/name`,
 `?role=reviewer&step=review`).
+
+Historical timing correction clears a landing only when it precedes Asked, or a surviving,
+complete worktree reflog proves there is no own commit after Asked. All other old values stay:
+a retired worktree, expired reflog or failed read cannot erase history. The upgrade inspects at
+most three worktrees per Tick and persists its progress. Read-only and dry-run instances do
+not run the upgrade.
 
 #### Session links and transcript turn timing
 
@@ -410,7 +424,7 @@ Session ids use the same decoding as the transcript reader, including plugin pro
 
 `GET /api/timings` is a read-only snapshot of the timing store. It returns `{"cards":[...]}`,
 sorted by card id, with `id`, `repo`, `source`, `tier`, `partial`, `requestedAt`, `requestedFrom`,
-`landedAt`, `repliedAt`, `doneAt`, `events`, `rounds` and `sessions` when available. It excludes
+`landedAt`, `repliedAt`, `noReply`, `doneAt`, `events`, `rounds` and `sessions` when available. It excludes
 titles, folders, transcript bodies, mailbox thread and message ids, and reply-check bookkeeping.
 Like the other board APIs, it uses the server's existing access boundary; it must not be published
 on the public internet.

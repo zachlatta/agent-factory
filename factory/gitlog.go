@@ -34,6 +34,110 @@ func (f *Factory) headReflog(ctx context.Context, dir string) ([]reflogEntry, er
 	return es, nil
 }
 
+// ownLandingTime finds the last landed version of an own commit made after asked.
+// hasOwn distinguishes a no-commit worktree from work that cannot be matched to main.
+// Only a complete worktree reflog can prove that no own commit exists. No fetch or write runs.
+func (f *Factory) ownLandingTime(ctx context.Context, dir string, asked time.Time) (at time.Time, hasOwn bool, err error) {
+	if dir == "" {
+		return at, false, errors.New("worktree unknown")
+	}
+	if asked.IsZero() {
+		return at, false, errors.New("request time unknown")
+	}
+	linked, err := f.isLinkedWorktree(ctx, dir)
+	if err != nil {
+		return at, false, err
+	}
+	if !linked {
+		return at, false, errors.New("shared reflog")
+	}
+	const limit = 2000
+	out, err := f.GitOut(ctx, dir, "reflog", "show", "--max-count=2001", "--format=%H%x09%gs", "HEAD")
+	if err != nil {
+		return at, false, err
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(lines) > limit {
+		return at, false, errors.New("reflog limit reached")
+	}
+	var own, versions []reflogEntry
+	complete := false
+	seenOwn, seenVersion := map[string]bool{}, map[string]bool{}
+	for _, line := range lines {
+		sha, subject, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		if subject == "" { // initial linked-worktree HEAD entry
+			complete = true
+		}
+		if ownCommitRe.MatchString(subject) && !seenOwn[sha] {
+			own = append(own, reflogEntry{sha, subject})
+			seenOwn[sha] = true
+		} else if strings.Contains(subject, "(pick):") && !seenVersion[sha] {
+			versions = append(versions, reflogEntry{sha, subject})
+			seenVersion[sha] = true
+		}
+	}
+	commitTime := func(sha string) (time.Time, error) {
+		out, err := f.GitOut(ctx, dir, "show", "-s", "--format=%cI", sha)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return time.Parse(time.RFC3339, strings.TrimSpace(out))
+	}
+	onBranch := func(sha string) bool {
+		return f.Git(ctx, dir, "merge-base", "--is-ancestor", sha, "HEAD") == nil &&
+			f.Git(ctx, dir, "merge-base", "--is-ancestor", sha, "origin/main") == nil
+	}
+	for _, e := range own {
+		made, eerr := commitTime(e.SHA)
+		if eerr != nil {
+			return at, hasOwn, eerr
+		}
+		if !made.After(asked) {
+			continue
+		}
+		hasOwn = true
+		if onBranch(e.SHA) {
+			if made.After(at) {
+				at = made.UTC()
+			}
+			continue
+		}
+		id, eerr := f.patchID(ctx, dir, e.SHA)
+		if eerr != nil {
+			return at, hasOwn, eerr
+		}
+		if id == "" {
+			continue
+		}
+		for _, v := range versions {
+			if !onBranch(v.SHA) {
+				continue
+			}
+			other, eerr := f.patchID(ctx, dir, v.SHA)
+			if eerr != nil {
+				return at, hasOwn, eerr
+			}
+			if other != id {
+				continue
+			}
+			when, eerr := commitTime(v.SHA)
+			if eerr != nil {
+				return at, hasOwn, eerr
+			}
+			if when.After(asked) && when.After(at) {
+				at = when.UTC()
+			}
+		}
+	}
+	if !hasOwn && !complete {
+		return at, false, errors.New("incomplete reflog")
+	}
+	return at, hasOwn, nil
+}
+
 // landingMoveRe matches the reflog entries a plain landing writes: its rebase (pick, start,
 // finish; also "pull … --rebase"), a checkout, a fast-forward, or the no-op reset an up-to-date
 // rebase records. Anything else after review (a commit, an amend, "rebase (continue)" after a

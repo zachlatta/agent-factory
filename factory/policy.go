@@ -886,6 +886,7 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 
 // Tick runs the factory's automatic moves (Sinai's label-in / label-out stages).
 func (f *Factory) Tick() {
+	f.reconcileTimings()
 	now := f.Now()
 	for _, a := range f.agents() {
 		if f.stopping.Load() {

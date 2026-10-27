@@ -334,6 +334,7 @@ function timeline(t){
   }
   if(t.landedAt) parts.push('landed '+clock(t.landedAt));
   if(t.repliedAt) parts.push('replied '+clock(t.repliedAt));
+  else if(t.noReply) parts.push('no reply');
   if(done) parts.push(done);
   if(t.totalSecs) parts.push(dur(t.totalSecs)+(done?' in all':' so far'));
   if(t.zachSecs && t.stages.filter(s=>s.stage==='zach').length>=2) parts.push(dur(t.zachSecs)+' waiting on Zach');
