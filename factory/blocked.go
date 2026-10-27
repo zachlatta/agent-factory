@@ -39,10 +39,13 @@ func permissionWait(a Agent) bool {
 	return a.Pending != "" || (a.RequiresAttention && a.AttentionReason == "permission")
 }
 
-// blockedWhy says why a running child agent (reviewer or sub-agent) will not move on its own: it
+// blockedWhy includes failed reviewers and running children that cannot move on their own: a child
 // waits on a permission prompt, or it has had no activity for over stallMinutes while no sub-agent
 // of its own works (subagentActive). "" when neither.
 func blockedWhy(agents []Agent, a Agent, now time.Time) string {
+	if a.Status == "error" && a.L(labelRole) == "reviewer" && !a.archived() {
+		return "stopped with an error"
+	}
 	if a.Status != "running" || a.archived() {
 		return ""
 	}
@@ -55,10 +58,13 @@ func blockedWhy(agents []Agent, a Agent, now time.Time) string {
 	return ""
 }
 
-// reviewerBlocked reports whether a running reviewer will give no verdict without someone stepping
+// reviewerBlocked includes errored reviewers and running reviewers that need someone to step
 // in: on a permission prompt for at least stuckAfter since its last activity, or stalled (with no
 // working sub-agent of its own).
 func reviewerBlocked(agents []Agent, r Agent, now time.Time) bool {
+	if r.Status == "error" && !r.archived() {
+		return true
+	}
 	if r.Status != "running" || r.archived() {
 		return false
 	}

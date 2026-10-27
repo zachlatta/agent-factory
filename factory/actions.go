@@ -70,6 +70,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		_, err := f.StartReview(c, kind)
 		return ok, err
+	case "resume":
+		return ok, f.resumeLimit(f.agent(c.ID), "Resume the interrupted step. Check the current worktree before continuing.", nil)
 	case "send":
 		if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
 			return nil, errors.New("message is empty")
@@ -82,6 +84,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if b.Via == "email" {
 			// his email reply, as a follow-up block so the card's request and reviewer prompts show it
 			msg, via = f.emailFollowUp(msg), "Zach answered by email while the card waited on him:\n\n"
+		}
+		if a := f.agent(c.ID); a.L(labelNote) == limitNote {
+			return ok, f.resumeLimit(a, via+msg, b.Attachments)
 		}
 		if c.Awaiting == "plan" {
 			// Zach's answer to an architecture plan: revise it, then plan review runs again

@@ -75,7 +75,7 @@ func yesNo(ask *Ask) (string, string) {
 		return false
 	}
 	switch {
-	case has("stop") || has("rerun") || has("pickrepo") || ask.Title == finishedTitle:
+	case has("stop") || has("resume") || has("rerun") || has("pickrepo") || ask.Title == finishedTitle:
 		return "", ""
 	case has("recommend"):
 		return "recommend", "changes"
@@ -114,6 +114,8 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Title: "Running, but no activity for " + strings.TrimPrefix(stalledFlag(c), "stalled "), From: "builder",
 			Why:     "The agent has been quiet a long time. It may be on a slow step or hung. Stop it, or send it a message.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
+	case note == limitNote:
+		return limitAsk(a)
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
 	case note == "stuck" && (a.L(labelStuckFrom) == "review" || a.L(labelStuckFrom) == "plan-review"):
@@ -263,6 +265,10 @@ func briefAsk(a Agent) *Ask {
 // prompt or stalled. It never offers to answer the prompt.
 func blockedReviewerAsk(r Child) *Ask {
 	acts := []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}
+	if r.Status == "error" {
+		return &Ask{Title: "Reviewer stopped with an error", From: "reviewer", Actions: acts,
+			Why: "The reviewer failed. Re-run retires it and starts a fresh review."}
+	}
 	if r.Blocked == "waiting on permission" {
 		why := "Claude Code asked the reviewer for permission"
 		if r.Permission != "" {

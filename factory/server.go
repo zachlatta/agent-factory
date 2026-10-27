@@ -219,7 +219,7 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 var actions = map[string]bool{"new": true, "idea": true, "scout": true, "stage": true, "review": true, "send": true,
-	"approve": true, "recommend": true, "rerun": true, "stop": true, "archive": true, "done": true, "close": true,
+	"approve": true, "recommend": true, "rerun": true, "resume": true, "stop": true, "archive": true, "done": true, "close": true,
 	"land-review": true, "answer": true}
 
 func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {

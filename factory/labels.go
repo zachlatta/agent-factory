@@ -7,6 +7,7 @@ const labelPrefix = "factory."
 
 // Factory label keys, without labelPrefix.
 const (
+	labelLimit      = "limit-recovery" // persisted quota deadline and single recovery attempt
 	labelStage      = "stage"
 	labelSince      = "since"
 	labelAutoReview = "auto-review"

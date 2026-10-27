@@ -213,7 +213,7 @@ func (f *Factory) tickIdeas() error {
 		switch {
 		case !ok && now.Sub(i.StartedAt) < 10*time.Minute: // just started, not on disk yet
 			inFlight++
-		case ok && !a.archived() && Derive(a) != "landed" && Derive(a) != "zach":
+		case ok && a.Status != "error" && !a.archived() && Derive(a) != "landed" && Derive(a) != "zach":
 			inFlight++
 		}
 	}

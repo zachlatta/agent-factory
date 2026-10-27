@@ -924,6 +924,12 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		return nil
 	}
+	if handled, err := f.tickLimit(a, now); handled || err != nil {
+		return err
+	}
+	if a.Status == "error" {
+		return f.mailLimit(a)
+	}
 	routing := a.L(labelRouting) != ""
 	if a.L(labelStage) == "plan" && a.L(labelSource) == "board" && a.L(labelBase) == "" && !routing && !a.archived() {
 		f.recordBase(a)

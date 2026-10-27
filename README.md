@@ -70,6 +70,12 @@ The planner (the "Fellow") first picks a track:
   Zach); reviewers may answer `nits` or `close`; a reviewer that ends or disappears without a
   verdict is re-run once on its own before the card moves to Needs Zach (`factory.no-verdict`); a
   card that stops with nothing queued goes to Needs Zach after 2 minutes.
+- Provider errors: a working card in error with a recognized quota reset gets one resume
+  attempt after that reset plus 30 seconds. The deadline and attempt survive restarts. A second
+  error, an unknown reset format, or uncertain delivery goes to Needs Zach with Resume, Reply
+  and Drop. Resume and Reply each make one explicit attempt at the interrupted step; neither
+  rearms automatic retries. Unknown Codex limit formats require human intervention. An errored
+  reviewer sends its card to Needs Zach with Re-run the review.
 - Blocked agents: a child agent waiting on a permission prompt (`paseo permit ls`) or running with
   no activity for 20 minutes flags its card ("reviewer waiting on permission", "reviewer stalled N
   min"). Such a reviewer no longer counts as a pending verdict, so its card really moves to Needs
@@ -250,7 +256,8 @@ are unavailable, not evidence of zero usage. Cache and reasoning fields remain s
 
 Any agent can suggest work with `POST /api/idea` (header `X-Factory: 1`; `repo`, `title`,
 `summary`, `why`, `doneWhen`, `request`, optional `tier`). The factory starts the oldest waiting
-idea, at most 2 in flight and 5 a day; a person can Start or Dismiss any idea. Titles that repeat
+idea, at most 2 in flight and 5 a day; a person can Start or Dismiss any idea. Errored cards do not count
+toward the in-flight cap; when they resume, the count can temporarily exceed that cap. Titles that repeat
 a waiting, dismissed or recently started idea are rejected. "Suggest ideas" on the board starts a
 read-only Scout that submits up to 3, guided by the dialog's prompt; with Repo Auto, a picker first
 chooses the repo from that prompt, as for new cards. The text in “What should it do?” is passed to the Scout

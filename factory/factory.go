@@ -88,6 +88,9 @@ func (c *Config) defaults() {
 }
 
 type Factory struct {
+	limitMu     sync.Mutex               // serializes error recovery ticks and explicit Resume
+	limitStates map[string]limitRecovery // latest persisted recovery across stale snapshots
+
 	cfg    Config
 	p      Paseo
 	ideas  *IdeaStore
