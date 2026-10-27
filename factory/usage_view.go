@@ -126,7 +126,11 @@ func usagePlan(provider string) string {
 
 // usageOwner follows reviewers and nested sub-agents to their card without
 // inventing an owner for an orphan or cycling through malformed parent labels.
+// Quiet anchors are grouping boundaries, so each card retains its own token usage.
 func usageOwner(a Agent, agents map[string]Agent) string {
+	if boardAnchor(a) {
+		return ""
+	}
 	seen := map[string]bool{}
 	for !seen[a.ID] {
 		seen[a.ID] = true
@@ -134,7 +138,7 @@ func usageOwner(a Agent, agents map[string]Agent) string {
 		if parent == "" {
 			parent = a.Labels["paseo.parent-agent-id"]
 		}
-		if parent == "" {
+		if parent == "" || boardAnchor(agents[parent]) {
 			if timed(a) {
 				return a.ID
 			}

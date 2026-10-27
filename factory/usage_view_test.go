@@ -180,3 +180,58 @@ func TestUsageGroupsModelsAndStages(t *testing.T) {
 		t.Fatal("cycle invented owner")
 	}
 }
+
+func TestUsageOwnerStopsAtQuietAnchors(t *testing.T) {
+	for _, anchor := range []Agent{
+		{ID: "anchor", Labels: map[string]string{labelPrefix + labelRole: quietAnchorRole, parentAgentLabel: quietBootstrapParent}},
+		{ID: "anchor", Labels: map[string]string{"role": InboxAnchorRole}},
+	} {
+		t.Run(anchor.L(labelRole)+anchor.Labels["role"], func(t *testing.T) {
+			root := card("root", map[string]string{labelStage: "building"})
+			root.Labels[parentAgentLabel] = anchor.ID
+			rev := reviewer("review", "root", "code")
+			rev.Labels[parentAgentLabel] = anchor.ID
+			child := Agent{ID: "child", Labels: map[string]string{parentAgentLabel: root.ID}}
+			nested := Agent{ID: "nested", Labels: map[string]string{parentAgentLabel: rev.ID}}
+			agents := map[string]Agent{}
+			for _, a := range []Agent{anchor, root, rev, child, nested} {
+				agents[a.ID] = a
+			}
+			for _, a := range []Agent{root, rev, child, nested} {
+				if got := usageOwner(a, agents); got != root.ID {
+					t.Errorf("usageOwner(%s) = %q, want %q", a.ID, got, root.ID)
+				}
+			}
+			if got := usageOwner(anchor, agents); got != "" {
+				t.Errorf("anchor has invented card owner %q", got)
+			}
+		})
+	}
+}
+
+func TestUsageCollectionKeepsQuietCardsSeparate(t *testing.T) {
+	f, _ := newTestFactory(t)
+	labels := map[string]map[string]string{
+		"anchor": {labelPrefix + labelRole: quietAnchorRole, parentAgentLabel: quietBootstrapParent},
+		"first":  {labelPrefix + labelStage: "building", parentAgentLabel: "anchor"},
+		"second": {labelPrefix + labelStage: "review", parentAgentLabel: "anchor"},
+		"review": {labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewKind: "code", labelPrefix + labelReviewOf: "first", parentAgentLabel: "anchor"},
+		"child":  {parentAgentLabel: "first"},
+		"nested": {parentAgentLabel: "review"},
+	}
+	want := map[string]string{"anchor": "", "first": "first", "second": "second", "review": "first", "child": "first", "nested": "first"}
+	for id, l := range labels {
+		session := "usage-" + id
+		usageAgentFile(t, f, id, "claude", session, l)
+		writeFile(t, filepath.Join(f.cfg.Home, ".claude/projects/demo", session+".jsonl"), `{"type":"assistant","timestamp":"2026-10-25T19:45:00Z","message":{"id":"message-a","model":"model-a","usage":{"input_tokens":10,"output_tokens":5}}}`+"\n")
+	}
+	view, _ := f.collectTokenUsage(context.Background())
+	if view.Totals.Total != 90 || len(view.Rows) != len(want) {
+		t.Fatalf("lost token rows: %+v", view)
+	}
+	for _, row := range view.Rows {
+		if row.Card != want[row.Agent] || row.Counts.Total != 15 {
+			t.Errorf("tokens filed under wrong card: %+v; want %q", row, want[row.Agent])
+		}
+	}
+}
