@@ -204,12 +204,6 @@ func TestScheduleAcknowledgmentConcurrentAndOverlap(t *testing.T) {
 	if err := scheduleClaim(other.policy, other.request.Release, other.now); err != nil {
 		t.Fatal("disjoint claim refused:", err)
 	}
-	other.request.Release = f.request.Release
-	other.request.Release.CanonicalPath = other.workspace
-	other.request.Release.RunID = "other"
-	if err := scheduleClaim(other.policy, other.request.Release, other.now); err == nil {
-		t.Fatal("workspace identity reused")
-	}
 }
 func TestScheduleStoreUnknownStateAndLostAcknowledgment(t *testing.T) {
 	for _, mode := range []string{"corrupt", "symlink", "insecure", "missing"} {
@@ -389,6 +383,9 @@ func TestScheduleIndependentEvidenceRejections(t *testing.T) {
 			f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) { m["scheduleId"] = "other-schedule" })
 			f.request.Release.ScheduleID = "other-schedule"
 		},
+		"manifest digest": func(t *testing.T, f *scheduleFixture) {
+			f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) { m["manifestDigest"] = strings.Repeat("0", 64) })
+		},
 		"future verification": func(t *testing.T, f *scheduleFixture) {
 			// Release ordering also enforces verifiedAt <= releasedAt <= now.
 			f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) { m["verifiedAt"] = f.now.Add(time.Second).Format(time.RFC3339Nano) })
@@ -410,5 +407,59 @@ func TestScheduleIndependentEvidenceRejections(t *testing.T) {
 				t.Fatal("invalid evidence accepted")
 			}
 		})
+	}
+}
+
+func TestScheduleClaimIdentityAndGitConflicts(t *testing.T) {
+	for _, kind := range []string{"workspace", "agent", "git branch"} {
+		t.Run(kind, func(t *testing.T) {
+			f, other := newScheduleFixture(t), newScheduleFixture(t)
+			first, second := f.request.Release, other.request.Release
+			second.RunID, second.AgentID, second.WorkspaceID = "other-run", "other-agent", "other-workspace"
+			if kind == "git branch" {
+				first.CommonDir, first.Branch, first.Head = t.TempDir(), "topic", strings.Repeat("a", 40)
+				second.CommonDir, second.Branch, second.Head = first.CommonDir, first.Branch, first.Head
+			}
+			if err := scheduleClaim(f.policy, first, f.now); err != nil {
+				t.Fatal("first claim:", err)
+			}
+			switch kind {
+			case "workspace":
+				second.WorkspaceID = first.WorkspaceID
+			case "agent":
+				second.AgentID = first.AgentID
+			}
+			if err := scheduleClaim(f.policy, second, f.now); err == nil {
+				t.Fatal("conflicting claim accepted")
+			}
+			// Removing only the intended conflict must allow the otherwise distinct claim.
+			second.WorkspaceID, second.AgentID = "other-workspace", "other-agent"
+			if kind == "git branch" {
+				second.Branch = "other-topic"
+			}
+			if err := scheduleClaim(f.policy, second, f.now); err != nil {
+				t.Fatal("distinct claim:", err)
+			}
+		})
+	}
+}
+
+func TestScheduleDurableOutputInsideWorkspace(t *testing.T) {
+	f := newScheduleFixture(t)
+	inside := filepath.Join(f.workspace, "result")
+	if err := os.Rename(f.output, inside); err != nil {
+		t.Fatal(err)
+	}
+	declaration := scheduleMap(f.request.Declaration)
+	declaration["requirements"].(map[string]any)["outputs"].([]any)[0].(map[string]any)["path"] = inside
+	f.request.Declaration = scheduleJSON(declaration)
+	f.request.Receipt = scheduleEdit(f.request.Receipt, func(m map[string]any) {
+		m["declarationDigest"] = scheduleHash(scheduleCanonicalTest(t, declaration))
+		m["evidence"].(map[string]any)["outputs"].([]any)[0].(map[string]any)["path"] = inside
+	})
+	f.request.Release.ReceiptDigest = scheduleHash(f.request.Receipt)
+	// Hash, size, exact schema and declaration bindings all match the moved output.
+	if err := f.validate(); err == nil {
+		t.Fatal("disposable output accepted as durable")
 	}
 }
