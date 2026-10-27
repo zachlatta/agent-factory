@@ -103,11 +103,12 @@ func expandLetters(clean string, qs []Question) (string, bool) {
 func (f *Factory) waitingCard(thread string) (Agent, error) {
 	var waiting []Agent
 	found := false
+	byID := f.byID()
 	for _, a := range f.agents() {
-		if a.gone() || a.L(labelStage) == "" || a.L(labelRole) != "" {
+		if a.gone() || a.L(labelStage) == "" || a.L(labelRole) != "" || replacedPredecessor(byID, a) {
 			continue
 		}
-		if a.L(labelZachThread) != thread && emailThread(a) != thread {
+		if !lineageHasThread(byID, a, thread) {
 			continue
 		}
 		found = true
@@ -135,7 +136,7 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if a.L(labelAnswered) == b.MessageID {
+	if lineageHasAnswered(f.byID(), a, b.MessageID) {
 		return map[string]string{"card": a.ID, "action": "duplicate"}, nil
 	}
 	c, ok := f.card(a.ID)

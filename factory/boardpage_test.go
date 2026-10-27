@@ -482,3 +482,49 @@ console.log(JSON.stringify({
 		t.Errorf("sub-agents =\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestBoardPageFrontierAndReplacedCardLinks(t *testing.T) {
+	page := boardPage(t)
+	if !strings.Contains(page, "a.frontier") || !strings.Contains(page, "findCard(") {
+		t.Fatal("board page missing Frontier labels or findCard")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	optMatch := regexp.MustCompile(`(?s)function agentOptions\(selected\)\{.*?\n\}`).FindString(page)
+	useMatch := regexp.MustCompile(`(?s)function agentUsageHtml\(selected, selId\)\{.*?\n\}`).FindString(page)
+	findMatch := regexp.MustCompile(`(?s)function findCard\(id\)\{.*?\n\}`).FindString(page)
+	if optMatch == "" || useMatch == "" || findMatch == "" {
+		t.Fatalf("missing JS functions: opt=%v use=%v find=%v", optMatch != "", useMatch != "", findMatch != "")
+	}
+	script := `const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ago = () => '1m ago', usageBars = () => 'bars';
+const AG = {agents: [
+  {id:'opus', label:'Opus 5.5', plan:'Claude Max', frontier:true, available:true, usage:{summary:'80% left'}},
+  {id:'sonnet', label:'Sonnet 5.5', plan:'Claude Max', frontier:false, available:true, usage:{summary:'80% left'}},
+  {id:'codex-sol', label:'GPT-6.1 Sol', plan:'ChatGPT Pro', frontier:true, available:true, usage:{summary:'90% left'}},
+  {id:'gemini-argon', label:'Gemini 4 Argon', plan:'Google AI Ultra', frontier:true, available:true, usage:{summary:'95% left'}},
+]};
+const B = {cards: [{id:'22222222-2222-2222-2222-222222222222', replaces:['11111111-1111-1111-1111-111111111111']}]};
+` + optMatch + "\n" + useMatch + "\n" + findMatch + `
+const opts = agentOptions('opus'), rows = agentUsageHtml('opus', 'nAgent');
+console.log(JSON.stringify({
+  opusOpt: opts.includes('Opus 5.5 · Frontier · Claude Max'), solOpt: opts.includes('GPT-6.1 Sol · Frontier · ChatGPT Pro'),
+  argonOpt: opts.includes('Gemini 4 Argon · Frontier · Google AI Ultra'), sonnetOpt: !opts.includes('Sonnet 5.5 · Frontier'),
+  opusRow: rows.includes('<b>Opus 5.5</b> · <span class="sub">Frontier</span> · <span class="sub">Claude Max</span>'),
+  sonnetRow: rows.includes('<b>Sonnet 5.5</b> · <span class="sub">Claude Max</span>'),
+  exactNew: (findCard('22222222-2222-2222-2222-222222222222')||{}).id,
+  exactOld: (findCard('11111111-1111-1111-1111-111111111111')||{}).id,
+  shortOld: (findCard('1111111')||{}).id, missing: findCard('9999999') || null,
+}));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `{"opusOpt":true,"solOpt":true,"argonOpt":true,"sonnetOpt":true,"opusRow":true,"sonnetRow":true,` +
+		`"exactNew":"22222222-2222-2222-2222-222222222222","exactOld":"22222222-2222-2222-2222-222222222222","shortOld":"22222222-2222-2222-2222-222222222222","missing":null}`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}

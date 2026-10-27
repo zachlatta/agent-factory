@@ -99,11 +99,18 @@ func mailable(ask *Ask) bool {
 
 // mailZach emails Zach why card a waits on him, once per wait note.
 func (f *Factory) mailZach(a Agent, c Card) error {
+	byID := f.byID()
+	if replacedPredecessor(byID, a) {
+		return nil
+	}
 	ask := askFor(c, a)
 	if !mailable(ask) {
 		return nil
 	}
 	note := waitNote(a)
+	if lineageTold(byID, a) == note {
+		return nil
+	}
 	if w := parseTime(a.L(labelWriting)); !w.IsZero() && !writtenFor(a, w, f.Now()) {
 		return nil // the builder is still to write the summary or brief the email carries
 	}
@@ -113,7 +120,7 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	if f.Now().Before(retry) {
 		return nil
 	}
-	if emailThread(a) == "" && f.cfg.ZachEmail == "" {
+	if lineageEmailThread(byID, a) == "" && f.cfg.ZachEmail == "" {
 		if f.noteOnce("no-zach-email", "") {
 			f.logf("no FACTORY_ZACH_EMAIL: board cards waiting on Zach are not emailed")
 		}
@@ -182,10 +189,11 @@ func (f *Factory) deliver(a Agent, m email) (string, error) {
 }
 
 func (f *Factory) deliverOnce(ctx context.Context, a Agent, m email) (string, error) {
-	if th := emailThread(a); th != "" {
+	byID := f.byID()
+	if th := lineageEmailThread(byID, a); th != "" {
 		return "", f.replyInThread(ctx, a.ID, th, m, false)
 	}
-	if th := a.L(labelZachThread); th != "" {
+	if th := lineageLabel(byID, a, labelZachThread); th != "" {
 		return "", f.replyInThread(ctx, a.ID, th, m, true)
 	}
 	args := map[string]any{"to": []string{f.cfg.ZachEmail},

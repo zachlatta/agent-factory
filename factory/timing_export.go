@@ -32,7 +32,8 @@ func (t *CardTiming) observeSessions(c Card, agents []Agent, byID map[string]Age
 	}
 	changed := false
 	for _, a := range agents {
-		if a.ID != c.ID && owners[a.ID] != c.ID {
+		isFellow := a.ID == c.ID || (a.L(labelRole) == "" && sameCard(byID, a.ID, c.ID))
+		if !isFellow && owners[a.ID] != c.ID {
 			continue
 		}
 		id := nativeSessionID(a.SessionID)
@@ -41,7 +42,7 @@ func (t *CardTiming) observeSessions(c Card, agents []Agent, byID map[string]Age
 		}
 		prev, seen := last[a.ID]
 		role, parent := a.L(labelRole), a.Labels["paseo.parent-agent-id"]
-		if a.ID == c.ID {
+		if isFellow {
 			role, parent = "fellow", ""
 		} else if role == "reviewer" {
 			parent = a.L(labelReviewOf)

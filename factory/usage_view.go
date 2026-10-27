@@ -140,7 +140,7 @@ func usageOwner(a Agent, agents map[string]Agent) string {
 		}
 		if parent == "" || boardAnchor(agents[parent]) {
 			if timed(a) {
-				return a.ID
+				return resolveCardID(agents, a.ID)
 			}
 			return ""
 		}

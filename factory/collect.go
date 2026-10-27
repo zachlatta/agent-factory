@@ -44,7 +44,9 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 		return nil, err
 	}
 	repoCache := map[string]string{}
-	var out []Agent
+	var all []Agent
+	byID := map[string]Agent{}
+	keep := map[string]bool{}
 	for _, f := range files {
 		var d struct {
 			ID, Title, Provider, Cwd, WorkspaceID, LastStatus, AttentionReason, LastError string
@@ -66,10 +68,24 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 		if a.Labels == nil {
 			a.Labels = map[string]string{}
 		}
+		all = append(all, a)
+		byID[a.ID] = a
 		if a.archived() && a.ArchivedAt.Before(cutoff) && !(a.parked() && a.ArchivedAt.After(now.Add(-parkedKeep))) {
 			continue
 		}
 		if !a.archived() && a.Status == "closed" && a.LastActivityAt.Before(cutoff) {
+			continue
+		}
+		keep[a.ID] = true
+	}
+	for id := range keep {
+		for _, prev := range cardLineage(byID, id) {
+			keep[prev.ID] = true
+		}
+	}
+	var out []Agent
+	for _, a := range all {
+		if !keep[a.ID] {
 			continue
 		}
 		info := ws[a.WorkspaceID]
@@ -82,7 +98,7 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 		}
 		out = append(out, a)
 	}
-	return out, nil
+	return applyLineageLabels(out), nil
 }
 
 func readJSON(path string, v any) error {

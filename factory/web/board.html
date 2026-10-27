@@ -373,7 +373,8 @@ function inTime(iso){ if(!iso) return ''; const h=(Date.parse(iso)-Date.now())/3
 function agentOptions(selected){
   return AG.agents.map(a=>{
     const u = a.usage && a.usage.summary ? ' — '+a.usage.summary : '';
-    return `<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)} · ${esc(a.plan)}${esc(u)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`;
+    const f = a.frontier ? ' · Frontier' : '';
+    return `<option value="${esc(a.id)}" ${a.available?'':'disabled'} ${a.id===selected?'selected':''}>${esc(a.label)}${f} · ${esc(a.plan)}${esc(u)}${a.available?'':' (not available: '+esc(a.status)+')'}</option>`;
   }).join('');
 }
 // thinkingPicker: begin
@@ -404,7 +405,7 @@ function agentUsageHtml(selected, selId){
       return `<div class="arow acct"><div>${esc(ac.label)}${ac.email?` · <span class="sub aemail" title="${esc(ac.email)}">${esc(ac.email)}</span>`:''}${ac.active?' · <span class="sub">active</span>':''}</div><div>${usageBars(ac)}</div><div class="sub">${esc(ameta)}</div></div>`;
     }).join('') : '';
     return `<div class="arow ${a.id===selected?'on':''} ${a.available?'':'off'}" onclick="pickAgent('${esc(selId)}','${esc(a.id)}')">
-      <div><b>${esc(a.label)}</b> · <span class="sub">${esc(a.plan)}</span></div><div>${usageBars(u)}</div><div class="sub">${esc(meta)}</div></div>` + accts;
+      <div><b>${esc(a.label)}</b> · ${a.frontier?'<span class="sub">Frontier</span> · ':''}<span class="sub">${esc(a.plan)}</span></div><div>${usageBars(u)}</div><div class="sub">${esc(meta)}</div></div>` + accts;
   }).join('');
 }
 function pickAgent(selId, id){
@@ -458,13 +459,18 @@ async function load(){
   const nr=$('nRepo'); if(!nr.options.length){ nr.add(new Option('Auto: best match (recommended)','auto')); B.repos.forEach(r=>nr.add(new Option(r,r))); }
   $('activity').innerHTML = (B.log||[]).slice().reverse().map(esc).join('<br>') || 'No factory activity yet.';
   if(!askOpen.size && !(document.activeElement && document.activeElement.tagName==='TEXTAREA' && $('grid').contains(document.activeElement))) render();
-  if(sel) fillPanel(B.cards.find(c=>c.id===sel), false);
+  if(sel) fillPanel(findCard(sel), false);
   openFromHash();
 }
-// a link to board#<card id> (the Needs Zach email's Open board button) opens that card once it loads
+function findCard(id){
+  if(!id) return null;
+  return (B.cards||[]).find(c => c.id===id || c.id.startsWith(id) || (c.replaces||[]).some(r => r===id || r.startsWith(id))) || null;
+}
+// a link to board#<card id> or ?card=<card id> (including a replaced predecessor id) opens that card once it loads
 function openFromHash(){
-  const id=decodeURIComponent(location.hash.slice(1));
-  if(id && B.cards.some(c=>c.id===id)){ history.replaceState(null,'',location.pathname+location.search); openPanel(id); }
+  const q=typeof location!=='undefined'&&location.search?new URLSearchParams(location.search).get('card'):'', id=decodeURIComponent(location.hash.slice(1))||q||'';
+  const c=findCard(id);
+  if(c){ history.replaceState(null,'',location.pathname); openPanel(c.id); }
 }
 
 function visible(){
@@ -770,7 +776,7 @@ async function move(id, stage){ const c=B.cards.find(x=>x.id===id); if(!c||c.sta
   if(stage==='landed' && !confirm('Move to Done archives this agent in Paseo. Continue?')) return;
   await post('stage',{id,stage}); toast('Moved to '+B.stages.find(s=>s[0]===stage)[1]); c.stage=stage; render(); refresh(); }
 
-function openPanel(id){ sel=id; const c=B.cards.find(c=>c.id===id); seen(c); fillPanel(c, true); render(); }
+function openPanel(id){ const c=findCard(id); sel=c?c.id:id; seen(c); fillPanel(c, true); render(); }
 // seen marks an unread card read (factory.seen). Quiet: a read-only canary answers 403, no toast.
 function seen(c){ if(!c||!c.unread) return; c.unread=false; fetch('api/seen', {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify({id:c.id})}).catch(()=>{}); }
 function closePanel(){ sel=null; $('panel').classList.remove('open'); render(); }
@@ -861,10 +867,10 @@ function ideaHtml(c, isIdea){
     <h4>Technical brief for the builder</h4>
     ${brief==null?'<div class="md">loading…</div>':!brief?'<div class="md"><i>None.</i></div>'
       :`<div class="brief md ${briefFull.has(i.id)?'full':''}">${mdIdea(brief)}</div>
-      <div class="more" onclick="briefFull.has('${i.id}')?briefFull.delete('${i.id}'):briefFull.add('${i.id}'); fillPanel(B.cards.find(c=>c.id===sel), false)">${briefFull.has(i.id)?'Show less':'Show all'}</div>`}`;
+      <div class="more" onclick="briefFull.has('${i.id}')?briefFull.delete('${i.id}'):briefFull.add('${i.id}'); fillPanel(findCard(sel), false)">${briefFull.has(i.id)?'Show less':'Show all'}</div>`}`;
 }
 async function act(a, extra={}){
-  const c = B.cards.find(x=>x.id===sel)||{};
+  const c = findCard(sel)||{};
   const r = await post(a, {id:sel, ...extra});
   toast(r.queued?'Review queued: starts when the agent goes idle'
     : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Plan approved: agent is building':'Approved: agent is landing it')
@@ -944,7 +950,8 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePanel(); });
 // agent labels have fallbacks until then). Deferred CDN scripts have run by
 // DOMContentLoaded, so re-render then for markdown.
 load(); loadAgents().then(render); loadLanes().then(render);
-document.addEventListener('DOMContentLoaded', ()=>{ render(); if(sel) fillPanel(B.cards.find(c=>c.id===sel), false); });
+window.addEventListener('hashchange', openFromHash);
+document.addEventListener('DOMContentLoaded', ()=>{ render(); if(sel) fillPanel(findCard(sel), false); });
 // every 5 s while the board is in view, none while hidden, and at once when it comes back
 setInterval(()=>{ if(!document.hidden) load(); }, 5000);
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });

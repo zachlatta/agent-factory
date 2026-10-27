@@ -433,9 +433,23 @@ func ParseQuestions(text string) (string, []Question) {
 }
 
 // storedReply is agent a's last reply to a message, from its own session file, which marks who
-// said what. It never asks Paseo; with no readable file it returns an ErrNoHistory error.
+// said what. It never asks Paseo; with no readable file it returns an ErrNoHistory error. For a
+// replaced card whose replacement has no reply yet, it falls back through the replacement chain.
 func (f *Factory) storedReply(a Agent) (string, error) {
-	evs, err := storedEvents(f.cfg.Home, a)
+	text, err := storedReplyOne(f.cfg.Home, a)
+	if (err != nil || strings.TrimSpace(text) == "") && a.L(labelRole) == "" && a.L(labelReplaces) != "" {
+		lin := cardLineage(f.byID(), a.ID)
+		for i := len(lin) - 2; i >= 0; i-- {
+			if prev, perr := storedReplyOne(f.cfg.Home, lin[i]); perr == nil && strings.TrimSpace(prev) != "" {
+				return prev, nil
+			}
+		}
+	}
+	return text, err
+}
+
+func storedReplyOne(home string, a Agent) (string, error) {
+	evs, err := storedEvents(home, a)
 	if err != nil {
 		return "", err
 	}

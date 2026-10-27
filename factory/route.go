@@ -268,7 +268,9 @@ func (f *Factory) startRouted(a Agent, repo string) error {
 }
 
 // finishRouted records the new card on the picker, archives the picker and drops its saved request.
-// A failed step is retried by the next Tick (factory.routed holds the new card's id).
+// A failed step is retried by the next Tick (factory.routed holds the new card's id). Once the
+// picker is archived and its Route deleted, no consumer reads factory.routed to find the active
+// card, so a later replacement of that card does not rewrite the archived picker.
 func (f *Factory) finishRouted(id, card, repo string) error {
 	if err := f.setLabels(id, map[string]string{labelRouted: card, labelAwaiting: "", labelNote: routedNote + repo}); err != nil {
 		return err

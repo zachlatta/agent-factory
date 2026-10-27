@@ -127,6 +127,16 @@ The planner (the "Fellow") first picks a track:
   they would do.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
+- Replaced cards (`factory/replace.go`): when a card hands off to another agent (`factory.replaces=<old-id>`
+  on the replacement, `factory.replaced-by=<new-id>` on the retired predecessor), `resolveCardID`
+  follows `factory.replaced-by` to the current card across board cards, ideas, `Waits on:` dependencies,
+  reviewer `review-of` links, email reply threads (`factory.zach-thread` and `gmail-thread`) and message
+  deduplication (`factory.answered` and `factory.told`), timings, token usage, peers, steers, evidence,
+  board `#<id>` links, and `/t/<id>` transcripts (which stitch the predecessor turns and a system
+  switch divider ahead of the replacement session). Carried lifecycle, gate, and thread labels
+  (`carriedFactoryLabels` and `carriedRawLabels`) are both copied at handoff and read through the
+  replacement chain so approval, review, and public-repo scan gates survive even a partial handoff.
+  Write primitives (`setLabels`, `send`, `stop`, `archiveChecked`) always act on the exact single agent ID.
 - A duplicate passes its request on. A reviewer (or the Fellow) that finds a duplicate names the
   card it duplicates on a `DUPLICATE OF: <card id>` line. When Zach closes the card at that close
   verdict, the factory keeps its request and the reviewer's notes (`steers.json`) and sends them to
@@ -218,10 +228,13 @@ future deletion, see [Workspace retirement](docs/workspace-retirement.md).
   another agent is explicitly named.
 
 The model pickers prefer GPT-6.1 Sol within OpenAI and Opus 5.5 within Claude; Sonnet 5.5 is
-also available. Opus, Sonnet and Sol start at medium thinking. New Task and Start Idea let you
-choose a supported thinking level; switching models restores that model's default. Models without
-an adjustable thinking level hide the control. Explicit choices survive Repo Auto. The supported
-levels are listed per model in `factory/agents.go`, matching Paseo's provider model metadata.
+also available. Frontier models (`Frontier: true` in `factory/agents.go`: Opus 5.5, GPT-6.1 Sol
+and Gemini 4 Argon) are labeled `· Frontier` in the New Task and Start Idea dropdown options and
+allowance rows; Sonnet 5.5, GPT-5.3 Codex Spark and Muse Spark remain unlabeled. Opus, Sonnet
+and Sol start at medium thinking. New Task and Start Idea let you choose a supported thinking
+level; switching models restores that model's default. Models without an adjustable thinking
+level hide the control. Explicit choices survive Repo Auto. The supported levels are listed per
+model in `factory/agents.go`, matching Paseo's provider model metadata.
 
 ### Sub-agents
 

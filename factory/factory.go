@@ -200,7 +200,7 @@ func (f *Factory) nextRead() uint64 {
 // stored, and reports whether it stored. fetch lets fillAsks read new Needs Zach detail with
 // session files; without it the board uses only cached detail (board actions must stay fast).
 func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
-	agents = f.withArchiveMarks(agents)
+	agents = applyLineageLabels(f.withArchiveMarks(agents))
 	cards := BuildBoard(agents, f.ideas.List(), f.Now())
 	f.fillAsks(cards, agents, fetch)
 	asked := map[string]CardRequest{} // first prompts of email and voice cards not yet timed (timing.go)
@@ -434,6 +434,8 @@ func (f *Factory) agents() []Agent {
 	return f.list
 }
 
+// agentOK looks up a single agent by exact or prefix ID without following replacement links,
+// so write primitives (setLabels, send, archiveChecked) only ever act on the exact agent named.
 func (f *Factory) agentOK(id string) (Agent, bool) {
 	if id == "" {
 		return Agent{}, false
@@ -457,6 +459,11 @@ func (f *Factory) card(id string) (Card, bool) {
 	for _, c := range f.cards {
 		if c.ID == id || strings.HasPrefix(c.ID, id) {
 			return c, true
+		}
+		for _, prev := range c.Replaces {
+			if prev == id || strings.HasPrefix(prev, id) {
+				return c, true
+			}
 		}
 	}
 	return Card{}, false

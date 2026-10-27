@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -144,7 +145,14 @@ func (f *Factory) handlePeers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
-	a, found := f.agentOK(r.PathValue("id"))
+	id := r.PathValue("id")
+	a, found := f.agentOK(id)
+	byID := f.byID()
+	if !found || (a.L(labelRole) == "" && replacedPredecessor(byID, a)) {
+		if ca, ok := f.cardAgentOK(id); ok {
+			a, found = ca, true
+		}
+	}
 	if !found {
 		writeJSON(w, 404, map[string]string{"error": "agent not on the board (open, or archived in the last 12 h)"})
 		return
@@ -157,6 +165,27 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		res = Transcript{Events: []Event{}, Fallback: true, Replace: true, Provider: a.Provider}
 		if _, err := storedEvents(f.cfg.Home, a); err != nil {
 			unavailable = err.Error()
+		}
+	}
+	if a.L(labelRole) == "" && (after == 0 || res.Replace) {
+		if lin := cardLineage(byID, a.ID); len(lin) > 1 {
+			var prefix []Event
+			for i := 0; i < len(lin)-1; i++ {
+				prev, next := lin[i], lin[i+1]
+				if pr, perr := ReadTranscript(f.cfg.Home, TranscriptSource{Provider: prev.Provider, SessionID: prev.SessionID, Cwd: prev.Cwd}, 0); perr == nil && !pr.Fallback {
+					prefix = append(prefix, pr.Events...)
+				}
+				prefix = append(prefix, Event{
+					Kind: "system",
+					Text: fmt.Sprintf("Switched from %s (%s) to %s (%s)", short(prev.ID), orNone(prev.Model, prev.Provider), short(next.ID), orNone(next.Model, next.Provider)),
+					Ts:   iso(next.CreatedAt),
+				})
+			}
+			if len(prefix) > 0 {
+				res.Events = append(prefix, res.Events...)
+				res.Fallback = false
+				unavailable = ""
+			}
 		}
 	}
 	c, isCard := f.card(a.ID)
@@ -205,11 +234,45 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, found := f.agentOK(id)
+	byID := f.byID()
+	if !found || (a.L(labelRole) == "" && replacedPredecessor(byID, a)) {
+		if ca, ok := f.cardAgentOK(id); ok {
+			a, found = ca, true
+		}
+	}
 	if !found {
 		writeJSON(w, 404, map[string]string{"error": "agent not on the board (open, or archived in the last 12 h)"})
 		return
 	}
 	// the session file only: `paseo logs` would load the agent (resuming it even when archived)
+	if a.L(labelRole) == "" {
+		if lin := cardLineage(byID, a.ID); len(lin) > 1 {
+			var parts []string
+			var lastErr error
+			for i, x := range lin {
+				if i > 0 {
+					parts = append(parts, fmt.Sprintf("--- Switched from %s (%s) to %s (%s) ---",
+						short(lin[i-1].ID), orNone(lin[i-1].Model, lin[i-1].Provider), short(x.ID), orNone(x.Model, x.Provider)))
+				}
+				t, err := storedText(f.cfg.Home, x, 30)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if strings.TrimSpace(t) != "" {
+					parts = append(parts, t)
+				}
+			}
+			if len(parts) > 0 {
+				writeJSON(w, 200, map[string]string{"text": strings.Join(parts, "\n")})
+				return
+			}
+			if lastErr != nil {
+				writeJSON(w, 404, map[string]string{"error": lastErr.Error()})
+				return
+			}
+		}
+	}
 	text, err := storedText(f.cfg.Home, a, 30)
 	if err != nil {
 		writeJSON(w, 404, map[string]string{"error": err.Error()})

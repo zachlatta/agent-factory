@@ -260,6 +260,18 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 			continue
 		}
 		t := s.cards[c.ID]
+		for _, prevID := range c.Replaces {
+			old, ok := s.cards[prevID]
+			if !ok {
+				continue
+			}
+			if t == nil {
+				t = old
+				s.cards[c.ID] = t
+			}
+			delete(s.cards, prevID)
+			changed = true
+		}
 		if t == nil {
 			if a.gone() || c.Stage == "landed" {
 				continue // finished before timing saw it: nothing to time

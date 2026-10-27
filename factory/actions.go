@@ -221,8 +221,9 @@ func (f *Factory) dropAgent(id string) error {
 	if err := f.archiveAgent(id); err != nil {
 		return err
 	}
+	byID := f.byID()
 	for _, r := range f.agents() {
-		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && r.Status == "running" && !r.archived() {
+		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && r.Status == "running" && !r.archived() {
 			if err := f.archiveAgent(r.ID); err != nil {
 				f.logf("reviewer %s of dropped %s: %v", short(r.ID), short(id), err)
 			}

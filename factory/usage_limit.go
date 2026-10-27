@@ -190,7 +190,7 @@ func limitAsk(a Agent) *Ask {
 
 // An error wait can be emailed without admitting an errored agent to completion rules.
 func (f *Factory) mailLimit(a Agent) error {
-	if a.archived() || a.L(labelStage) != "zach" || a.L(labelNote) != limitNote || f.Mail == nil || a.L(labelTold) == waitNote(a) {
+	if a.archived() || a.L(labelStage) != "zach" || a.L(labelNote) != limitNote || f.Mail == nil || lineageTold(f.byID(), a) == waitNote(a) {
 		return nil
 	}
 	c, ok := f.card(a.ID)

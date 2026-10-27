@@ -96,8 +96,9 @@ func (f *Factory) agentCounts() AgentCounts {
 		Cards: []CardAgents{}, LastReap: last}
 	cards := map[string]*CardAgents{}
 	var order []string
+	byID := f.byID()
 	for _, a := range agents {
-		if a.L(labelStage) == "" || a.L(labelRole) != "" || a.gone() {
+		if a.L(labelStage) == "" || a.L(labelRole) != "" || a.gone() || replacedPredecessor(byID, a) {
 			continue
 		}
 		c := &CardAgents{ID: a.ID, Title: a.Title, Stage: Derive(a), Parked: a.parked()}

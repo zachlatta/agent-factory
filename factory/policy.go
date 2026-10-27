@@ -610,6 +610,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		f.deferArchive(rev.ID)
 		return nil
 	}
+	target = resolveCardID(f.byID(), target)
 	t, ok := f.agentOK(target)
 	if ok {
 		// Zach may have dropped the card while it was in review: a message would revive it. A parked
@@ -960,6 +961,9 @@ func (f *Factory) Tick() {
 const actedGrace = 45 * time.Second
 
 func (f *Factory) tickAgent(a Agent, now time.Time) error {
+	if a.L(labelRole) == "" && replacedPredecessor(f.byID(), a) {
+		return nil
+	}
 	old := now.Sub(a.CreatedAt) > time.Minute
 	switch {
 	case quietAnchor(a):
@@ -1096,7 +1100,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	case a.L(labelStage) == "zach" && isDepAskNote(a.L(labelNote)) && a.L(labelWaitsOn) != "" &&
 		depState(f.agents(), a, a.L(labelWaitsOn)) == depLanded:
 		return f.tickHeld(a, c)
-	case a.L(labelStage) == "zach" && f.Mail != nil && a.L(labelTold) != waitNote(a) && mailable(c.Ask):
+	case a.L(labelStage) == "zach" && f.Mail != nil && lineageTold(f.byID(), a) != waitNote(a) && mailable(c.Ask):
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
@@ -1173,8 +1177,9 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 			if live, err := f.stillStopped(a); !live {
 				return err
 			}
+			byID := f.byID()
 			for _, r := range agents {
-				if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == a.ID && r.archived() && r.L(labelApplied) == "" {
+				if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), a.ID) && r.archived() && r.L(labelApplied) == "" {
 					if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: ""}); err != nil {
 						return err
 					}
@@ -1217,8 +1222,12 @@ func (f *Factory) rerunReview(a Agent, kind string) error {
 // has not been applied yet. ApplyVerdict picks those up (archived or not), so checkStuck leaves
 // them to ApplyVerdict instead of starting a second reviewer in the same Tick.
 func unappliedStoppedReviewer(agents []Agent, id string) bool {
+	byID := make(map[string]Agent, len(agents))
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
 	for _, r := range agents {
-		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && r.L(labelApplied) == "" &&
+		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && r.L(labelApplied) == "" &&
 			(r.Status == "idle" || r.Status == "closed") {
 			return true
 		}
@@ -1229,8 +1238,12 @@ func unappliedStoppedReviewer(agents []Agent, id string) bool {
 // hasBlockedReviewer reports whether card id has a live running reviewer that is stalled or
 // waiting on a permission prompt (reviewerBlocked).
 func hasBlockedReviewer(agents []Agent, id string, now time.Time) bool {
+	byID := make(map[string]Agent, len(agents))
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
 	for _, r := range agents {
-		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && reviewerBlocked(agents, r, now) {
+		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && reviewerBlocked(agents, r, now) {
 			return true
 		}
 	}
@@ -1243,8 +1256,12 @@ func hasBlockedReviewer(agents []Agent, id string, now time.Time) bool {
 // neither is one stuck on a permission prompt or stalled (reviewerBlocked): its card goes to Needs
 // Zach with a re-run, and a verdict it gives later is still applied.
 func reviewPending(agents []Agent, id string, now time.Time) bool {
+	byID := make(map[string]Agent, len(agents))
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
 	for _, r := range agents {
-		if r.L(labelRole) != "reviewer" || r.L(labelReviewOf) != id || r.archived() || reviewerBlocked(agents, r, now) {
+		if r.L(labelRole) != "reviewer" || !sameCard(byID, r.L(labelReviewOf), id) || r.archived() || reviewerBlocked(agents, r, now) {
 			continue
 		}
 		if r.Status == "running" || r.L(labelApplied) == "" {

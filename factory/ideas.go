@@ -182,6 +182,21 @@ func (f *Factory) dismissIdea(id string) error {
 	})
 }
 
+// replaceCard updates any started idea pointing at oldID to point at its replacement newID.
+func (s *IdeaStore) replaceCard(oldID, newID string) error {
+	if oldID == "" || newID == "" || oldID == newID {
+		return nil
+	}
+	return s.update(func(ideas []Idea) ([]Idea, error) {
+		for n := range ideas {
+			if ideas[n].Card != "" && (ideas[n].Card == oldID || strings.HasPrefix(oldID, ideas[n].Card)) {
+				ideas[n].Card = newID
+			}
+		}
+		return ideas, nil
+	})
+}
+
 // tickIdeas starts the oldest waiting idea if the in-flight and daily caps allow.
 func (f *Factory) tickIdeas() error {
 	ideas := f.ideas.List()
@@ -209,7 +224,7 @@ func (f *Factory) tickIdeas() error {
 		if i.StartedBy == "auto" && i.StartedAt.In(f.cfg.Location).Format("2006-01-02") == day {
 			startedToday++
 		}
-		a, ok := agents[i.Card]
+		a, ok := agents[resolveCardID(agents, i.Card)]
 		switch {
 		case !ok && now.Sub(i.StartedAt) < 10*time.Minute: // just started, not on disk yet
 			inFlight++

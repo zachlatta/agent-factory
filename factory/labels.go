@@ -45,6 +45,8 @@ const (
 	labelWaitsOn    = "waits-on"     // short id of the card this one lands after, from its approved plan (deps.go)
 	labelWaitsDone  = "waits-landed" // the waits-on card was seen landed: it stays landed after it leaves the list
 	labelHeld       = "held"         // in landing: the land prompt waits for this card to land (deps.go)
+	labelReplaces   = "replaces"     // predecessor card agent id replaced by this agent (replace.go)
+	labelReplacedBy = "replaced-by"  // replacement card agent id that took over this card (replace.go)
 	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
 	labelNoVerdict  = "no-verdict"   // the current review round already re-ran once after a reviewer gave no verdict
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track

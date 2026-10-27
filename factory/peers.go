@@ -110,6 +110,15 @@ func (f *Factory) Peers(forID, repo string) Peers {
 				me = &cards[n]
 				break
 			}
+			for _, prev := range cards[n].Replaces {
+				if prev == forID || strings.HasPrefix(prev, forID) {
+					me = &cards[n]
+					break
+				}
+			}
+			if me != nil {
+				break
+			}
 		}
 	}
 	if me != nil {
@@ -364,10 +373,39 @@ type peerRequest struct {
 	req    CardRequest
 }
 
-// cardRequest is Zach's request and follow-ups for agent a. A Claude session file is read once,
-// then only from where the last read stopped, so a new follow-up shows on the next call. Other
-// providers' files are read once (no follow-ups after that). Empty when there is no file yet.
+// cardRequest is Zach's request and follow-ups for agent a across its replacement chain. A Claude
+// session file is read once, then only from where the last read stopped; other providers' session
+// files are re-read when their size or mtime changes. Empty when there is no file yet.
 func (f *Factory) cardRequest(a Agent) CardRequest {
+	if a.ID == "" {
+		return CardRequest{}
+	}
+	lin := cardLineage(f.byID(), a.ID)
+	if len(lin) <= 1 {
+		return f.agentRequest(a)
+	}
+	var out CardRequest
+	for _, x := range lin {
+		r := f.agentRequest(x)
+		if !out.Read && r.Read {
+			out.Read = true
+		}
+		if out.Base == "" && r.Base != "" {
+			out.Base = r.Base
+		}
+		if out.AskedKind == "" && r.AskedKind != "" {
+			out.AskedKind, out.Asked = r.AskedKind, r.Asked
+		}
+		for _, fu := range r.FollowUps {
+			if !slices.Contains(out.FollowUps, fu) {
+				out.FollowUps = append(out.FollowUps, fu)
+			}
+		}
+	}
+	return out
+}
+
+func (f *Factory) agentRequest(a Agent) CardRequest {
 	if a.ID == "" || a.SessionID == "" {
 		return CardRequest{}
 	}
@@ -385,9 +423,7 @@ func (f *Factory) cardRequest(a Agent) CardRequest {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if a.Provider != "claude" {
-		if !e.based {
-			e.readOnce(f.cfg.Home, a)
-		}
+		e.readOnce(f.cfg.Home, a)
 		return e.copy()
 	}
 	id := nativeSessionID(a.SessionID)
@@ -409,14 +445,25 @@ func (e *peerRequest) copy() CardRequest {
 	return r
 }
 
-// readOnce reads a non-Claude session the old way, whole.
+// readOnce reads a non-Claude session whole, re-reading only when the file's size or mtime changes.
 func (e *peerRequest) readOnce(home string, a Agent) {
+	if e.path != "" {
+		if st, err := os.Stat(e.path); err == nil && st.Size() == e.size && st.ModTime().Equal(e.mtime) {
+			return
+		}
+	}
 	res, err := ReadTranscript(home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, 0)
 	if err != nil || res.Fallback {
 		return
 	}
+	e.based, e.req = false, CardRequest{}
 	for _, ev := range res.Events {
 		e.take(ev)
+	}
+	if res.Path != "" {
+		if st, err := os.Stat(res.Path); err == nil {
+			e.path, e.size, e.mtime = res.Path, st.Size(), st.ModTime()
+		}
 	}
 }
 
@@ -475,7 +522,6 @@ func (e *peerRequest) take(ev Event) {
 		e.req.Base = requestOf(ev.Text)
 		e.req.Read = true
 		e.req.AskedKind, e.req.Asked = askedOf(ev.Text)
-		return
 	}
 	for _, fu := range followUpsOf(ev.Text) {
 		if !slices.Contains(e.req.FollowUps, fu) { // a queued message may also be saved as a user line

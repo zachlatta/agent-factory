@@ -94,6 +94,7 @@ func (f *Factory) reap(now time.Time) {
 
 	var waiting []Agent // Needs Zach cards that could be parked
 	idleLive := 0
+	byID := f.byID()
 	for _, a := range agents {
 		if a.L(labelParked) != "" && !a.archived() {
 			// woken by a send whose label clear failed, or a park whose archive failed
@@ -105,6 +106,10 @@ func (f *Factory) reap(now time.Time) {
 			continue
 		}
 		switch {
+		case a.L(labelRole) == "" && replacedPredecessor(byID, a):
+			if archive(a, false) {
+				continue
+			}
 		case a.L(labelRole) == "reviewer":
 			// one with no verdict applied yet is ApplyVerdict's (it archives after applying)
 			if a.L(labelApplied) != "" && archive(a, false) {

@@ -90,10 +90,11 @@ func source(a Agent) string {
 // BuildBoard turns agents (and waiting ideas) into cards. Reviewers and sub-agents fold into
 // their parent card; the email dispatcher's anchor agent is hidden.
 func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
-	byID := map[string]bool{}
+	agents = applyLineageLabels(agents)
+	agentByID := make(map[string]Agent, len(agents))
 	anchors := map[string]bool{}
 	for _, a := range agents {
-		byID[a.ID] = true
+		agentByID[a.ID] = a
 		if boardAnchor(a) {
 			anchors[a.ID] = true
 		}
@@ -103,7 +104,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 	owner := cardOwners(agents, anchors)
 	for _, a := range agents {
 		switch o, folded := owner[a.ID]; {
-		case anchors[a.ID]:
+		case anchors[a.ID] || replacedPredecessor(agentByID, a):
 		case folded:
 			children[o] = append(children[o], a)
 		default:
@@ -120,7 +121,9 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 	for _, i := range ideas {
 		switch {
 		case i.Status == "started" && i.Card != "":
-			fromIdea[i.Card] = ideaView(i, 0)
+			v := ideaView(i, 0)
+			fromIdea[i.Card] = v
+			fromIdea[resolveCardID(agentByID, i.Card)] = v
 		case i.Status == "waiting":
 			waiting = append(waiting, i)
 		}
@@ -134,6 +137,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Branch: a.Branch, Cwd: a.Cwd, Model: a.Model, Status: a.Status, Source: source(a), Stage: Derive(a),
 			Labelled: a.L(labelStage) != "", Flags: []string{}, Verdict: a.L(labelVerdict), Note: a.L(labelNote),
 			Tier: a.L(labelTier), Awaiting: a.L(labelAwaiting), Origin: a.L(labelOrigin), Agent: a.L(labelAgent),
+			Replaces:  lineagePredecessorIDs(agentByID, a.ID),
 			Rounds:    Rounds{Plan: atoi(a.L(labelPlanRounds)), Code: atoi(a.L(labelCodeRounds))},
 			CreatedAt: iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
 			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != "", PlanFix: a.L(labelPlanFix)}
@@ -271,7 +275,7 @@ func cardOwners(agents []Agent, anchors map[string]bool) map[string]string {
 			}
 			o = p
 		}
-		out[a.ID] = o
+		out[a.ID] = resolveCardID(byID, o)
 	}
 	return out
 }

@@ -129,6 +129,14 @@ func (f *Factory) handleEvidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, media, err := readEvidence(c.Cwd, name)
+	if err != nil && len(c.Replaces) > 0 {
+		lin := cardLineage(f.byID(), c.ID)
+		for i := len(lin) - 2; i >= 0 && err != nil; i-- {
+			if lin[i].Cwd != "" && lin[i].Cwd != c.Cwd {
+				data, media, err = readEvidence(lin[i].Cwd, name)
+			}
+		}
+	}
 	if err != nil {
 		http.NotFound(w, r)
 		return

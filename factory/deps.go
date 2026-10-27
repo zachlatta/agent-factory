@@ -36,8 +36,13 @@ const (
 // depOf is the state of the card with short id among agents. A Done card is landed even after it is
 // archived. A verified landing also stays landed after follow-up work or closure.
 func depOf(agents []Agent, id string) string {
+	byID := make(map[string]Agent, len(agents))
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	target := resolveCardID(byID, id)
 	for _, d := range agents {
-		if short(d.ID) != id || d.L(labelRole) != "" {
+		if (d.ID != target && short(d.ID) != id) || replacedPredecessor(byID, d) || d.L(labelRole) != "" {
 			continue
 		}
 		switch {

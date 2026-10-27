@@ -268,6 +268,19 @@ func retirementOverlap(a, b string) bool {
 	return within(a, b) || within(b, a)
 }
 
+func retirementTargetLanded(targetID string, all []retirementAgentRecord) bool {
+	byID := make(map[string]Agent, len(all))
+	recByID := make(map[string]retirementAgentRecord, len(all))
+	for _, r := range all {
+		byID[r.ID] = Agent{ID: r.ID, Labels: r.Labels}
+		recByID[r.ID] = r
+	}
+	resolved := resolveCardID(byID, targetID)
+	p, ok := recByID[resolved]
+	return ok && p.Labels["factory.stage"] == "landed" && p.Labels["factory.parked"] == "" &&
+		(p.LastStatus == "idle" || p.LastStatus == "closed") && !p.RequiresAttention
+}
+
 func retirementCompletion(a retirementAgentRecord, all []retirementAgentRecord) (string, string) {
 	l := a.Labels
 	if l["factory.parked"] != "" {
@@ -275,6 +288,12 @@ func retirementCompletion(a retirementAgentRecord, all []retirementAgentRecord) 
 	}
 	if a.LastStatus == "running" || a.RequiresAttention {
 		return "active-or-waiting", "blocked"
+	}
+	if l["factory.replaced-by"] != "" && a.ArchivedAt != "" {
+		if retirementTargetLanded(l["factory.replaced-by"], all) {
+			return "replaced-card", "unknown"
+		}
+		return "replaced-with-protected-target", "blocked"
 	}
 	if a.LastStatus == "error" {
 		return "agent-error", "blocked"
@@ -292,12 +311,8 @@ func retirementCompletion(a retirementAgentRecord, all []retirementAgentRecord) 
 		return "unfinished-picker", "blocked"
 	}
 	if l["factory.role"] == "reviewer" {
-		if l["factory.applied"] != "" && a.ArchivedAt != "" {
-			for _, p := range all {
-				if p.ID == l["factory.review-of"] && p.Labels["factory.stage"] == "landed" && p.Labels["factory.parked"] == "" && (p.LastStatus == "idle" || p.LastStatus == "closed") && !p.RequiresAttention {
-					return "applied-reviewer", "unknown"
-				}
-			}
+		if l["factory.applied"] != "" && a.ArchivedAt != "" && retirementTargetLanded(l["factory.review-of"], all) {
+			return "applied-reviewer", "unknown"
 		}
 		return "reviewer-with-protected-target", "blocked"
 	}
@@ -314,7 +329,7 @@ func retirementEvidence(all []retirementAgentRecord, selected []RetirementAgent)
 			continue
 		}
 		labels := map[string]string{}
-		for _, key := range []string{"role", "factory.stage", "factory.role", "factory.applied", "factory.review-of", "factory.parked", "factory.routing", "factory.routed", "paseo.schedule-id"} {
+		for _, key := range []string{"role", "factory.stage", "factory.role", "factory.applied", "factory.review-of", "factory.replaces", "factory.replaced-by", "factory.parked", "factory.routing", "factory.routed", "paseo.schedule-id"} {
 			if a.Labels[key] != "" {
 				labels[key] = a.Labels[key]
 			}

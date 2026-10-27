@@ -23,6 +23,7 @@ type AgentChoice struct {
 	ThinkingOptions []string `json:"thinkingOptions,omitempty"` // supported Paseo levels; nil means no control
 	Thinking        string   `json:"thinking"`                  // paseo run --thinking; "" = the model's default
 	Mode            string   `json:"mode"`                      // the provider's mode with no permission prompts
+	Frontier        bool     `json:"frontier,omitempty"`        // currently known as a Frontier model
 	Plan            string   `json:"plan"`                      // the subscription it draws on
 	Note            string   `json:"note,omitempty"`
 }
@@ -33,15 +34,15 @@ const defaultAgent = "opus"
 // AgentChoices is every agent a card can use. Mode ids were checked live against Paseo.
 var AgentChoices = []AgentChoice{
 	{ID: "opus", Label: "Opus 5.5", Provider: ReviewerModel, Thinking: "medium", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultracode"}, Mode: "bypassPermissions",
-		Plan: "Claude Max"},
+		Frontier: true, Plan: "Claude Max"},
 	{ID: "sonnet", Label: "Sonnet 5.5", Provider: "claude/claude-sonnet-5-5", Thinking: "medium", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultracode"}, Mode: "bypassPermissions",
 		Plan: "Claude Max"},
 	{ID: "codex-sol", Label: "GPT-6.1 Sol", Provider: "codex/gpt-6.1-sol", Thinking: "medium", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Mode: "full-access",
-		Plan: "ChatGPT Pro", Note: "sends this card's work to OpenAI"},
+		Frontier: true, Plan: "ChatGPT Pro", Note: "sends this card's work to OpenAI"},
 	{ID: "codex-astra", Label: "GPT-6 Astra", Provider: "codex/gpt-6-astra", Thinking: "high", ThinkingOptions: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Mode: "full-access",
 		Plan: "ChatGPT Pro", Note: "sends this card's work to OpenAI"},
 	{ID: "gemini-argon", Label: "Gemini 4 Argon", Provider: "antigravity/gemini-4-argon-high", Mode: "full-access",
-		Plan: "Google AI Ultra", Note: "sends this card's work to Google"},
+		Frontier: true, Plan: "Google AI Ultra", Note: "sends this card's work to Google"},
 	{ID: "muse-wonder", Label: "Muse Wonder", Provider: "muse/muse-wonder-full-1.0", Mode: "allowAll",
 		Plan: "Muse Code Power", Note: "sends this card's work to Meta"},
 }

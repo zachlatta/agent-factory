@@ -87,8 +87,9 @@ func ParseDuplicate(text string) string {
 func (f *Factory) newestReviewer(id string) (Agent, bool) {
 	var best Agent
 	found := false
+	byID := f.byID()
 	for _, r := range f.agents() {
-		if r.L(labelRole) == "reviewer" && r.L(labelReviewOf) == id && (!found || r.CreatedAt.After(best.CreatedAt)) {
+		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && (!found || r.CreatedAt.After(best.CreatedAt)) {
 			best, found = r, true
 		}
 	}
@@ -117,7 +118,7 @@ func (f *Factory) recordSteer(a Agent) (string, error) {
 			keep = ParseDuplicate(text)
 		}
 	}
-	k, ok := f.agentOK(keep)
+	k, ok := f.cardAgentOK(keep)
 	if keep == "" || !ok || k.ID == a.ID || k.L(labelRole) != "" {
 		return "", nil
 	}
@@ -148,7 +149,7 @@ func (f *Factory) tickSteers() {
 }
 
 func (f *Factory) tickSteer(id string, st Steer) error {
-	k, ok := f.agentOK(st.Keep)
+	k, ok := f.cardAgentOK(st.Keep)
 	stage := k.L(labelStage)
 	switch {
 	case !ok || k.gone() || stage == "landing" || stage == "landed":
