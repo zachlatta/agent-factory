@@ -162,3 +162,61 @@ separately reviewed upstream work. It must use the corrected supported archive
 path rather than introducing another one. Enabling scheduled-run retirement follows
 both the executor and separate scheduler-owner work. Until both stages are built,
 the lifecycle remains incomplete and unattended deletion stays disabled.
+
+## Standalone schedule evidence consumer
+
+Generic v1 consumer support is inactive: no CLI, board, inventory or executor calls
+it. The production owner adapter always reports unavailable. Configuration cannot
+activate acceptance. Scheduled runs retain all existing protections.
+
+The standalone validator requires exact receipt, declaration, outcome, identity,
+manifest and evidence fields. Missing, duplicate or unknown keys and unsupported
+versions refuse. Only `recordKind=success`, independently successful outcomes and
+`retirementAuthorized=false` qualify. Declaration and manifest digests must match;
+digests are change detectors, never authentication. Non-Git identity uses null for
+all Git fields. Unknown result kinds or acceptance requirements refuse.
+
+Commit evidence requires the intended canonical local remote or unauthenticated
+HTTPS URL and full landing ref. Each validation fetches into an isolated proof
+repository and proves the run HEAD remains an ancestor of the fetched tip. Normal
+tip advances need no receipt rewrite; failed fetches and rewritten history refuse.
+Durable outputs must match the exact declared set of stable, digest-checked regular
+files outside the disposable workspace. Symlinks and changed files refuse.
+
+The internal release projection covers v1's exact scheduler, schedule, run, agent,
+workspace, path and Git identities, ownership generation, receipt digest, approved
+declaration provenance, release time and expiry. It defines no external scheduler
+wire format. A later reviewed adapter must authenticate these bindings, establish
+`scheduler-owned -> released-for-Factory -> Factory-acknowledged`, check current
+revocation and complete scheduler references, and hold exclusion through acceptance.
+An agent assertion or schema-valid receipt cannot provide those guarantees.
+
+The standalone policy reader requires `FACTORY_SCHEDULE_RECEIPT_MAX_AGE` and
+`FACTORY_SCHEDULE_ACK_STORE` from approved host configuration outside the repo.
+Neither has a default; the running service does not yet consume these settings.
+Receipt age starts at `verifiedAt`; future timestamps, invalid ordering and expiry
+at the boundary refuse. Release expiry also bounds acceptance. Executor integration
+must additionally honor permit expiry and recheck evidence immediately before each
+operation. Revalidation never refreshes the immutable receipt's age.
+
+The acknowledgment store must already exist, be canonical, privately owned and
+inaccessible to other users, and lie outside the workspace and Git common directory.
+The integration owner must additionally protect it from run agents and provide
+local-filesystem locking, durability, retention and backups. Claims serialize across
+processes, publish without replacement, fsync before acknowledgment and retain exact
+identity, generation and receipt digest. Replay, conflicting ownership, overlapping
+paths, unknown state and I/O failures refuse. Expiry, restart, lost replies and
+partial publication never return authority automatically; preserve and reconcile.
+Do not delete records to retry or infer authority from partial archive outcomes.
+
+A handoff never grants a RetirementPermit or overrides protected work. Parked cards,
+anchors, primary/shared checkouts and unfinished work remain protected. Per-operation
+approval, fetched landing proof, complete resource and scheduler inventories and
+supported concurrent-use exclusion remain mandatory. Unknown means refusal.
+
+Executor call sites and the authoritative scheduler adapter are separate reviewed
+integration work. Final enablement requires the landed producer, executor and
+scheduler release implementation, end-to-end isolated fixture checks and explicit
+approval of a narrow activation scope. No broad rollout is authorized. Until then,
+preserve resources and report integration and activation as unfinished. Keep real
+identities, schedules, receipts, evidence and host settings outside this public repo.
