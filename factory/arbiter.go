@@ -147,7 +147,7 @@ func (f *Factory) startArbiter(t Agent, kind, last string, escalated bool) error
 	if f.guarded(c.Repo) {
 		prompt += publicReviewRule
 	}
-	rid, err := f.startReviewer(c, kind, "Arbiter ("+kind+"): "+trunc(c.Title, 60), prompt, labelArbiter)
+	rid, err := f.startReviewer(c, kind, "Arbiter ("+kind+"): "+trunc(c.Title, 60), prompt, map[string]string{labelArbiter: "1"})
 	if err != nil {
 		return err
 	}

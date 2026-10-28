@@ -158,12 +158,15 @@ console.log(JSON.stringify([
           {role:'subagent', status:'running'}, rv('code','closed','nits',1)], {plan:3, code:1}),
   labels([rv('plan','closed','changes',1), rv('plan','closed','nits',1), rv('plan','running','')], {plan:2, code:0}),
   labels([rv('','closed','')], {plan:0, code:0}),
+  labels([rv('plan','closed','approve',1), rv('code','closed','changes',1),
+          {...rv('code','closed','approve',1), lens:'correctness', panel:'2'},
+          {...rv('code','running',''), lens:'architecture', panel:'2'}], {plan:1, code:1}),
 ]));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
-	want := `[["plan round 3: nits","code round 1: nits"],["plan round 3 (running)"],["review"]]`
+	want := `[["plan round 3: nits","code round 1: nits"],["plan round 3 (running)"],["review"],["plan round 1: approve","correctness round 2: approve","architecture round 2 (running)"]]`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("labels = %s, want %s", got, want)
 	}
@@ -434,7 +437,8 @@ func TestBoardPageSubagents(t *testing.T) {
 	if strings.Contains(page, "['Sub-agents',") {
 		t.Error("panel still lists sub-agents as one text line")
 	}
-	const begin, end = "// subagents: begin", "// subagents: end"
+	// the review helpers (reviewName) sit just before the sub-agent ones
+	const begin, end = "// latestReviews: begin", "// subagents: end"
 	i, j := strings.Index(page, begin), strings.Index(page, end)
 	if i < 0 || j < i {
 		t.Fatal("no subagents markers in the page")

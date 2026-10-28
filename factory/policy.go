@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -490,7 +491,9 @@ func (f *Factory) unreadableReview(rev Agent, cause error) error {
 	return cause
 }
 
-// ApplyVerdict moves a card after its reviewer finished. Runs once per reviewer (factory.applied).
+// ApplyVerdict records a reviewer's verdict once (factory.applied) and moves its card: at once for a
+// single reviewer, a panel arbiter or the gate arbiter, once its whole panel has finished for a panel
+// reviewer (panel.go).
 func (f *Factory) ApplyVerdict(rev Agent) error {
 	target, kind := rev.L(labelReviewOf), rev.L(labelReviewKind)
 	if kind == "" {
@@ -542,29 +545,68 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			return nil
 		}
 	}
-	// The plan's tier, build side effects and dependency must be readable before
-	// consuming its review; an absent plan cannot be treated as a low-tier plan.
-	builderTier, builderPlan, builderReply := "", "", ""
-	if ok && kind == "plan" {
-		builderPlan, err = storedText(f.cfg.Home, t, 60)
-		if err != nil {
-			return f.waitForHistory(t, rev, err)
-		}
-		builderReply, err = f.storedReply(t)
-		if err != nil {
-			return f.waitForHistory(t, rev, err)
-		}
-		builderTier = ParseTier(builderPlan)
+	lens := rev.L(labelLens)
+	if ok && lens != "" && lens != lensArbiter {
+		return f.lensDone(rev, t, verdict, ParseTier(text))
 	}
-	if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
-		return err
+	consume := func() error {
+		if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
+			return err
+		}
+		f.deferArchive(rev.ID)
+		return nil
 	}
-	defer f.deferArchive(rev.ID)
 	if !ok {
+		if err := consume(); err != nil {
+			return err
+		}
 		f.logf("reviewer %s: target %s not found", short(rev.ID), short(target))
 		return nil
 	}
-	tier := MaxTier(t.L(labelTier), ParseTier(text), builderTier)
+	return f.decide(t, reviewOutcome{kind: kind, verdict: verdict, tier: ParseTier(text), notes: notes,
+		started: rev.CreatedAt, lens: lens, panel: rev.L(labelPanel), gate: rev.L(labelArbiter) != "", source: rev}, consume)
+}
+
+// reviewOutcome is one review round's result: a single reviewer's, a panel arbiter's, or a panel's
+// merged verdict; or the gate arbiter's ruling (arbiter.go), which settles a gate and is no round.
+type reviewOutcome struct {
+	kind, verdict, tier, notes string
+	started                    time.Time // the round's first reviewer started
+	lens, panel                string    // the panel arbiter's lens and panel round; "" for the others
+	gate                       bool      // the gate arbiter's ruling
+	source                     Agent     // the deciding reviewer, for the history grace; zero for a merged panel
+	noRerun                    bool      // no verdict, and its reviewer already re-ran: ask Zach
+}
+
+// decide moves card t once per review round. consume, when set, records the deciding reviewer's
+// verdict; it runs after the plan is read, so an unreadable plan leaves the review to retry.
+func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
+	target, kind, verdict, notes := t.ID, r.kind, r.verdict, r.notes
+	src := r.source
+	if src.ID == "" {
+		src = t
+	}
+	// The plan's tier, build side effects and dependency must be readable before
+	// consuming its review; an absent plan cannot be treated as a low-tier plan.
+	builderTier, builderPlan, builderReply := "", "", ""
+	if kind == "plan" {
+		var err error
+		builderPlan, err = storedText(f.cfg.Home, t, 60)
+		if err != nil {
+			return f.waitForHistory(t, src, err)
+		}
+		builderReply, err = f.storedReply(t)
+		if err != nil {
+			return f.waitForHistory(t, src, err)
+		}
+		builderTier = ParseTier(builderPlan)
+	}
+	if consume != nil {
+		if err := consume(); err != nil {
+			return err
+		}
+	}
+	tier := MaxTier(t.L(labelTier), r.tier, builderTier)
 	if tier == "" && kind == "plan" {
 		tier = "low"
 	}
@@ -578,20 +620,24 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	if tier != "" {
 		labels[labelTier] = tier
 	}
-	if rev.L(labelArbiter) != "" {
+	if r.gate {
 		// the arbiter's ruling settles the gate; it is not a review round
 		err := f.applyArbiter(t, kind, verdict, notes, tier, builderPlan, builderReply, labels)
 		f.logf("%s arbiter ruled %s for %s (tier %s)", kind, verdict, short(target), tier)
 		return err
 	}
-	if verdict == "" && t.L(labelNoVerdict) == "" {
+	if verdict == "" && t.L(labelNoVerdict) == "" && !r.noRerun {
 		// first no-verdict in this round: re-run once on its own before asking Zach
 		if err := f.setLabels(target, map[string]string{labelNoVerdict: "1"}); err != nil {
 			return err
 		}
 		f.logf("%s review for %s ended without verdict; re-running once", kind, short(target))
+		if r.lens == lensArbiter {
+			return f.startPanelArbiter(t, r.panel)
+		}
 		return f.rerunReview(t, kind)
 	}
+	var err error
 	roundsKey := roundsLabel(kind)
 	rounds := atoi(t.L(roundsKey)) + 1
 	labels[roundsKey] = fmt.Sprint(rounds)
@@ -641,7 +687,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			err = f.startArbiter(t, kind, notes, verdict == "escalate")
 		}
 	}
-	f.recordRound(target, kind, rounds, rev.CreatedAt, verdict)
+	f.recordRound(target, kind, rounds, r.started, verdict)
 	f.logf("%s verdict %s for %s (round %d, tier %s)", kind, verdict, short(target), rounds, tier)
 	return err
 }
@@ -759,9 +805,10 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 	return err
 }
 
-// StartReview starts a fresh reviewer agent for card c in the card's own workspace. A code review
-// needs a clean worktree, so that what it reads is what lands: a dirty one gets the builder a message
-// to commit first, and the review stays queued until it stops again.
+// StartReview starts a fresh reviewer agent for card c in the card's own workspace, or for a larger or
+// riskier code change a panel of them (panel.go), and returns the single reviewer's id ("" for a panel).
+// A code review needs a clean worktree, so that what it reads is what lands: a dirty one gets the
+// builder a message to commit first, and the review stays queued until it stops again.
 func (f *Factory) StartReview(c Card, kind string) (string, error) {
 	// a new review is a new generation: no earlier code approval stands for it, even if this one
 	// waits on a dirty tree or fails to start
@@ -789,9 +836,21 @@ func (f *Factory) StartReview(c Card, kind string) (string, error) {
 			labels[labelDirtyAsks] = ""
 		}
 	}
-	rid, err := f.runReviewer(c, kind, f.visibility(c.Cwd), "Review ("+kind+"): "+trunc(c.Title, 60), "", "")
-	if err != nil {
-		return "", err
+	rid, lenses, panel := "", []string(nil), ""
+	if kind == "code" {
+		lenses, panel = f.reviewPanel(c)
+	}
+	if lenses != nil {
+		if err := f.startLenses(c, lenses, panel, ""); err != nil {
+			return "", err
+		}
+	} else {
+		var err error
+		rid, err = f.runReviewer(c, kind, reviewSpec{}, f.visibility(c.Cwd), "Review ("+kind+"): "+trunc(c.Title, 60), "", "")
+		if err != nil {
+			return "", err
+		}
+		f.logf("started %s review %s for %s (%s)", kind, short(rid), c.Short, trunc(c.Title, 40))
 	}
 	labels[labelStage] = "review"
 	if kind == "plan" {
@@ -800,7 +859,6 @@ func (f *Factory) StartReview(c Card, kind string) (string, error) {
 	if err := f.setLabels(c.ID, labels); err != nil {
 		return rid, err
 	}
-	f.logf("started %s review %s for %s (%s)", kind, short(rid), c.Short, trunc(c.Title, 40))
 	return rid, nil
 }
 
@@ -872,7 +930,7 @@ func (f *Factory) reviewHold(a Agent, cwd, repo string) map[string]string {
 
 // runReviewer starts a read-only reviewer of the given kind for c. For a landing review, why is the
 // agent's note and head the commit under review.
-func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (string, error) {
+func (f *Factory) runReviewer(c Card, kind string, spec reviewSpec, vis, title, why, head string) (string, error) {
 	if a, ok := f.agentOK(c.ID); ok && c.Request == nil {
 		r := f.cardRequest(a)
 		c.Request = &r
@@ -881,7 +939,13 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 	if f.guarded(c.Repo) {
 		prompt += publicReviewRule
 	}
-	if kind != "plan" && f.uiChange(c) {
+	if spec.lens != "" {
+		prompt = lensFocus[spec.lens] + "\n\n" + prompt
+		if spec.extra != "" {
+			prompt += "\n\n" + spec.extra
+		}
+	}
+	if spec.lens == lensUX || (spec.lens == "" && kind != "plan" && f.uiChange(c)) {
 		prompt += uiReviewRule
 	}
 	if kind == "land" {
@@ -891,19 +955,28 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 		prompt = fmt.Sprintf("This is a LANDING REVIEW: agent %s asks before it lands commit %s on main. What lands "+
 			"is `git -C %s log origin/main..%s`. Its note: %s\n\n%s", c.ID, head, c.Cwd, head, why, prompt)
 	}
-	return f.startReviewer(c, kind, title, prompt)
+	var labels map[string]string
+	if spec.lens != "" {
+		labels = map[string]string{labelLens: spec.lens, labelPanel: spec.panel}
+	}
+	return f.startReviewer(c, kind, title, prompt, labels)
 }
 
 // startReviewer starts a read-only reviewer agent of kind for c with prompt (the sub-agent rule is
-// added here), labelled with each of flags set to "1" besides its role, card and kind.
-func (f *Factory) startReviewer(c Card, kind, title, prompt string, flags ...string) (string, error) {
+// added here), with labels besides its role, card and kind.
+func (f *Factory) startReviewer(c Card, kind, title, prompt string, labels map[string]string) (string, error) {
 	// reviewerRunArgs: reviewers, landing reviewers and arbiters too, stay on the default agent (Opus 5.5)
 	args := append(reviewerRunArgs(),
 		"--title", title,
 		"--label", labelArg(labelRole, "reviewer"), "--label", labelArg(labelReviewOf, c.ID),
 		"--label", labelArg(labelReviewKind, kind), "--background", "--quiet")
-	for _, fl := range flags {
-		args = append(args, "--label", labelArg(fl, "1"))
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--label", labelArg(k, labels[k]))
 	}
 	if c.WorkspaceID != "" {
 		args = append(args, "--workspace", c.WorkspaceID)
@@ -1178,6 +1251,9 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 		agents := f.agents()
 		if reviewPending(agents, a.ID, now) || unappliedStoppedReviewer(agents, a.ID) {
 			return nil
+		}
+		if stage == "review" && f.panelReady(a) {
+			return f.closePanel(a) // its last reviewer finished but the panel did not close (an unreadable report)
 		}
 		if !hasBlockedReviewer(agents, a.ID, now) && a.L(labelNoVerdict) == "" {
 			if live, err := f.stillStopped(a); !live {

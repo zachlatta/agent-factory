@@ -454,6 +454,9 @@ func usageRole(a Agent) string {
 		return "fellow"
 	}
 	if k == "reviewer" {
+		if l := a.L(labelLens); l != "" {
+			return strings.TrimSpace(a.L(labelReviewKind) + " " + l + " reviewer")
+		}
 		return strings.TrimSpace(a.L(labelReviewKind) + " reviewer")
 	}
 	if k == "other" && a.Labels["paseo.parent-agent-id"] != "" {

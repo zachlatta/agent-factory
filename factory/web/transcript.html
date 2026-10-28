@@ -363,7 +363,7 @@ function renderSide(outline){
     <div>Branch</div><div>${esc(a.branch||'')}</div><div>Model</div><div>${esc(a.model||'')}</div>
     <div>Started</div><div>${ago(a.createdAt)}</div><div>Active</div><div>${ago(a.lastActivityAt)}</div>
     <div>Folder</div><div><code>${esc(a.cwd)}</code></div><div>Agent</div><div><code>${esc(a.id)}</code></div></div>`;
-  if (c && c.children.length) h += `<h3>Sub-agents and reviews</h3><div class="outline">${c.children.map(k => `<a href="${encodeURIComponent(k.id)}">${k.role==='reviewer'?esc((k.kind||'')+' review'):esc(k.title||k.short)} <small>${k.model&&k.role!=='reviewer'?esc(k.model)+' · ':''}${k.archived?'archived':esc(k.status)}${k.verdict?' · '+esc(k.verdict):''}</small></a>`).join('')}</div>`;
+  if (c && c.children.length) h += `<h3>Sub-agents and reviews</h3><div class="outline">${c.children.map(k => `<a href="${encodeURIComponent(k.id)}">${k.role==='reviewer'?esc(({correctness:'correctness review',architecture:'architecture review',ux:'phone UX review',arbiter:'panel arbiter'})[k.lens]||(k.kind||'')+' review'):esc(k.title||k.short)} <small>${k.model&&k.role!=='reviewer'?esc(k.model)+' · ':''}${k.archived?'archived':esc(k.status)}${k.verdict?' · '+esc(k.verdict):''}</small></a>`).join('')}</div>`;
   if (outline.length || older) h += `<h3>Messages to the agent</h3><div class="outline">${older ? '<a href="#" onclick="loadOlder(); return false"><small>Earlier messages not loaded: load more</small></a>' : ''}${outline.map(o => `<a href="#${o.id}" title="${esc(short(o.text, 300))}"><small>${clock(o.ts)}</small> ${esc(short(o.text, 60))}</a>`).join('')}</div>`;
   $('side').innerHTML = h;
 }

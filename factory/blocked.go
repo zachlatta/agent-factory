@@ -150,6 +150,7 @@ func (f *Factory) supersedeReviewers(id string) error {
 		if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
 			return err
 		}
+		f.noteLens(r.ID, lensResult{done: true, verdict: "superseded"})
 		if r.archived() {
 			continue
 		}

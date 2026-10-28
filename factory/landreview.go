@@ -188,7 +188,7 @@ func (f *Factory) startLandReview(b Body) (LandReview, error) {
 	}
 	why := trunc(strings.TrimSpace(b.Why), 500)
 	vis := f.visibility(cwd)
-	rid, err := f.runReviewer(c, "land", vis, "Landing review: "+trunc(c.Title, 50), why, head)
+	rid, err := f.runReviewer(c, "land", reviewSpec{}, vis, "Landing review: "+trunc(c.Title, 50), why, head)
 	if err != nil {
 		return LandReview{}, err
 	}

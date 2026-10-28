@@ -227,7 +227,7 @@ func TestQuietRealLaunchPaths(t *testing.T) {
 			case "scout":
 				_, err = f.startScout("example/desk", "Check the build")
 			default:
-				_, err = f.runReviewer(Card{ID: "root", Repo: "example/desk", Cwd: "/work/example", WorkspaceID: "card-workspace"}, kind, "private", "Review", "Check the build", "example-head")
+				_, err = f.runReviewer(Card{ID: "root", Repo: "example/desk", Cwd: "/work/example", WorkspaceID: "card-workspace"}, kind, reviewSpec{}, "private", "Review", "Check the build", "example-head")
 			}
 			if err != nil {
 				t.Fatal(err)

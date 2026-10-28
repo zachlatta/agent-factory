@@ -143,10 +143,29 @@ The planner (the "Fellow") first picks a track:
 - Plans and build summaries name their deploy steps (if any). Builders make no live changes
   (install scripts, enabling or restarting services, resizing VMs, external settings) before code
   review: the code reviewer checks the steps, and the landing step runs and verifies them after pushing.
+- Code review is one reviewer or a panel (`factory/panel.go`). One reviewer, with the whole rubric,
+  reviews a change that is not architecture tier, touches no UI and no secret-scan file
+  (`factory/scan/`, `.gitleaks.toml`, `.githooks/`, `bin/`) and changes at most 150 lines outside
+  `_test.go` files (`git diff --numstat origin/main...HEAD`; when git cannot say, only an
+  architecture change gets the panel). Anything else gets a panel, all on the same commit: a
+  correctness-and-tests reviewer, an architecture-and-consistency reviewer and, for a UI change, a
+  phone UX reviewer (the only one given the UI check). Reviewers carry `factory.lens` and
+  `factory.panel` (the round); the card carries `factory.panel` while its panel is open.
+  - A panel reviewer's verdict alone never moves the card. Once all have one: if all approve, the
+    factory decides with their notes merged under one heading each and the highest tier; otherwise one
+    panel arbiter (Opus, `factory.lens=arbiter`) reads their reports, checks each blocking finding
+    against the code, and decides the round, so the builder gets one merged list. It decides a
+    round, unlike the gate arbiter below, which settles a gate at its round cap or on an escalation. Plan reviews and outside landing reviews stay single.
+  - Either way the card moves once per round, and each round counts once toward the cap.
+  - A rework round re-runs the correctness reviewer (the code changed), every reviewer that did not
+    approve, and the UX reviewer when the fix touched a UI, then the panel arbiter if they still differ.
+  - A panel reviewer that ends without a verdict is re-run once on its own; with still none, the
+    round has no verdict. A panel arbiter without a verdict is re-run once. Re-run the review replaces
+    the whole panel. Reviews started before panels have no lens and decide as single reviews.
 - Circuit breakers: 3 review rounds per gate. At the plan-review cap, a last round whose only
   blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those fixes applied
   and verified by code review. Otherwise, at the cap of either gate and on any reviewer's
-  `escalate`, an **arbiter** agent rules instead of a person (`factory/arbiter.go`): a fresh Opus
+  `escalate`, an **arbiter** agent (the gate arbiter) rules instead of a person (`factory/arbiter.go`): a fresh Opus
   reviewer (`factory.arbiter`) that reads the builder's conversation and the last review and ends
   with `VERDICT: approve|changes|escalate|close`, `changes` only with `MUST FIX:` lines. On a plan,
   approve builds it and changes builds it with the fixes (code review checks each, as with
@@ -190,7 +209,8 @@ The planner (the "Fellow") first picks a track:
   rounds (`factory.work-left-rounds`, carried across handoffs and not reset by "Send it on"); after
   that the card waits in Needs Zach with the list. A landing whose commits differ from the reviewed
   ones waits as "Landed something other than what was reviewed".
-- Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
+- Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check,
+  given to the panel's phone UX reviewer (or the single reviewer when git cannot list the files):
   the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
   `0.0.0.0`), and clicks through it with computer use. Its non-blocking "UI feedback:" block goes to
   the builder, who repeats it in the landing summary. In this repo, build the card's binary in the
@@ -760,7 +780,8 @@ Computer-use access keeps the role's existing action approvals and read-only res
 
 - `cmd/factory`: the binary (board server, `factory scan`, `land-review`).
 - `cmd/factory-deploy`, `deployer/`: the self-deployer; `deploy/`: the systemd units.
-- `factory/policy.go`: tiers, prompts, verdicts, the automatic moves (`Tick`).
+- `factory/policy.go`: tiers, prompts, verdicts, the automatic moves (`Tick`). `factory/panel.go`:
+  code-review panels and the panel arbiter.
 - `factory/guard.go`: guarded (public) repos. `factory/scan/`: the secret scanner.
 - `factory/alwaysask.go`: who sees finished work before it lands, and the always-ask file check.
   `factory/arbiter.go`: the arbiter for reviews that do not settle. `.factory.json`: this repo's

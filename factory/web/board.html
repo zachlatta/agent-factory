@@ -552,18 +552,29 @@ function render(){
 }
 
 // latestReviews: begin
-// latestReviews keeps the newest reviewer of each kind; children arrive oldest first.
+// latestReviews keeps the newest reviewer of each kind; children arrive oldest first. When the newest
+// is on a code-review panel, it keeps the newest reviewer of each lens in that panel instead.
 function latestReviews(children){
-  const last = {};
+  const last = {}, out = [];
   children.forEach(k=>{ if(k.role==='reviewer') last[k.kind||''] = k; });
-  return Object.values(last);
+  Object.values(last).forEach(n=>{
+    if(!n.panel){ out.push(n); return; }
+    const per = {};
+    children.forEach(k=>{ if(k.role==='reviewer' && (k.kind||'')===(n.kind||'') && k.panel===n.panel) per[k.lens||''] = k; });
+    out.push(...Object.values(per));
+  });
+  return out;
 }
+const lensNames = {correctness:'correctness review', architecture:'architecture review', ux:'phone UX review', arbiter:'panel arbiter'};
+// reviewName is a reviewer's name: its panel lens, else its kind.
+function reviewName(k){ return lensNames[k.lens] || (k.kind||'')+' review'; }
 // reviewLabel names a reviewer's round and verdict. The round counter only counts applied
-// verdicts, so a running reviewer is on the next round.
+// verdicts, so a running reviewer is on the next round; a panel reviewer knows its round.
 function reviewLabel(k, rounds){
   const running = k.status==='running' && !k.archived;
-  const n = ((k.kind && rounds[k.kind]) || 0) + (running && !k.verdict ? 1 : 0);
-  return (k.kind||'review') + (n ? ' round '+n : '') + (k.verdict ? ': '+k.verdict : running ? ' (running)' : '');
+  const n = k.panel ? +k.panel : ((k.kind && rounds[k.kind]) || 0) + (running && !k.verdict ? 1 : 0);
+  const name = k.lens ? (lensNames[k.lens]||k.lens).replace(/ review$/,'') : (k.kind||'review');
+  return name + (n ? ' round '+n : '') + (k.verdict ? ': '+k.verdict : running ? ' (running)' : '');
 }
 // latestReviews: end
 // subagents: begin
@@ -585,7 +596,7 @@ function cardKids(children, all){
 }
 function kidRow(k){
   const running = k.status==='running' && !k.archived, sub = k.role!=='reviewer';
-  const name = sub ? (k.title||k.short) : (k.kind||'')+' review'+(k.verdict?': '+k.verdict:'');
+  const name = sub ? (k.title||k.short) : reviewName(k)+(k.verdict?': '+k.verdict:'');
   const dot = k.archived ? 'arch' : running ? 'running' : '';
   return `<div class="krow" data-kid="${esc(k.id)}">
     <div class="kt"><span class="dot ${dot}"></span><b>${esc(name)}</b></div>

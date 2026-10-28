@@ -32,7 +32,7 @@ func reviewPrompt(t *testing.T, kind string, git map[string]string) (string, *Fa
 	if git != nil {
 		f.GitOut = gitStub(git)
 	}
-	if _, err := f.runReviewer(Card{ID: "c1", Short: "c1", Title: "x", Cwd: "/w/c1", Repo: "example/desk"}, kind, "private", "t", "", "h1"); err != nil {
+	if _, err := f.runReviewer(Card{ID: "c1", Short: "c1", Title: "x", Cwd: "/w/c1", Repo: "example/desk"}, kind, reviewSpec{}, "private", "t", "", "h1"); err != nil {
 		t.Fatal(err)
 	}
 	runs := p.runsWithLabel(labelArg(labelReviewKind, kind))

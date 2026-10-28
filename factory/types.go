@@ -82,7 +82,7 @@ type Card struct {
 	Agent          string    `json:"agent"`              // AgentChoice id (factory.agent label)
 	Replaces       []string  `json:"replaces,omitempty"` // replaced predecessor card agent ids, oldest first (replace.go)
 	WaitsOn        string    `json:"waitsOn,omitempty"`  // short id of the card it lands after (deps.go)
-	Routing        bool      `json:"routing"`           // a repo picker (route.go), not the card's real work
+	Routing        bool      `json:"routing"`            // a repo picker (route.go), not the card's real work
 	CreatedAt      string    `json:"createdAt"`
 	LastActivityAt string    `json:"lastActivityAt"`
 	ArchivedAt     string    `json:"archivedAt"`
@@ -116,6 +116,8 @@ type Child struct {
 	Archived bool   `json:"archived"`
 	Role     string `json:"role"`
 	Kind     string `json:"kind"`
+	Lens     string `json:"lens,omitempty"`  // a code-review panel reviewer's focus, or arbiter (panel.go)
+	Panel    string `json:"panel,omitempty"` // the review round that panel belongs to
 	Verdict  string `json:"verdict"`
 	// Blocked: running but not moving on its own ("waiting on permission", "stalled N min"); Permission: the prompt
 	Blocked    string `json:"blocked,omitempty"`

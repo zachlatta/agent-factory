@@ -214,8 +214,9 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 				}
 				return
 			}
-			if p.runs != 1 {
-				t.Fatalf("new commits: reviews started = %d, want 1", p.runs)
+			// an architecture card's code review is a panel of two (panel.go)
+			if p.runs != 2 || len(p.runsWithLabel(labelPrefix+labelLens+"="+lensCorrectness)) != 1 {
+				t.Fatalf("new commits: reviews started = %d, want a panel of 2", p.runs)
 			}
 			// code review passes: a card Zach asked for waits for him before it lands again
 			rev := reviewer("r1", c.ID, "code")

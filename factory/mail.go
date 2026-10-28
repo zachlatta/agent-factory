@@ -277,13 +277,18 @@ func (f *Factory) replyInThread(ctx context.Context, id, thread string, m email,
 	return err
 }
 
-// askSource is the agent whose last message is the ask's Detail: the card, or its latest reviewer.
+// askSource is the agent whose last message is the ask's Detail: the card, or the reviewer that
+// decided its latest review (a single reviewer or a panel's arbiter, else its newest panel reviewer).
 func askSource(c Card, ask *Ask) string {
-	src := c.ID
+	src, decided := c.ID, false
 	if ask.From == "reviewer" {
 		for _, k := range c.Children {
-			if k.Role == "reviewer" {
-				src = k.ID // children are oldest first, so this ends on the latest
+			if k.Role != "reviewer" {
+				continue
+			}
+			// children are oldest first, so this ends on the latest
+			if d := deciding(k.Lens); d || !decided {
+				src, decided = k.ID, d
 			}
 		}
 	}

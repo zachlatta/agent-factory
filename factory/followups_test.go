@@ -284,7 +284,7 @@ func TestReviewerGetsTheCardsFollowUps(t *testing.T) {
 	f, p := newTestFactory(t, a)
 	writeSession(t, f.cfg.Home, a.Cwd, a.SessionID, sessionLine(fakeEmailPrompt, false),
 		sessionLine(fakeFollowUp("Sun, 25 Oct 2026 20:01:00 -0400", "Make it green instead."), false))
-	if _, err := f.runReviewer(Card{ID: a.ID, Title: "x", Cwd: a.Cwd, Repo: a.Repo}, "plan", "unknown", "t", "", ""); err != nil {
+	if _, err := f.runReviewer(Card{ID: a.ID, Title: "x", Cwd: a.Cwd, Repo: a.Repo}, "plan", reviewSpec{}, "unknown", "t", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	runs := p.runsWithLabel(labelArg(labelReviewKind, "plan"))

@@ -23,6 +23,9 @@ const (
 	labelRole       = "role"
 	labelReviewOf   = "review-of"
 	labelReviewKind = "review-kind"
+	labelLens       = "lens"      // a code-review panel reviewer's focus: correctness, architecture, ux or arbiter (panel.go)
+	labelPanel      = "panel"     // reviewer: the code-review round its panel belongs to; card: that round while its panel is open
+	labelLensTier   = "lens-tier" // a panel reviewer's TIER line, for the merged decision
 	labelOrigin     = "origin"
 	labelSource     = "source"
 	labelAgent      = "agent"        // the AgentChoice id that plans and builds the card
