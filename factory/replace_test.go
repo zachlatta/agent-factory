@@ -270,7 +270,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 		t.Error("tickSteers did not deliver steer targeting oldID to newID")
 	}
 	srv := f.Handler()
-	for _, path := range []string{"/api/transcript/" + oldID, "/api/transcript/" + newID} {
+	for _, path := range []string{"/api/transcript/" + oldID + "?tail=1", "/api/transcript/" + newID + "?tail=1"} {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		var tr Transcript

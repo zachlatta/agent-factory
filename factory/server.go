@@ -213,12 +213,9 @@ func (f *Factory) handleTranscript(w http.ResponseWriter, r *http.Request) {
 			unavailable = err.Error()
 		}
 	}
-	// the agents this card's agent replaced come before its first line: on the page that reaches it
-	start := !res.Older
-	if !p.back() {
-		start = p.After == 0 && p.From == 0
-	}
-	if lin := lineage(byID, a); start && len(lin) > 1 {
+	// the agents this card's agent replaced come before its first line: only on the newest-first page
+	// that reaches it, never on a poll (the page keeps them, so a poll would add another copy)
+	if lin := lineage(byID, a); p.back() && !res.Older && len(lin) > 1 {
 		if prefix := f.lineagePrefix(lin); len(prefix) > 0 {
 			res.Events = append(prefix, res.Events...)
 			res.Fallback = false
@@ -259,7 +256,8 @@ func (f *Factory) handleTranscriptImage(w http.ResponseWriter, r *http.Request) 
 	// line.k is an image of a's own session; line.k.p one of the agent p back in its card's lineage
 	ref, hops := r.PathValue("ref"), 0
 	if m := lineageRef.FindStringSubmatch(ref); m != nil {
-		ref, hops = m[1], int(m[2][0]-'0')
+		ref = m[1]
+		hops, _ = strconv.Atoi(m[2])
 	}
 	if lin := lineage(byID, a); hops < len(lin) {
 		a = lin[len(lin)-1-hops]

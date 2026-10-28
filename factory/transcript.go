@@ -409,8 +409,8 @@ func refImages(evs []Event) {
 	})
 }
 
-// lineageRef is an image ref of an agent a card's agent replaced: line.k.p, p agents back.
-var lineageRef = regexp.MustCompile(`^([0-9]+\.[0-9]+)\.([1-9])$`)
+// lineageRef is an image ref of an agent a card's agent replaced: line.k.p, p (1 to 99) agents back.
+var lineageRef = regexp.MustCompile(`^([0-9]+\.[0-9]+)\.([1-9][0-9]?)$`)
 
 var imageRef = regexp.MustCompile(`^([1-9][0-9]{0,9})\.(0|[1-9][0-9]{0,4})$`)
 

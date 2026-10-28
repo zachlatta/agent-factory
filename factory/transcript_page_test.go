@@ -415,3 +415,38 @@ func TestTranscriptPagesAddAReplacedAgentsHistoryOnceTheStartIsReached(t *testin
 		t.Errorf("poll = %s", texts(poll.Events))
 	}
 }
+
+func TestPollsNeverResendAReplacedAgentsHistory(t *testing.T) {
+	f, _ := newTestFactory(t)
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-old2/old2-sess.jsonl",
+		`{"type":"assistant","timestamp":"t0","message":{"content":[{"type":"text","text":"Old agent reply"}]}}`+"\n")
+	old := card("old2", map[string]string{labelStage: "building"})
+	old.Provider, old.SessionID, old.Cwd = "claude", "old2-sess", "/w/old2"
+	repl := card("new2", map[string]string{labelStage: "building", labelReplaces: "old2"})
+	repl.Provider, repl.SessionID, repl.Cwd = "claude", "new2-sess", "/w/new2" // no session file yet
+	f.SetAgents([]Agent{old, repl})
+	prevs := func(evs []Event) (n int) {
+		for _, e := range evs {
+			if e.Prev > 0 {
+				n++
+			}
+		}
+		return n
+	}
+	tail, _ := getTranscript(t, f, "new2?tail=1")
+	if prevs(tail.Events) != 2 || tail.Before != 0 {
+		t.Fatalf("tail = before %d, %+v", tail.Before, tail.Events)
+	}
+	for i := 0; i < 3; i++ {
+		if poll, _ := getTranscript(t, f, "new2?after=0&from=0"); prevs(poll.Events) != 0 {
+			t.Fatalf("poll %d resent the old history: %+v", i, poll.Events)
+		}
+	}
+	// once the new agent writes its file, a poll sends only its lines
+	writeFile(t, f.cfg.Home+"/.claude/projects/-w-new2/new2-sess.jsonl",
+		`{"type":"assistant","timestamp":"t1","message":{"content":[{"type":"text","text":"New agent reply"}]}}`+"\n")
+	poll, _ := getTranscript(t, f, "new2?after=0&from=0")
+	if len(poll.Events) != 1 || poll.Events[0].Text != "New agent reply" || poll.Next != 1 {
+		t.Errorf("first poll with a file = %+v", poll)
+	}
+}

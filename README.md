@@ -655,7 +655,9 @@ Computer-use access keeps the role's existing action approvals and read-only res
   read again now; a line still being written waits until it ends). Images carry a `ref` instead of
   their data and are fetched from `/api/transcript/{id}/image/{ref}` (PNG, JPEG, GIF or WebP, for
   agents on the board), so a tool's images load only when it is opened. The page loads older pages
-  as you scroll up, and all of them before a search.
+  as you scroll up, and all of them before a search. A card whose agent was replaced shows the earlier agents' history
+  (events with `prev`, image refs ending in `.<prev>`) on the newest-first page that reaches its
+  agent's first line; polls never send it again.
 - `factory/hostmetrics*.go`, `hostfleet.go`: host load for the header icon and `/host`. Each
   `FACTORY_METRIC_HOSTS` alias gets one read-only SSH stream (`ssh -o BatchMode=yes`, a fixed
   script on stdin, Linux or macOS), shared by all viewers, run only while someone polls
