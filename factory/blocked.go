@@ -18,8 +18,13 @@ const scratchSafetyRule = "Never run commands from inside .factory-scratch/. Kee
 	"Any authorized scratch removal must run from the worktree root using its literal absolute path; " +
 	"never use a relative path, variable, substitution, glob, or ~."
 
+// scratchClean deletes a worktree's .factory-scratch/ without rm: rm -r asks for permission even
+// inside the worktree. -X removes only ignored files, and the folder is ignored (.git/info/exclude).
+const scratchClean = "git -C <worktree root> clean -fdX -- .factory-scratch/"
+
 // scratchCleanupRule assigns cleanup only to the card owner, never reviewers or sub-agents.
-const scratchCleanupRule = scratchSafetyRule + " Before landing or finishing, delete .factory-scratch/ if present. " +
+const scratchCleanupRule = scratchSafetyRule + " Before landing or finishing, delete .factory-scratch/ if present with " +
+	scratchClean + " (rm -r asks for permission even inside the worktree). " +
 	"This keeps ignored files from blocking worktree retirement."
 
 // worktreeStorageRule includes shell safety without assigning cleanup of shared scratch.

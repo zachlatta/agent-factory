@@ -1334,7 +1334,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 				t.Errorf("%s lacks %q", name, want)
 			}
 		}
-		for _, forbidden := range []string{"delete .factory-scratch/", "Before landing or finishing"} {
+		for _, forbidden := range []string{"delete .factory-scratch/", "Before landing or finishing", scratchClean} {
 			if strings.Contains(s, forbidden) {
 				t.Errorf("%s instructs a shared-worktree user to clean up: %q", name, forbidden)
 			}
@@ -1353,7 +1353,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		deleteScratchPrompts[name] = s
 	}
 	for name, s := range deleteScratchPrompts {
-		for _, want := range []string{"delete .factory-scratch/", "retirement", "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {
+		for _, want := range []string{"delete .factory-scratch/", "retirement", scratchClean, "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("%s lacks %q", name, want)
 			}

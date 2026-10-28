@@ -44,6 +44,8 @@ Host settings (board URL, default repo, private scan patterns, PATH) live in
   Never run commands from inside that folder; keep your working directory at the worktree root.
   Any authorized scratch removal must run from there using its literal absolute path, without
   variables, substitutions, globs or ~.
+  The owner deletes it with `git -C <worktree root> clean -fdX -- .factory-scratch/`, not `rm -r`,
+  which asks for permission even inside the worktree.
 - Never combine cd and git in a compound command (including cd X && git); use git -C X.
   For rm, use only literal absolute paths and no cd earlier in the same command.
 - The secret scan (`factory/scan`, `.gitleaks.toml`, `.githooks/`, `bin/`) is reviewed as
