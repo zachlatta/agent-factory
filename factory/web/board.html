@@ -553,14 +553,20 @@ function render(){
 
 // latestReviews: begin
 // latestReviews keeps the newest reviewer of each kind; children arrive oldest first. When the newest
-// is on a code-review panel, it keeps the newest reviewer of each lens in that panel instead.
+// is on a code-review panel, it keeps the newest reviewer of each lens instead, so a reviewer that
+// approved an earlier round and did not re-run still shows that verdict; an arbiter shows only for
+// the newest round.
 function latestReviews(children){
   const last = {}, out = [];
   children.forEach(k=>{ if(k.role==='reviewer') last[k.kind||''] = k; });
   Object.values(last).forEach(n=>{
     if(!n.panel){ out.push(n); return; }
     const per = {};
-    children.forEach(k=>{ if(k.role==='reviewer' && (k.kind||'')===(n.kind||'') && k.panel===n.panel) per[k.lens||''] = k; });
+    children.forEach(k=>{
+      if(k.role!=='reviewer' || (k.kind||'')!==(n.kind||'') || !k.lens) return;
+      if(k.lens==='arbiter' && k.panel!==n.panel) return;
+      per[k.lens] = k;
+    });
     out.push(...Object.values(per));
   });
   return out;

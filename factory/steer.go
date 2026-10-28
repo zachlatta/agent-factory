@@ -83,18 +83,13 @@ func ParseDuplicate(text string) string {
 	return m[len(m)-1][1]
 }
 
-// newestReviewer is the most recently started reviewer of card id that decides a round (a single
-// reviewer or an arbiter), else its most recent panel reviewer.
+// newestReviewer is the most recently started reviewer of card id (in a split panel round, its arbiter).
 func (f *Factory) newestReviewer(id string) (Agent, bool) {
 	var best Agent
 	found := false
 	byID := f.byID()
 	for _, r := range f.agents() {
-		if r.L(labelRole) != "reviewer" || !sameCard(byID, r.L(labelReviewOf), id) {
-			continue
-		}
-		d, bd := deciding(r.L(labelLens)), deciding(best.L(labelLens))
-		if !found || (d && !bd) || (d == bd && r.CreatedAt.After(best.CreatedAt)) {
+		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && (!found || r.CreatedAt.After(best.CreatedAt)) {
 			best, found = r, true
 		}
 	}

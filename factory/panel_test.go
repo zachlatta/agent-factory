@@ -317,26 +317,26 @@ func TestStuckCheckClosesAFinishedPanel(t *testing.T) {
 	}
 }
 
-func TestDecidingReviewerGivesTheAskDetail(t *testing.T) {
+func TestNewestRoundsReviewerGivesTheAskDetail(t *testing.T) {
+	// round 1 split and its arbiter asked for changes; round 2's reviewers all approved (no arbiter)
 	c := Card{ID: "c1", Children: []Child{
-		{ID: "single", Role: "reviewer", Kind: "code"},
-		{ID: "lens-a", Role: "reviewer", Kind: "code", Lens: lensCorrectness, Panel: "2"},
-		{ID: "arb", Role: "reviewer", Kind: "code", Lens: lensArbiter, Panel: "2"},
-		{ID: "lens-b", Role: "reviewer", Kind: "code", Lens: lensArchitecture, Panel: "3"},
+		{ID: "lens-1", Role: "reviewer", Kind: "code", Lens: lensArchitecture, Panel: "1"},
+		{ID: "arb-1", Role: "reviewer", Kind: "code", Lens: lensArbiter, Panel: "1"},
+		{ID: "lens-2", Role: "reviewer", Kind: "code", Lens: lensCorrectness, Panel: "2"},
 	}}
-	if got := askSource(c, &Ask{From: "reviewer"}); got != "arb" {
-		t.Errorf("askSource = %s, want the arbiter", got)
+	if got := askSource(c, &Ask{From: "reviewer"}); got != "lens-2" {
+		t.Errorf("askSource = %s, want the newest round's reviewer", got)
 	}
-	c.Children = c.Children[1:2]
-	if got := askSource(c, &Ask{From: "reviewer"}); got != "lens-a" {
-		t.Errorf("askSource = %s, want the only reviewer", got)
+	c.Children = c.Children[:2]
+	if got := askSource(c, &Ask{From: "reviewer"}); got != "arb-1" {
+		t.Errorf("askSource = %s, want the split round's arbiter", got)
 	}
 
 	arb := lensReviewer("arb", "c1", lensArbiter, "1")
 	late := lensReviewer("late", "c1", lensCorrectness, "2")
 	late.CreatedAt = arb.CreatedAt.Add(time.Hour)
 	f, _ := newTestFactory(t, card("c1", nil), arb, late)
-	if r, ok := f.newestReviewer("c1"); !ok || r.ID != "arb" {
-		t.Errorf("newestReviewer = %s, want the arbiter", r.ID)
+	if r, ok := f.newestReviewer("c1"); !ok || r.ID != "late" {
+		t.Errorf("newestReviewer = %s, want the newest round's reviewer", r.ID)
 	}
 }

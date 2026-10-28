@@ -161,12 +161,18 @@ console.log(JSON.stringify([
   labels([rv('plan','closed','approve',1), rv('code','closed','changes',1),
           {...rv('code','closed','approve',1), lens:'correctness', panel:'2'},
           {...rv('code','running',''), lens:'architecture', panel:'2'}], {plan:1, code:1}),
+  labels([{...rv('code','closed','approve',1), lens:'correctness', panel:'1'},
+          {...rv('code','closed','changes',1), lens:'architecture', panel:'1'},
+          {...rv('code','closed','approve',1), lens:'ux', panel:'1'},
+          {...rv('code','closed','changes',1), lens:'arbiter', panel:'1'},
+          {...rv('code','running',''), lens:'correctness', panel:'2'},
+          {...rv('code','running',''), lens:'architecture', panel:'2'}], {plan:1, code:1}),
 ]));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
-	want := `[["plan round 3: nits","code round 1: nits"],["plan round 3 (running)"],["review"],["plan round 1: approve","correctness round 2: approve","architecture round 2 (running)"]]`
+	want := `[["plan round 3: nits","code round 1: nits"],["plan round 3 (running)"],["review"],["plan round 1: approve","correctness round 2: approve","architecture round 2 (running)"],["correctness round 2 (running)","architecture round 2 (running)","phone UX round 1: approve"]]`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("labels = %s, want %s", got, want)
 	}

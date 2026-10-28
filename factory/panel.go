@@ -400,6 +400,3 @@ func (f *Factory) panelReady(a Agent) bool {
 	}
 	return true
 }
-
-// deciding reports whether a reviewer with this lens decides its round: a single reviewer or an arbiter.
-func deciding(lens string) bool { return lens == "" || lens == lensArbiter }
