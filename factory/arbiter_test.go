@@ -118,12 +118,19 @@ func TestArbiterRulingOnAPlan(t *testing.T) {
 	if l[labelStage] != "zach" || l[labelNote] != sideEffectNote {
 		t.Errorf("approve with a side effect: labels = %v", l)
 	}
-	// changes without a fix, or no verdict: the board shows it; no second arbiter
-	for _, ruling := range []string{"I cannot tell.\nTIER: low\nVERDICT: changes", "ran out of time"} {
-		l, msgs, p := arbiterRules(t, at(), "plan", ruling)
-		if l[labelStage] != "zach" || l[labelNote] != arbiterStuckNote || len(msgs) != 0 || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 0 {
-			t.Errorf("%q: labels = %v sent = %v", ruling, l, msgs)
-		}
+	// changes without a fix (a ruling): the board shows it; no second arbiter
+	l, msgs, p := arbiterRules(t, at(), "plan", "I cannot tell.\nTIER: low\nVERDICT: changes")
+	if l[labelStage] != "zach" || l[labelNote] != arbiterStuckNote || len(msgs) != 0 || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 0 {
+		t.Errorf("changes without a fix: labels = %v sent = %v", l, msgs)
+	}
+	// no ruling at all: one replacement arbiter, then the card is marked stuck in its column, never Zach's
+	l, msgs, p = arbiterRules(t, at(), "plan", "ran out of time")
+	if l[labelStage] == "zach" || l[labelReviewerRetries] != "1" || len(msgs) != 0 || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
+		t.Errorf("no ruling: labels = %v sent = %v", l, msgs)
+	}
+	l, msgs, p = arbiterRules(t, withLabels(at(), map[string]string{labelReviewerRetries: "1"}), "plan", "ran out of time again")
+	if l[labelStage] == "zach" || l[labelStuck] != stuckReview || len(msgs) != 0 || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 0 {
+		t.Errorf("second missing ruling: labels = %v sent = %v", l, msgs)
 	}
 	// close: as any reviewer's close
 	if l, _, _ := arbiterRules(t, at(), "plan", "Duplicate.\nTIER: low\nVERDICT: close"); l[labelStage] != "zach" || l[labelVerdict] != "close" {

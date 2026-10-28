@@ -159,9 +159,10 @@ The planner (the "Fellow") first picks a track:
   - Either way the card moves once per round, and each round counts once toward the cap.
   - A rework round re-runs the correctness reviewer (the code changed), every reviewer that did not
     approve, and the UX reviewer when the fix touched a UI, then the panel arbiter if they still differ.
-  - A panel reviewer that ends without a verdict is re-run once on its own; with still none, the
-    round has no verdict. A panel arbiter without a verdict is re-run once. Re-run the review replaces
-    the whole panel. Reviews started before panels have no lens and decide as single reviews.
+  - A panel reviewer that fails (see Reviewers under automatic recovery) is replaced on its own; one
+    still without a verdict after that leaves its lens missing, and the panel arbiter decides from the
+    others' reports, told which lens is missing and to check that area itself. Re-run the review
+    replaces the whole panel. Reviews started before panels have no lens and decide as single reviews.
 - Circuit breakers: 3 review rounds per gate. At the plan-review cap, a last round whose only
   blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those fixes applied
   and verified by code review. Otherwise, at the cap of either gate and on any reviewer's
@@ -172,29 +173,53 @@ The planner (the "Fellow") first picks a track:
   `SMALL FIX:`), both through the build side-effects check above; escalate is a side effect Zach
   must allow. On code, approve goes on to the finished-work rule, changes sends the fixes for one
   more round whose review checks them, and escalate brings the card to Zach with its reason. The
-  arbiter runs once per gate per card (`factory.arbitrated`); a gate that still does not settle,
-  or a ruling it cannot give, waits on the board (never emailed) as "Reviews didn't settle" with Let
-  an agent decide (another arbiter), a reply, or Drop; QUESTION blocks from an earlier brief are not
-  offered there, since the arbiter's action carries no answers. Reviewers may answer `nits` or `close`; a reviewer
-  that ends or disappears without a verdict is re-run once on its own before the card moves to
-  Needs Zach (`factory.no-verdict`); a card that stops with nothing queued goes to Needs Zach after
-  2 minutes.
-- Provider errors: a working card in error with a recognized quota reset gets one resume
-  attempt after that reset plus 30 seconds. The deadline and attempt survive restarts. A second
-  error, an unknown reset format, or uncertain delivery goes to Needs Zach with Resume, Reply
-  and Drop. Resume and Reply each make one explicit attempt at the interrupted step; neither
-  rearms automatic retries. Unknown Codex limit formats require human intervention. An errored
-  reviewer sends its card to Needs Zach with Re-run the review.
-- Blocked agents: a child agent waiting on a permission prompt (`paseo permit ls`) or running with
-  no activity for 20 minutes flags its card ("reviewer waiting on permission", "reviewer stalled N
-  min"). Such a reviewer no longer counts as a pending verdict, so its card really moves to Needs
-  Zach (its labels change) with "Re-run the review", which retires the old reviewer first. If the
-  old reviewer finishes before a re-run, its verdict still moves the card on. The factory never
-  answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
+  arbiter runs once per gate per card (`factory.arbitrated`); a gate that still does not settle after
+  its ruling, or a ruling that is not one of those (such as changes with no `MUST FIX:`), waits on the
+  board (never emailed) as "Reviews didn't settle" with Let an agent decide (another arbiter), a
+  reply, or Drop; QUESTION blocks from an earlier brief are not offered there, since the arbiter's
+  action carries no answers. An arbiter that gives no ruling at all is handled by automatic recovery
+  below. Reviewers may answer `nits` or `close`.
+- Automatic recovery (`factory/recover.go`). Errors, usage limits, stalls, failed reviewers,
+  dropped dependencies and failed landings never go to Needs Zach or email. The factory retries
+  them, or hands them back to the card, up to a hard cap per kind. When a cap runs out, the card
+  stays in its column marked stuck (`factory.stuck=<why>`, read with `stuckReason` for the daily
+  digest): a "stuck: <why>" flag on the board and a board-only ask with Re-run (Resume for agent
+  errors), Reply and Drop. A stuck card gets no automatic move until it runs again or Zach acts; that clears the mark.
+  The state lives in one label, `factory.recovery` (base64 JSON, which replaces
+  `factory.limit-recovery` and is read from it once). It survives restarts, and a handoff to a
+  replacement agent carries it and `factory.reviewer-retries` (`carriedFactoryLabels`), so a
+  handoff cannot reset a cap. The stuck mark is not carried.
+  - Card agent errors: a recognized quota reset gets one resume on the same model at the reset
+    plus 30 seconds. Unknown errors, and a repeat after that resume, retry on the same model 2, 10
+    and 30 minutes after each failure. Then the card is marked `stuck=agent error`. A send whose
+    delivery is uncertain is never repeated within its 2-minute grace; the next try waits its step.
+    A completed turn ends the episode. Resume and Reply on a stuck card each make one attempt and
+    do not rearm the retries.
+  - Reviewers: an errored reviewer, one waiting on a permission prompt (`paseo permit ls`) for 2
+    minutes or running with no activity for 20 (without a working sub-agent of its own), and one that
+    ends or disappears without a verdict, are superseded and archived, and a fresh one starts, at most
+    twice: per review round for a single reviewer (`factory.reviewer-retries`, cleared when a verdict
+    counts the round), per lens for a panel reviewer (counted from the panel's reviewers). After that
+    an arbiter decides, told which reviewer is missing: the panel arbiter from the other lenses'
+    reports on a panel, or, in place of a single reviewer, an arbiter that reviews the change itself.
+    An arbiter (panel, stand-in or gate arbiter) that errors, stalls or gives no ruling gets one
+    replacement; then the card is marked `stuck=review could not finish` in its review column. The
+    stand-in's and the gate arbiter's tries count on `factory.reviewer-retries` too, so the cap holds
+    even when a gone arbiter has left the agent list. If a
+    superseded reviewer finishes first, its verdict still moves the card on. The factory never
+    answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
+  - A card that stops with nothing queued (for 2 minutes in plan, building or landing) is nudged once
+    with what its step is missing. If it stops again, its step re-runs (a review, or the land prompt
+    with its scan). The third time it is marked `stuck=stopped with nothing queued`. Moving to another
+    column starts the count afresh.
+  - Failed landings: see the landing checks below. Each card gets at most 2 returns to building,
+    then `stuck=landing failed`.
 - A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
   the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
   or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
-  card goes to Needs Zach with one question: land it anyway, reply, or drop it.
+  card is told and goes back to building with its `Waits on` cleared. It decides itself whether to
+  rebuild without the other card's work or keep the change as is, and either way code review runs
+  again before the land prompt.
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none`. A card that lists work left (`REMAINING:` then one `-`
   line per item), or says nothing, waits in Needs Zach with the list in its note ("Landed, with work
@@ -207,8 +232,18 @@ The planner (the "Fellow") first picks a track:
   agent finishes it in its worktree, new commits get a code review (and, on a card Zach asked for, his
   finished-work stop again), and it lands again. Only the first landing emails Zach. At most 2 such
   rounds (`factory.work-left-rounds`, carried across handoffs and not reset by "Send it on"); after
-  that the card waits in Needs Zach with the list. A landing whose commits differ from the reviewed
-  ones waits as "Landed something other than what was reviewed".
+  that the card waits in Needs Zach with the list.
+- A landing whose HEAD is not on `origin/main` (a push failure, a rebase conflict, a `bin/land` scan
+  hit) goes back to building, with the failure in the message. The agent rebases on `origin/main`,
+  resolves conflicts, reruns the tests and commits; on a scan hit it rewrites its own unpushed
+  commits instead. Then code review runs again and the land prompt follows. A direct-track card
+  not on main is told once to land its work item again, then marked stuck.
+- A landing whose commits differ from the reviewed ones goes back to building the same way: the
+  agent checks what landed and fixes forward, code review covers what landed, and the land prompt
+  says not to push again if HEAD is already on main. On a public repo the factory first scans the
+  range that landed (`factory.base..HEAD`). A hit, or a scan that cannot run, waits in Needs Zach as
+  "Landed something other than what was reviewed" and is emailed: something unreviewed is already
+  public.
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check,
   given to the panel's phone UX reviewer (or the single reviewer when git cannot list the files):
   the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
@@ -483,13 +518,15 @@ Zach is emailed only for decisions, by the factory itself through the zrl-bot ma
 is either emailed or board-only (`Ask.boardOnly`):
 
 - **Emailed:** allow a build with side effects, try finished work before it lands, the secret
-  scan's stop, a public-repo push without review, and a repo choice.
+  scan's stop, a public-repo push without review, a landed diff on a public repo whose secret scan
+  did not pass (something unreviewed may already be public), and a repo choice.
 - **Board only:** finished cards and cards moved by hand; a running agent (permission prompt, stall,
-  writing its summary); errors and usage limits; a stuck step or reviewer; a review with no
-  verdict; a review that did not settle even with the arbiter (the arbiter's call, not his);
-  a reviewer's close or duplicate verdict; dependency waits; and every check after landing
-  (not verified, work left, did it finish, landed diff differs). These are problems for the factory
-  and its agents; the board shows them until a later digest lists them.
+  writing its summary); a card marked stuck by automatic recovery; a paused decision; a review that
+  did not settle even with the arbiter (the arbiter's call, not his); a reviewer's close or
+  duplicate verdict; and the checks after landing (work left, did it finish, an older landed diff).
+  Errors, usage limits, failed reviewers, stopped cards, dropped dependencies and failed landings
+  never reach Needs Zach at all (automatic recovery). These are problems for the factory and its
+  agents; the board shows them until a later digest lists them.
 
 The email is the decision alone:
 
@@ -512,6 +549,8 @@ The email is the decision alone:
   once it has written it (at most 10 minutes later).
 - Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
   retried after 5 minutes; a timed-out one is not, since it may have gone out.
+- Cards that were waiting in Needs Zach for a reason automatic recovery now handles take the
+  recovery path on their next pass.
 - `/api/health` reports the last mailbox check as `mail`; it never fails the health check.
 
 Replies: the email dispatcher checks the sender, then posts his reply to

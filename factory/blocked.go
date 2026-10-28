@@ -147,16 +147,24 @@ func (f *Factory) supersedeReviewers(id string) error {
 		if r.L(labelRole) != "reviewer" || !sameCard(byID, r.L(labelReviewOf), id) || r.L(labelApplied) != "" {
 			continue
 		}
-		if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
+		if err := f.retireReviewer(r, "superseded"); err != nil {
 			return err
 		}
-		f.noteLens(r.ID, lensResult{done: true, verdict: "superseded"})
-		if r.archived() {
-			continue
-		}
-		if err := f.archiveAgent(r.ID); err != nil {
-			f.logf("reviewer %s superseded but not archived: %v", short(r.ID), err)
-		}
+	}
+	return nil
+}
+
+// retireReviewer records verdict on reviewer r (superseded, or "" for one given up on) and archives it.
+func (f *Factory) retireReviewer(r Agent, verdict string) error {
+	if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
+		return err
+	}
+	f.noteLens(r.ID, lensResult{done: true, verdict: verdict})
+	if r.archived() {
+		return nil
+	}
+	if err := f.archiveAgent(r.ID); err != nil {
+		f.logf("reviewer %s retired but not archived: %v", short(r.ID), err)
 	}
 	return nil
 }

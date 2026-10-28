@@ -295,27 +295,34 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 	}
 }
 
+const diffFlags = "diff --no-ext-diff --no-textconv --no-color --full-index --src-prefix=a/ --dst-prefix=b/ -U0 "
+
+// landedGit answers git for a card whose reviewed commit h1 landed, rebased, as n2.
+var landedGit = map[string]string{
+	"reflog show --format=%H%x09%gs HEAD":  "n2\trebase (finish): x\nn2\trebase (pick): w\nm\trebase (start): checkout origin/main\nh1\tcommit: w\n",
+	"merge-base origin/main h1":            "m\n",
+	"rev-list --reverse --no-merges m..h1": "h1\n",
+	"rev-list --no-merges m..origin/main":  "n2\no1\n",
+	diffFlags + "h1^ h1":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -4 +4 @@\n-old\n+new\n",
+	diffFlags + "o1^ o1":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -2 +2,2 @@\n-ctx\n+ctx1\n+ctx2\n",
+	diffFlags + "n2^ n2":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5 +5 @@\n-old\n+new\n",
+}
+
+// landedExtraGit: a commit was made after review and landed with it.
+var landedExtraGit = withAnswers(landedGit, "reflog show --format=%H%x09%gs HEAD",
+	"n3\trebase (finish): x\nn3\trebase (pick): more\nn2\tcommit: more\nh1\tcommit: w\n")
+
 func TestLandingChecksTheReviewedCommit(t *testing.T) {
-	const diffFlags = "diff --no-ext-diff --no-textconv --no-color --full-index --src-prefix=a/ --dst-prefix=b/ -U0 "
-	landed := map[string]string{
-		"reflog show --format=%H%x09%gs HEAD":  "n2\trebase (finish): x\nn2\trebase (pick): w\nm\trebase (start): checkout origin/main\nh1\tcommit: w\n",
-		"merge-base origin/main h1":            "m\n",
-		"rev-list --reverse --no-merges m..h1": "h1\n",
-		"rev-list --no-merges m..origin/main":  "n2\no1\n",
-		diffFlags + "h1^ h1":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -4 +4 @@\n-old\n+new\n",
-		diffFlags + "o1^ o1":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -2 +2,2 @@\n-ctx\n+ctx1\n+ctx2\n",
-		diffFlags + "n2^ n2":                   "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5 +5 @@\n-old\n+new\n",
-	}
+	landed := landedGit
 	for _, tc := range []struct {
 		name, stage string
 		git         map[string]string
 	}{
 		{"as reviewed", "landed", landed},
-		{"commit after review", "zach", withAnswers(landed, "reflog show --format=%H%x09%gs HEAD",
-			"n3\trebase (finish): x\nn3\trebase (pick): more\nn2\tcommit: more\nh1\tcommit: w\n")},
-		{"reviewed commit diff changed", "zach", withAnswers(landed, diffFlags+"n2^ n2",
+		{"commit after review", "building", landedExtraGit},
+		{"reviewed commit diff changed", "building", withAnswers(landed, diffFlags+"n2^ n2",
 			"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5 +5 @@\n-old\n+edited\n")},
-		{"reviewed commit missing", "zach", withAnswers(landed, "rev-list --no-merges m..origin/main", "o1\n")},
+		{"reviewed commit missing", "building", withAnswers(landed, "rev-list --no-merges m..origin/main", "o1\n")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelReviewed: "h1"})
@@ -329,8 +336,9 @@ func TestLandingChecksTheReviewedCommit(t *testing.T) {
 			if l[labelStage] != tc.stage {
 				t.Errorf("labels = %v", l)
 			}
-			if tc.stage == "zach" && !strings.HasPrefix(l[labelNote], "landed diff differs from the reviewed one") {
-				t.Errorf("note = %q", l[labelNote])
+			if tc.stage == "building" && (l[labelNote] != "rebuilding: landed diff differs" || l[labelAutoReview] != "code" ||
+				len(p.sent("c1")) != 1 || !strings.Contains(p.sent("c1")[0], "already on origin/main")) {
+				t.Errorf("not sent back to building: %v %v", l, p.sent("c1"))
 			}
 		})
 	}

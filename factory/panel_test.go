@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -222,38 +223,99 @@ func TestReworkRoundAlwaysRechecksCorrectness(t *testing.T) {
 	}
 }
 
-func TestPanelReviewerWithoutVerdictRerunsOnceThenAsksZach(t *testing.T) {
+func TestPanelLensWithoutVerdictIsReplacedThenTheArbiterDecidesWithoutIt(t *testing.T) {
 	r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
 	r2 := lensReviewer("r2", "c1", lensArchitecture, "1")
 	r2.Labels[labelPrefix+labelApplied], r2.Labels[labelPrefix+labelVerdict] = "1", "approve"
-	f, p := newTestFactory(t, panelCard(nil), r1, r2)
-	storeLog(t, f, p, "r1", "I ran out of time.")
+	f, p, m := mailFactory(t, panelCard(nil), r1, r2)
 	storeLog(t, f, p, "r2", "Fine.\nTIER: risky\nVERDICT: approve")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
+	agents := []Agent{f.agent("c1"), r1, r2}
+	last := r1
+	for n := 1; n <= reviewerRetryCap+1; n++ {
+		storeLog(t, f, p, last.ID, "I ran out of time.")
+		if err := f.ApplyVerdict(f.agent(last.ID)); err != nil {
+			t.Fatal(err)
+		}
+		runs := p.runsWithLabel(labelPrefix + labelLens + "=" + lensCorrectness)
+		if n <= reviewerRetryCap {
+			if len(runs) != n || argLabel(runs[n-1], labelPanel) != "1" {
+				t.Fatalf("replacement %d = %v", n, runs)
+			}
+		} else if len(runs) != reviewerRetryCap {
+			t.Fatalf("replaced more than %d times: %d", reviewerRetryCap, len(runs))
+		}
+		if l := p.labels("c1"); l[labelStage] != "" {
+			t.Fatalf("card moved: %v", l)
+		}
+		last.Labels[labelPrefix+labelApplied] = "1"
+		next := lensReviewer(fmt.Sprintf("r1-%d", n), "c1", lensCorrectness, "1")
+		next.CreatedAt = last.CreatedAt.Add(time.Minute)
+		agents = append(agents, next)
+		f.SetAgents(agents)
+		last = next
 	}
-	runs := p.runsWithLabel(labelPrefix + labelLens + "=" + lensCorrectness)
-	if len(runs) != 1 || argLabel(runs[0], labelPanel) != "1" {
-		t.Fatalf("re-run = %v", runs)
+	arb := p.runsWithLabel(labelPrefix + labelLens + "=" + lensArbiter)
+	if len(arb) != 1 {
+		t.Fatalf("arbiter runs = %d", len(arb))
 	}
-	if l := p.labels("c1"); l[labelStage] != "" {
-		t.Fatalf("card moved: %v", l)
+	prompt := arb[0][len(arb[0])-1]
+	if !strings.Contains(prompt, "MISSING: correctness review") || !strings.Contains(prompt, "check that area") || !strings.Contains(prompt, "Fine.") {
+		t.Errorf("arbiter not told which lens is missing: %s", prompt)
 	}
-	r1.Labels[labelPrefix+labelApplied] = "1"
-	r4 := lensReviewer("r4", "c1", lensCorrectness, "1")
-	r4.CreatedAt = r1.CreatedAt.Add(time.Minute)
-	f.SetAgents([]Agent{f.agent("c1"), r1, r2, r4})
-	storeLog(t, f, p, "r4", "Again no verdict.")
-	if err := f.ApplyVerdict(f.agent("r4")); err != nil {
-		t.Fatal(err)
-	}
-	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != noVerdictNote {
-		t.Fatalf("card labels = %v", l)
-	}
-	if n := len(p.runsWithLabel(labelPrefix + labelLens + "=" + lensCorrectness)); n != 1 {
-		t.Errorf("re-ran twice: %d", n)
+	if l := p.labels("c1"); l[labelStage] == "zach" || len(m.sends()) != 0 {
+		t.Errorf("went to Zach: %v %v", l, m.sends())
 	}
 }
+
+func TestBlockedPanelLensIsReplacedOnItsOwn(t *testing.T) {
+	r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
+	r1.Status, r1.LastActivityAt = "running", t0.Add(-(stallMinutes+1)*time.Minute)
+	r2 := lensReviewer("r2", "c1", lensArchitecture, "1")
+	r2.Labels[labelPrefix+labelApplied], r2.Labels[labelPrefix+labelVerdict] = "1", "approve"
+	c := panelCard(nil)
+	c.LastActivityAt = t0.Add(-time.Hour)
+	f, p := newTestFactory(t, c, r1, r2)
+	f.Tick()
+	runs := p.runsWithLabel(labelPrefix + labelReviewKind + "=code")
+	if len(runs) != 1 || lensOf(runs[0]) != lensCorrectness || argLabel(runs[0], labelPanel) != "1" {
+		t.Fatalf("runs = %v", runs)
+	}
+	if !p.called("archive", "r1") || p.labels("r1")[labelVerdict] != "superseded" || p.labels("r2")[labelVerdict] != "" {
+		t.Errorf("wrong reviewers retired: r1 %v r2 %v", p.labels("r1"), p.labels("r2"))
+	}
+}
+
+func TestArbiterWithoutRulingIsReplacedOnceThenStuck(t *testing.T) {
+	r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
+	r1.Labels[labelPrefix+labelApplied], r1.Labels[labelPrefix+labelVerdict] = "1", "changes"
+	a1 := lensReviewer("a1", "c1", lensArbiter, "1")
+	f, p, m := mailFactory(t, panelCard(map[string]string{labelPanel: ""}), r1, a1)
+	storeLog(t, f, p, "r1", "Blocking: x.\nVERDICT: changes")
+	storeLog(t, f, p, "a1", "I could not decide.")
+	if err := f.ApplyVerdict(f.agent("a1")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.runsWithLabel(labelPrefix + labelLens + "=" + lensArbiter)); n != 1 {
+		t.Fatalf("arbiter replacements = %d", n)
+	}
+	a2 := lensReviewer("a2", "c1", lensArbiter, "1")
+	a2.CreatedAt = a1.CreatedAt.Add(time.Minute)
+	f.SetAgents(append(f.agents(), a2))
+	storeLog(t, f, p, "a2", "Still nothing.")
+	if err := f.ApplyVerdict(f.agent("a2")); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStuck] != stuckReview || l[labelStage] == "zach" || len(m.sends()) != 0 {
+		t.Fatalf("labels %v mails %v", l, m.sends())
+	}
+	if n := len(p.runsWithLabel(labelPrefix + labelLens + "=" + lensArbiter)); n != 1 {
+		t.Errorf("a third arbiter ran: %d", n)
+	}
+}
+
+// A ruling arbiter whose gate then fails (the round cap) keeps that gate: only a missing ruling marks
+// the card stuck. TestPanelRoundCapStillApplies covers the ruling side.
 
 func TestPanelRoundCapStillApplies(t *testing.T) {
 	r1 := lensReviewer("r1", "c1", lensCorrectness, "3")

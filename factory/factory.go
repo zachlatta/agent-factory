@@ -96,13 +96,13 @@ func (c *Config) defaults() {
 }
 
 type Factory struct {
-	quietMu     sync.Mutex
-	quiet       quietState
-	limitMu     sync.Mutex               // serializes error recovery ticks and explicit Resume
-	limitStates map[string]limitRecovery // latest persisted recovery across stale snapshots
-	panelMu     sync.Mutex               // guards panels and lenses (panel.go)
-	panels      map[string]string        // card id -> its open panel round ("" closed), ahead of stale snapshots
-	lenses      map[string]lensResult    // panel reviewer id -> its recorded result, ahead of stale snapshots
+	quietMu    sync.Mutex
+	quiet      quietState
+	recoveryMu sync.Mutex            // serializes recovery ticks and explicit Resume (recover.go)
+	recoveries map[string]recovery   // latest persisted recovery across stale snapshots
+	panelMu    sync.Mutex            // guards panels and lenses (panel.go)
+	panels     map[string]string     // card id -> its open panel round ("" closed), ahead of stale snapshots
+	lenses     map[string]lensResult // panel reviewer id -> its recorded result, ahead of stale snapshots
 
 	cfg    Config
 	p      Paseo

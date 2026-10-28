@@ -11,7 +11,7 @@ import (
 
 func TestPostLandingReplyRouting(t *testing.T) {
 	for _, via := range []string{"board", "email"} {
-		for _, note := range []string{"landing not verified", "landed; did not say what remains", "landed; still to do: finish"} {
+		for _, note := range []string{"landed; did not say what remains", "landed; still to do: finish"} {
 			t.Run(via+note, func(t *testing.T) {
 				c := card("c1", map[string]string{labelStage: "zach", labelNote: note, labelPlanRounds: "1", labelAutoReview: "code"})
 				f, p := newTestFactory(t, c)

@@ -79,6 +79,9 @@ func mailFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *fakeMail
 }
 
 // longPlan is a builder reply longer than the board's 6000-character Detail, ending in a question.
+// histWait is a Needs Zach wait that is still emailed, used where a test needs any such wait.
+const histWait = "history unavailable: decision paused"
+
 func longPlan() string {
 	return "PLAN START\n" + strings.Repeat("a step of the plan\n", 400) + "PLAN END\n\n" +
 		"QUESTION: Which store?\n- Postgres (recommended)\n- SQLite\n"
@@ -183,7 +186,7 @@ func TestApproveWordOnlyWhenYesApproves(t *testing.T) {
 	if len(words) != 2 || words[0].Word != "yes" || words[0].Does != "allow & build" || words[1].Word != "drop" {
 		t.Errorf("plan words = %+v", words)
 	}
-	stuck := card("c2", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})
+	stuck := card("c2", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"})
 	f, _, _ = mailFactory(t, stuck)
 	c, _ = f.card("c2")
 	var hasDone bool
@@ -294,17 +297,20 @@ func TestWhichWaitsAreEmailed(t *testing.T) {
 	}{
 		{"landed with work left", card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: browser check"}), nil, false},
 		{"landed did it finish", card("c1", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}), nil, false},
-		{"landing not verified", card("c1", map[string]string{labelStage: "zach", labelNote: "landing not verified"}), nil, false},
-		{"landed diff differs", card("c1", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: x"}), nil, false},
-		{"stuck", card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}), nil, false},
-		{"stuck reviewer", card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "review"}), []Agent{stuckReviewer}, false},
-		{"no verdict", card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}), nil, false},
+		{"landed diff differs, older wait", card("c1", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: x"}), nil, false},
+		{"landed diff differs, public scan failed", func() Agent {
+			a := card("c1", map[string]string{labelStage: "zach",
+				labelNote: "landed diff differs from the reviewed one: x" + landDiffScanMark + "found: tailnet-hostname a.go:3"})
+			a.Repo = publicRepo
+			return a
+		}(), nil, true},
+		{"stuck in its column", card("c1", map[string]string{labelStage: "building", labelStuck: stuckStopped}), nil, false},
+		{"stuck reviewer", card("c1", map[string]string{labelStage: "review", labelStuck: stuckReview}), []Agent{stuckReviewer}, false},
+		{"agent error", card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), nil, false},
 		{"reviewed commit unverified", card("c1", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}), nil, false},
 		{"parked changed since review", card("c1", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}), nil, false},
-		{"usage limit", card("c1", map[string]string{labelStage: "zach", labelNote: limitNote}), nil, false},
 		{"history unavailable", card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused"}), nil, false},
 		{"duplicate close", card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}), nil, false},
-		{"dependency wait", card("c1", map[string]string{labelStage: "zach", labelNote: depAskNote("d0e0001", depDropped)}), nil, false},
 		{"permission prompt", running(card("c1", map[string]string{labelStage: "zach"}), "Bash"), nil, false},
 		{"finished", attention("finished"), nil, false},
 		{"allow a build", planWait("c1", nil), nil, true},
@@ -461,8 +467,8 @@ func TestHealthReportsMailWithoutFailing(t *testing.T) {
 	}
 }
 
-func TestNoVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "plan-review"})
+func TestCloseVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
 	r := reviewer("r1", "c1", "plan")
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Provider, r.SessionID, r.Cwd = "claude", "s-oom", "/w/c1"
@@ -476,7 +482,7 @@ func TestNoVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
 	f.SetAgents([]Agent{c, r})
 	f.Tick()
 	if s := m.sends(); len(s) != 0 {
-		t.Fatalf("a review with no verdict is board-only: %+v", s)
+		t.Fatalf("a close verdict is board-only: %+v", s)
 	}
 	text := boardDetail(t, f, "c1")
 	for _, want := range []string{
@@ -492,7 +498,7 @@ func TestNoVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
 	}
 
 	// Missing transcript file says why it could not be read.
-	c2 := card("c2", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"})
+	c2 := card("c2", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
 	r2 := reviewer("r2", "c2", "code")
 	r2.Labels[labelPrefix+labelApplied] = "1"
 	r2.Provider, r2.SessionID, r2.Cwd = "claude", "missing-id", "/w/c2"

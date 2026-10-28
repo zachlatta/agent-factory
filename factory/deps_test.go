@@ -165,40 +165,35 @@ func TestHeldCardIsReleasedOnceDependencyLands(t *testing.T) {
 	}
 }
 
-func TestHeldCardGoesToZachWhenDependencyDroppedOrMissing(t *testing.T) {
+func TestHeldCardRebuildsWhenDependencyDroppedOrMissing(t *testing.T) {
 	for name, tc := range map[string]struct {
 		agents []Agent
-		note   string
-		title  string
+		state  string
+		says   string
 	}{
-		"dropped": {[]Agent{dep("building", true)}, "waits on d0e0001: it was dropped", "was dropped"},
-		"closed":  {[]Agent{dep("zach", true)}, "waits on d0e0001: it was dropped", "was dropped"},
-		"missing": {nil, "waits on d0e0001: no such card found", "find the card"},
+		"dropped": {[]Agent{dep("building", true)}, depDropped, "was dropped"},
+		"closed":  {[]Agent{dep("zach", true)}, depDropped, "was dropped"},
+		"missing": {nil, depMissing, "is not on the board"},
 	} {
-		f, p := newTestFactory(t, append(tc.agents, heldCard(nil))...)
+		f, p, m := mailFactory(t, append(tc.agents, heldCard(nil))...)
 		f.Tick()
 		l := p.labels("c1")
-		if l[labelStage] != "zach" || l[labelHeld] != "" || l[labelNote] != tc.note {
+		if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" || l[labelWaitsOn] != "" ||
+			l[labelNote] != "rebuilding: d0e0001 "+tc.state {
 			t.Errorf("%s: labels = %v", name, l)
 		}
-		if msgs := p.sent("c1"); len(msgs) != 0 {
+		msgs := p.sent("c1")
+		if len(msgs) != 1 || !strings.Contains(msgs[0], tc.says) || !strings.Contains(msgs[0], "rebuild without it") ||
+			!strings.Contains(msgs[0], "Code review runs again") {
 			t.Errorf("%s: sent = %v", name, msgs)
 		}
-		a := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: tc.note})
-		ask := askFor(Card{Stage: "zach"}, a)
-		if ask == nil || !strings.Contains(ask.Title, tc.title) || ask.Yes != "approve" || mailable(ask) {
-			t.Fatalf("%s: ask = %+v", name, ask)
+		if len(m.sends()) != 0 {
+			t.Errorf("%s: emailed Zach: %v", name, m.sends())
 		}
-		// Zach's Approve is the answer: it lands, with no second hold
-		f.SetAgents(append(tc.agents, a))
-		if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-			t.Fatal(err)
-		}
-		if l := p.labels("c1"); l[labelStage] != "landing" || l[labelHeld] != "" {
-			t.Errorf("%s: after approve labels = %v", name, l)
-		}
-		if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Land it now") {
-			t.Errorf("%s: after approve sent = %v", name, msgs)
+		// once rebuilt and reviewed, the land prompt is no longer held
+		a := withLabels(heldCard(nil), l)
+		if id, _ := f.pendingDep(a); id != "" {
+			t.Errorf("%s: still waits on %s", name, id)
 		}
 	}
 }
@@ -278,8 +273,16 @@ func TestVerifiedLandingDependency(t *testing.T) {
 	}
 }
 
-func TestDependencyAskRecoversAfterVerifiedLanding(t *testing.T) {
-	for _, note := range []string{depAskNote("d0e0001", depDropped), depAskNote("d0e0001", depMissing)} {
+// legacyDepNote is the Needs Zach note a dependency wait had before cards decided for themselves.
+func legacyDepNote(missing bool) string {
+	if missing {
+		return "waits on d0e0001: no such card found"
+	}
+	return "waits on d0e0001: it was dropped"
+}
+
+func TestOldDependencyWaitReleasesAfterVerifiedLanding(t *testing.T) {
+	for _, note := range []string{legacyDepNote(false), legacyDepNote(true)} {
 		t.Run(note, func(t *testing.T) {
 			d := dep("zach", true)
 			d.Labels[labelPrefix+labelLandedVerified] = "1"
@@ -306,19 +309,14 @@ func TestDependencyAskRecoversAfterVerifiedLanding(t *testing.T) {
 	}
 }
 
-func TestDependencyRecoveryStaysBlocked(t *testing.T) {
-	for _, name := range []string{"unverified", "diff changed", "unrelated ask", "running", "closed", "parked", "running on inspect"} {
+func TestOldDependencyWaitMovesToRecovery(t *testing.T) {
+	for _, name := range []string{"in flight again", "dropped", "unrelated ask", "running", "closed", "parked", "running on inspect"} {
 		t.Run(name, func(t *testing.T) {
-			d := dep("zach", false)
-			d.Labels[labelPrefix+labelLandedVerified] = "1"
-			c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote("d0e0001", depDropped)})
+			d := dep("building", false)
+			c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: legacyDepNote(false)})
 			switch name {
-			case "unverified", "diff changed":
-				delete(d.Labels, labelPrefix+labelLandedVerified)
-				d.Labels[labelPrefix+labelNote] = "landing not verified"
-				if name == "diff changed" {
-					d.Labels[labelPrefix+labelNote] = "landed diff differs from the reviewed one: changed"
-				}
+			case "dropped":
+				d.ArchivedAt = t0.Add(-time.Hour)
 			case "unrelated ask":
 				c.Labels[labelPrefix+labelNote] = "review passed: approve to land"
 			case "running":
@@ -334,11 +332,20 @@ func TestDependencyRecoveryStaysBlocked(t *testing.T) {
 				p.status["c1"] = "running"
 			}
 			f.Tick()
-			if l := p.labels("c1"); l[labelStage] != "" || l[labelHeld] != "" {
-				t.Errorf("moved blocked card: %v", l)
-			}
-			if len(p.sent("c1")) != 0 {
-				t.Error("sent blocked card a land prompt")
+			l := p.labels("c1")
+			switch name {
+			case "in flight again":
+				if l[labelStage] != "landing" || l[labelHeld] != "d0e0001" || len(p.sent("c1")) != 0 {
+					t.Errorf("not held again: %v %v", l, p.sent("c1"))
+				}
+			case "dropped":
+				if l[labelStage] != "building" || len(p.sent("c1")) != 1 {
+					t.Errorf("not rebuilt: %v %v", l, p.sent("c1"))
+				}
+			default:
+				if l[labelStage] != "" || l[labelHeld] != "" || len(p.sent("c1")) != 0 {
+					t.Errorf("moved blocked card: %v %v", l, p.sent("c1"))
+				}
 			}
 		})
 	}
@@ -346,7 +353,7 @@ func TestDependencyRecoveryStaysBlocked(t *testing.T) {
 
 func TestGuardedDependencyAskRecoveryScansAgain(t *testing.T) {
 	for _, clean := range []bool{false, true} {
-		c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote("d0e0001", depDropped),
+		c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: legacyDepNote(false),
 			labelReviewed: reviewedSHA})
 		c.Repo = publicRepo
 		d := dep("zach", true)
@@ -391,7 +398,7 @@ func TestFailedLandingDoesNotRecordVerifiedDependency(t *testing.T) {
 		storeLog(t, f, p, c.ID, "REMAINING: none")
 		f.Tick()
 		l := p.labels(c.ID)
-		if l[labelLandedVerified] != "" || l[labelStage] != "zach" {
+		if l[labelLandedVerified] != "" || l[labelStage] != "building" {
 			t.Errorf("failed verification recorded landing: %v", l)
 		}
 		for k, v := range l {

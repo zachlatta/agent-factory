@@ -69,17 +69,19 @@ func TestApprovedParkedHeldCardWaitsWhileDependencyInFlight(t *testing.T) {
 	}
 }
 
-func TestApprovedParkedHeldCardDroppedDependencyAsksZach(t *testing.T) {
+// A dropped dependency wakes the approved parked card to decide for itself, and its approval does not
+// carry over: code review runs again, then the land prompt.
+func TestApprovedParkedHeldCardDroppedDependencyRebuilds(t *testing.T) {
 	f, p, with := parkedHeld(t, true, nil)
 	with(dep("building", true))
 	headIs(f, reviewedSHA, nil)
 	f.Tick()
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || !isDepAskNote(l[labelNote]) || l[labelHeld] != "" || l[labelHeldApproved] != "" {
+	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" || l[labelHeldApproved] != "" || l[labelWaitsOn] != "" {
 		t.Errorf("labels = %v", l)
 	}
-	if len(p.sent("c1")) != 0 {
-		t.Errorf("sent = %v", p.sent("c1"))
+	if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "rebuild without it") {
+		t.Errorf("sent = %v", s)
 	}
 }
 

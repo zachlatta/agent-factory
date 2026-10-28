@@ -236,7 +236,7 @@ func (f *Factory) notePanel(id, panel string) {
 }
 
 // lensDone records a panel reviewer's verdict. The card moves only once its whole panel has one.
-// A reviewer that gave none is re-run once on its own.
+// A reviewer that gave none is replaced on its own, at most reviewerRetryCap times (recover.go).
 func (f *Factory) lensDone(rev, t Agent, verdict, tier string) error {
 	if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: verdict, labelLensTier: tier}); err != nil {
 		return err
@@ -249,33 +249,33 @@ func (f *Factory) lensDone(rev, t Agent, verdict, tier string) error {
 		return nil
 	}
 	lens := rev.L(labelLens)
-	if verdict == "" && !f.lensRerun(t.ID, panel, lens) {
+	if verdict == "" && f.lensRuns(t.ID, panel, lens) <= reviewerRetryCap {
 		c, ok := f.card(t.ID)
 		if !ok {
 			return nil
 		}
-		f.logf("%s of %s ended without verdict; re-running it once", lensNames[lens], short(t.ID))
+		f.logf("%s of %s ended without verdict; starting a replacement", lensNames[lens], short(t.ID))
 		return f.startLenses(c, []string{lens}, panel, "")
 	}
 	return f.closePanel(t)
 }
 
-// lensRerun reports whether lens already ran twice in card id's panel round.
-func (f *Factory) lensRerun(id, panel, lens string) bool {
+// lensRuns counts the reviewers of lens that ran in card id's panel round, replaced ones included.
+func (f *Factory) lensRuns(id, panel, lens string) int {
 	n := 0
 	byID := f.byID()
 	for _, r := range f.agents() {
 		if r.L(labelRole) == "reviewer" && r.L(labelLens) == lens && r.L(labelPanel) == panel &&
-			sameCard(byID, r.L(labelReviewOf), id) && f.lensResultOf(r).verdict != "superseded" {
+			sameCard(byID, r.L(labelReviewOf), id) {
 			n++
 		}
 	}
-	return n > 1
+	return n
 }
 
 // closePanel decides card t's open panel once every reviewer in it has a result: all approve, and
-// the factory decides with their notes merged; a reviewer still without a verdict after its re-run,
-// and the round has no verdict; anything else, and one arbiter decides from their reports.
+// the factory decides with their notes merged; anything else, a split or a lens still without a
+// verdict after its replacements, and one arbiter decides from the reports it has.
 func (f *Factory) closePanel(t Agent) error {
 	panel := f.openPanel(t)
 	lenses := f.panelLenses(t.ID, panel)
@@ -294,7 +294,7 @@ func (f *Factory) closePanel(t Agent) error {
 		}
 		switch {
 		case res.verdict == "":
-			verdict = ""
+			split = true // a lens is missing: the arbiter checks its area
 		case blocking(res.verdict):
 			split = true
 		case res.verdict == "nits" && verdict == "approve":
@@ -309,12 +309,7 @@ func (f *Factory) closePanel(t Agent) error {
 		return err
 	}
 	f.notePanel(t.ID, "")
-	switch {
-	case verdict == "":
-		// a reviewer gave no verdict even after its re-run: the round has none (decide asks Zach)
-		f.logf("panel %s of %s has a reviewer without verdict", panel, short(t.ID))
-		return f.decide(t, reviewOutcome{kind: "code", tier: tier, notes: notes, started: started, noRerun: true}, nil)
-	case !split:
+	if !split {
 		f.logf("panel %s of %s agrees: %s", panel, short(t.ID), verdict)
 		return f.decide(t, reviewOutcome{kind: "code", verdict: verdict, tier: tier, notes: notes, started: started}, nil)
 	}
@@ -330,6 +325,10 @@ func (f *Factory) panelReports(t Agent, panel string) (string, error) {
 	for _, l := range []string{lensCorrectness, lensArchitecture, lensUX} {
 		r, ok := lenses[l]
 		if !ok {
+			continue
+		}
+		if res := f.lensResultOf(r); res.done && res.verdict == "" {
+			out = append(out, "## MISSING: "+lensNames[l]+"\n"+missingLensNote)
 			continue
 		}
 		full, err := f.storedReply(r)

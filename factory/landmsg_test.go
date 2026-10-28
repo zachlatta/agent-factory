@@ -23,13 +23,9 @@ func TestLandingTextNamesNoScript(t *testing.T) {
 			t.Errorf("%s does not point at AGENTS.md", name)
 		}
 	}
-	ask := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"})}, nil, t0)[0].Ask
-	if ask == nil {
-		t.Fatal("no ask for landing not verified")
-	}
-	for _, a := range ask.Actions {
-		if strings.Contains(a.Hint, "bin/land") || strings.Contains(a.Label, "bin/land") {
-			t.Errorf("landing-not-verified action names bin/land: %+v", a)
+	for name, s := range map[string]string{"landFailMsg": landFailMsg("HEAD not on origin/main"), "landDiffMsg": landDiffMsg("extra commit")} {
+		if strings.Contains(s, "bin/land") {
+			t.Errorf("%s names bin/land: %q", name, s)
 		}
 	}
 }

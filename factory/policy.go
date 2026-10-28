@@ -575,7 +575,6 @@ type reviewOutcome struct {
 	lens, panel                string    // the panel arbiter's lens and panel round; "" for the others
 	gate                       bool      // the gate arbiter's ruling
 	source                     Agent     // the deciding reviewer, for the history grace; zero for a merged panel
-	noRerun                    bool      // no verdict, and its reviewer already re-ran: ask Zach
 }
 
 // decide moves card t once per review round. consume, when set, records the deciding reviewer's
@@ -611,8 +610,8 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 		tier = "low"
 	}
 	labels := map[string]string{}
-	if t.L(labelNoVerdict) != "" {
-		labels[labelNoVerdict] = ""
+	if t.L(labelReviewerRetries) != "" {
+		labels[labelReviewerRetries] = "" // a verdict or ruling counts: its replacements start afresh
 	}
 	if kind == "plan" {
 		labels[labelPlanFix] = "" // a plan verdict replaces the last round's fixes
@@ -620,22 +619,22 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	if tier != "" {
 		labels[labelTier] = tier
 	}
+	if verdict == "" {
+		// no verdict: never a question for Zach. A missing ruling gets one replacement arbiter, then the
+		// card is marked stuck (arbiterFailed); a single reviewer is replaced (replaceReviewer).
+		switch {
+		case r.gate:
+			return f.gateArbiterFailed(t, kind, "ended without a ruling")
+		case r.lens == lensArbiter:
+			return f.arbiterFailed(t, kind, r.panel, "ended without a verdict")
+		}
+		return f.replaceReviewer(t, kind, "ended without a verdict")
+	}
 	if r.gate {
 		// the arbiter's ruling settles the gate; it is not a review round
 		err := f.applyArbiter(t, kind, verdict, notes, tier, builderPlan, builderReply, labels)
 		f.logf("%s arbiter ruled %s for %s (tier %s)", kind, verdict, short(target), tier)
 		return err
-	}
-	if verdict == "" && t.L(labelNoVerdict) == "" && !r.noRerun {
-		// first no-verdict in this round: re-run once on its own before asking Zach
-		if err := f.setLabels(target, map[string]string{labelNoVerdict: "1"}); err != nil {
-			return err
-		}
-		f.logf("%s review for %s ended without verdict; re-running once", kind, short(target))
-		if r.lens == lensArbiter {
-			return f.startPanelArbiter(t, r.panel)
-		}
-		return f.rerunReview(t, kind)
 	}
 	var err error
 	roundsKey := roundsLabel(kind)
@@ -670,13 +669,6 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 		err = f.passPlan(t, labels, "plan fixes", tier, notes, builderPlan, builderReply, smallFix, "")
 	case verdict == "close":
 		err = set(labelStage, "zach", labelVerdict, "close", labelNote, "reviewer suggests closing")
-	case verdict == "":
-		// no question to put to Zach: offer a fresh review (rerun reads stuck-from)
-		from := "review"
-		if kind == "plan" {
-			from = "plan-review"
-		}
-		err = set(labelStage, "zach", labelVerdict, kind+" none", labelNote, noVerdictNote, labelStuckFrom, from)
 	case arbitrated(t, kind):
 		// the arbiter already ruled on this gate and it still did not settle: the board shows it
 		err = set(labelStage, "zach", labelVerdict, kind+" "+verdict, labelNote, arbiterStuckNote, labelStuckFrom, "")
@@ -872,10 +864,10 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 	if asks > dirtyAskCap {
 		f.logf("%s worktree still not clean after %d asks", c.Short, dirtyAskCap)
 		return f.setLabels(c.ID, map[string]string{labelStage: "zach", labelAutoReview: "",
-			labelNote: "worktree not clean for review", labelNoVerdict: ""})
+			labelNote: "worktree not clean for review", labelReviewerRetries: ""})
 	}
 	if err := f.setLabels(c.ID, map[string]string{labelStage: "building", labelAutoReview: "code",
-		labelSince: iso(f.Now()), labelDirtyAsks: fmt.Sprint(asks), labelNoVerdict: ""}); err != nil {
+		labelSince: iso(f.Now()), labelDirtyAsks: fmt.Sprint(asks), labelReviewerRetries: ""}); err != nil {
 		return err
 	}
 	f.logf("%s: worktree not clean, asked the builder to commit before review", c.Short)
@@ -1054,11 +1046,14 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		return nil
 	}
-	if handled, err := f.tickLimit(a, now); handled || err != nil {
+	if handled, err := f.tickError(a, now); handled || err != nil || a.Status == "error" {
 		return err
 	}
-	if a.Status == "error" {
-		return nil // an error wait shows on the board; it is never emailed
+	if a.L(labelStuck) != "" && a.Status == "running" && !a.archived() {
+		// running again (a reply, Resume or Re-run): automatic recovery starts afresh
+		if err := f.setLabels(a.ID, map[string]string{labelStuck: ""}); err != nil {
+			return err
+		}
 	}
 	routing := a.L(labelRouting) != ""
 	if a.L(labelStage) == "plan" && a.L(labelSource) == "board" && a.L(labelBase) == "" && !routing && !a.archived() {
@@ -1071,6 +1066,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 	}
 	f.markDepLanded(a)
+	f.clearNudges(a)
 	f.tickDelegate(a, now)
 	if heldApprovedParked(a) && a.Status != "running" {
 		// Zach approved this card while its dependency was in flight, then it was parked: release it
@@ -1080,8 +1076,8 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		return nil
 	}
-	if !a.stopped() {
-		return nil
+	if !a.stopped() || a.L(labelStuck) != "" {
+		return nil // a card marked stuck has no automatic move until it runs again or Zach acts
 	}
 	// "acted": the agent did something after the last move and is idle again. The 45 s grace covers
 	// the gap between `paseo send` and the agent flipping to running.
@@ -1163,23 +1159,25 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return f.waitForHistory(a, a, err)
 		}
 		if ok, why := f.landedOnMain(c.Cwd, a.L(labelBase)); !ok {
-			// stays unarchived so Zach can read what the agent did
+			// a push failure or rebase conflict: the card fixes its branch, then code review again
 			f.logf("%s landing not verified: %s", short(a.ID), why)
-			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: "landing not verified"})
+			return f.returnToBuild(a, "landing not verified", landFailMsg(why), false)
 		}
 		if reviewed := a.L(labelReviewed); reviewed != "" {
 			if ok, why := f.landedAsReviewed(c.Cwd, reviewed); !ok {
 				f.logf("%s landed diff differs from the reviewed one: %s", short(a.ID), why)
-				return f.setLabels(a.ID, map[string]string{labelStage: "zach",
-					labelNote: "landed diff differs from the reviewed one: " + trunc(why, 200)})
+				return f.landedDiffDiffers(a, c, why)
 			}
 		}
 		f.recordLanded(a, c.Cwd)
 		return f.finishLanding(a, c, reply)
-	case a.L(labelStage) == "zach" && isDepAskNote(a.L(labelNote)) && a.L(labelWaitsOn) != "" &&
-		depState(f.agents(), a, a.L(labelWaitsOn)) == depLanded:
-		return f.tickHeld(a, c)
-	case a.L(labelStage) == "zach" && f.Mail != nil && lineageTold(f.byID(), a) != waitNote(a) && mailable(c.Ask):
+	case a.L(labelStage) == "zach":
+		if moved, err := f.migrateWait(a, c); moved || err != nil {
+			return err
+		}
+		if f.Mail == nil || lineageTold(f.byID(), a) == waitNote(a) || !mailable(c.Ask) {
+			return nil
+		}
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
@@ -1217,7 +1215,7 @@ func (f *Factory) waitForHistory(card, source Agent, cause error) error {
 	})
 }
 
-// stuckWhy names what a card in a working column is missing, or "" when its next move is pending.
+// stuckWhy names the working columns, where automatic recovery runs, and what a stopped card there is missing.
 var stuckWhy = map[string]string{
 	"plan":        "Planner stopped, nothing queued",
 	"building":    "Builder stopped, nothing queued",
@@ -1226,13 +1224,13 @@ var stuckWhy = map[string]string{
 	"landing":     "Landing agent stopped without landing",
 }
 
-// checkStuck moves a stopped factory card to Needs Zach when no automatic move is coming for it:
-// nothing should sit waiting. It runs after the other rules,
-// so a card reaching it had no move this Tick. Needs Zach and Done are never stuck.
+// checkStuck recovers a stopped factory card when no automatic move is coming for it: nothing should
+// sit waiting. It runs after the other rules, so a card reaching it had no move this Tick. A review
+// column replaces its gone or blocked reviewer (replaceReviewer); plan, building and landing get a
+// nudge, then a re-run of their step (stepStuck). Needs Zach, Done and cards marked stuck are skipped.
 func (f *Factory) checkStuck(a Agent, now time.Time) error {
 	stage := a.L(labelStage)
-	why := stuckWhy[stage]
-	if why == "" {
+	if stuckWhy[stage] == "" || a.L(labelStuck) != "" {
 		return nil
 	}
 	ref := a.LastActivityAt
@@ -1255,39 +1253,19 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 		if stage == "review" && f.panelReady(a) {
 			return f.closePanel(a) // its last reviewer finished but the panel did not close (an unreadable report)
 		}
-		if !hasBlockedReviewer(agents, a.ID, now) && a.L(labelNoVerdict) == "" {
-			if live, err := f.stillStopped(a); !live {
-				return err
-			}
-			byID := f.byID()
-			for _, r := range agents {
-				if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), a.ID) && r.archived() && r.L(labelApplied) == "" {
-					if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: ""}); err != nil {
-						return err
-					}
-				}
-			}
-			if err := f.setLabels(a.ID, map[string]string{labelNoVerdict: "1"}); err != nil {
-				return err
-			}
-			kind := "code"
-			if stage == "plan-review" {
-				kind = "plan"
-			}
-			f.logf("%s %s reviewer gone without verdict; re-running once", short(a.ID), kind)
-			return f.rerunReview(a, kind)
+		if live, err := f.stillStopped(a); !live {
+			return err
 		}
+		return f.recoverReview(a, stage, agents, now)
 	}
 	if live, err := f.stillStopped(a); !live {
 		return err
 	}
-	f.logf("%s stuck in %s: %s", short(a.ID), stage, why)
-	labels := map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: stage,
-		labelAutoReview: ""}
-	if a.L(labelNoVerdict) != "" {
-		labels[labelNoVerdict] = ""
+	c, ok := f.card(a.ID)
+	if !ok {
+		return nil
 	}
-	return f.setLabels(a.ID, labels)
+	return f.stepStuck(a, c, stage)
 }
 
 func (f *Factory) rerunReview(a Agent, kind string) error {
@@ -1317,19 +1295,19 @@ func unappliedStoppedReviewer(agents []Agent, id string) bool {
 	return false
 }
 
-// hasBlockedReviewer reports whether card id has a live running reviewer that is stalled or
-// waiting on a permission prompt (reviewerBlocked).
-func hasBlockedReviewer(agents []Agent, id string, now time.Time) bool {
+// blockedReviewerOf is card id's first reviewer that is errored, stalled or waiting on a permission
+// prompt (reviewerBlocked).
+func blockedReviewerOf(agents []Agent, id string, now time.Time) (Agent, bool) {
 	byID := make(map[string]Agent, len(agents))
 	for _, a := range agents {
 		byID[a.ID] = a
 	}
 	for _, r := range agents {
 		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && reviewerBlocked(agents, r, now) {
-			return true
+			return r, true
 		}
 	}
-	return false
+	return Agent{}, false
 }
 
 // reviewPending reports whether card id has a reviewer that will still produce a verdict: one that
@@ -1415,8 +1393,7 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note})
 	}
 	if ok, why := f.landedOnMain(c.Cwd, a.L(labelBase)); !ok {
-		f.logf("%s direct card not on main: %s", short(a.ID), why)
-		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: "landing not verified"})
+		return f.returnDirect(a, why)
 	}
 	// the direct track pushes only its own work item; anything else needed the build track's reviews
 	outside, err := f.ownFilesOutside(c.Cwd, "work/")

@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 // Card dependencies. An approved plan may name one card this card lands after, with a line
 // "Waits on: <short id>" (ParseWaitsOn; stored as factory.waits-on when the plan review passes).
 // After code review passes, the land prompt is held while that card is in flight (factory.held,
 // stage landing) and sent by the next Tick once it lands. If it was dropped, or the factory cannot
-// find it, the card goes to Needs Zach with one question; his Approve lands it as reviewed.
+// find it, the card is told and goes back to building (rebuildWithoutDep): it decides itself whether
+// to rebuild without it or land as is, and either way code review runs again.
 
 // labelHeldApproved marks a held card Zach approved himself (the time). Only such a card is released
 // while parked: the release's land prompt is what wakes it, after the freshness and scan gates.
@@ -34,8 +34,8 @@ func ParseWaitsOn(text, self string) string {
 const (
 	depWaiting = "waiting" // in flight: hold the landing
 	depLanded  = "landed"  // Done or verified landing with follow-up work: land
-	depDropped = "dropped" // archived without landing (dropped or closed): ask Zach
-	depMissing = "missing" // not on the board: ask Zach
+	depDropped = "dropped" // archived without landing (dropped or closed): the card decides
+	depMissing = "missing" // not on the board: the card decides
 )
 
 // depOf is the state of the card with short id among agents. A Done card is landed even after it is
@@ -93,41 +93,8 @@ func (f *Factory) markDepLanded(a Agent) {
 	}
 }
 
-// Notes for held cards. Label values hold no commas (labelArg).
+// holdNote is a held card's note. Label values hold no commas (labelArg).
 func holdNote(id string) string { return "waits on " + id + " to land" }
-
-const (
-	depDroppedNote = ": it was dropped"
-	depMissingNote = ": no such card found"
-)
-
-func depAskNote(id, state string) string {
-	if state == depMissing {
-		return "waits on " + id + depMissingNote
-	}
-	return "waits on " + id + depDroppedNote
-}
-
-// depAsk is the one question for a card whose waits-on card was dropped or cannot be found.
-func depAsk(note string) *Ask {
-	id := strings.TrimPrefix(note, "waits on ")
-	id, _, _ = strings.Cut(id, ":")
-	title, what := "The card this waits on was dropped: land anyway?",
-		"was dropped or closed without landing"
-	if strings.HasSuffix(note, depMissingNote) {
-		title, what = "Can't find the card this waits on: land anyway?",
-			"is not on the board (a wrong id, or it left the board before it landed)"
-	}
-	return &Ask{Title: title, From: "builder",
-		Why: "The approved plan says this card lands after card " + id + ", which " + what + ". The code review " +
-			"passed and the landing is held. Land it as reviewed, tell the agent what to do instead, or drop it.",
-		Actions: []Action{primary("approve", "Land it anyway"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
-}
-
-func isDepAskNote(note string) bool {
-	return strings.HasPrefix(note, "waits on ") &&
-		(strings.HasSuffix(note, depDroppedNote) || strings.HasSuffix(note, depMissingNote))
-}
 
 // waitFlag is the board flag for a card with a waits-on line.
 func waitFlag(agents []Agent, a Agent) string {
@@ -151,8 +118,8 @@ func depHoldMsg(id, fb string) string {
 		"summary with it under 'UI feedback:'.\n\n" + fb
 }
 
-// tickHeld moves a held landing card on, or recovers a dependency ask once its dependency lands.
-// It sends the land prompt once landed, or asks Zach if the dependency was dropped or is missing.
+// tickHeld moves a held landing card on. It sends the land prompt once its dependency landed, or
+// sends the card back to building if the dependency was dropped or is missing.
 // A held card is never checked as a landing (or stuck): it has not been told to land.
 func (f *Factory) tickHeld(a Agent, c Card) error {
 	id := a.L(labelHeld)
@@ -167,9 +134,7 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 		return err
 	}
 	if st != depLanded {
-		f.logf("%s held: %s %s", short(a.ID), id, st)
-		return f.setLabels(a.ID, clearHeldApproval(a, map[string]string{labelStage: "zach", labelHeld: "",
-			labelNote: depAskNote(id, st)}))
+		return f.rebuildWithoutDep(a, id, st)
 	}
 	if hold := f.reviewHold(a, c.Cwd, c.Repo); hold != nil {
 		// the land prompt is for the reviewed commit only

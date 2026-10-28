@@ -88,16 +88,15 @@ func TestReviewPendingSkipsBlockedReviewers(t *testing.T) {
 	}
 }
 
-func TestBlockedReviewerSendsCardToZachWithRerun(t *testing.T) {
+func TestBlockedReviewerIsReplacedNotSentToZach(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		r     Agent
-		stuck bool
-		title string
+		name     string
+		r        Agent
+		replaced bool
 	}{
-		{"permission prompt", runningReviewer("r1", "c1", 10*time.Minute, "Bash: cd /w; rm /tmp/rv.log"), true, "Reviewer stuck on a permission prompt"},
-		{"stalled", runningReviewer("r1", "c1", 30*time.Minute, ""), true, "Reviewer stalled: no activity for 30 min"},
-		{"working", runningReviewer("r1", "c1", time.Minute, ""), false, ""},
+		{"permission prompt", runningReviewer("r1", "c1", 10*time.Minute, "Bash: cd /w; rm /tmp/rv.log"), true},
+		{"stalled", runningReviewer("r1", "c1", 30*time.Minute, ""), true},
+		{"working", runningReviewer("r1", "c1", time.Minute, ""), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "review", labelSince: ago(time.Hour)})
@@ -105,23 +104,16 @@ func TestBlockedReviewerSendsCardToZachWithRerun(t *testing.T) {
 			f, p := newTestFactory(t, c, tc.r)
 			f.Tick()
 			l := p.labels("c1")
-			if got := l[labelStage] == "zach" && l[labelNote] == "stuck" && l[labelStuckFrom] == "review"; got != tc.stuck {
-				t.Fatalf("stuck = %v, labels = %v", got, l)
+			if l[labelStage] == "zach" {
+				t.Fatalf("sent to Needs Zach: %v", l)
 			}
-			if !tc.stuck {
-				return
+			replaced := l[labelReviewerRetries] == "1" && p.called("archive", "r1") &&
+				len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) == 1
+			if replaced != tc.replaced {
+				t.Fatalf("replaced = %v, labels = %v, calls %v", replaced, l, p.calls)
 			}
-			ask := BuildBoard([]Agent{withLabels(c, l), tc.r}, nil, t0)[0].Ask
-			if ask == nil || ask.Title != tc.title || actionIDs(ask) != "rerun,reply,close" || ask.Actions[0].Label != "Re-run the review" {
-				t.Fatalf("ask = %+v", ask)
-			}
-			if tc.r.Pending != "" && !strings.Contains(ask.Why, tc.r.Pending) {
-				t.Errorf("why lacks the prompt: %q", ask.Why)
-			}
-			for _, x := range ask.Actions {
-				if strings.Contains(strings.ToLower(x.ID+x.Label), "permi") || x.ID == "approve" {
-					t.Errorf("ask offers to answer the prompt: %+v", x)
-				}
+			if tc.replaced && p.labels("r1")[labelVerdict] != "superseded" {
+				t.Errorf("blocked reviewer not superseded: %v", p.labels("r1"))
 			}
 		})
 	}
@@ -129,7 +121,7 @@ func TestBlockedReviewerSendsCardToZachWithRerun(t *testing.T) {
 
 func TestRerunSupersedesOldReviewers(t *testing.T) {
 	for _, status := range []string{"idle", "running"} {
-		c := card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "review"})
+		c := card("c1", map[string]string{labelStage: "review", labelStuck: stuckReview})
 		c.Status = status
 		old := runningReviewer("r1", "c1", time.Hour, "Bash: rm x")
 		done := reviewer("r0", "c1", "code")

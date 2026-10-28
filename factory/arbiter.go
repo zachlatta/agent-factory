@@ -161,7 +161,7 @@ func (f *Factory) startArbiter(t Agent, kind, last string, escalated bool) error
 	}
 	f.logf("started %s arbiter %s for %s", kind, short(rid), short(t.ID))
 	return f.setLabels(t.ID, map[string]string{labelStage: stage, labelArbitrated: done, labelNote: arbiterNote,
-		labelSince: iso(f.Now()), labelAutoReview: "", labelNoVerdict: ""})
+		labelSince: iso(f.Now()), labelAutoReview: ""})
 }
 
 // arbiterFixMsg sends the builder the arbiter's code fixes for one more round.

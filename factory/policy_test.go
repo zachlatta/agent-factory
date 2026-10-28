@@ -201,58 +201,55 @@ func TestChangesGoBackUntilReworkCap(t *testing.T) {
 	}
 }
 
-func TestMissingVerdictRerunsOnceBeforeAskingZach(t *testing.T) {
+func TestMissingVerdictReplacesReviewerTwiceThenTheArbiterThenStuck(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "review", labelTier: "low"})
-	r1 := reviewer("r1", "c1", "code")
-	f, p := newTestFactory(t, c, r1)
-	storeLog(t, f, p, "r1", "I ran out of time")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
+	f, p, m := mailFactory(t, c, reviewer("r1", "c1", "code"))
+	arbiterRuns := func() [][]string { return p.runsWithLabel(labelPrefix + labelLens + "=" + lensArbiter) }
+	steps := []Agent{reviewer("r1", "c1", "code"), reviewer("r2", "c1", "code"), reviewer("r3", "c1", "code"),
+		lensReviewer("a1", "c1", lensArbiter, "solo-code-1"), lensReviewer("a2", "c1", lensArbiter, "solo-code-1")}
+	for n, r := range steps {
+		if n > 0 {
+			f.SetAgents([]Agent{withLabels(c, p.labels("c1")), r})
+		}
+		storeLog(t, f, p, r.ID, "I ran out of time")
+		if err := f.ApplyVerdict(f.agent(r.ID)); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels("c1")
+		if p.labels(r.ID)[labelApplied] != "1" || !p.called("archive", r.ID) {
+			t.Errorf("%s not marked applied and archived: %v", r.ID, p.calls)
+		}
+		if l[labelStage] != "review" || l[labelCodeRounds] != "" {
+			t.Fatalf("%s: a missing verdict left review or counted a round: %v", r.ID, l)
+		}
+		runs, arb, stuck := len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))), len(arbiterRuns()), ""
+		want := map[int][3]int{0: {1, 0}, 1: {2, 0}, 2: {3, 1}, 3: {4, 2}, 4: {4, 2}}[n]
+		if n == len(steps)-1 {
+			stuck = stuckReview
+		}
+		if runs != want[0] || arb != want[1] || l[labelStuck] != stuck {
+			t.Fatalf("%s: %d reviews (%d arbiters), stuck %q; labels %v", r.ID, runs, arb, l[labelStuck], l)
+		}
 	}
-	l := p.labels("c1")
-	if l[labelStage] != "review" || l[labelNoVerdict] != "1" || l[labelCodeRounds] != "" {
-		t.Fatalf("first no-verdict should re-run in review without adding a round: labels = %v", l)
+	prompt := arbiterRuns()[0][len(arbiterRuns()[0])-1]
+	if argLabel(arbiterRuns()[0], labelPanel) != "solo-code-1" || !strings.Contains(prompt, "you are the reviewer that is missing") {
+		t.Errorf("arbiter not told the reviewer is missing: %s", prompt)
 	}
-	if p.labels("r1")[labelApplied] != "1" || !p.called("archive", "r1") {
-		t.Errorf("first reviewer not marked applied and archived: %v", p.calls)
+	if len(p.sent("c1")) != 0 || len(m.sends()) != 0 {
+		t.Errorf("a review that could not finish messaged the builder or emailed Zach: %v %v", p.sent("c1"), m.sends())
 	}
-	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
-		t.Fatalf("first no-verdict started %d reviews, want 1", len(runs))
-	}
-	if tm, ok := f.timings.get("c1"); ok && len(tm.Rounds) != 0 {
-		t.Errorf("first no-verdict recorded timing rounds: %+v", tm.Rounds)
-	}
-
-	// Second no-verdict in the same round moves the card to Needs Zach and clears no-verdict.
-	cAfterFirst := withLabels(c, l)
-	r2 := reviewer("r2", "c1", "code")
-	f.SetAgents([]Agent{cAfterFirst, r2})
-	storeLog(t, f, p, "r2", "killed again")
-	if err := f.ApplyVerdict(f.agent("r2")); err != nil {
-		t.Fatal(err)
-	}
-	l = p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != noVerdictNote || l[labelStuckFrom] != "review" ||
-		l[labelVerdict] != "code none" || l[labelCodeRounds] != "1" || l[labelNoVerdict] != "" {
-		t.Errorf("second no-verdict labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 0 {
-		t.Errorf("no brief without a question: %v", msgs)
-	}
-	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
-		t.Errorf("second no-verdict started another review: %d runs", len(runs))
-	}
-	if tm, _ := f.timings.get("c1"); len(tm.Rounds) != 1 || tm.Rounds[0].Verdict != "" || tm.Rounds[0].N != 1 {
-		t.Errorf("second no-verdict timing rounds = %+v", tm.Rounds)
+	stuck := withLabels(c, p.labels("c1"))
+	if ask := BuildBoard([]Agent{stuck}, nil, t0)[0].Ask; ask == nil || ask.Title != "Stuck: "+stuckReview || mailable(ask) {
+		t.Errorf("stuck ask = %+v", ask)
 	}
 
-	// Manual Re-run from Needs Zach starts a fresh review.
-	f.SetAgents([]Agent{withLabels(cAfterFirst, l)})
+	// Zach's Re-run starts a fresh review with its replacements reset.
+	f.SetAgents([]Agent{stuck})
 	if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
-	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 2 {
-		t.Errorf("rerun started %d total reviews, want 2", len(runs))
+	if l := p.labels("c1"); l[labelStuck] != "" || l[labelReviewerRetries] != "" || len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) != 5 {
+		t.Errorf("rerun: labels %v", l)
 	}
 }
 
@@ -270,12 +267,12 @@ func TestCardBeforeArchivedClosedReviewerStartsOnlyOneReviewer(t *testing.T) {
 		t.Fatalf("started %d reviewers in one Tick, want 1: %v", len(runs), p.calls)
 	}
 	l := p.labels("c1")
-	if l[labelStage] != "plan-review" || l[labelNoVerdict] != "1" {
+	if l[labelStage] != "plan-review" || l[labelReviewerRetries] != "1" {
 		t.Errorf("labels = %v", l)
 	}
 }
 
-func TestCheckStuckRerunsMissingReviewerOnce(t *testing.T) {
+func TestCheckStuckReplacesMissingReviewer(t *testing.T) {
 	since := ago(10 * time.Minute)
 	for _, tc := range []struct {
 		name  string
@@ -296,8 +293,8 @@ func TestCheckStuckRerunsMissingReviewerOnce(t *testing.T) {
 			f, p := newTestFactory(t, append([]Agent{c}, tc.extra...)...)
 			f.Tick()
 			l := p.labels("c1")
-			if l[labelStage] != tc.stage || l[labelNoVerdict] != "1" {
-				t.Fatalf("first stuck check should re-run in %s: labels = %v", tc.stage, l)
+			if l[labelStage] != tc.stage || l[labelReviewerRetries] != "1" {
+				t.Fatalf("first stuck check should replace the reviewer in %s: labels = %v", tc.stage, l)
 			}
 			if len(tc.extra) > 0 && p.labels("r1")[labelApplied] != "1" {
 				t.Errorf("archived running reviewer not marked applied: %v", p.labels("r1"))
@@ -305,24 +302,36 @@ func TestCheckStuckRerunsMissingReviewerOnce(t *testing.T) {
 			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
 				t.Fatalf("runs = %d, want 1", len(runs))
 			}
-
-			// Second missing reviewer in the same round goes to Needs Zach.
-			c2 := withLabels(c, l)
-			c2.Labels[labelPrefix+labelSince] = since
-			f.SetAgents([]Agent{c2})
-			f.Tick()
-			l = p.labels("c1")
-			if l[labelStage] != "zach" || l[labelNote] != "stuck" || l[labelStuckFrom] != tc.stage || l[labelNoVerdict] != "" {
-				t.Errorf("second stuck check labels = %v", l)
+			// each replacement that disappears too is replaced, up to the cap; then the card is marked stuck
+			for n := 2; n <= reviewerRetryCap+1; n++ {
+				c2 := withLabels(c, p.labels("c1"))
+				c2.Labels[labelPrefix+labelSince] = since
+				f.SetAgents([]Agent{c2})
+				f.Tick()
 			}
-			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
-				t.Errorf("second stuck check started another review: %d runs", len(runs))
+			l = p.labels("c1")
+			if l[labelStuck] != "" || len(p.runsWithLabel(labelPrefix+labelLens+"="+lensArbiter)) != 1 {
+				t.Fatalf("after the replacements the arbiter should review: labels = %v", l)
+			}
+			// arbiters that vanish too: one replacement, then stuck, counted on the card
+			for n := 0; n < 2; n++ {
+				c2 := withLabels(c, p.labels("c1"))
+				c2.Labels[labelPrefix+labelSince] = since
+				f.SetAgents([]Agent{c2})
+				f.Tick()
+			}
+			l = p.labels("c1")
+			if l[labelStage] != tc.stage || l[labelStuck] != stuckReview || l[labelNote] == "stuck" {
+				t.Errorf("after the arbiters: labels = %v", l)
+			}
+			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != reviewerRetryCap+2 {
+				t.Errorf("runs = %d, want %d", len(runs), reviewerRetryCap+2)
 			}
 		})
 	}
 }
 
-func TestFailedAutoRerunGoesToZachOnNextTick(t *testing.T) {
+func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.LastActivityAt = t0.Add(-time.Hour)
 	r := reviewer("r1", "c1", "plan")
@@ -334,25 +343,24 @@ func TestFailedAutoRerunGoesToZachOnNextTick(t *testing.T) {
 		t.Fatal("expected StartReview error when paseo run fails")
 	}
 	l := p.labels("c1")
-	if l[labelNoVerdict] != "1" {
-		t.Fatalf("no-verdict not recorded before StartReview: %v", l)
+	if l[labelReviewerRetries] != "1" {
+		t.Fatalf("replacement not counted before StartReview: %v", l)
 	}
 	p.runErr = nil
 	rApplied := withLabels(r, p.labels("r1"))
 	f.SetAgents([]Agent{withLabels(c, l), rApplied})
 	f.Tick()
 	l = p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != "stuck" || l[labelStuckFrom] != "plan-review" || l[labelNoVerdict] != "" {
-		t.Errorf("after failed auto-rerun, next Tick should send card to Zach: labels = %v", l)
+	if l[labelStage] != "plan-review" || l[labelReviewerRetries] != "2" || l[labelStuck] != "" {
+		t.Errorf("after failed auto-rerun, next Tick should start the second replacement: labels = %v", l)
 	}
-	// Only the single failed run call from ApplyVerdict was attempted; checkStuck did not retry again.
-	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
-		t.Errorf("runs = %d, want 1", len(runs))
+	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 2 {
+		t.Errorf("runs = %d, want 2", len(runs))
 	}
 }
 
-func TestVerdictAndDirtyCommitClearNoVerdictFlag(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelNoVerdict: "1"})
+func TestVerdictAndDirtyCommitClearReviewerRetries(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelReviewerRetries: "1"})
 	r := reviewer("r1", "c1", "plan")
 	f, p := newTestFactory(t, c, r)
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
@@ -361,13 +369,13 @@ func TestVerdictAndDirtyCommitClearNoVerdictFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := p.labels("c1")
-	if v, ok := l[labelNoVerdict]; !ok || v != "" || l[labelStage] != "plan" {
-		t.Errorf("valid verdict did not clear no-verdict: %v", l)
+	if v, ok := l[labelReviewerRetries]; !ok || v != "" || l[labelStage] != "plan" {
+		t.Errorf("valid verdict did not clear reviewer retries: %v", l)
 	}
 
-	// Same-pass dirty worktree: ApplyVerdict sets no-verdict=1, then StartReview sees a dirty tree and calls
-	// askToCommit in the same pass (while the cached agent snapshot still has no-verdict unset). askToCommit
-	// must still clear no-verdict so the next code review round gets its own retry allowance.
+	// Same-pass dirty worktree: ApplyVerdict counts a replacement, then StartReview sees a dirty tree and calls
+	// askToCommit in the same pass. askToCommit must clear the count so the next code review round gets its
+	// own replacements.
 	cDirty := card("c2", map[string]string{labelStage: "review", labelSource: "board"})
 	cDirty.Cwd = "/w/c2"
 	rDirty := reviewer("r2", "c2", "code")
@@ -381,8 +389,8 @@ func TestVerdictAndDirtyCommitClearNoVerdictFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	l2 := p2.labels("c2")
-	if v, ok := l2[labelNoVerdict]; !ok || v != "" || l2[labelStage] != "building" {
-		t.Errorf("same-pass askToCommit did not clear no-verdict: %v", l2)
+	if v, ok := l2[labelReviewerRetries]; !ok || v != "" || l2[labelStage] != "building" {
+		t.Errorf("same-pass askToCommit did not clear reviewer retries: %v", l2)
 	}
 }
 
@@ -429,7 +437,7 @@ func TestTickFinishesDirectCardWithoutReview(t *testing.T) {
 		mergeBase         error
 	}{
 		{name: "on main", stage: "landed", note: "done in one pass"},
-		{name: "not on main", stage: "zach", note: "landing not verified", mergeBase: errors.New("exit status 1")},
+		{name: "not on main: told to land again", stage: "", note: "landing its result again", mergeBase: errors.New("exit status 1")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
@@ -473,8 +481,8 @@ func TestTickFinishesLanding(t *testing.T) {
 		gitCalls    int
 	}{
 		{name: "on main", stage: "landed", gitCalls: 2},
-		{name: "not on main", stage: "zach", mergeBase: errors.New("exit status 1"), gitCalls: 2},
-		{name: "cwd gone", stage: "zach", gone: true},
+		{name: "not on main", stage: "building", mergeBase: errors.New("exit status 1"), gitCalls: 2},
+		{name: "cwd gone", stage: "building", gone: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "landing", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
@@ -497,8 +505,9 @@ func TestTickFinishesLanding(t *testing.T) {
 			if l[labelStage] != tc.stage {
 				t.Errorf("labels = %v", l)
 			}
-			if tc.stage == "zach" && l[labelNote] != "landing not verified" {
-				t.Errorf("note = %q", l[labelNote])
+			if tc.stage == "building" && (l[labelNote] != "rebuilding: landing not verified" || l[labelAutoReview] != "code" ||
+				len(p.sent("c1")) != 1 || !strings.Contains(p.sent("c1")[0], "Rebase on origin/main")) {
+				t.Errorf("not sent back to building: %v %v", l, p.sent("c1"))
 			}
 			if p.called("archive", "c1") {
 				t.Error("card archived")
@@ -679,7 +688,7 @@ func TestTickRecordsBaseCommitOfNewBoardCard(t *testing.T) {
 }
 
 func TestDirectCardNeedsACommitOfItsOwn(t *testing.T) {
-	for _, tc := range []struct{ head, stage string }{{"base1", "zach"}, {"new2", "landed"}} {
+	for _, tc := range []struct{ head, stage string }{{"base1", ""}, {"new2", "landed"}} {
 		c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute), labelBase: "base1"})
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
@@ -693,25 +702,26 @@ func TestDirectCardNeedsACommitOfItsOwn(t *testing.T) {
 	}
 }
 
-func TestStuckCardsGoToZach(t *testing.T) {
+func TestStoppedCardsRecoverInTheirColumn(t *testing.T) {
 	since := ago(10 * time.Minute)
 	for _, tc := range []struct {
 		name   string
 		labels map[string]string
 		extra  []Agent
-		stuck  bool
+		want   string // "nudge", "stuck" or "" (nothing)
 	}{
-		{"building, nothing queued", map[string]string{labelStage: "building", labelSince: since}, nil, true},
-		{"building, review queued", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: ago(10 * time.Second)}, nil, false},
-		{"plan, not a board card", map[string]string{labelStage: "plan", labelSince: since}, nil, true},
+		{"building, nothing queued", map[string]string{labelStage: "building", labelSince: since}, nil, "nudge"},
+		{"building, review queued", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: ago(10 * time.Second)}, nil, ""},
+		{"plan, not a board card", map[string]string{labelStage: "plan", labelSince: since}, nil, "nudge"},
 		{"plan review, reviewer running", map[string]string{labelStage: "plan-review", labelSince: since},
-			[]Agent{func() Agent { r := reviewer("r1", "c1", "plan"); r.Status = "running"; return r }()}, false},
-		{"code review, no reviewer at all after retry", map[string]string{labelStage: "review", labelSince: since, labelNoVerdict: "1"}, nil, true},
-		{"code review, reviewer applied after retry", map[string]string{labelStage: "review", labelSince: since, labelNoVerdict: "1"},
-			[]Agent{func() Agent { r := reviewer("r1", "c1", "code"); r.Labels[labelPrefix+labelApplied] = "1"; return r }()}, true},
-		{"landing, agent never acted", map[string]string{labelStage: "landing", labelSince: since}, nil, true},
-		{"building, inside the grace period", map[string]string{labelStage: "building", labelSince: ago(time.Minute)}, nil, false},
-		{"needs zach already", map[string]string{labelStage: "zach", labelSince: since}, nil, false},
+			[]Agent{func() Agent { r := reviewer("r1", "c1", "plan"); r.Status = "running"; return r }()}, ""},
+		{"code review, no reviewer after the replacements and arbiters", map[string]string{labelStage: "review", labelSince: since, labelReviewerRetries: "4"}, nil, "stuck"},
+		{"code review, reviewer applied after the replacements and arbiters", map[string]string{labelStage: "review", labelSince: since, labelReviewerRetries: "4"},
+			[]Agent{func() Agent { r := reviewer("r1", "c1", "code"); r.Labels[labelPrefix+labelApplied] = "1"; return r }()}, "stuck"},
+		{"landing, agent never acted", map[string]string{labelStage: "landing", labelSince: since}, nil, "nudge"},
+		{"building, inside the grace period", map[string]string{labelStage: "building", labelSince: ago(time.Minute)}, nil, ""},
+		{"needs zach already", map[string]string{labelStage: "zach", labelSince: since}, nil, ""},
+		{"already marked stuck", map[string]string{labelStage: "building", labelSince: since, labelStuck: stuckStopped}, nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", tc.labels)
@@ -719,16 +729,81 @@ func TestStuckCardsGoToZach(t *testing.T) {
 			if tc.name == "building, inside the grace period" {
 				c.LastActivityAt = t0.Add(-time.Minute)
 			}
-			f, p := newTestFactory(t, append([]Agent{c}, tc.extra...)...)
+			f, p, m := mailFactory(t, append([]Agent{c}, tc.extra...)...)
 			f.Tick()
 			l := p.labels("c1")
-			if got := l[labelStage] == "zach" && l[labelNote] == "stuck"; got != tc.stuck {
-				t.Fatalf("stuck = %v, labels = %v", got, l)
+			if l[labelStage] == "zach" || len(m.sends()) != 0 {
+				t.Fatalf("went to Needs Zach or emailed: %v %v", l, m.sends())
 			}
-			if tc.stuck && l[labelStuckFrom] != tc.labels[labelStage] {
-				t.Errorf("stuck-from = %q", l[labelStuckFrom])
+			got := ""
+			switch {
+			case l[labelStuck] != "":
+				got = "stuck"
+			case len(p.sent("c1")) == 1 && strings.HasPrefix(p.sent("c1")[0], "The factory has no next step"):
+				got = "nudge"
+			case len(p.sent("c1")) != 0 || len(l) != 0:
+				got = fmt.Sprintf("other: %v %v", l, p.sent("c1"))
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestStoppedCardIsNudgedThenRerunThenMarkedStuck(t *testing.T) {
+	for _, stage := range []string{"building", "landing"} {
+		t.Run(stage, func(t *testing.T) {
+			since := ago(10 * time.Minute)
+			c := card("c1", map[string]string{labelStage: stage, labelSince: since})
+			c.LastActivityAt = t0.Add(-time.Hour)
+			f, p := newTestFactory(t, c)
+			stopAgain := func() {
+				c = withLabels(c, p.labels("c1"))
+				c.Labels[labelPrefix+labelSince] = since
+				c.Labels[labelPrefix+labelStage] = stage // the re-run's move did not take: still nothing queued
+				f.SetAgents([]Agent{c})
+				f.Tick()
+			}
+			f.Tick()
+			if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "no next step") {
+				t.Fatalf("nudge = %v", msgs)
+			}
+			stopAgain()
+			rerun := len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) == 1
+			if stage == "landing" {
+				rerun = len(p.sent("c1")) == 2 && strings.Contains(p.sent("c1")[1], "re-running your landing")
+			}
+			if !rerun {
+				t.Fatalf("step not re-run: %v %v", p.calls, p.sent("c1"))
+			}
+			stopAgain()
+			if l := p.labels("c1"); l[labelStuck] != stuckStopped || l[labelStage] == "zach" {
+				t.Errorf("not marked stuck in its column: %v", l)
+			}
+			sent := len(p.sent("c1"))
+			stopAgain()
+			if len(p.sent("c1")) != sent {
+				t.Error("a card marked stuck was nudged again")
+			}
+		})
+	}
+}
+
+func TestNudgesStartAfreshAfterTheCardMoves(t *testing.T) {
+	since := ago(10 * time.Minute)
+	c := card("c1", map[string]string{labelStage: "building", labelSince: since})
+	c.LastActivityAt = t0.Add(-time.Hour)
+	f, p := newTestFactory(t, c)
+	f.Tick() // nudge 1
+	c = withLabels(c, p.labels("c1"))
+	c.Labels[labelPrefix+labelStage] = "review"
+	c.Labels[labelPrefix+labelSince] = iso(t0)
+	c.LastActivityAt = t0
+	f.SetAgents([]Agent{c})
+	f.Tick() // moved on: forgets the nudge
+	if r := readRecovery(withLabels(c, p.labels("c1"))); r.Nudges != 0 {
+		t.Fatalf("nudges kept after a move: %+v", r)
 	}
 }
 

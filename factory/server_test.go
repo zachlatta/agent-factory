@@ -106,7 +106,7 @@ func TestServer(t *testing.T) {
 func TestServerRoutesEveryAskAction(t *testing.T) {
 	f, p := newDiskFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
 		labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}),
-		card("c2", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}))
+		card("c2", map[string]string{labelStage: "review", labelStuck: stuckReview}))
 	h := f.Handler()
 	for _, tc := range []struct{ action, id string }{{"arbiter", "c1"}, {"rerun", "c2"}} {
 		req := httptest.NewRequest("POST", "/api/"+tc.action, strings.NewReader(`{"id":"`+tc.id+`"}`))

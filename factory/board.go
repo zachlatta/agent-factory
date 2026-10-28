@@ -178,8 +178,14 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				c.Stage = "zach" // shown only: its labels keep the column, and it returns when activity resumes
 			}
 		}
-		if r := readLimit(a); a.Status == "error" && r.Phase == "waiting" && !a.archived() {
-			c.Note = "Usage limit: resumes after " + r.Reset.UTC().Format(time.RFC3339)
+		if r := readRecovery(a); a.Status == "error" && r.Phase == "waiting" && !a.archived() {
+			c.Note = "Agent error: retries after " + r.Reset.UTC().Format(time.RFC3339)
+			if r.FromReset {
+				c.Note = "Usage limit: resumes after " + r.Reset.UTC().Format(time.RFC3339)
+			}
+		}
+		if why := stuckReason(a); why != "" && !a.archived() {
+			c.Flags = append(c.Flags, stuckFlagPrefix+why)
 		}
 		c.Unread = unread(a)
 		if a.RequiresAttention && a.AttentionReason != "finished" {

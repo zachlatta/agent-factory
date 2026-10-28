@@ -69,12 +69,13 @@ func askFor(c Card, a Agent) *Ask {
 }
 
 // boardOnly reports whether the wait is shown on the board only, never emailed: a finished or
-// hand-moved card, a running agent (permission prompt, stall, writing its summary), an error or usage
-// limit, a stuck step or reviewer, a review with no verdict, a reviewed commit that cannot be confirmed,
-// a close or duplicate verdict, a dependency wait, a review that did not settle (the arbiter's to
-// decide, not his), and the checks after landing.
+// hand-moved card, a running agent (permission prompt, stall, writing its summary), a card marked stuck
+// by automatic recovery (recover.go), a paused decision, a reviewed commit that cannot be confirmed, a
+// close or duplicate verdict, a review that did not settle (the arbiter's to decide, not his), and the
+// checks after landing.
 // Decisions (allowing a build, previews, landings, repo choice, the secret scan, an agent waiting on him)
-// are emailed.
+// are emailed, and so is a landed diff on a public repo whose secret scan did not pass: something
+// unreviewed may already be public.
 func boardOnly(c Card, a Agent, ask *Ask) bool {
 	note := a.L(labelNote)
 	switch {
@@ -82,19 +83,16 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 		return true
 	case a.Status == "running":
 		return true
-	case note == limitNote || strings.HasPrefix(note, "history unavailable"):
-		return true
-	case note == "stuck" || note == noVerdictNote:
+	case a.L(labelStuck) != "" || strings.HasPrefix(note, "history unavailable"):
 		return true
 	case strings.HasPrefix(note, unverifiedReviewNote):
 		// a technical stop: nothing landed, and Re-run on the board starts the fresh review
 		return true
 	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
 		return true
-	case isDepAskNote(note):
-		return true
-	case note == "landing not verified" || note == "landed; did not say what remains" ||
-		strings.HasPrefix(note, "landed; still to do: ") || strings.HasPrefix(note, "landed diff differs"):
+	case strings.HasPrefix(note, landDiffNotePrefix):
+		return !strings.Contains(note, landDiffScanMark)
+	case note == "landed; did not say what remains" || strings.HasPrefix(note, "landed; still to do: "):
 		return true
 	case a.L(labelVerdict) == "close" && ask.Title == closeTitle:
 		return true
@@ -136,6 +134,9 @@ const repoTitle = "Which repo should this start in?"
 
 // baseAsk builds the Ask for a Needs Zach card from its labels and Paseo attention state.
 func baseAsk(c Card, a Agent) *Ask {
+	if a.L(labelStuck) != "" && !a.archived() {
+		return stuckAsk(a) // stays in its column: shown on the board, never emailed
+	}
 	if c.Stage != "zach" {
 		return nil
 	}
@@ -156,8 +157,6 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Title: "Running, but no activity for " + strings.TrimPrefix(stalledFlag(c), "stalled "), From: "builder",
 			Why:     "The agent has been quiet a long time. It may be on a slow step or hung. Stop it, or send it a message.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
-	case note == limitNote:
-		return limitAsk(a)
 	case strings.HasPrefix(note, "history unavailable"):
 		return &Ask{Title: "History unavailable: decision paused", From: "builder",
 			Why: "The factory could not read the session history needed for this decision within two minutes of the turn stopping. " +
@@ -165,17 +164,6 @@ func baseAsk(c Card, a Agent) *Ask {
 			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
-	case note == "stuck" && (a.L(labelStuckFrom) == "review" || a.L(labelStuckFrom) == "plan-review"):
-		if r, ok := blockedReviewer(c); ok {
-			return blockedReviewerAsk(r)
-		}
-		fallthrough
-	case note == "stuck":
-		from := a.L(labelStuckFrom)
-		return &Ask{Title: "Stuck in " + stageName(from) + ": nothing is queued", From: "builder",
-			Why: stuckWhy[from] + ". The factory had no next step for it, so it moved here. The agent's last message is below.",
-			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"),
-				act("done", "Mark done"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "plan":
 		return &Ask{Title: "Allow this build?", From: "builder",
 			Why: "Other agents reviewed the plan. Building it would change something outside its own copy of the code (or that was not ruled out), so nothing is built until you allow it. A code review still runs before it lands.",
@@ -200,11 +188,6 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "Nothing was landed or published. The factory lands only the commit its code review saw, and here " +
 				strings.TrimPrefix(note, unverifiedReviewNote) + ". Re-running starts a fresh code review of what the card has now.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
-	case note == noVerdictNote:
-		return &Ask{Title: "The review didn't finish properly", From: "reviewer",
-			Why: "The reviewer stopped without a verdict, so the factory can't tell whether the work passed. " +
-				"Its last message is below. Re-running starts a fresh review.",
-			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
 		// the last two are cards that waited for Zach's brief before the arbiter took over the cap
 		return settleAsk()
@@ -212,12 +195,6 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
 			Actions: []Action{primary("close", "Close it"), reply("Keep going", "Why it is still needed")}}
-	case isDepAskNote(note):
-		return depAsk(note)
-	case note == "landing not verified":
-		return &Ask{Title: "Landing didn't reach main", From: "builder",
-			Why:     "The agent finished landing, but its commit is not on origin/main. Its last message is below.",
-			Actions: []Action{reply("Tell it to retry", "e.g. rebase and land it again"), act("done", "It's fine, mark done")}}
 	case strings.HasPrefix(note, "landed; still to do: "):
 		return &Ask{Title: "Landed, with work left", From: "builder",
 			Why: "The agent landed its change but says part of this card is not done: " +
@@ -228,12 +205,18 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "The agent landed its change but did not end with a REMAINING line, so the factory can't tell " +
 				"whether anything is left. Its last message is below.",
 			Actions: []Action{primary("done", "Mark done"), reply("Reply", "e.g. what is left?")}}
-	case strings.HasPrefix(note, "landed diff differs from the reviewed one"):
+	case strings.HasPrefix(note, landDiffNotePrefix):
+		// a public repo whose landed range failed the secret scan or could not be scanned (others go back
+		// to building), or an older wait from before that
+		why := "What reached main is not exactly the reviewed commits (" +
+			strings.TrimPrefix(strings.TrimPrefix(note, landDiffNotePrefix), ": ") + "). Check what landed."
+		if strings.Contains(note, landDiffScanMark) {
+			why = "What reached public main is not exactly the reviewed commits, and the secret scan of what landed did " +
+				"not pass (" + strings.TrimPrefix(strings.TrimPrefix(note, landDiffNotePrefix), ": ") +
+				"). Treat anything it found as exposed."
+		}
 		return &Ask{Title: "Landed something other than what was reviewed", From: "builder",
-			Why: "What reached main is not exactly the reviewed commits (" +
-				strings.TrimPrefix(strings.TrimPrefix(note, "landed diff differs from the reviewed one"), ": ") +
-				"). Check what landed. Its last message is below.",
-			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
+			Why: why + " Its last message is below.", Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
 	case a.L(labelStage) == "zach":
 		return &Ask{Title: handTitle, From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",
@@ -268,9 +251,6 @@ func repoAsk(note, candidates string) *Ask {
 	return ask
 }
 
-// noVerdictNote marks a card whose reviewer ended without a VERDICT line.
-const noVerdictNote = "reviewer gave no verdict"
-
 // askQuestions is the builder's QUESTION blocks shown with ask: none on a review that did not settle.
 // Those were written for a ruling the arbiter now makes, and its action carries no answers, so picking one
 // could only be refused; Zach can still write his own answer through the reply.
@@ -289,28 +269,6 @@ func settleAsk() *Ask {
 			"builder what to do. The builder's last message is below.",
 		Actions: []Action{primary("arbiter", "Let an agent decide"), reply("Tell it what to do", "e.g. ignore the second point, fix the first"),
 			act("close", "Drop it")}}
-}
-
-// blockedReviewerAsk offers a fresh review for a card whose reviewer is stuck on a permission
-// prompt or stalled. It never offers to answer the prompt.
-func blockedReviewerAsk(r Child) *Ask {
-	acts := []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}
-	if r.Status == "error" {
-		return &Ask{Title: "Reviewer stopped with an error", From: "reviewer", Actions: acts,
-			Why: "The reviewer failed. Re-run retires it and starts a fresh review."}
-	}
-	if r.Blocked == "waiting on permission" {
-		why := "Claude Code asked the reviewer for permission"
-		if r.Permission != "" {
-			why += " (" + r.Permission + ")"
-		}
-		return &Ask{Title: "Reviewer stuck on a permission prompt", From: "reviewer", Actions: acts,
-			Why: why + ", which it does even in bypass mode, and the factory never answers prompts. Re-run stops this " +
-				"reviewer and starts a fresh one. Or approve the prompt in Paseo and the review carries on."}
-	}
-	return &Ask{Title: "Reviewer " + strings.Replace(r.Blocked, "stalled ", "stalled: no activity for ", 1), From: "reviewer",
-		Actions: acts, Why: "The reviewer has been running a long time with no activity; it may be hung. Re-run stops it " +
-			"and starts a fresh review. If it finishes first, its verdict still moves the card on."}
 }
 
 func stalledFlag(c Card) string {

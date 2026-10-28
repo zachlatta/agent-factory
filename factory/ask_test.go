@@ -42,8 +42,8 @@ func TestAskFor(t *testing.T) {
 			"Reviews didn't settle", "builder", "arbiter,reply,close"},
 		{"older escalation", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),
 			"Reviews didn't settle", "builder", "arbiter,reply,close"},
-		{"no verdict", card("c", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}),
-			"The review didn't finish properly", "reviewer", "rerun,reply,close"},
+		{"review stuck in its column", card("c", map[string]string{labelStage: "review", labelStuck: stuckReview}),
+			"Stuck: review could not finish", "builder", "rerun,reply,close"},
 		{"no reviewed commit", card("c", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}),
 			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
 		{"reviewed commit unreadable", card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
@@ -58,14 +58,14 @@ func TestAskFor(t *testing.T) {
 		}(), "Writing a summary for you…", "builder", "stop"},
 		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}),
 			"Reviewer thinks this isn't needed", "reviewer", "close,reply"},
-		{"landing unverified", card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"}),
-			"Landing didn't reach main", "builder", "reply,done"},
+		{"agent error stuck in its column", card("c", map[string]string{labelStage: "building", labelStuck: stuckAgentError}),
+			"Stuck: the agent keeps failing", "builder", "resume,reply,close"},
 		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}},
 			"Finished: read the result", "builder", "done,reply"},
 		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}},
 			"Waiting on you: permission", "builder", "reply,done"},
-		{"stuck", card("c", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}),
-			"Stuck in Building: nothing is queued", "builder", "rerun,reply,done,close"},
+		{"stopped card stuck in its column", card("c", map[string]string{labelStage: "landing", labelStuck: stuckStopped}),
+			"Stuck: stopped with nothing queued", "builder", "rerun,reply,close"},
 		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),
 			"Moved here by hand", "builder", "reply,done"},
 		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: push 2"}),
@@ -98,7 +98,7 @@ func TestAskFor(t *testing.T) {
 }
 
 func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote})
+	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
 	r := reviewer("r1", "c1", "code")
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
@@ -212,7 +212,7 @@ func TestLandedAsks(t *testing.T) {
 }
 
 func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "plan-review"})
+	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
 	r := reviewer("r1", "c1", "plan")
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Provider, r.SessionID, r.Cwd = "claude", "s-mid", "/w/c1"

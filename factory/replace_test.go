@@ -81,6 +81,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
 		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
 		labelLandedVerified: "1",
+		labelRecovery:       "e30", labelReviewerRetries: "1",
 		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
 		labelDelegated: "2026-10-25T19:00:00Z", labelArbitrated: "plan", labelWorkLeftRounds: "2", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
 	})

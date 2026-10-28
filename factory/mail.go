@@ -349,10 +349,11 @@ func (f *Factory) cardLink(id string) string {
 func letter(i int) string { return string(rune('A' + i)) }
 
 // factoryRaised reports whether card a stopped for a check the factory raised itself (a secret scan,
-// an unreviewed public-repo push), where the agent's last reply was not written as a decision for Zach.
+// an unreviewed public-repo push, a landed diff that differs from its review), where the agent's last reply was not written as a decision for Zach.
 func factoryRaised(a Agent) bool {
 	note := a.L(labelNote)
-	return strings.HasPrefix(note, "secret scan") || strings.HasPrefix(note, "public repo: finished without review")
+	return strings.HasPrefix(note, "secret scan") || strings.HasPrefix(note, "public repo: finished without review") ||
+		strings.HasPrefix(note, landDiffNotePrefix)
 }
 
 type evidenceSlot struct {

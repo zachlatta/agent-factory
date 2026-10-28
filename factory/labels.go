@@ -7,8 +7,7 @@ const labelPrefix = "factory."
 
 // Factory label keys, without labelPrefix.
 const (
-	labelLimit      = "limit-recovery" // persisted quota deadline and single recovery attempt
-	labelQuiet      = "quiet"          // anchor identity used to repair detached factory roots
+	labelQuiet      = "quiet" // anchor identity used to repair detached factory roots
 	labelStage      = "stage"
 	labelSince      = "since"
 	labelAutoReview = "auto-review"
@@ -30,7 +29,7 @@ const (
 	labelSource     = "source"
 	labelAgent      = "agent"        // the AgentChoice id that plans and builds the card
 	labelBase       = "base"         // the worktree's HEAD when the card was first seen: its own commits come after
-	labelStuckFrom  = "stuck-from"   // the column a stuck card left for Needs Zach
+	labelStuckFrom  = "stuck-from"   // the column a card paused for Needs Zach left (history unavailable)
 	labelTold       = "told"         // the Needs Zach note already emailed to Zach (mail.go)
 	labelZachThread = "zach-thread"  // cards with no gmail-thread: the zrl-bot thread the factory emails Zach in
 	labelAnswered   = "answered"     // the last email reply from Zach applied to the card (answer.go)
@@ -51,7 +50,6 @@ const (
 	labelReplaces   = "replaces"     // predecessor card agent id replaced by this agent (replace.go)
 	labelReplacedBy = "replaced-by"  // replacement card agent id that took over this card (replace.go)
 	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
-	labelNoVerdict  = "no-verdict"   // the current review round already re-ran once after a reviewer gave no verdict
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
 	labelDelegated  = "delegated"    // an email or voice card got the sub-agent section from the factory (inbox.go)
 	labelArbiter    = "arbiter"      // on a reviewer: it is its card's arbiter (arbiter.go)
@@ -63,6 +61,16 @@ const (
 // labelCodeOK is the HEAD a completed code review (or arbiter) passed, set where the card moves on
 // (passCode) and cleared when any review starts. bin/land's landing review reuses only that approval.
 const labelCodeOK = "code-approved"
+
+// Automatic recovery (recover.go).
+const (
+	labelRecovery        = "recovery"         // error retries, stopped-card steps and landing returns
+	labelStuck           = "stuck"            // why a card stays in its column after its recovery ran out
+	labelReviewerRetries = "reviewer-retries" // replacement reviewers started in the current review round
+)
+
+// legacyLimitLabel held the error recovery state before factory.recovery; it is read once, then cleared.
+const legacyLimitLabel = "limit-recovery"
 
 // labelLandedVerified records that commits reached main and passed the reviewed-change check.
 // It survives later work on the card and closure.

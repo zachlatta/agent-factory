@@ -45,6 +45,12 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		return nil, errors.New("unknown card")
 	}
 	now := iso(f.Now())
+	if a := f.agent(c.ID); a.L(labelStuck) != "" && (action == "stage" || action == "review" || action == "send" && !errorStuck(a)) {
+		// Zach took the card on: its automatic recovery starts afresh (Re-run and Resume clear it themselves)
+		if err := f.setLabels(c.ID, map[string]string{labelStuck: ""}); err != nil {
+			return nil, err
+		}
+	}
 	switch action {
 	case "stage":
 		if !validStage(b.Stage) {
@@ -71,7 +77,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		_, err := f.StartReview(c, kind)
 		return ok, err
 	case "resume":
-		return ok, f.resumeLimit(f.agent(c.ID), "Resume the interrupted step. Check the current worktree before continuing.", nil)
+		return ok, f.resumeError(f.agent(c.ID), "Resume the interrupted step. Check the current worktree before continuing.", nil)
 	case "send":
 		if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
 			return nil, errors.New("message is empty")
@@ -85,8 +91,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			// his email reply, as a follow-up block so the card's request and reviewer prompts show it
 			msg, via = f.emailFollowUp(msg), "Zach answered by email while the card waited on him:\n\n"
 		}
-		if a := f.agent(c.ID); a.L(labelNote) == limitNote {
-			return ok, f.resumeLimit(a, via+msg, b.Attachments)
+		if a := f.agent(c.ID); errorStuck(a) {
+			return ok, f.resumeError(a, via+msg, b.Attachments)
 		}
 		if a := f.agent(c.ID); a.L(labelStage) == "zach" && strings.HasPrefix(a.L(labelNote), "history unavailable") {
 			// Retire the paused review before sending new work. Its file can appear
@@ -289,12 +295,30 @@ func replyLabels(a Agent, now string, guarded bool) map[string]string {
 	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code"}
 }
 
-// rerun restarts the step a stuck card left (factory.stuck-from): its review, or its landing.
+// rerun restarts the step a stuck card left: its column when it is marked stuck there (factory.stuck),
+// else the column it left for Needs Zach (factory.stuck-from). Its automatic retries start afresh.
 func (f *Factory) rerun(c Card) error {
-	if a := f.agent(c.ID); a.L(labelRouting) != "" {
+	a := f.agent(c.ID)
+	if a.L(labelRouting) != "" {
 		return f.routeFromReply(a) // a picker's step is reading its REPO line, not a plan review
 	}
-	switch from := f.agent(c.ID).L(labelStuckFrom); from {
+	from := a.L(labelStuckFrom)
+	if a.L(labelStuck) != "" {
+		from = a.L(labelStage)
+	}
+	if from == "" {
+		return errors.New("this card is not stuck")
+	}
+	if err := f.updateRecovery(a, func(r *recovery) { r.Nudges, r.NudgeStage = 0, "" },
+		map[string]string{labelStuck: "", labelReviewerRetries: ""}); err != nil {
+		return err
+	}
+	return f.rerunStep(c, from)
+}
+
+// rerunStep re-runs the step of column from for card c: its review, or its landing.
+func (f *Factory) rerunStep(c Card, from string) error {
+	switch from {
 	case "landing":
 		if hold := f.reviewHold(f.agent(c.ID), c.Cwd, c.Repo); hold != nil {
 			hold = clearHeldApproval(f.agent(c.ID), hold)
@@ -312,7 +336,7 @@ func (f *Factory) rerun(c Card) error {
 		if err := f.sendLanding(c.ID, rerunLandMsg(guarded)); err != nil {
 			return err
 		}
-		return f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run by Zach"})
+		return f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run"})
 	case "plan", "plan-review", "building", "review":
 		kind := "code"
 		if from == "plan" || from == "plan-review" {
@@ -322,16 +346,7 @@ func (f *Factory) rerun(c Card) error {
 			return err
 		}
 		if c.Status == "running" {
-			labels := map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())}
-			if f.agent(c.ID).L(labelNoVerdict) != "" {
-				labels[labelNoVerdict] = ""
-			}
-			return f.setLabels(c.ID, labels)
-		}
-		if f.agent(c.ID).L(labelNoVerdict) != "" {
-			if err := f.setLabels(c.ID, map[string]string{labelNoVerdict: ""}); err != nil {
-				return err
-			}
+			return f.setLabels(c.ID, map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())})
 		}
 		_, err := f.StartReview(c, kind)
 		return err
@@ -465,5 +480,5 @@ func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
 // landingReply resumes verification or completion reporting without queuing a code review.
 func landingReply(a Agent) bool {
 	note := a.L(labelNote)
-	return note == "landing not verified" || note == "landed; did not say what remains"
+	return note == "landed; did not say what remains"
 }

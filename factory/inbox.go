@@ -36,6 +36,9 @@ func (f *Factory) landMsgFor(a Agent) string {
 	if f.guarded(a.Repo) {
 		msg = guardedLandMsg
 	}
+	if readRecovery(a).LandedDiff {
+		msg = landedDiffLandNote + msg
+	}
 	t := emailThread(a)
 	if t == "" || a.L(labelWorkLeftRounds) != "" {
 		return msg + remainingRule
