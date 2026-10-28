@@ -21,14 +21,16 @@ const (
 	handoffTextCap      = 12000
 )
 
-// handoffState is factory.handoff: "<phase> <new id or -> <choice id> <unix seconds> <tries>".
-// Phases: starting, started, confirmed, failed.
+// handoffState is factory.handoff: "<phase> <new id or -> <choice id> <unix seconds> <tries> [kind]".
+// Phases: starting, started, confirmed, failed. Kind is "" for a model hand-off and "stage" for a
+// fresh agent at a stage change (stagehandoff.go).
 type handoffState struct {
 	Phase  string
 	New    string
 	Choice string
 	At     time.Time
 	Tries  int
+	Kind   string
 }
 
 func (s handoffState) String() string {
@@ -36,12 +38,16 @@ func (s handoffState) String() string {
 	if n == "" {
 		n = "-"
 	}
-	return fmt.Sprintf("%s %s %s %d %d", s.Phase, n, s.Choice, s.At.Unix(), s.Tries)
+	out := fmt.Sprintf("%s %s %s %d %d", s.Phase, n, s.Choice, s.At.Unix(), s.Tries)
+	if s.Kind != "" {
+		out += " " + s.Kind
+	}
+	return out
 }
 
 func parseHandoff(v string) handoffState {
 	p := strings.Fields(v)
-	if len(p) != 5 {
+	if len(p) != 5 && len(p) != 6 {
 		return handoffState{}
 	}
 	sec, err1 := strconv.ParseInt(p[3], 10, 64)
@@ -52,6 +58,9 @@ func parseHandoff(v string) handoffState {
 	s := handoffState{Phase: p[0], New: p[1], Choice: p[2], At: time.Unix(sec, 0).UTC(), Tries: tries}
 	if s.New == "-" {
 		s.New = ""
+	}
+	if len(p) == 6 {
+		s.Kind = p[5]
 	}
 	return s
 }
@@ -161,13 +170,26 @@ func (f *Factory) chooseHandoff(a Agent) (AgentChoice, bool) {
 	return pickHandoff(failingProvider(a), statuses, usages, f.Now())
 }
 
-// handoffAllowed: card agents only, once per card. Any lineage (a replacement, or a predecessor
-// with a hand-off recorded) means the card already had its hand-off.
+// handoffAllowed: card agents only, one model hand-off per card. A model replacement in the lineage
+// (factory.model-handoff) or a model hand-off recorded on any of its agents means the card had it;
+// fresh agents at stage changes (stagehandoff.go) do not count.
 func (f *Factory) handoffAllowed(a Agent) bool {
-	if a.L(labelRole) != "" || a.archived() || a.L(labelReplaces) != "" || f.handoffOf(a).Phase != "" {
+	if a.L(labelRole) != "" || a.archived() {
 		return false
 	}
-	return len(cardLineage(f.byID(), a.ID)) <= 1
+	if s := f.handoffOf(a); s.Phase != "" && (s.Kind == "" || s.Phase == "starting" || s.Phase == "started") {
+		return false
+	}
+	byID := f.byID()
+	if lineageLabel(byID, a, labelModelHandoff) != "" {
+		return false
+	}
+	for _, x := range cardLineage(byID, a.ID) {
+		if s := parseHandoff(x.L(labelHandoff)); s.Phase != "" && s.Kind == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // tryHandoff starts the hand-off of errored card agent a, if it may have one. It reports whether
@@ -205,15 +227,25 @@ func (f *Factory) startHandoff(a Agent, s handoffState, choice AgentChoice, prom
 			labels[labelPrefix+k] = v
 		}
 	}
-	note := "handed off from " + modelLabel(a) + " to " + choice.Label
-	if choice.Note != "" {
-		note += " (" + choice.Note + ")"
-	}
 	labels[labelPrefix+labelStage] = a.L(labelStage)
 	labels[labelPrefix+labelSince] = iso(f.Now())
 	labels[labelPrefix+labelAgent] = choice.ID
 	labels[labelPrefix+labelReplaces] = a.ID
-	labels[labelPrefix+labelNote] = note
+	if s.Kind == "stage" {
+		// the new stage's own labels, already on a: the swap is invisible on the board
+		for _, k := range []string{labelSince, labelNote, labelZachPlan, labelAwaiting} {
+			if v := a.L(k); v != "" {
+				labels[labelPrefix+k] = v
+			}
+		}
+	} else {
+		note := "handed off from " + modelLabel(a) + " to " + choice.Label
+		if choice.Note != "" {
+			note += " (" + choice.Note + ")"
+		}
+		labels[labelPrefix+labelNote] = note
+		labels[labelPrefix+labelModelHandoff] = "1"
+	}
 	args := choice.runArgs()
 	if a.WorkspaceID != "" {
 		args = append(args, "--workspace", a.WorkspaceID)
@@ -234,7 +266,11 @@ func (f *Factory) startHandoff(a Agent, s handoffState, choice AgentChoice, prom
 		return fmt.Errorf("hand-off of %s to %s: %w", short(a.ID), choice.Label, err)
 	}
 	id := lastLine(out)
-	f.logf("%s handed off to %s as %s", short(a.ID), choice.Label, short(id))
+	if s.Kind == "stage" {
+		f.logf("%s: fresh %s agent %s for %s", short(a.ID), choice.Label, short(id), a.L(labelStage))
+	} else {
+		f.logf("%s handed off to %s as %s", short(a.ID), choice.Label, short(id))
+	}
 	s.Phase, s.New = "started", id
 	f.poke()
 	return f.saveHandoff(a.ID, s, nil)
@@ -274,7 +310,13 @@ func (f *Factory) tickHandoff(a Agent, s handoffState, now time.Time) error {
 		choice, ok := agentByID(s.Choice)
 		var prompt string
 		var err error
-		if ok {
+		switch {
+		case ok && s.Kind == "stage":
+			var st stageHandoff
+			if st, err = f.loadStageHandoff(a.ID); err == nil {
+				prompt = st.Prompt
+			}
+		case ok:
 			prompt, err = f.handoffPrompt(a, choice, "an earlier hand-off that did not start")
 		}
 		if !ok || err != nil || s.Tries >= handoffTries {
@@ -282,7 +324,7 @@ func (f *Factory) tickHandoff(a Agent, s handoffState, now time.Time) error {
 			if err := f.saveHandoff(a.ID, s, nil); err != nil {
 				return err
 			}
-			return f.handoffGaveUp(a)
+			return f.handoffGaveUp(a, s)
 		}
 		s.Tries++
 		s.At = now
@@ -297,6 +339,7 @@ func (f *Factory) tickHandoff(a Agent, s handoffState, now time.Time) error {
 			if err := f.saveHandoff(a.ID, s, map[string]string{labelReplacedBy: r.ID}); err != nil {
 				return err
 			}
+			f.dropStageHandoff(a.ID)
 			return f.archiveChecked(a.ID, false)
 		}
 		if now.Sub(s.At) < handoffConfirmGrace {
@@ -307,8 +350,8 @@ func (f *Factory) tickHandoff(a Agent, s handoffState, now time.Time) error {
 			return err
 		}
 		if !found {
-			// the card is still the old agent: it takes the stuck marker
-			return f.handoffGaveUp(a)
+			// the card is still the old agent: it takes the stuck marker, or its stage message
+			return f.handoffGaveUp(a, s)
 		}
 		// the card resolves to the replacement, whose own recovery carries the stuck marker; the
 		// old agent stays until the card is finished
@@ -323,8 +366,12 @@ func (f *Factory) tickHandoff(a Agent, s handoffState, now time.Time) error {
 	return nil
 }
 
-// handoffGaveUp leaves card agent a to the same-model recovery's end state: marked stuck.
-func (f *Factory) handoffGaveUp(a Agent) error {
+// handoffGaveUp leaves card agent a to the same-model recovery's end state (marked stuck), or, for a
+// stage swap, sends its stage message to the old session as before (stagehandoff.go).
+func (f *Factory) handoffGaveUp(a Agent, s handoffState) error {
+	if s.Kind == "stage" {
+		return f.stageGaveUp(a)
+	}
 	f.recoveryMu.Lock()
 	defer f.recoveryMu.Unlock()
 	return f.exhaust(a, f.recoveryState(a))

@@ -228,6 +228,21 @@ The planner (the "Fellow") first picks a track:
     column starts the count afresh.
   - Failed landings: see the landing checks below. Each card gets at most 2 returns to building,
     then `stuck=landing failed`.
+- Fresh agent per stage (`factory/stagehandoff.go`): when a plan is approved (by its reviewer or by
+  Zach, or Zach accepts a brief's choices) and when a code review asks for changes, the card does not
+  resume its session, whose context by then is re-read on every call. The factory starts a new agent
+  on the same model (`factory.agent`, else the agent's provider and model) in the same worktree,
+  through the same steps as a model hand-off (`factory.handoff` kind `stage`). Its first message is a
+  short handoff: the card's original instructions verbatim, Zach's follow-ups, the approved plan, the
+  branch's commits and diffstat, the previous agent's last message (once, not if it is the plan) and
+  the stage message, plus every earlier agent's Paseo id and session id, with how to read their full
+  transcripts (`paseo logs`, or PDW `pdw readme agent-sessions`, `marts_ai_conversations`,
+  `pdw search`) when the handoff is not enough. The prompt is kept in the state dir (`handoffs/`)
+  until the new agent is confirmed, so a restart retries the same one; a swap that does not start
+  (no known model, no readable first session, two failed starts) sends the stage message to the old
+  session instead, as before. Plan rework, landing, Zach's replies and summary, brief or preview
+  requests stay in the session. Stage swaps do not use up the card's one model hand-off
+  (`factory.model-handoff` marks that). `FACTORY_STAGE_HANDOFF=off` turns the swaps off.
 - A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
   the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
   or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
@@ -875,6 +890,7 @@ push. Agent pushes can publish only the checkout's reviewed HEAD.
 | `FACTORY_LANES` | `-lanes` | board lane names per repo, `{"owner/repo": {"name": "...", "lands": "..."}}` (default `~/.config/agent-factory/lanes.json`) |
 | `FACTORY_IDLE_TTL` | `-idle-ttl` | park a Needs Zach card idle this long (default `3h`) |
 | `FACTORY_IDLE_CAP` | `-idle-cap` | park the longest idle Needs Zach cards while more factory agents than this are idle (default 10) |
+| `FACTORY_STAGE_HANDOFF` | `-stage-handoff` | `on` (default): build and code-review fixes start a fresh agent with a short handoff; `off`: resume the card's session |
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |

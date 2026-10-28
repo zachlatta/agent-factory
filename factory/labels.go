@@ -99,3 +99,6 @@ func roundsLabel(kind string) string {
 
 // labelRemainingAsk marks the one completion clarification for the current landing.
 const labelRemainingAsk = "remaining-asked"
+
+// labelModelHandoff marks a card handed to another model once (handoff.go); stage swaps carry it.
+const labelModelHandoff = "model-handoff"

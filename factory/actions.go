@@ -147,11 +147,12 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			if fix := a.L(labelPlanFix); fix != "" {
 				notes = "Apply these fixes from the last plan review: " + fix
 			}
-			if err := f.send(c.ID, buildMsg("Zach allowed this build."+answers, notes)); err != nil {
+			next := map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
+				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"}
+			if err := f.advance(labeled(a, next), "build", buildMsg("Zach allowed this build."+answers, notes)); err != nil {
 				return nil, err
 			}
-			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
-				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"})
+			return ok, f.setLabels(c.ID, next)
 		}
 		// Zach approves what was reviewed: a card that moved since goes back to code review, and one whose
 		// reviewed commit cannot be checked does not land

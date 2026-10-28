@@ -665,7 +665,11 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 			labels[labelPlanFix] = ""
 		}
 		if err = set(labelStage, back, labelVerdict, kind+" changes", labelSince, now, labelAutoReview, kind); err == nil {
-			err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
+			if kind == "code" {
+				err = f.advance(labeled(t, labels), "code-review fixes", reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
+			} else {
+				err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
+			}
 		}
 	case verdict == "changes" && kind == "plan" && smallFix != "":
 		err = f.passPlan(t, labels, "plan fixes", tier, notes, builderPlan, builderReply, smallFix, "")
@@ -711,7 +715,7 @@ func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, not
 	if err := f.setLabels(t.ID, labels); err != nil {
 		return err
 	}
-	return f.send(t.ID, msg)
+	return f.advance(labeled(t, labels), "build", msg)
 }
 
 // sideEffectNote is the Needs Zach note of a plan whose build has side effects: the one thing Zach is asked

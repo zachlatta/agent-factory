@@ -35,6 +35,9 @@ type Config struct {
 	ReadOnly  bool   // serve and refresh only: no Tick, no actions, no provider diagnostic (deploy canary)
 	DryRun    bool   // serve real data; actions answer but only log their paseo and git writes (dryrun.go)
 
+	// NoStageHandoff resumes the card's session at every stage instead of starting a fresh agent (stagehandoff.go).
+	NoStageHandoff bool
+
 	BoardURL     string   // where Zach opens the board, for emails; "" = "the factory board"
 	DefaultRepo  string   // owner/repo for new cards, ideas and scouts with none given; errands are recorded there
 	LanesFile    string   // board lane names per repo (lanes.go); default ~/.config/agent-factory/lanes.json
