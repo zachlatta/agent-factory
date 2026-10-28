@@ -42,11 +42,19 @@ func TestInboxCardWithPlanGetsPlanReview(t *testing.T) {
 	}
 }
 
-func TestInboxCardLandsThenEmailsZach(t *testing.T) {
-	f, p := newTestFactory(t, inboxCard("c1", map[string]string{labelStage: "review", labelSource: "email", labelTier: "low", labelPlanRounds: "1"}),
-		reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+func TestInboxCardComesToZachThenLandsAndEmails(t *testing.T) {
+	c := inboxCard("c1", map[string]string{labelStage: "review", labelSource: "email", labelTier: "low", labelPlanRounds: "1"})
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStage] != "zach" || l[labelNote] != previewNote {
+		t.Fatalf("he asked for it, so he sees it first: %v", l)
+	}
+	f, p = newTestFactory(t, withLabels(c, l))
+	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := p.sent("c1")

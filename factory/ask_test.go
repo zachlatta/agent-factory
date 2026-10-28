@@ -22,18 +22,22 @@ func TestAskFor(t *testing.T) {
 		from    string
 		actions string
 	}{
-		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}),
-			"Approve this plan?", "builder", "approve,reply,close"},
-		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
-			"Ship it?", "builder", "approve,reply,close"},
-		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
-			"Ship it?", "reviewer", "approve,reply,close"},
-		{"architecture preview", card("c", map[string]string{labelStage: "zach", labelNote: previewNote}),
+		{"build side effects", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: sideEffectNote}),
+			"Allow this build?", "builder", "approve,reply,close"},
+		{"older plan approval", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}),
+			"Allow this build?", "builder", "approve,reply,close"},
+		{"older hand-sent landing", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
 			"Try it, then ship it?", "builder", "approve,reply,close"},
-		{"rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
-			"Reviews didn't settle: your call on the code", "builder", "recommend,reply,approve,close"},
-		{"escalated", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),
-			"A reviewer needs your decision", "builder", "reply,recommend,close"},
+		{"older architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
+			"Try it, then ship it?", "builder", "approve,reply,close"},
+		{"finished work", card("c", map[string]string{labelStage: "zach", labelNote: previewNote, labelAskWhy: "you asked for it"}),
+			"Try it, then ship it?", "builder", "approve,reply,close"},
+		{"did not settle", card("c", map[string]string{labelStage: "zach", labelNote: arbiterStuckNote}),
+			"Reviews didn't settle", "builder", "arbiter,reply,close"},
+		{"older rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
+			"Reviews didn't settle", "builder", "arbiter,reply,close"},
+		{"older escalation", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),
+			"Reviews didn't settle", "builder", "arbiter,reply,close"},
 		{"no verdict", card("c", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}),
 			"The review didn't finish properly", "reviewer", "rerun,reply,close"},
 		{"writing its brief", func() Agent {
@@ -49,8 +53,6 @@ func TestAskFor(t *testing.T) {
 			"Finished: read the result", "builder", "done,reply"},
 		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}},
 			"Waiting on you: permission", "builder", "reply,done"},
-		{"rework cap on a plan", card("c", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "plan changes"}),
-			"Reviews didn't settle: your call on the plan", "builder", "recommend,reply,approve,close"},
 		{"stuck", card("c", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}),
 			"Stuck in Building: nothing is queued", "builder", "rerun,reply,done,close"},
 		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),
@@ -73,14 +75,10 @@ func TestAskFor(t *testing.T) {
 			t.Errorf("%s: ask = %+v (actions %s)", c.name, ask, actionIDs(ask))
 		}
 	}
-	// a plan at the rework cap is built as it is, not landed; code is landed as it is
-	plan := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "plan changes"})}, nil, t0)[0].Ask
-	if plan.Actions[2].Label != btnBuildAsIs {
-		t.Errorf("plan rework cap approve label = %q", plan.Actions[2].Label)
-	}
-	code := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"})}, nil, t0)[0].Ask
-	if code.Actions[2].Label != btnLandAsIs {
-		t.Errorf("code rework cap approve label = %q", code.Actions[2].Label)
+	// the finished-work stop says why it came to Zach
+	fin := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: previewNote, labelAskWhy: "you asked for it"})}, nil, t0)[0].Ask
+	if !strings.Contains(fin.Why, "because you asked for it") {
+		t.Errorf("finished-work why = %q", fin.Why)
 	}
 	// only Needs Zach cards carry an ask
 	if BuildBoard([]Agent{card("c", map[string]string{labelStage: "building"})}, nil, t0)[0].Ask != nil {
@@ -108,14 +106,14 @@ func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	}
 }
 
-func TestArchitecturePlanAsksBuilderForSummary(t *testing.T) {
+func TestPlanWithUnclearSideEffectsAsksBuilderForTheDecision(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "short version for Zach") || strings.Contains(msgs[0], "Build it now") {
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "one short decision") || strings.Contains(msgs[0], "Build it now") {
 		t.Errorf("sent = %v", msgs)
 	}
 }

@@ -1,0 +1,19 @@
+{
+  "alwaysAsk": [
+    "factory/policy.go",
+    "factory/alwaysask.go",
+    "factory/arbiter.go",
+    "factory/guard.go",
+    "factory/deps.go",
+    "factory/remaining.go",
+    "factory/landreview.go",
+    "factory/uireview.go",
+    "factory/delegate.go",
+    "factory/overview.go",
+    "factory/scan/**",
+    "bin/**",
+    "deployer/**",
+    "cmd/factory-deploy/**",
+    "install.sh"
+  ]
+}

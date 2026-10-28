@@ -99,11 +99,11 @@ func TestUIFeedback(t *testing.T) {
 	}
 }
 
-const reviewWithUI = "Clicked through it with computer use.\n\nUI feedback:\n- the Save button is hard to see\n\nTIER: low\nVERDICT: "
+const reviewWithUI = "Clicked through it with computer use.\n\nUI feedback:\n- the Save button is hard to see\n\nALWAYS ASK: none\nTIER: low\nVERDICT: "
 
 func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 	for _, verdict := range []string{"approve", "nits"} {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 			reviewer("r1", "c1", "code"))
 		storeLog(t, f, p, "r1", reviewWithUI+verdict)
 		f.ApplyVerdict(f.agent("r1"))
@@ -134,7 +134,7 @@ func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
 	}
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || !strings.Contains(msgs[0], "- the Save button is hard to see") || !strings.Contains(msgs[0], "NEEDS FROM ZACH:") ||
-		strings.Contains(msgs[0], "Land it now") {
+		!strings.Contains(msgs[0], "UI feedback:") || strings.Contains(msgs[0], "Land it now") {
 		t.Fatalf("sent = %v", msgs)
 	}
 	// the builder answers and stops: the card stays with Zach, no review or landing starts

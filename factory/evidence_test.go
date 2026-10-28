@@ -95,23 +95,6 @@ func TestAskRequestAndEvidenceCache(t *testing.T) {
 	}
 }
 
-func TestRecommendCarriesAnswers(t *testing.T) {
-	for _, plan := range []bool{false, true} {
-		a := card("c1", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"})
-		if plan {
-			a.Labels[labelPrefix+labelAwaiting] = "plan"
-		}
-		f, p := newTestFactory(t, a)
-		if _, err := f.Act("recommend", Body{ID: "c1", Message: "Keep the cache"}); err != nil {
-			t.Fatal(err)
-		}
-		msgs := p.sent("c1")
-		if len(msgs) != 1 || !strings.Contains(msgs[0], "Keep the cache") {
-			t.Fatal(msgs)
-		}
-	}
-}
-
 func TestAskOriginalRequest(t *testing.T) {
 	a := reqCard("c1", "board")
 	a.Labels[labelPrefix+labelStage] = "zach"
@@ -141,6 +124,7 @@ func TestEvidencePrompts(t *testing.T) {
 	for name, prompt := range map[string]string{
 		"new card": fmt.Sprintf(newCardPrompt, "task", "example/repo", "", tierRules, wholeAppRule, questionRule),
 		"review":   ReviewPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown"),
+		"arbiter":  ArbiterPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown", "notes", true),
 	} {
 		for _, want := range []string{"BEFORE:", "AFTER:", ".factory-evidence/", "never commit"} {
 			if strings.Count(prompt, want) != 1 {
@@ -148,7 +132,7 @@ func TestEvidencePrompts(t *testing.T) {
 			}
 		}
 	}
-	for name, prompt := range map[string]string{"reminder": overviewReminder, "summary": summaryMsg, "brief": briefMsg("code", true, "notes", briefAsk(card("c", map[string]string{labelNote: "reviewer escalated"})))} {
+	for name, prompt := range map[string]string{"reminder": overviewReminder, "side effects": sideEffectMsg} {
 		if strings.Contains(prompt, "BEFORE:") {
 			t.Errorf("%s repeats attachment instructions", name)
 		}

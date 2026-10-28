@@ -80,7 +80,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
 		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
 		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelLandedVerified: "1",
-		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelDelegated: "2026-10-25T19:00:00Z", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
+		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelDelegated: "2026-10-25T19:00:00Z", labelArbitrated: "plan", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
 	})
 	old.Labels[gmailThreadLabel] = "th-gmail-1"
 	copied := copyCarriedLabels(old)
@@ -229,7 +229,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	if !reviewPending(f.agents(), newID, t0) {
 		t.Error("reviewPending(newID) = false for reviewer targeting oldID")
 	}
-	storeLog(t, f, p, rev.ID, "Looks good.\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, rev.ID, "Looks good.\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(rev); err != nil || p.labels(newID)[labelStage] != "landing" || len(p.sent(oldID)) > 0 {
 		t.Fatalf("ApplyVerdict err=%v stage=%q sentOld=%d", err, p.labels(newID)[labelStage], len(p.sent(oldID)))
 	}

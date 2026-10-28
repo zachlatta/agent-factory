@@ -17,13 +17,13 @@ var carriedFactoryLabels = []string{
 	labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelZachPlan,
 	labelDecided, labelPlanFix, labelReviewed, labelLandedVerified, labelWaitsOn, labelWaitsDone,
-	labelHeld, labelDelegated,
+	labelHeld, labelDelegated, labelArbitrated,
 }
 
 var chainCarriedFactoryLabels = []string{
 	labelZachThread, labelSource, labelOrigin, labelTitled,
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelZachPlan,
-	labelDelegated,
+	labelDelegated, labelArbitrated,
 }
 
 var carriedRawLabels = []string{gmailThreadLabel}

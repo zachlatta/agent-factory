@@ -61,10 +61,10 @@ func TestAskYesNo(t *testing.T) {
 		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan"}), "approve", "changes"},
 		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}), "approve", "changes"},
 		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}), "approve", "changes"},
-		{"rework cap brief", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), "recommend", "changes"},
+		{"rework cap brief", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), "arbiter", "changes"},
 		{"no verdict", card("c", map[string]string{labelStage: "zach", labelNote: noVerdictNote}), "", ""},
 		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close"}), "close", "changes"},
-		{"escalated brief", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}), "recommend", "changes"},
+		{"escalated brief", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}), "arbiter", "changes"},
 		{"stuck", card("c", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}), "", ""},
 		{"landing unverified", card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"}), "say", "say"},
 		{"moved by hand", card("c", map[string]string{labelStage: "zach"}), "say", "say"},
@@ -82,8 +82,8 @@ func TestAskYesNo(t *testing.T) {
 }
 
 func TestAskQuestionsFromLongReply(t *testing.T) {
-	// an escalation: the builder's brief is the detail
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"})
+	// finished work: the builder's preview is the detail
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: previewNote})
 	r := reviewer("r1", "c1", "code")
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
@@ -109,7 +109,7 @@ func TestApproveCarriesZachsAnswers(t *testing.T) {
 	if _, err := f.Act("approve", Body{ID: "c1", Message: answers}); err != nil {
 		t.Fatal(err)
 	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach approved your plan") ||
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") ||
 		!strings.Contains(msgs[0], answers) || !strings.Contains(msgs[0], "Build it now") {
 		t.Errorf("plan approve sent = %v", msgs)
 	}
@@ -138,8 +138,8 @@ func TestPromptsTeachQuestionFormat(t *testing.T) {
 		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeAppRule, questionRule),
 		"plan review": ReviewPrompt(c, "plan", 7478, "unknown"),
 		"code review": ReviewPrompt(c, "code", 7478, "unknown"),
-		"brief":       briefMsg("code", true, "notes", briefAsk(card("c1", map[string]string{labelNote: "reviewer escalated"}))),
-		"summary":     summaryMsg,
+		"arbiter":     ArbiterPrompt(c, "plan", 7478, "unknown", "notes", true),
+		"preview":     previewMsg("you asked for it"),
 	} {
 		if !strings.Contains(p, "QUESTION:") {
 			t.Errorf("%s prompt does not teach the QUESTION: format", name)

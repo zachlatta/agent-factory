@@ -113,7 +113,7 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 		return nil
 	}
 	if w := parseTime(a.L(labelWriting)); !w.IsZero() && !writtenFor(a, w, f.Now()) {
-		return nil // the builder is still to write the summary or brief the email carries
+		return nil // the builder is still to write the decision or preview the email carries
 	}
 	f.mu.Lock()
 	retry := f.mailRetry[a.ID]
@@ -299,7 +299,8 @@ func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
 	if ask != nil {
 		ask.Evidence = ev
 	}
-	return parseReply(text)
+	rest, qs, ov := parseReply(text)
+	return rest, askQuestions(ask, qs), ov
 }
 
 // replyWord is one word Zach can answer with by email and what it does.
@@ -308,9 +309,9 @@ type replyWord struct{ Word, Does string }
 // replyWords lists the one-word email answers for ask, matching parseAnswer.
 func replyWords(ask *Ask) []replyWord {
 	var out []replyWord
-	if yes := actionFor(ask, ask.Yes); yes != nil && (ask.Yes == "approve" || ask.Yes == "recommend") {
+	if yes := actionFor(ask, ask.Yes); yes != nil && (ask.Yes == "approve" || ask.Yes == "arbiter") {
 		does := strings.ToLower(yes.Label)
-		if len(ask.Questions) > 1 {
+		if len(ask.Questions) > 1 && ask.Yes == "approve" {
 			does = "take the recommended answers"
 		}
 		out = append(out, replyWord{"yes", does})
@@ -513,7 +514,7 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 		}
 		lead = append(lead, fmt.Sprintf("%d questions; I recommend %s.", len(qs), strings.Join(rec, " ")))
 		reply = append(reply, "Reply with letters like "+strings.Join(rec, " "))
-	case ask.Yes == "approve" || ask.Yes == "recommend":
+	case ask.Yes == "approve" || ask.Yes == "arbiter":
 		lead = append(lead, "I recommend yes.")
 	}
 	for _, w := range words {

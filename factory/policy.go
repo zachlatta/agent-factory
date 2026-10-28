@@ -15,18 +15,20 @@ import (
 // change no code skip the tiers too: the builder does them in one pass and says TRACK: direct.
 var Tiers = []string{"low", "risky", "architecture"}
 
+// TierHelp describes each tier. Who sees the finished work before it lands does not depend on the tier
+// alone: what Zach asked for always comes to him, and factory-started work only on the always-ask list
+// (alwaysask.go).
 var TierHelp = map[string]string{
 	"routine":      "Scheduled run of an approved job. No per-run review; it surfaces only if it gets stuck.",
-	"low":          "Plan review, then code review by another agent, then lands on its own.",
-	"risky":        "Plan review and code review must both pass, then lands on its own.",
-	"architecture": "Plan review, build, code review, then Zach tries a preview and approves the landing. He approves the plan first only when building it has side effects.",
+	"low":          "Plan review, then code review by another agent. Lands on its own if the factory started it; what Zach asked for comes to him finished first.",
+	"risky":        "Plan review and code review must both pass. Lands on its own if the factory started it; what Zach asked for comes to him finished first.",
+	"architecture": "Plan review, build, code review, then Zach tries the finished change and approves the landing.",
 }
 
 const tierRules = `Tiers (pick the highest that applies):
 - architecture: new service, datastore, framework or dependency; a change to how components fit
   together or to a shared interface; any refactor or cleanup (these must cover the whole app, see
-  below); anything hard to undo or publicly visible. Zach sees a preview and approves before it lands;
-  he approves the plan before code is written only when building it has side effects.
+  below); anything hard to undo or publicly visible. Zach tries the finished change before it lands.
 - risky: production data, migrations or deletes; money, payments or purchases; auth, secrets or
   permissions; hosts, deploys, cron or infra; email or messages to anyone but Zach; anything that
   runs unattended. Needs plan review and code review sign-off from other agents.
@@ -69,7 +71,7 @@ var (
 )
 
 // sideEffectsRule asks planners and plan reviewers what building a plan would change outside its worktree
-// before landing. An architecture plan goes to building without Zach only when the reviewer writes none.
+// before landing. A plan goes to building without Zach only when the reviewer writes none and the plan lists none.
 const sideEffectsRule = `BUILD SIDE EFFECTS: <none, or what building it changes outside the worktree before landing: prod data
 written or deleted, messages sent to anyone, money spent, hosts or services changed>
 (none means nothing at all happens outside the worktree while building. Write none alone on that line,
@@ -210,8 +212,8 @@ var rubric = map[string]string{
   written or deleted, messages sent to anyone, money spent, hosts or services changed? Check the plan's
   BUILD SIDE EFFECTS line against its approach and write your own, right before TIER:
   ` + sideEffectsRule + `
-  An architecture plan whose line you write as none is built before Zach sees it; he sees a preview before it
-  lands. Any other answer, or no line, stops it for his plan approval first.`,
+  A plan whose line you and the builder write as none is built without asking Zach. Any other answer, or no
+  line, stops it for Zach to allow the build first: that is the only thing he is asked before building.`,
 	"code": `Check the work against Zach's request and follow-ups (section below) and its plan if any:
 - Read the diff: ` + "`git -C <cwd> log --oneline origin/main..HEAD`, `git -C <cwd> diff origin/main...HEAD`" + `
   (the worktree was clean when this review started: the committed work is what lands). If the work already
@@ -231,7 +233,10 @@ var rubric = map[string]string{
   hostnames or tailnet URLs (*.ts.net), local paths (/home/<user>/...), and content from <errands> or PDW.
 - Repo fit: follows that repo's AGENTS.md/README conventions.
 - Refactor or cleanup: every instance across the repo changed (grep for the old pattern)?
-- Tier: the card is "<tier>". Does the change touch anything above that? Say so with TIER below.`,
+- Tier: the card is "<tier>". Does the change touch anything above that? Say so with TIER below.
+- Always ask: does Zach have to see it before it lands even if he did not ask for it? Write, right before TIER:
+  ` + alwaysAskRule + `
+  The factory also checks which files the diff touches. A missing line counts as an ask.`,
 }
 
 // ReviewPrompt is the prompt for a fresh reviewer agent of the given kind (plan, code or land); port is
@@ -281,8 +286,10 @@ Rules:
 - Blocking findings only: each one concrete (file:line or exact claim), with why it matters.
   Style preferences and nits are not blocking.
 - Allowed verdicts: approve, nits (approve; list nits, no new work), changes (blocking findings),
-  escalate (a decision only Zach can make; ask it as a QUESTION: block, below), close (duplicate, already done, or not needed).
-  Architecture-tier work goes to Zach anyway; do not escalate just for that.
+  escalate (a decision only Zach can make: a real-world side effect, or something he must see before it
+  lands; an arbiter agent checks it first; ask it as a QUESTION: block, below), close (duplicate, already done, or not needed).
+  Do not escalate a design disagreement or a tier: if the rounds do not settle, an arbiter agent decides, not
+  Zach. Zach sees finished work he asked for, and the always-ask list, anyway.
 - Keep it short: at most 8 bullets.
 - `+shellRule+`
 - `+scratchSafetyRule+`
@@ -317,10 +324,10 @@ func requestSection(r *CardRequest) string {
 	return strings.Join(b, "\n\n")
 }
 
-// decidedRule is added to reviews of a card where Zach accepted the builder's recommendations.
-const decidedRule = `- Zach has already ruled on open points in this card. His choices are in the builder's conversation ("Zach
-  accepts the recommendations in your brief", or a message from Zach). Treat them as settled: do not raise them
-  again as blocking. Flag only new problems, or a change that does not do what he chose.`
+// decidedRule is added to reviews of a card where Zach answered one of its stops.
+const decidedRule = `- Zach has already ruled on points in this card: his messages are in the builder's conversation. Treat
+  them as settled: do not raise them again as blocking. Flag only new problems, or a change that does not do
+  what he chose.`
 
 const planSmallFixRule = `- Small blocking fixes: when your verdict is changes and every blocking finding is a small, concrete fix the
   builder can apply while building and a code reviewer can check (such as a missing item in a list, an Ordering:
@@ -328,7 +335,7 @@ const planSmallFixRule = `- Small blocking fixes: when your verdict is changes a
   unsplit >1,000-line change, or a large blocker), add one line right before TIER:
   SMALL FIX: <one-line summary of the fixes the builder must apply>
   At the plan-review rework cap, a plan with that line goes to build with those fixes applied and verified by
-  code review; without it, the card stops in Needs Zach.`
+  code review; without it, an arbiter agent decides.`
 
 func planFixRule(fix string) string {
 	return "- Last-round plan fixes: this card went to build from the final plan-review round with small blocking fixes to apply (" +
@@ -376,8 +383,9 @@ End the plan with one line: TIER: <low|risky|architecture>.
 
 ` + overviewRule + `
 
-A different agent reviews the plan. An architecture plan goes to Zach before building only when building
-it has side effects; otherwise it is built and reviewed, and Zach tries a preview before it lands. When you get
+A different agent reviews the plan; Zach does not approve plans. He is asked before building only when
+building it has side effects; otherwise it is built and reviewed, and he tries the finished change before it
+lands if he asked for it (or it is on the always-ask list). When you get
 "Plan approved", build it. Don't improvise: if scope must change, stop and say so. Commit on your
 branch, but do NOT land or make live changes (install scripts, enable or restart services, resize VMs,
 change external settings) until the factory tells you to land after code review. If stuck, stop and write a handoff: what
@@ -392,42 +400,42 @@ const landMsg = "Land it now the way this repo lands work: read its AGENTS.md an
 	"from its repo's main within a minute of landing (and rolls back if it does not come up): never run its install.sh " +
 	"to deploy. " + shellRule + " " + scratchCleanupRule
 
-// summaryMsg asks the builder of an architecture plan for the version Zach reads on his phone.
-const summaryMsg = "Your plan passed review, and because it is an architecture change whose build has side effects (or " +
-	"they were not ruled out) it now waits for Zach's approval. Write a short version for Zach, in plain words for reading on a phone. Start with three lines:\n" +
-	"DECISION: <approve this plan?, in one line>\n" +
-	"OVERVIEW: <what changes and why, at most 3 short sentences>\n" +
-	"NEEDS FROM ZACH: <approve the plan, or answer the questions below, and what happens after>\n" +
-	"Then at most 3 bullets: what could go wrong and how you will check it. Then any question he must answer, " +
-	"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
-	"start building; stop after the summary. Use the evidence format already given when visuals help."
+// sideEffectMsg asks the builder of a plan whose build has side effects (or they were not ruled out) for the one
+// decision Zach makes before anything is built.
+const sideEffectMsg = "Your plan passed review, but building it would change something outside its worktree (or that " +
+	"was not ruled out), so nothing is built until Zach allows it. That is the only thing he is asked before building. " +
+	"Write him one short decision, in plain words for reading on a phone. Start with three lines:\n" +
+	"DECISION: <allow this build to ...?, in one line, naming the side effect>\n" +
+	"OVERVIEW: <exactly what building it changes outside the worktree (which data, which message to whom, how much " +
+	"money, which host or service) and why the build needs it, at most 2 short sentences>\n" +
+	"NEEDS FROM ZACH: <approve to build, or say what to change>\n" +
+	"If the build can avoid the side effect (test data, a dry run, doing it at landing instead), say so and recommend " +
+	"that. Do not ask him about the design: other agents reviewed the plan. Do not start building; stop after this."
 
-// previewNote is the Needs Zach note of an architecture card that passed code review without Zach's plan
-// approval: his one stop, where he tries the built change before it lands.
+// previewNote is the Needs Zach note of a card that passed code review and comes to Zach before it lands
+// (finishedWorkReason): his one stop, where he tries the built change.
 const previewNote = "built and reviewed: try the preview and approve to land"
 
-// previewAheadNote tells the builder of an architecture plan built before Zach saw it what comes after code review.
-const previewAheadNote = "It is an architecture change, but building it has no side effects, so it is built first: after " +
-	"code review Zach tries a preview of it before it lands."
-
-// previewMsg asks the builder of an architecture card that passed code review for what Zach needs to try it:
-// before and after, a link he can open on his phone, and his decision.
-const previewMsg = "Code review passed. This is an architecture change, so it stops for Zach once, now, before it lands. " +
-	"Write it for reading on a phone, in plain words. Start with three lines:\n" +
-	"DECISION: <land this change?, in one line>\n" +
-	"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
-	"NEEDS FROM ZACH: <try it, then approve the landing or say what to change, and what happens after>\n" +
-	"Then show it to him. If it changes something he sees (a page, an email, a message), take before (origin/main) and " +
-	"after (your branch) screenshots at desktop and phone widths, on test or fake data. Give him a live link he can open " +
-	"on his phone and try: your branch running on test or fake data, or in a dry-run mode the README documents (one " +
-	"that changes nothing), served on this host's tailnet IP (`tailscale ip -4`) and started under `timeout 24h` so it " +
-	"stops on its own (leave that one server running when you stop); where it cannot run safely, a static clickable " +
-	"mock-up instead. Upload the screenshots and any mock-up with the file-share skill, restricted to Zach, check that " +
-	"each link returns 401 without his login, and put the links in your message: a path on this host is not a link he " +
-	"can open. If the overview rule names before and after evidence lines, add them too. If nothing he sees changes, " +
-	"show the before and after behaviour in plain words and how he can try it. Then at most 3 bullets: what could go " +
-	"wrong. Then any question he must answer, each as a QUESTION: block (the question, then 2 to 6 options as - lines, " +
-	"recommended first). Do not land and do not change the code; stop after this."
+// previewMsg asks the builder of a card that passed code review and comes to Zach (for reason) for what he needs
+// to try it: before and after, a link he can open on his phone, and his decision.
+func previewMsg(reason string) string {
+	return "Code review passed. It comes to Zach once, now, before it lands (" + reason + "). " +
+		"Write it for reading on a phone, in plain words. Start with three lines:\n" +
+		"DECISION: <land this change?, in one line>\n" +
+		"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
+		"NEEDS FROM ZACH: <try it, then approve the landing or say what to change, and what happens after>\n" +
+		"Then show it to him. If it changes something he sees (a page, an email, a message), take before (origin/main) and " +
+		"after (your branch) screenshots at desktop and phone widths, on test or fake data. Give him a live link he can open " +
+		"on his phone and try: your branch running on test or fake data, or in a dry-run mode the README documents (one " +
+		"that changes nothing), served on this host's tailnet IP (`tailscale ip -4`) and started under `timeout 24h` so it " +
+		"stops on its own (leave that one server running when you stop); where it cannot run safely, a static clickable " +
+		"mock-up instead. Upload the screenshots and any mock-up with the file-share skill, restricted to Zach, check that " +
+		"each link returns 401 without his login, and put the links in your message: a path on this host is not a link he " +
+		"can open. If the overview rule names before and after evidence lines, add them too. If nothing he sees changes, " +
+		"show the before and after behaviour in plain words and how he can try it. Then at most 3 bullets: what could go " +
+		"wrong. Then any question he must answer, each as a QUESTION: block (the question, then 2 to 6 options as - lines, " +
+		"recommended first). Do not land and do not change the code; stop after this."
+}
 
 const noLiveChangesRule = "Do not make live changes (install scripts, enable or restart services, resize VMs, change external settings) before code review: do them in the landing step after review and verify them."
 
@@ -448,28 +456,13 @@ func reworkMsg(kind string, round, limit int, notes string) string {
 func buildMsg(prefix, notes string) string {
 	return prefix + " Build it now, as planned. Don't improvise: if the scope has to change, stop and say so " +
 		"instead. " + noLiveChangesRule + " When done, commit everything on your branch and leave the worktree clean, " +
-		"but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next, and the factory lands it once the review passes.\n\n" + worktreeRule + "\n\nReviewer notes:\n" + notes
+		"but do NOT land; stop with a short summary (including the deploy steps as built, if any). " + overviewReminder + " A code reviewer checks it next. Once it passes, Zach sees the finished work before it lands if he asked for it " +
+		"or it is on the always-ask list; otherwise the factory lands it.\n\n" + worktreeRule + "\n\nReviewer notes:\n" + notes
 }
 
-func buildWithFixesMsg(notes string, preview bool) string {
-	prefix := "The last plan review found only small, concrete blocking fixes (in Reviewer notes below). " +
-		"Apply these fixes, then build it now, as planned; do not stop for another plan review, and say in your summary how you applied them."
-	if preview {
-		prefix += " " + previewAheadNote
-	}
-	return buildMsg(prefix, notes)
-}
-
-func summaryWithFixesMsg(notes string) string {
-	return "The last plan review found only small, concrete blocking fixes (below). Fold those fixes into your plan, and " +
-		"because it is an architecture change whose build has side effects (or they were not ruled out) it now waits for Zach's approval. Write a short version for Zach (with the " +
-		"fixes folded in), in plain words for reading on a phone. Start with three lines:\n" +
-		"DECISION: <approve this plan?, in one line>\n" +
-		"OVERVIEW: <what changes and why, at most 3 short sentences>\n" +
-		"NEEDS FROM ZACH: <approve the plan, or answer the questions below, and what happens after>\n" +
-		"Then at most 3 bullets: what could go wrong and how you will check it. Then any question he must answer, " +
-		"each as a QUESTION: block (the question, then 2 to 6 options as - lines, recommended first). Do not " +
-		"start building; stop after the summary.\n\nReviewer notes:\n" + notes
+func buildWithFixesMsg(notes string) string {
+	return buildMsg("The last plan review found only small, concrete blocking fixes (in Reviewer notes below). "+
+		"Apply these fixes, then build it now, as planned; do not stop for another plan review, and say in your summary how you applied them.", notes)
 }
 
 // findings is the reviewer's last message, trimmed for forwarding to the builder.
@@ -491,73 +484,6 @@ func reviewNotes(full, text string) string {
 		return trunc(full, 8000)
 	}
 	return findings(text)
-}
-
-// briefMsg asks the builder of a card that reached the rework cap (or was escalated) for a brief Zach can act
-// on: he has not followed the review rounds. It carries the reviewer's whole final review, which the builder
-// has not seen, and names each button of ask by its exact label.
-func briefMsg(kind string, escalated bool, notes string, ask *Ask) string {
-	var b strings.Builder
-	if escalated {
-		fmt.Fprintf(&b, "The %s reviewer (a different agent) escalated a decision only Zach can make, so this card now "+
-			"waits on Zach.", kind)
-	} else {
-		fmt.Fprintf(&b, "Review of your %s did not settle after the last round, so this card now waits on Zach. You "+
-			"have not seen this final review yet; read it before you write.", kind)
-	}
-	b.WriteString(" Zach has not followed the review rounds and may not remember what this card is.\n\n" +
-		"The reviewer's final review, in full:\n<<<\n" + notes + "\n>>> End of review\n\n" +
-		"Write a brief for Zach, in plain words he can read on a phone (no file paths, no jargon). Start it with " +
-		"these lines, which his board shows on top of the card:\n" +
-		"DECISION: <the decision he must make, one line>\n" +
-		"OVERVIEW: <what this card is for (his request) and where it stands (planned or built; nothing has " +
-		"landed), at most 3 short sentences>\n" +
-		"NEEDS FROM ZACH: <the choice needed and what happens after, one short line>\n\n" +
-		"In the full report, explain the available actions by these exact labels:\n")
-	for _, x := range ask.Actions {
-		fmt.Fprintf(&b, "- \"%s\": %s\n", x.Label, buttonMeaning(x, ask))
-	}
-	b.WriteString("Then, after a blank line:\n" +
-		"1. Each point from that review that is still open: the reviewer's view, stated fairly even where you " +
-		"disagree, and your view.\n")
-	n := 2
-	if escalated {
-		b.WriteString("2. The reviewer's question for Zach, quoted word for word from the review above, then the " +
-			"options and the one you recommend, as a QUESTION: block (below).\n")
-		n++
-	}
-	fmt.Fprintf(&b, "%d. Each decision Zach must make, with the options and the one you recommend, each as a "+
-		"QUESTION: block (below).\n", n)
-	b.WriteString("Use the evidence format already given when visuals help.\nThe board shows each QUESTION: block as buttons he taps; his answers come to you as a " +
-		"message that quotes each question. " + questionRule + "\n\nThen stop. Do not build, edit files or land.")
-	return b.String()
-}
-
-// buttonMeaning says what one brief-card button does, for the brief.
-func buttonMeaning(x Action, ask *Ask) string {
-	switch x.ID {
-	case "recommend":
-		return "you do what this brief recommends (" + recommendDoes(ask) + ")"
-	case "approve":
-		if x.Label == btnBuildAsIs {
-			return "you build the plan as it stands; the open points are ignored"
-		}
-		return "the code lands as it stands; the open points are ignored"
-	case "reply":
-		return "his own instructions or answer come to you as a message"
-	case "close":
-		return "the card is dropped: archived, nothing lands"
-	}
-	return x.Label
-}
-
-func recommendDoes(ask *Ask) string {
-	for _, x := range ask.Actions {
-		if x.Label == btnBuildAsIs {
-			return "revise the plan to match, then build; a code review still runs before it lands"
-		}
-	}
-	return "apply it, then a code review runs before it lands"
 }
 
 // unreadableReview keeps outside landing requests in their own result protocol. They
@@ -655,6 +581,26 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		f.logf("reviewer %s: target %s not found", short(rev.ID), short(target))
 		return nil
 	}
+	tier := MaxTier(t.L(labelTier), ParseTier(text), builderTier)
+	if tier == "" && kind == "plan" {
+		tier = "low"
+	}
+	labels := map[string]string{}
+	if t.L(labelNoVerdict) != "" {
+		labels[labelNoVerdict] = ""
+	}
+	if kind == "plan" {
+		labels[labelPlanFix] = "" // a plan verdict replaces the last round's fixes
+	}
+	if tier != "" {
+		labels[labelTier] = tier
+	}
+	if rev.L(labelArbiter) != "" {
+		// the arbiter's ruling settles the gate; it is not a review round
+		err := f.applyArbiter(t, kind, verdict, notes, tier, builderPlan, builderReply, labels)
+		f.logf("%s arbiter ruled %s for %s (tier %s)", kind, verdict, short(target), tier)
+		return err
+	}
 	if verdict == "" && t.L(labelNoVerdict) == "" {
 		// first no-verdict in this round: re-run once on its own before asking Zach
 		if err := f.setLabels(target, map[string]string{labelNoVerdict: "1"}); err != nil {
@@ -665,21 +611,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	roundsKey := roundsLabel(kind)
 	rounds := atoi(t.L(roundsKey)) + 1
-	tier := MaxTier(t.L(labelTier), ParseTier(text), builderTier)
-	if tier == "" && kind == "plan" {
-		tier = "low"
-	}
-	zachOK := t.L(labelZachPlan) == "approved"
-	// an architecture plan whose build changes nothing outside the worktree is built first: Zach sees a preview
-	// before it lands instead of approving the plan
-	early := tier == "architecture" && !zachOK && !(kind == "plan" && buildsFirst(notes, builderPlan))
-	labels := map[string]string{roundsKey: fmt.Sprint(rounds)}
-	if t.L(labelNoVerdict) != "" {
-		labels[labelNoVerdict] = ""
-	}
-	if tier != "" {
-		labels[labelTier] = tier
-	}
+	labels[roundsKey] = fmt.Sprint(rounds)
 	set := func(kv ...string) error {
 		for i := 0; i+1 < len(kv); i += 2 {
 			labels[kv[i]] = kv[i+1]
@@ -688,102 +620,25 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	}
 	now := iso(f.Now())
 	smallFix := ""
-	if kind == "plan" {
-		labels[labelPlanFix] = ""
-		if verdict == "changes" && rounds >= f.cfg.ReworkCap {
-			smallFix = ParseSmallFix(notes)
-		}
-	}
-	if (verdict == "approve" || verdict == "nits" || smallFix != "") && kind == "plan" {
-		// the approved plan may name a card this one lands after (deps.go)
-		if id := ParseWaitsOn(builderReply, t.ID); id != t.L(labelWaitsOn) {
-			labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
-		}
+	if kind == "plan" && verdict == "changes" && rounds >= f.cfg.ReworkCap {
+		smallFix = ParseSmallFix(notes)
 	}
 	switch {
 	case (verdict == "approve" || verdict == "nits") && kind == "plan":
-		if early {
-			// the factory emails Zach the summary once the builder has written it (mailZach)
-			note := "architecture: approve the plan to build"
-			if err = set(labelStage, "zach", labelVerdict, "plan "+verdict, labelAwaiting, "plan", labelNote, note,
-				labelWriting, now); err == nil {
-				err = f.send(target, summaryMsg)
-			}
-		} else {
-			prefix := "Plan approved by the plan reviewer."
-			if tier == "architecture" && !zachOK {
-				prefix += " " + previewAheadNote
-			}
-			if err = set(labelStage, "building", labelVerdict, "plan "+verdict, labelSince, now, labelAutoReview, "code"); err == nil {
-				err = f.send(target, buildMsg(prefix, notes))
-			}
-		}
+		err = f.passPlan(t, labels, "plan "+verdict, tier, notes, builderPlan, builderReply, "", "Plan approved by the plan reviewer.")
 	case verdict == "approve" || verdict == "nits":
-		fb := uiFeedback(notes)
-		scanned := ""
-		if f.guarded(t.Repo) {
-			scanned = f.scanNote(t.Cwd, "") // public repo: the factory's own scan, before any landing
-		}
-		switch {
-		case scanned != "" && !scanPassed(scanned):
-			// a scan hit or error stops the card; a clean public-repo card lands like any other
-			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, scanned)
-		case tier == "architecture" && !zachOK:
-			// the one stop for Zach: the builder shows him before and after and a link to try (mailZach waits for it)
-			if err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, previewNote, labelWriting, now); err == nil {
-				err = f.send(target, previewMsg)
-			}
-		case t.L(labelPlanRounds) == "":
-			// a session that never had a plan review (sent to review by hand): Zach lands it. Not the
-			// tier label: every verdict records one, so a reworked hand-sent card has it by round 2.
-			// plan-rounds shows a plan review ran, not that it passed; a plan escalated to Zach that he
-			// then moves on himself can still auto-land.
-			err = set(labelStage, "zach", labelVerdict, "code "+verdict, labelNote, "review passed: approve to land")
-		default:
-			note := "auto-landing (" + tier + ")"
-			if scanned != "" {
-				note += ": public repo: scan passed at review"
-			}
-			if id, _ := f.pendingDep(t); id != "" {
-				// the land prompt waits for that card; the next Tick sends it or asks Zach (tickHeld)
-				if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelHeld, id,
-					labelNote, holdNote(id)); err == nil && fb != "" {
-					err = f.send(target, depHoldMsg(id, fb))
-				}
-				break
-			}
-			if err = set(labelStage, "landing", labelVerdict, "code "+verdict, labelSince, now, labelNote, note); err == nil {
-				msg := fmt.Sprintf("Code review passed (%s tier). %s", tier, f.landMsgFor(t))
-				if fb != "" {
-					msg += uiFeedbackLandMsg(fb)
-				}
-				err = f.sendLanding(target, msg)
-			}
-		}
-		if err == nil && fb != "" && labels[labelStage] == "zach" {
-			err = f.send(target, uiFeedbackHoldMsg(fb))
-		}
+		err = f.passCode(t, labels, "code "+verdict, tier, notes, "")
 	case verdict == "changes" && rounds < f.cfg.ReworkCap:
 		back := "building"
 		if kind == "plan" {
 			back = "plan"
+			labels[labelPlanFix] = ""
 		}
 		if err = set(labelStage, back, labelVerdict, kind+" changes", labelSince, now, labelAutoReview, kind); err == nil {
 			err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
 		}
 	case verdict == "changes" && kind == "plan" && smallFix != "":
-		if early {
-			note := "architecture: approve the plan to build"
-			if err = set(labelStage, "zach", labelVerdict, "plan changes", labelAwaiting, "plan", labelNote, note,
-				labelWriting, now, labelPlanFix, smallFix); err == nil {
-				err = f.send(target, summaryWithFixesMsg(notes))
-			}
-		} else {
-			if err = set(labelStage, "building", labelVerdict, "plan fixes", labelSince, now, labelAutoReview, "code",
-				labelNote, "building with last-round plan fixes", labelPlanFix, smallFix); err == nil {
-				err = f.send(target, buildWithFixesMsg(notes, tier == "architecture" && !zachOK))
-			}
-		}
+		err = f.passPlan(t, labels, "plan fixes", tier, notes, builderPlan, builderReply, smallFix, "")
 	case verdict == "close":
 		err = set(labelStage, "zach", labelVerdict, "close", labelNote, "reviewer suggests closing")
 	case verdict == "":
@@ -793,31 +648,121 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 			from = "plan-review"
 		}
 		err = set(labelStage, "zach", labelVerdict, kind+" none", labelNote, noVerdictNote, labelStuckFrom, from)
+	case arbitrated(t, kind):
+		// the arbiter already ruled on this gate and it still did not settle: the board shows it
+		err = set(labelStage, "zach", labelVerdict, kind+" "+verdict, labelNote, arbiterStuckNote, labelStuckFrom, "")
 	default:
-		// rework cap or escalate: Zach hasn't followed the rounds, so the builder writes him a brief first
-		why := "reviewer escalated"
-		if verdict == "changes" {
-			why = "rework cap reached"
-		}
-		labels[labelVerdict], labels[labelNote] = kind+" "+verdict, why
-		next := t
-		next.Labels = map[string]string{}
-		for k, v := range t.Labels {
-			next.Labels[k] = v
-		}
-		for k, v := range labels {
-			next.Labels[labelPrefix+k] = v
-		}
-		next.Labels[labelPrefix+labelStage] = "zach"
-		next.Status = "idle"
-		ask := briefAsk(next)
-		msg := briefMsg(kind, verdict == "escalate", notes, ask)
-		if err = set(labelStage, "zach", labelWriting, now); err == nil {
-			err = f.send(target, msg)
+		// rework cap or escalation: an arbiter agent rules instead of Zach
+		labels[labelVerdict] = kind + " " + verdict
+		if err = f.setLabels(target, labels); err == nil {
+			err = f.startArbiter(t, kind, notes, verdict == "escalate")
 		}
 	}
 	f.recordRound(target, kind, rounds, rev.CreatedAt, verdict)
 	f.logf("%s verdict %s for %s (round %d, tier %s)", kind, verdict, short(target), rounds, tier)
+	return err
+}
+
+// passPlan moves card t on from a plan that passed review (or the arbiter, or the last round with small
+// fixes): to building, or to Zach first when building it has side effects he has not allowed. fixes are
+// blocking fixes the builder applies while building; prefix opens the build message ("" for the
+// small-fix message).
+func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, notes, builderPlan, builderReply, fixes, prefix string) error {
+	// the approved plan may name a card this one lands after (deps.go)
+	if id := ParseWaitsOn(builderReply, t.ID); id != t.L(labelWaitsOn) {
+		labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
+	}
+	labels[labelPlanFix] = fixes
+	if t.L(labelZachPlan) != "approved" && !buildsFirst(notes, builderPlan) {
+		return f.sideEffectStop(t, labels, notes)
+	}
+	labels[labelStage], labels[labelVerdict], labels[labelSince], labels[labelAutoReview] = "building", verdict, iso(f.Now()), "code"
+	msg := buildMsg(prefix, notes)
+	switch {
+	case prefix == "":
+		labels[labelNote] = "building with last-round plan fixes"
+		msg = buildWithFixesMsg(notes)
+	case fixes != "":
+		labels[labelNote] = "building with the arbiter's fixes"
+	}
+	if err := f.setLabels(t.ID, labels); err != nil {
+		return err
+	}
+	return f.send(t.ID, msg)
+}
+
+// sideEffectNote is the Needs Zach note of a plan whose build has side effects: the one thing Zach is asked
+// before anything is built.
+const sideEffectNote = "building has side effects: approve to build"
+
+// sideEffectStop holds card t's passed plan for Zach, because building it has side effects (or they were not
+// ruled out). The factory emails him once the builder has written the decision (mailZach).
+// Its verdict label keeps the plan pending (planPending), so Zach's reply goes back to plan review.
+func (f *Factory) sideEffectStop(t Agent, labels map[string]string, notes string) error {
+	labels[labelStage], labels[labelVerdict], labels[labelAwaiting] = "zach", "plan side effects", "plan"
+	labels[labelNote], labels[labelWriting] = sideEffectNote, iso(f.Now())
+	if err := f.setLabels(t.ID, labels); err != nil {
+		return err
+	}
+	return f.send(t.ID, sideEffectMsg+"\n\nReviewer notes:\n"+notes)
+}
+
+// passCode moves card t on from code that passed review (or the arbiter): a public repo's scan first, then
+// to Zach when finishedWorkReason says he sees it before it lands (asked is a reason already given),
+// otherwise to landing.
+func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, notes, asked string) error {
+	target, now := t.ID, iso(f.Now())
+	set := func(kv ...string) error {
+		for i := 0; i+1 < len(kv); i += 2 {
+			labels[kv[i]] = kv[i+1]
+		}
+		return f.setLabels(target, labels)
+	}
+	fb := uiFeedback(notes)
+	scanned := ""
+	if f.guarded(t.Repo) {
+		scanned = f.scanNote(t.Cwd, "") // public repo: the factory's own scan, before any landing
+	}
+	var err error
+	if scanned != "" && !scanPassed(scanned) {
+		// a scan hit or error stops the card; a clean public-repo card goes on like any other
+		err = set(labelStage, "zach", labelVerdict, verdict, labelNote, scanned)
+	} else if why := f.finishedWorkReason(t, tier, notes, asked); why != "" {
+		// the one stop for Zach: the builder shows him before and after and a link to try (mailZach waits for it)
+		if err = set(labelStage, "zach", labelVerdict, verdict, labelNote, previewNote, labelAskWhy, why,
+			labelWriting, now); err == nil {
+			msg := previewMsg(why)
+			if fb != "" {
+				// one message: a second would interrupt the builder writing the first
+				msg += uiFeedbackPreviewNote + fb
+				fb = ""
+			}
+			err = f.send(target, msg)
+		}
+	} else {
+		note := "auto-landing (" + tier + ")"
+		if scanned != "" {
+			note += ": public repo: scan passed at review"
+		}
+		if id, _ := f.pendingDep(t); id != "" {
+			// the land prompt waits for that card; the next Tick sends it or asks Zach (tickHeld)
+			if err = set(labelStage, "landing", labelVerdict, verdict, labelSince, now, labelHeld, id,
+				labelNote, holdNote(id)); err == nil && fb != "" {
+				err = f.send(target, depHoldMsg(id, fb))
+			}
+			return err
+		}
+		if err = set(labelStage, "landing", labelVerdict, verdict, labelSince, now, labelNote, note); err == nil {
+			msg := fmt.Sprintf("Code review passed (%s tier). %s", tier, f.landMsgFor(t))
+			if fb != "" {
+				msg += uiFeedbackLandMsg(fb)
+			}
+			err = f.sendLanding(target, msg)
+		}
+	}
+	if err == nil && fb != "" && labels[labelStage] == "zach" {
+		err = f.send(target, uiFeedbackHoldMsg(fb))
+	}
 	return err
 }
 
@@ -884,17 +829,6 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 // runReviewer starts a read-only reviewer of the given kind for c. For a landing review, why is the
 // agent's note and head the commit under review.
 func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (string, error) {
-	// reviewerRunArgs: reviewers, landing reviewers too, stay on the default agent (Opus 5.5)
-	args := append(reviewerRunArgs(),
-		"--title", title,
-		"--label", labelArg(labelRole, "reviewer"), "--label", labelArg(labelReviewOf, c.ID),
-		"--label", labelArg(labelReviewKind, kind), "--background", "--quiet")
-	if c.WorkspaceID != "" {
-		args = append(args, "--workspace", c.WorkspaceID)
-	}
-	if c.Cwd != "" {
-		args = append(args, "--cwd", c.Cwd)
-	}
 	if a, ok := f.agentOK(c.ID); ok && c.Request == nil {
 		r := f.cardRequest(a)
 		c.Request = &r
@@ -906,7 +840,6 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 	if kind != "plan" && f.uiChange(c) {
 		prompt += uiReviewRule
 	}
-	prompt += f.delegateRule(true)
 	if kind == "land" {
 		if why == "" {
 			why = "(none given)"
@@ -914,7 +847,27 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 		prompt = fmt.Sprintf("This is a LANDING REVIEW: agent %s asks before it lands commit %s on main. What lands "+
 			"is `git -C %s log origin/main..%s`. Its note: %s\n\n%s", c.ID, head, c.Cwd, head, why, prompt)
 	}
-	out, err := f.paseo(append(args, prompt)...)
+	return f.startReviewer(c, kind, title, prompt)
+}
+
+// startReviewer starts a read-only reviewer agent of kind for c with prompt (the sub-agent rule is
+// added here), labelled with each of flags set to "1" besides its role, card and kind.
+func (f *Factory) startReviewer(c Card, kind, title, prompt string, flags ...string) (string, error) {
+	// reviewerRunArgs: reviewers, landing reviewers and arbiters too, stay on the default agent (Opus 5.5)
+	args := append(reviewerRunArgs(),
+		"--title", title,
+		"--label", labelArg(labelRole, "reviewer"), "--label", labelArg(labelReviewOf, c.ID),
+		"--label", labelArg(labelReviewKind, kind), "--background", "--quiet")
+	for _, fl := range flags {
+		args = append(args, "--label", labelArg(fl, "1"))
+	}
+	if c.WorkspaceID != "" {
+		args = append(args, "--workspace", c.WorkspaceID)
+	}
+	if c.Cwd != "" {
+		args = append(args, "--cwd", c.Cwd)
+	}
+	out, err := f.paseo(append(args, prompt+f.delegateRule(true))...)
 	if err != nil {
 		return "", err
 	}

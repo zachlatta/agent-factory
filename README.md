@@ -2,7 +2,9 @@
 
 A Kanban board and review pipeline for coding agents run by Paseo. You throw
 any request at the start of the queue; an agent plans it, other agents review the plan and the
-code, and the work lands on its own or waits for your approval, depending on how risky it is.
+code, and the work is built and reviewed before you see it. What you asked for comes to you
+finished, once, before it lands; what the factory started lands on its own unless it is on the
+always-ask list.
 
 One Go binary. It reads Paseo's agent files every 15 seconds and whenever one changes, applies the
 rules below, and calls the `paseo` CLI for every move (labels on agents are the state:
@@ -61,37 +63,70 @@ The planner (the "Fellow") first picks a track:
   card; worktrees started outside the factory (such as email or voice dispatchers) name their own
   branches.
 
-| Tier | What | Gates | Lands |
-| --- | --- | --- | --- |
-| routine | scheduled runs of an approved job | none per run; surfaces only if blocked | itself |
-| low | docs, copy, an isolated fix, tests, a small feature on existing patterns | plan review, code review | on its own |
-| risky | prod data, deletes, migrations, money, auth/secrets, hosts/deploys/cron, messages to others, unattended jobs | plan review and code review both pass | on its own |
-| architecture | new service/datastore/framework/dependency, shared interfaces, any refactor or cleanup, hard to undo or public | plan review, code review, then a person tries a preview and approves the landing (and approves the plan before building only when building has side effects) | after a person's OK |
+| Tier | What | Gates |
+| --- | --- | --- |
+| routine | scheduled runs of an approved job | none per run; surfaces only if blocked |
+| low | docs, copy, an isolated fix, tests, a small feature on existing patterns | plan review, code review |
+| risky | prod data, deletes, migrations, money, auth/secrets, hosts/deploys/cron, messages to others, unattended jobs | plan review and code review both pass |
+| architecture | new service/datastore/framework/dependency, shared interfaces, any refactor or cleanup, hard to undo or public | plan review, code review; always shown to a person before it lands |
 
-- Architecture cards stop for a person once, before landing, unless building has side effects. Every
-  plan and plan review ends with `BUILD SIDE EFFECTS: none`, or what building (not landing) would
-  change outside the worktree: prod data written or deleted, messages sent, money spent, hosts or
-  services changed. Only a bare none counts (`none`, `None.`, `**none**`; also no, n/a or nothing):
-  its reason goes on the next line. Anything else on the line, even a reason that sounds safe
-  (`none (code and tests only)`), is read as a side effect (`ParseSideEffects`), so no reading of free
-  text can let a plan with real effects skip the person. Only when the plan reviewer writes none and
-  the plan lists nothing does the card go to building; otherwise (or with no line) it waits for a
-  person to approve the plan, as before. A built card that passes code review waits in Needs Zach while its builder writes a
-  preview: before and after screenshots at desktop and phone widths, and a live link to try it
-  (the branch on test data or a dry-run mode, on the tailnet under `timeout`, or a static mock-up),
-  uploaded with the file-share skill, restricted to Zach. Approve lands it; a reply sends it back
-  to building and code review. A card whose plan a person approved early lands on its own.
+- **No plan approvals.** Agents review plans; a person is asked before building only when building
+  has side effects. Every plan and plan review ends with `BUILD SIDE EFFECTS: none`, or what
+  building (not landing) would change outside the worktree: prod data written or deleted, messages
+  sent, money spent, hosts or services changed. Only a bare none counts (`none`, `None.`, `**none**`;
+  also no, n/a or nothing): its reason goes on the next line. Anything else on the line, even a
+  reason that sounds safe (`none (code and tests only)`), is read as a side effect
+  (`ParseSideEffects`), so no reading of free text can let a plan with real effects skip the person.
+  Only when the plan reviewer writes none and the plan lists nothing does the card go to building;
+  otherwise (or with no line) it waits in Needs Zach as "Allow this build?", with Allow & build, a
+  reply (back to plan review) or Drop. Any tier: the tier does not decide this stop.
+- **Finished work** (`factory/alwaysask.go`). After code review passes (and, in a public repo, the
+  scan), a card comes to Zach once, before it lands, when any of these holds; otherwise it lands on
+  its own:
+  - he asked for it: every card except ideas, Scouts and scheduled runs, including email, voice and
+    board cards, cards with no source label, and those whose build he allowed;
+  - it had no plan review (sent to review by hand);
+  - it is architecture tier;
+  - the code reviewer's `ALWAYS ASK:` line is not `none` (architecture he did not ask for, a change
+    to the factory's own gates or rules, a new service), or the line is missing;
+  - the always-ask file check hits.
+
+  It waits in Needs Zach while its builder writes a preview: before and after screenshots at
+  desktop and phone widths, and a live link to try it (the branch on test data or a dry-run mode, on
+  the tailnet under `timeout`, or a static mock-up), uploaded with the file-share skill, restricted
+  to Zach. The card says why it came to him (`factory.ask-why`). Approve lands it; a reply sends it
+  back to building and code review.
+- **Always-ask file check.** The factory lists the files `git diff --no-renames --name-only
+  origin/main...HEAD` changes and matches them against built-in patterns (agent rules and gates:
+  `AGENTS.md`, `CLAUDE.md`, `.githooks/`, CI workflows, gitleaks config, `.factory.json`; services:
+  `deploy/`, systemd units, Dockerfiles and compose files, `Procfile`; dependencies: `go.mod`,
+  `package.json`, `pyproject.toml`, requirements files, `Gemfile`, `Cargo.toml`) and the repo's own
+  `alwaysAsk` patterns in `.factory.json` (`*` within a name, `**` across directories). The repo's
+  file is read from `origin/main`, never the card's copy, so a card cannot loosen the check that
+  applies to it, and a card that edits it is always asked. A diff or file it cannot read asks.
+  This repo lists its gates there.
 - Refactors and cleanups must cover the whole repo (or list what is left and why); a partial
   refactor is a blocking finding.
 - Plans and build summaries name their deploy steps (if any). Builders make no live changes
   (install scripts, enabling or restarting services, resizing VMs, external settings) before code
   review: the code reviewer checks the steps, and the landing step runs and verifies them after pushing.
-- Circuit breakers: 3 review rounds per gate, then a person (at the plan-review cap, a last round
-  whose only blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those
-  fixes applied and verified by code review; design disagreements and large blockers go to Needs
-  Zach); reviewers may answer `nits` or `close`; a reviewer that ends or disappears without a
-  verdict is re-run once on its own before the card moves to Needs Zach (`factory.no-verdict`); a
-  card that stops with nothing queued goes to Needs Zach after 2 minutes.
+- Circuit breakers: 3 review rounds per gate. At the plan-review cap, a last round whose only
+  blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those fixes applied
+  and verified by code review. Otherwise, at the cap of either gate and on any reviewer's
+  `escalate`, an **arbiter** agent rules instead of a person (`factory/arbiter.go`): a fresh Opus
+  reviewer (`factory.arbiter`) that reads the builder's conversation and the last review and ends
+  with `VERDICT: approve|changes|escalate|close`, `changes` only with `MUST FIX:` lines. On a plan,
+  approve builds it and changes builds it with the fixes (code review checks each, as with
+  `SMALL FIX:`), both through the build side-effects check above; escalate is a side effect Zach
+  must allow. On code, approve goes on to the finished-work rule, changes sends the fixes for one
+  more round whose review checks them, and escalate brings the card to Zach with its reason. The
+  arbiter runs once per gate per card (`factory.arbitrated`); a gate that still does not settle,
+  or a ruling it cannot give, waits on the board (never emailed) as "Reviews didn't settle" with Let
+  an agent decide (another arbiter), a reply, or Drop; QUESTION blocks from an earlier brief are not
+  offered there, since the arbiter's action carries no answers. Reviewers may answer `nits` or `close`; a reviewer
+  that ends or disappears without a verdict is re-run once on its own before the card moves to
+  Needs Zach (`factory.no-verdict`); a card that stops with nothing queued goes to Needs Zach after
+  2 minutes.
 - Provider errors: a working card in error with a recognized quota reset gets one resume
   attempt after that reset plus 30 seconds. The deadline and attempt survive restarts. A second
   error, an unknown reset format, or uncertain delivery goes to Needs Zach with Resume, Reply
@@ -340,9 +375,9 @@ are folded into details. Missing original requests are labeled unavailable, with
 Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
 The decision and needs fields describe the concrete choice and its consequence; overview prose
 stays in details. Existing `QUESTION:` blocks provide up to four questions, with the recommendation
-first. Ordinary approval and recommendation require every question to be answered. A brief’s as-is
-approval ignores open questions and refuses filled answers or instructions. Drop and Other do not
-require every question to be answered.
+first. Ordinary approval requires every question to be answered. Let an agent decide carries no
+answers and refuses filled answers or instructions: send them through a reply choice. Drop and
+Other do not require every question to be answered.
 Every action requires an explicit choice, including cards with only one action. Named reply choices
 keep their hints and recommendation. Send question answers through a reply choice; completion, retry,
 stop and drop refuse to discard filled answers or instructions. Select the action and press Submit once; Other sends typed
@@ -374,11 +409,12 @@ Zach is emailed only for decisions, by the factory itself through the zrl-bot ma
 (`pdw call zrl_bot_email_control__*`, `factory/mail.go`), once per wait reason. Each ask on the board
 is either emailed or board-only (`Ask.boardOnly`):
 
-- **Emailed:** approve a plan, try a preview, approve landing, a brief (reviews didn't settle, a
-  reviewer escalated), the secret scan's stop, a public-repo push without review, and a repo choice.
+- **Emailed:** allow a build with side effects, try finished work before it lands, the secret
+  scan's stop, a public-repo push without review, and a repo choice.
 - **Board only:** finished cards and cards moved by hand; a running agent (permission prompt, stall,
   writing its summary); errors and usage limits; a stuck step or reviewer; a review with no
-  verdict; a reviewer's close or duplicate verdict; dependency waits; and every check after landing
+  verdict; a review that did not settle even with the arbiter (the arbiter's call, not his);
+  a reviewer's close or duplicate verdict; dependency waits; and every check after landing
   (not verified, work left, did it finish, landed diff differs). These are problems for the factory
   and its agents; the board shows them until a later digest lists them.
 
@@ -399,7 +435,7 @@ The email is the decision alone:
   their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
   `FACTORY_ZACH_EMAIL`. If sending with inline screenshots fails, it retries once without them.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
-  A wait where the builder was just asked for a summary or brief (`factory.writing`) is emailed
+  A wait where the builder was just asked for a decision or preview (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).
 - Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
   retried after 5 minutes; a timed-out one is not, since it may have gone out.
@@ -413,7 +449,7 @@ acts:
 
 | Reply | Does |
 | --- | --- |
-| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or recommend; on an approve with questions, it also answers each with its recommended (first) option |
+| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or let an agent decide; on an approve with questions, it also answers each with its recommended (first) option |
 | `done`, `mark done`, `mark it done` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
 | `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with the Yes button when it approves |
@@ -551,12 +587,12 @@ in them is published. For their cards:
   worktree. It uses its own installed binary and the gitleaks config from `origin/main`, never the
   card's copy, so a card cannot weaken the scan that checks it. A hit, or a scan that cannot run,
   stops the card in Needs Zach; nothing is published.
-- A clean scan lands the card under the usual tier rules, with `bin/land`, which scans again
-  before its push, as does the pre-push hook. No person approves the landing: what keeps private
-  data out is the code reviewer, told the repo is public, and the scans. This holds for every
-  card, including ideas, Scouts and scheduled runs, so those can publish with no person reading
-  them. Architecture-tier cards (at their preview stop) and cards with no plan review still wait for Zach, as in any repo;
-  approving one scans again before the land message.
+- After a clean scan the finished-work rule applies, as in any repo: what Zach asked for comes to
+  him first, and what the factory started (ideas, Scouts, scheduled runs) lands on its own with
+  `bin/land`, which scans again before its push, as does the pre-push hook, unless it is on the
+  always-ask list. For those, no person approves the landing: what keeps private data out is the
+  code reviewer, told the repo is public, and the scans. Approving a card at its finished-work stop
+  scans again before the land message.
 - The direct track is off, ideas wait for a person's Start, and reviewers get a public-repo rule
   (any hostname, email, id, quote or secret is blocking).
 
@@ -662,6 +698,9 @@ Computer-use access keeps the role's existing action approvals and read-only res
 - `cmd/factory-deploy`, `deployer/`: the self-deployer; `deploy/`: the systemd units.
 - `factory/policy.go`: tiers, prompts, verdicts, the automatic moves (`Tick`).
 - `factory/guard.go`: guarded (public) repos. `factory/scan/`: the secret scanner.
+- `factory/alwaysask.go`: who sees finished work before it lands, and the always-ask file check.
+  `factory/arbiter.go`: the arbiter for reviews that do not settle. `.factory.json`: this repo's
+  always-ask patterns.
 - `factory/route.go`: Repo Auto. `factory/agents.go`: the agent choices. `factory/reap.go`: the idle reap.
 - `factory/board.go`, `collect.go`, `ask.go`, `ideas.go`, `inbox.go`, `actions.go`,
   `transcript.go`, `server.go`; the board and transcript pages are in `factory/web/`.

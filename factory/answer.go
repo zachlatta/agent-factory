@@ -63,7 +63,7 @@ func parseAnswer(text string, ask *Ask) answer {
 	if clean == "" {
 		return answer{}
 	}
-	yesActs := ask.Yes == "approve" || ask.Yes == "recommend"
+	yesActs := ask.Yes == "approve" || ask.Yes == "arbiter"
 	if len(ask.Questions) == 1 && loneLetter.MatchString(clean) {
 		clean = "1" + clean // one question: its letter alone answers it
 	}
@@ -80,8 +80,8 @@ func parseAnswer(text string, ask *Ask) answer {
 		return answer{Action: "close"}
 	case letterReply.MatchString(clean):
 		if expanded, ok := expandLetters(clean, ask.Questions); ok {
-			// approve carries answers; recommend does not (it applies the brief as written), so on a
-			// brief they go to the agent, as the board sends them
+			// approve carries answers; arbiter does not, so on a review that did not settle they go to
+			// the agent, as the board sends them
 			if ask.Yes == "approve" && actionFor(ask, "approve") != nil {
 				return answer{Action: "approve", Message: expanded}
 			}

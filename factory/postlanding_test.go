@@ -146,7 +146,7 @@ func postLandingAnswer(text string) []byte {
 func TestNewLandingPromptsResetClarification(t *testing.T) {
 	for _, route := range []string{"approve", "rerun", "code review", "dependency"} {
 		t.Run(route, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1", labelRemainingChecked: "1"})
+			c := idea("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1", labelRemainingChecked: "1"})
 			agents := []Agent{c, reviewer("r1", c.ID, "code")}
 			if route == "dependency" {
 				c = heldCard(map[string]string{labelRemainingAsk: "1", labelRemainingChecked: "1"})
@@ -158,7 +158,7 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 			case "approve", "rerun":
 				_, err = f.Act(route, Body{ID: c.ID})
 			case "code review":
-				storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+				storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 				err = f.ApplyVerdict(f.agent("r1"))
 			case "dependency":
 				err = f.tickHeld(c, Card{ID: c.ID, Repo: c.Repo, Cwd: c.Cwd})

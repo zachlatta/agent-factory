@@ -31,7 +31,7 @@ func TestParseWaitsOn(t *testing.T) {
 func TestPlanApprovalRecordsWaitsOn(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001\nTIER: low")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -71,9 +71,9 @@ func heldCard(extra map[string]string) Agent {
 }
 
 func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
 		labelWaitsOn: "d0e0001"}), reviewer("r1", "c1", "code"), dep("building", false))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +95,8 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 		} else {
 			agents = append(agents, d)
 		}
-		f, p := newTestFactory(t, append(agents, card("c1", labels))...)
-		storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+		f, p := newTestFactory(t, append(agents, idea("c1", labels))...)
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "landing" || l[labelHeld] != "" {
 			t.Errorf("%s: labels = %v", name, l)
@@ -108,9 +108,9 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 }
 
 func TestHeldCardWithUIFeedbackIsToldToWait(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
 		labelWaitsOn: "d0e0001"}), reviewer("r1", "c1", "code"), dep("review", false))
-	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], "the button is small") ||

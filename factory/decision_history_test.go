@@ -119,7 +119,7 @@ func TestDecisionHistoryPlanMustBeReadBeforeReviewConsumed(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "plan-review"})
 	r := reviewer("r1", c.ID, "plan")
 	f, p := newTestFactory(t, c, r)
-	storeLog(t, f, p, r.ID, "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, r.ID, "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(r); err != nil {
 		t.Fatal(err)
 	}

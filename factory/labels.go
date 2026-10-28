@@ -14,7 +14,7 @@ const (
 	labelAutoReview = "auto-review"
 	labelTier       = "tier"
 	labelAwaiting   = "awaiting"
-	labelZachPlan   = "zach-plan"
+	labelZachPlan   = "zach-plan" // "approved": Zach allowed a plan whose build has side effects
 	labelVerdict    = "verdict"
 	labelNote       = "note"
 	labelPlanRounds = "plan-rounds"
@@ -35,7 +35,7 @@ const (
 	labelRouting    = "routing"      // a repo picker: its card starts in the repo it names (route.go)
 	labelRouted     = "routed"       // a picker's new card id ("starting" while it is being started)
 	labelCandidates = "candidates"   // repos a picker could not choose between, space-separated
-	labelDecided    = "zach-decided" // Zach ruled on the open review points (recommend): later reviews treat them as settled
+	labelDecided    = "zach-decided" // Zach answered or asked for changes on this card: later reviews treat his choices as settled
 	labelReviewed   = "reviewed"     // the HEAD the last code review saw: landing must put exactly that on main
 	labelDirtyAsks  = "dirty-asks"   // times the builder was asked to commit before code review
 	labelLandReview = "land-review"  // agents outside the card flow: last landing review, <verdict>@<sha>
@@ -51,6 +51,9 @@ const (
 	labelNoVerdict  = "no-verdict"   // the current review round already re-ran once after a reviewer gave no verdict
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
 	labelDelegated  = "delegated"    // an email or voice card got the sub-agent section from the factory (inbox.go)
+	labelArbiter    = "arbiter"      // on a reviewer: it is its card's arbiter (arbiter.go)
+	labelArbitrated = "arbitrated"   // the gates ("plan", "code"; space-separated) whose arbiter already ruled
+	labelAskWhy     = "ask-why"      // why a card whose code review passed comes to Zach before it lands (alwaysask.go)
 )
 
 // labelLandedVerified records that commits reached main and passed the reviewed-change check.

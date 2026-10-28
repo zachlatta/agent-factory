@@ -14,12 +14,13 @@ import (
 func TestParseAnswer(t *testing.T) {
 	qs := []Question{{Text: "Which store?", Options: []string{"Postgres", "SQLite"}},
 		{Text: "When?", Options: []string{"Now", "Later"}}}
-	plan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Approve plan & build"),
+	plan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Allow & build"),
 		reply("Send back", ""), act("close", "Drop it")}, Questions: qs}
-	onePlan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Approve plan & build"),
+	onePlan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Allow & build"),
 		reply("Send back", ""), act("close", "Drop it")}, Questions: qs[:1]}
-	brief := &Ask{Yes: "recommend", Actions: []Action{primary("recommend", btnRecommend), act("close", btnDrop)}}
-	briefQs := &Ask{Yes: "recommend", Actions: brief.Actions, Questions: qs}
+	brief := settleAsk()
+	brief.Yes = "arbiter"
+	briefQs := &Ask{Yes: "arbiter", Actions: brief.Actions, Questions: qs}
 	rerun := &Ask{Actions: []Action{primary("rerun", "Re-run"), reply("Reply", "")}}
 	landedLeft := &Ask{Yes: "say", No: "say", Actions: []Action{reply("Send it on", ""), act("done", "Mark done")}}
 	for _, tc := range []struct {
@@ -30,7 +31,7 @@ func TestParseAnswer(t *testing.T) {
 		{plan, "Approve.", "approve", ""},
 		{plan, "LGTM!", "approve", ""},
 		{plan, "  go   ahead ", "approve", ""},
-		{brief, "yes", "recommend", ""},
+		{brief, "yes", "arbiter", ""},
 		{rerun, "yes", "send", "yes"},
 		{plan, "drop it", "close", ""},
 		{rerun, "drop", "send", "drop"},
@@ -44,8 +45,8 @@ func TestParseAnswer(t *testing.T) {
 		{plan, "1B 2A", "approve", "Which store?\n   → SQLite"},
 		{plan, "1b, 2b", "approve", "When?\n   → Later"},
 		{brief, "1A", "send", "1A"},                                              // no questions on the brief
-		{briefQs, "1B", "send", "Zach's answers:\n1. Which store?\n   → SQLite"}, // recommend would drop the choice
-		{briefQs, "yes", "recommend", ""},
+		{briefQs, "1B", "send", "Zach's answers:\n1. Which store?\n   → SQLite"}, // the arbiter would drop the choice
+		{briefQs, "yes", "arbiter", ""},
 		{plan, "yes", "approve", "1. Which store?\n   → Postgres\n2. When?\n   → Now"}, // yes takes the recommendations
 		{onePlan, "B", "approve", "Which store?\n   → SQLite"},                         // one question: a letter alone
 		{onePlan, "a.", "approve", "→ Postgres"},
@@ -83,7 +84,7 @@ func TestEmailApproveBuildsWithoutAnEcho(t *testing.T) {
 	if l[labelStage] != "building" || l[labelAnswered] != "m2" || l[labelZachPlan] != "approved" {
 		t.Errorf("labels = %v", l)
 	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach approved your plan") {
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") {
 		t.Errorf("sent = %v", msgs)
 	}
 	if s := m.sends(); len(s) != 0 {
@@ -194,21 +195,24 @@ func TestAnswerAPIStatusTellsTheDispatcherToFallBack(t *testing.T) {
 	}
 }
 
+// A review that did not settle offers no questions (the arbiter rules now), so letters are Zach's own words.
 func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
 	a := card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes",
 		labelZachThread: "nt1"})
 	f, p, m := mailFactory(t, a)
 	storeLog(t, f, p, "c1", "Brief.\n\nQUESTION: Which fix?\n- The small one (recommended)\n- The big one\n")
 	c, _ := f.card("c1")
-	if ask := askFor(c, f.agent("c1")); ask.Yes != "recommend" {
+	if ask := askFor(c, f.agent("c1")); ask.Yes != "arbiter" {
 		t.Fatalf("ask = %+v", ask)
+	}
+	if c.Ask == nil || len(c.Ask.Questions) != 0 {
+		t.Fatalf("stale questions offered next to the arbiter: %+v", c.Ask)
 	}
 	res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "1B"})
 	if err != nil || res.(map[string]string)["action"] != "send" {
 		t.Fatalf("res = %v, err = %v", res, err)
 	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Which fix?\n   → The big one") ||
-		strings.Contains(msgs[0], "accepts the recommendations") {
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "1B") || strings.Contains(msgs[0], "→") {
 		t.Errorf("sent = %v", msgs)
 	}
 	if s := m.sends(); len(s) != 0 {

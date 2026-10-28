@@ -66,18 +66,18 @@ c.routing=false;c.ask.actions=[{id:'reply',label:'Reply'},{id:'done',label:'Mark
 html=askHtml(c);assert(html.includes('>Yes</button>'));assert(html.includes('>No</button>'));assert(html.includes("askChoose('c1','yes')"));
 askActions.c1='yes';await askSubmit('c1');assert.equal(sent.at(-1)[0],'send');assert.equal(sent.at(-1)[1].message,'Yes.');
 askActions.c1='no';await askSubmit('c1');assert.equal(sent.at(-1)[1].message,'No.');
-// A brief's as-is approval deliberately ignores the open questions.
-const brief={id:'brief',ask:{actions:[{id:'approve',label:'Land as it is'},{id:'recommend',label:'Apply recommendations'},{id:'reply',label:'Reply'}],questions:[{text:'Store?',options:['Postgres','SQLite']},{text:'Color?',options:['Blue','Green']}]}};
-B.cards=[brief];nodes['r-brief']={value:''};askActions.brief=0;
-await askSubmit('brief');assert.equal(sent.at(-1)[0],'approve');assert.deepEqual(sent.at(-1)[1],{id:'brief'});
+// Handing a review that did not settle to the arbiter carries no answers: they must go through a reply.
+const settle={id:'settle',ask:{actions:[{id:'arbiter',label:'Let an agent decide'},{id:'reply',label:'Tell it what to do'},{id:'close',label:'Drop it'}],questions:[{text:'Store?',options:['Postgres','SQLite']},{text:'Color?',options:['Blue','Green']}]}};
+B.cards=[settle];nodes['r-settle']={value:''};askActions.settle=0;
+await askSubmit('settle');assert.equal(sent.at(-1)[0],'arbiter');assert.deepEqual(sent.at(-1)[1],{id:'settle'});
 for(const picks of [{0:0},{0:0,1:1}]) {
- askActions.brief=0;askPicks.brief=picks;const before=sent.length;
- await askSubmit('brief');assert.equal(sent.length,before,'as-is must not swallow answers');
+ askActions.settle=0;askPicks.settle=picks;const before=sent.length;
+ await askSubmit('settle');assert.equal(sent.length,before,'the arbiter must not swallow answers');
 }
-askPicks.brief={};nodes['r-brief'].value='Preserve these instructions';
-const beforeDraft=sent.length;await askSubmit('brief');assert.equal(sent.length,beforeDraft);assert(notices.at(-1).includes('reply option'));
-nodes['r-brief'].value='';askActions.brief=1;askPicks.brief={0:0,1:1};
-await askSubmit('brief');assert.equal(sent.at(-1)[0],'recommend');assert(sent.at(-1)[1].message.includes('Postgres'));
+askPicks.settle={};nodes['r-settle'].value='Preserve these instructions';
+const beforeDraft=sent.length;await askSubmit('settle');assert.equal(sent.length,beforeDraft);assert(notices.at(-1).includes('reply option'));
+nodes['r-settle'].value='';askActions.settle=1;askPicks.settle={0:0,1:1};
+await askSubmit('settle');assert.equal(sent.at(-1)[0],'send');assert(sent.at(-1)[1].message.includes('Postgres'));
 html=askHtml({id:'c2',ask:{request:{Base:'Unique task text'},overview:{overview:'Overview text'},actions:[],questions:[]}});assert.equal(html.split('Unique task text').length-1,1);assert(html.includes('<p class="gist">Overview text</p>'));
 
 })().catch(e=>{console.error(e);process.exit(1)});`

@@ -69,8 +69,9 @@ func askFor(c Card, a Agent) *Ask {
 // boardOnly reports whether the wait is shown on the board only, never emailed: a finished or
 // hand-moved card, a running agent (permission prompt, stall, writing its summary), an error or usage
 // limit, a stuck step or reviewer, a review with no verdict, a close or duplicate verdict, a dependency
-// wait, and the checks after landing. Decisions (plans, previews, landings, briefs, repo choice, the
-// secret scan, an agent waiting on him) are emailed.
+// wait, a review that did not settle (the arbiter's to decide, not his), and the checks after landing.
+// Decisions (allowing a build, previews, landings, repo choice, the secret scan, an agent waiting on him)
+// are emailed.
 func boardOnly(c Card, a Agent, ask *Ask) bool {
 	note := a.L(labelNote)
 	switch {
@@ -81,6 +82,8 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 	case note == limitNote || strings.HasPrefix(note, "history unavailable"):
 		return true
 	case note == "stuck" || note == noVerdictNote:
+		return true
+	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
 		return true
 	case isDepAskNote(note):
 		return true
@@ -93,8 +96,8 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 	return false
 }
 
-// yesNo maps the board's Yes/No buttons onto the ask, by its buttons. A brief (rework cap or escalation)
-// gets Yes = go with the builder's recommendation; a yes/no question (primary approve or close) gets
+// yesNo maps the board's Yes/No buttons onto the ask, by its buttons. A review that did not settle gets
+// Yes = let an agent decide; a yes/no question (primary approve or close) gets
 // that action; both send No as a change request. An open-ended ask sends Yes or No as a reply. Asks
 // whose answer is Stop, Re-run or a repo, and finished cards, get none.
 func yesNo(ask *Ask) (string, string) {
@@ -109,8 +112,8 @@ func yesNo(ask *Ask) (string, string) {
 	switch {
 	case has("stop") || has("resume") || has("rerun") || has("pickrepo") || ask.Title == finishedTitle:
 		return "", ""
-	case has("recommend"):
-		return "recommend", "changes"
+	case has("arbiter"):
+		return "arbiter", "changes"
 	}
 	for _, x := range ask.Actions {
 		if x.Primary && (x.ID == "approve" || x.ID == "close") {
@@ -168,10 +171,10 @@ func baseAsk(c Card, a Agent) *Ask {
 			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"),
 				act("done", "Mark done"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "plan":
-		return &Ask{Title: "Approve this plan?", From: "builder",
-			Why: "It is an architecture change and building it has side effects (or they were not ruled out), so nothing gets built until you OK the plan. A code review still runs before it lands.",
-			Actions: []Action{primary("approve", "Approve plan & build"),
-				reply("Send back with changes", "What should change in the plan?"), act("close", "Drop it")}}
+		return &Ask{Title: "Allow this build?", From: "builder",
+			Why: "Other agents reviewed the plan. Building it would change something outside its own copy of the code (or that was not ruled out), so nothing is built until you allow it. A code review still runs before it lands.",
+			Actions: []Action{primary("approve", "Allow & build"),
+				reply("Send back with changes", "What should change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
 		return &Ask{Title: "Private text found before publishing: fix it?", From: "builder",
 			Why: "This repo is public. The factory's scan " + strings.TrimPrefix(note, "secret scan ") +
@@ -182,19 +185,14 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
-	case note == previewNote:
+	case note == previewNote || strings.HasPrefix(note, "review passed") || strings.HasPrefix(note, "review found an architecture change"):
+		// the finished-work stop; the other two notes are its older forms on cards that waited before it
+		why := "Built, tested and passed by code review; nothing is live yet."
+		if w := a.L(labelAskWhy); w != "" {
+			why += " It comes to you because " + w + "."
+		}
 		return &Ask{Title: "Try it, then ship it?", From: "builder",
-			Why: "It is an architecture change, built and passed by code review; nothing is live yet. The agent's before and after and its link to try it are below.",
-			Actions: []Action{primary("approve", "Approve & ship"),
-				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
-	case strings.HasPrefix(note, "review found an architecture change"):
-		return &Ask{Title: "Ship it?", From: "reviewer",
-			Why: "The code passed review, but the reviewer found it changes the architecture, which needs your OK.",
-			Actions: []Action{primary("approve", "Approve & ship"),
-				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
-	case strings.HasPrefix(note, "review passed"):
-		return &Ask{Title: "Ship it?", From: "builder",
-			Why: "Another agent reviewed the work and passed it. This card was sent to review by hand, so you decide whether it lands.",
+			Why: why + " The agent's before and after and its link to try it are below.",
 			Actions: []Action{primary("approve", "Approve & ship"),
 				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
 	case note == noVerdictNote:
@@ -202,8 +200,9 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "The reviewer stopped without a verdict, so the factory can't tell whether the work passed. " +
 				"Its last message is below. Re-running starts a fresh review.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
-	case note == "rework cap reached" || note == "reviewer escalated":
-		return briefAsk(a)
+	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
+		// the last two are cards that waited for Zach's brief before the arbiter took over the cap
+		return settleAsk()
 	case a.L(labelVerdict) == "close":
 		return &Ask{Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
@@ -267,36 +266,24 @@ func repoAsk(note, candidates string) *Ask {
 // noVerdictNote marks a card whose reviewer ended without a VERDICT line.
 const noVerdictNote = "reviewer gave no verdict"
 
-// Button labels on brief cards. briefMsg describes each button by these exact labels.
-const (
-	btnRecommend    = "Go with its recommendations"
-	btnRecommendOne = "Go with its recommendation"
-	btnBuildAsIs    = "Build the plan as it is"
-	btnLandAsIs     = "Land as it is"
-	btnTell         = "Tell it what to do"
-	btnAnswer       = "Answer"
-	btnDrop         = "Drop it"
-)
-
-const briefWhy = "Below is the builder's summary: what's unresolved, what it recommends, and what each button does. " +
-	"The reviewer's full notes are on its card."
-
-// briefAsk is the Ask for a card that reached the rework cap or was escalated by its reviewer. The builder was
-// sent briefMsg, so Detail is its brief, and the buttons are the ones the brief describes.
-func briefAsk(a Agent) *Ask {
-	plan := planPending(a) && strings.HasPrefix(a.L(labelVerdict), "plan")
-	if a.L(labelNote) == "reviewer escalated" {
-		return &Ask{Title: "A reviewer needs your decision", From: "builder", Why: briefWhy,
-			Actions: []Action{{ID: "reply", Label: btnAnswer, Primary: true, Hint: "Your decision"},
-				act("recommend", btnRecommendOne), act("close", btnDrop)}}
+// askQuestions is the builder's QUESTION blocks shown with ask: none on a review that did not settle.
+// Those were written for a ruling the arbiter now makes, and its action carries no answers, so picking one
+// could only be refused; Zach can still write his own answer through the reply.
+func askQuestions(ask *Ask, qs []Question) []Question {
+	if ask != nil && actionFor(ask, "arbiter") != nil {
+		return nil
 	}
-	asIs, what := btnLandAsIs, "code"
-	if plan {
-		asIs, what = btnBuildAsIs, "plan"
-	}
-	return &Ask{Title: "Reviews didn't settle: your call on the " + what, From: "builder", Why: briefWhy,
-		Actions: []Action{primary("recommend", btnRecommend), reply(btnTell, "e.g. ignore the second point, fix the first"),
-			act("approve", asIs), act("close", btnDrop)}}
+	return qs
+}
+
+// settleAsk is the Ask for a card whose review did not settle even with the arbiter (or that waited for
+// Zach at the review cap before the arbiter existed): another arbiter, his own instructions, or drop it.
+func settleAsk() *Ask {
+	return &Ask{Title: "Reviews didn't settle", From: "builder",
+		Why: "The reviewers and the builder could not agree. Let an agent weigh both sides and decide, or tell the " +
+			"builder what to do. The builder's last message is below.",
+		Actions: []Action{primary("arbiter", "Let an agent decide"), reply("Tell it what to do", "e.g. ignore the second point, fix the first"),
+			act("close", "Drop it")}}
 }
 
 // blockedReviewerAsk offers a fresh review for a card whose reviewer is stuck on a permission
@@ -372,7 +359,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 			ask.Request = cached.request
 		}
 		if ok && (cached.key == key || !fetch) {
-			ask.Detail, ask.Questions, ask.Overview = cached.text, cached.questions, cached.overview
+			ask.Detail, ask.Questions, ask.Overview = cached.text, askQuestions(ask, cached.questions), cached.overview
 			ask.Evidence = cached.evidence
 			ask.Report = cached.report
 			if fetch {
@@ -402,6 +389,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 		f.mu.Lock()
 		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview, ask.Evidence, ask.Report, ask.Request}
 		f.mu.Unlock()
+		ask.Questions = askQuestions(ask, ask.Questions) // the cache keeps them: the ask can change without new activity
 	}
 }
 

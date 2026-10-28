@@ -39,44 +39,63 @@ func TestGuardedDefaultsToFactoryRepoOnly(t *testing.T) {
 	}
 }
 
-func TestGuardedZachCardLandsAfterCleanScan(t *testing.T) {
-	for _, tier := range []string{"low", "risky", "architecture"} {
-		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: tier, labelSource: "board",
-			labelPlanRounds: "1", labelZachPlan: "approved"}), reviewer("r1", "c1", "code"))
+func TestGuardedCardIsScannedBeforeItLandsOrReachesZach(t *testing.T) {
+	for _, tc := range []struct {
+		name, tier, origin, want string
+	}{
+		{"idea low", "low", "idea", "landing"},
+		{"idea risky", "risky", "idea", "landing"},
+		{"idea architecture", "architecture", "idea", "zach"}, // always-ask: architecture he did not ask for
+		{"Zach's low", "low", "", "zach"},                     // he asked for it: he sees it finished
+	} {
+		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: tc.tier, labelSource: "board",
+			labelOrigin: tc.origin, labelPlanRounds: "1"}), reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
-		storeLog(t, f, p, "r1", "TIER: "+tier+"\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tc.tier+"\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
-		if l[labelStage] != "landing" || !strings.Contains(l[labelNote], "scan passed") {
-			t.Errorf("%s: labels = %v", tier, l)
+		if l[labelStage] != tc.want {
+			t.Errorf("%s: labels = %v", tc.name, l)
 		}
-		if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land") || !strings.Contains(msgs[0], "--no-verify") {
-			t.Errorf("%s: sent = %v", tier, msgs)
+		msgs := p.sent("c1")
+		if tc.want == "landing" && (len(msgs) != 1 || !strings.Contains(l[labelNote], "scan passed") ||
+			!strings.Contains(msgs[0], "bin/land") || !strings.Contains(msgs[0], "--no-verify")) {
+			t.Errorf("%s: note %q, sent = %v", tc.name, l[labelNote], msgs)
+		}
+		if tc.want == "zach" && (l[labelNote] != previewNote || len(msgs) != 1 || strings.Contains(msgs[0], "Land it now")) {
+			t.Errorf("%s: note %q, sent = %v", tc.name, l[labelNote], msgs)
 		}
 		if len(*ranges) != 1 || (*ranges)[0] != "origin/main..HEAD" {
-			t.Errorf("%s: scanned %v", tier, *ranges)
+			t.Errorf("%s: scanned %v", tc.name, *ranges)
 		}
 	}
 }
 
-func TestGuardedInboxCardLandsAndReports(t *testing.T) {
+func TestGuardedInboxCardComesToZachThenLandsAndReports(t *testing.T) {
 	c := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "email", labelPlanRounds: "1"})
 	c.Labels[gmailThreadLabel] = "t1"
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 	fakeScan(f, nil, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "landing" {
-		t.Errorf("labels = %v", l)
+	l := p.labels("c1")
+	if l[labelStage] != "zach" || l[labelNote] != previewNote {
+		t.Fatalf("labels = %v", l)
+	}
+	f, p = newTestFactory(t, withLabels(c, l))
+	fakeScan(f, nil, nil)
+	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
+		t.Fatal(err)
 	}
 	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land") || !strings.Contains(msgs[0], "t1") {
 		t.Errorf("sent = %v", msgs)
 	}
 }
 
-// Every public-repo card lands on its own after an approving review and a clean scan, whoever
-// placed it: ideas, Scouts, scheduled runs and cards with no source label too.
-func TestGuardedAnyCardLandsAfterCleanScan(t *testing.T) {
+// Every public-repo card the factory started lands on its own after an approving review and a clean
+// scan, with nothing on the always-ask list: ideas, Scouts and scheduled runs. Cards with no source
+// label count as Zach's and come to him.
+func TestGuardedFactoryCardLandsAfterCleanScan(t *testing.T) {
 	sched := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"})
 	sched.Labels["paseo.schedule-id"] = "s1"
 	for name, c := range map[string]Agent{
@@ -89,12 +108,16 @@ func TestGuardedAnyCardLandsAfterCleanScan(t *testing.T) {
 	} {
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
-		storeLog(t, f, p, "r1", "VERDICT: nits")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
-		if l := p.labels("c1"); l[labelStage] != "landing" || !strings.Contains(l[labelNote], "scan passed") {
+		want := "landing"
+		if name == "app" {
+			want = "zach"
+		}
+		if l := p.labels("c1"); l[labelStage] != want {
 			t.Errorf("%s: labels = %v", name, l)
 		}
-		if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land") {
+		if msgs := p.sent("c1"); want == "landing" && (len(msgs) != 1 || !strings.Contains(msgs[0], "bin/land")) {
 			t.Errorf("%s: sent = %v", name, msgs)
 		}
 		if len(*ranges) != 1 {
@@ -240,13 +263,13 @@ func TestGuardedPromptsCarryPublicRules(t *testing.T) {
 }
 
 func TestUnguardedRepoUnchanged(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
 		t.Fatal("scanned a repo that is not guarded")
 		return nil, nil
 	}
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "landing" {
 		t.Errorf("labels = %v", l)

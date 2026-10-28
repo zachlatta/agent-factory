@@ -54,7 +54,7 @@ func TestMaxTier(t *testing.T) {
 func TestPlanApprovedLowTierStartsBuild(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "[Assistant] plan is sound\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] plan is sound\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[Assistant] Plan ... TIER: low")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -97,16 +97,17 @@ func TestZachApprovesArchitecturePlan(t *testing.T) {
 	if l[labelStage] != "building" || l[labelZachPlan] != "approved" || l[labelAutoReview] != "code" || l[labelAwaiting] != "" {
 		t.Errorf("labels = %v", l)
 	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach approved your plan") {
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") {
 		t.Errorf("sent = %v", msgs)
 	}
 }
 
 func TestCodeApprovedAutoLandsByTier(t *testing.T) {
+	// work the factory started lands after the gates when nothing is on the always-ask list
 	for _, tier := range []string{"low", "risky"} {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: tier, labelPlanRounds: "1"}),
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: tier, labelPlanRounds: "1"}),
 			reviewer("r1", "c1", "code"))
-		storeLog(t, f, p, "r1", "TIER: "+tier+"\nVERDICT: nits")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "landing" {
@@ -118,12 +119,13 @@ func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	}
 }
 
-func TestArchitectureApprovedByZachAutoLands(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelZachPlan: "approved", labelPlanRounds: "1"}),
+func TestAllowedBuildStillComesToZachFinished(t *testing.T) {
+	// allowing a build's side effects is not approving the finished work he asked for
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelZachPlan: "approved", labelPlanRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "landing" {
+	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelAskWhy] != "you asked for it" {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -144,30 +146,32 @@ func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
 }
 
 func TestUntieredCardGoesToZachAfterReview(t *testing.T) {
-	// an existing session Zach sent to review by hand: no plan review, no tier
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review"}), reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	// a session sent to review by hand: no plan review, no tier; even one the factory started stops
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review"}), reviewer("r1", "c1", "code"))
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") || l[labelTier] != "low" {
+	if l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelAskWhy] != "it had no plan review" || l[labelTier] != "low" {
 		t.Errorf("labels = %v", l)
 	}
-	if len(p.sent("c1")) != 0 {
-		t.Errorf("must not land: %v", p.sent("c1"))
+	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
+		t.Errorf("must not land: %v", msgs)
 	}
 }
 
 func TestHandReviewedCardWaitsForZachAfterRework(t *testing.T) {
 	// a hand-sent card whose first code review asked for changes now has a tier label, but no plan review
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelCodeRounds: "1"}),
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelCodeRounds: "1"}),
 		reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") {
+	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != previewNote {
 		t.Errorf("labels = %v", l)
 	}
-	if len(p.sent("c1")) != 0 {
-		t.Errorf("must not land: %v", p.sent("c1"))
+	for _, m := range p.sent("c1") {
+		if strings.Contains(m, "Land it now") {
+			t.Errorf("must not land: %v", m)
+		}
 	}
 }
 
@@ -188,8 +192,12 @@ func TestChangesGoBackUntilReworkCap(t *testing.T) {
 		reviewer("r1", "c1", "code"))
 	storeLog(t, f, p, "r1", "VERDICT: changes")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != "rework cap reached" {
+	// at the cap an arbiter agent rules, not Zach
+	if l := p.labels("c1"); l[labelStage] != "review" || l[labelNote] != arbiterNote || l[labelArbitrated] != "code" {
 		t.Errorf("at cap: labels = %v", l)
+	}
+	if len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
+		t.Errorf("no arbiter started: %v", p.calls)
 	}
 }
 
@@ -736,7 +744,7 @@ func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelSince: ago(10 * time.Minute)}),
 		reviewer("r1", "c1", "plan"))
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "building" {
 		t.Errorf("labels = %v", l)
@@ -786,127 +794,6 @@ func TestReviewerNotesReachBuilderWhole(t *testing.T) {
 	}
 }
 
-// briefFor applies a final verdict to a card at the edge of the rework cap and returns the labels, the
-// message sent to the builder, and the Ask the card then shows.
-func briefFor(t *testing.T, labels map[string]string, kind, verdict string) (map[string]string, string, *Ask) {
-	t.Helper()
-	f, p := newTestFactory(t)
-	c := card("c1", labels)
-	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", kind, verdict, p)})
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	msgs := p.sent("c1")
-	if len(msgs) != 1 {
-		t.Fatalf("sent = %v", msgs)
-	}
-	return l, msgs[0], BuildBoard([]Agent{withLabels(c, l)}, nil, t0)[0].Ask
-}
-
-func TestReworkCapAsksBuilderForBrief(t *testing.T) {
-	for _, tc := range []struct {
-		name, kind string
-		labels     map[string]string
-		asIs       string
-	}{
-		{"code", "code", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "2"}, btnLandAsIs},
-		{"plan", "plan", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: "2"}, btnBuildAsIs},
-	} {
-		l, msg, ask := briefFor(t, tc.labels, tc.kind, "changes")
-		if l[labelStage] != "zach" || l[labelNote] != "rework cap reached" || l[labelTold] != "" {
-			t.Errorf("%s: labels = %v", tc.name, l)
-		}
-		for _, want := range []string{"FIRST finding", "LAST finding", "not seen this final review", "Do not build"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("%s: brief lacks %q:\n%s", tc.name, want, msg)
-			}
-		}
-		if strings.Contains(msg, "word for word") {
-			t.Errorf("%s: no reviewer question to quote at the cap", tc.name)
-		}
-		// the brief names every button the card shows, by its exact label
-		if ask.From != "builder" || actionIDs(ask) != "recommend,reply,approve,close" || ask.Actions[2].Label != tc.asIs {
-			t.Errorf("%s: ask = %+v", tc.name, ask)
-		}
-		for _, x := range ask.Actions {
-			if !strings.Contains(msg, `"`+x.Label+`"`) {
-				t.Errorf("%s: brief lacks button %q", tc.name, x.Label)
-			}
-		}
-	}
-}
-
-func TestEscalationAsksBuilderForBriefQuotingReviewer(t *testing.T) {
-	l, msg, ask := briefFor(t, map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}, "code", "escalate")
-	if l[labelStage] != "zach" || l[labelNote] != "reviewer escalated" || l[labelVerdict] != "code escalate" {
-		t.Errorf("labels = %v", l)
-	}
-	if !strings.Contains(msg, "quoted word for word") || !strings.Contains(msg, "FIRST finding") {
-		t.Errorf("brief = %s", msg)
-	}
-	if actionIDs(ask) != "reply,recommend,close" {
-		t.Errorf("ask = %+v", ask)
-	}
-	for _, x := range ask.Actions {
-		if !strings.Contains(msg, `"`+x.Label+`"`) {
-			t.Errorf("brief lacks button %q", x.Label)
-		}
-	}
-	if strings.Contains(msg, btnLandAsIs) {
-		t.Error("escalated card has no land-as-is button")
-	}
-}
-
-func TestRecommendAppliesTheBrief(t *testing.T) {
-	// plan at the cap: revise to the recommendations, build, code review next
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-		labelVerdict: "plan changes", labelPlanRounds: "3", labelTier: "risky"}))
-	if _, err := f.Act("recommend", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelZachPlan] != "approved" || l[labelDecided] != "1" {
-		t.Errorf("plan labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Revise the plan to match them") ||
-		!strings.Contains(msgs[0], "do NOT land") {
-		t.Errorf("plan sent = %v", msgs)
-	}
-
-	// code at the cap: apply, then a code review, not landing
-	code := card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-		labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3", labelTier: "low"})
-	f, p = newTestFactory(t, code)
-	if _, err := f.Act("recommend", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	l = p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelDecided] != "1" {
-		t.Errorf("code labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Apply them") || strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("code sent = %v", msgs)
-	}
-
-	// that review asks for changes again: straight back to Zach with a new brief, no loop
-	_, msg, _ := briefFor(t, map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "3",
-		labelDecided: "1"}, "code", "changes")
-	if !strings.Contains(msg, "Write a brief for Zach") {
-		t.Errorf("after recommend: %s", msg)
-	}
-}
-
-func TestApproveOnCodeAtCapLandsAsIs(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-		labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}))
-	f.Act("approve", Body{ID: "c1"})
-	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelDecided] != "" {
-		t.Errorf("labels = %v", l)
-	}
-}
-
 func TestReviewPromptTreatsZachsRulingsAsSettled(t *testing.T) {
 	c := Card{ID: "c1", Title: "x", Tier: "low"}
 	if strings.Contains(ReviewPrompt(c, "code", 7478, "unknown"), "already ruled") {
@@ -930,18 +817,7 @@ func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
 		}
 	}
 
-	f, p := newTestFactory(t,
-		card("c-plan", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-			labelVerdict: "plan changes", labelPlanRounds: "3", labelTier: "risky"}),
-		card("c-code", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-			labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3", labelTier: "low"}),
-		card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
-	if _, err := f.Act("recommend", Body{ID: "c-plan"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Act("recommend", Body{ID: "c-code"}); err != nil {
-		t.Fatal(err)
-	}
+	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
 	dirtyCard, _ := f.card("c-dirty")
 	if err := f.askToCommit(dirtyCard, " M a.go"); err != nil {
 		t.Fatal(err)
@@ -953,8 +829,7 @@ func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
 		"reworkMsg plan": reworkMsg("plan", 1, 3, "fix it"),
 		"reworkMsg code": reworkMsg("code", 1, 3, "fix it"),
 		"askToCommit":    p.sent("c-dirty")[0],
-		"recommend plan": p.sent("c-plan")[0],
-		"recommend code": p.sent("c-code")[0],
+		"arbiter fixes":  arbiterFixMsg("fix it"),
 		"code rubric":    ReviewPrompt(c, "code", 7478, "unknown"),
 	}
 	for name, s := range noLivePrompts {
@@ -966,8 +841,7 @@ func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
 		"buildMsg":       noLivePrompts["buildMsg"],
 		"reworkMsg code": noLivePrompts["reworkMsg code"],
 		"askToCommit":    noLivePrompts["askToCommit"],
-		"recommend plan": noLivePrompts["recommend plan"],
-		"recommend code": noLivePrompts["recommend code"],
+		"arbiter fixes":  noLivePrompts["arbiter fixes"],
 	} {
 		if !strings.Contains(s, "deploy steps") {
 			t.Errorf("%s does not ask the summary to restate deploy steps: %q", name, s)
@@ -1013,7 +887,7 @@ func TestParseSmallFix(t *testing.T) {
 
 func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 	reviewText := "- confirmAnswer is missing from factoryMails\n" +
-		"SMALL FIX: add confirmAnswer to factoryMails\nTIER: risky\nVERDICT: changes"
+		"SMALL FIX: add confirmAnswer to factoryMails\nBUILD SIDE EFFECTS: none\nTIER: risky\nVERDICT: changes"
 
 	// Rounds 1 and 2 still go back to plan rework even with SMALL FIX.
 	for _, prev := range []string{"0", "1"} {
@@ -1079,7 +953,7 @@ func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 		t.Errorf("plan review prompt matched its own SMALL FIX rule: %q", got)
 	}
 
-	// Code review at the rework cap still stops in Needs Zach even if SMALL FIX is present.
+	// Code review at the rework cap goes to the arbiter even if SMALL FIX is present.
 	f, p = newTestFactory(t,
 		card("c-code", map[string]string{labelStage: "review", labelSource: "board", labelTier: "risky", labelPlanRounds: "1", labelCodeRounds: "2"}),
 		reviewer("r-code", "c-code", "code"))
@@ -1087,12 +961,13 @@ func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
 	if err := f.ApplyVerdict(f.agent("r-code")); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c-code"); l[labelStage] != "zach" || l[labelNote] != "rework cap reached" {
-		t.Errorf("code review at cap should still stop in zach: %v", l)
+	if l := p.labels("c-code"); l[labelNote] != arbiterNote || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
+		t.Errorf("code review at cap should go to the arbiter: %v", l)
 	}
 }
 
-func TestPlanReworkCapSmallFixOnArchitectureWaitsForZachPlanApproval(t *testing.T) {
+func TestPlanReworkCapSmallFixWithSideEffectsWaitsForZach(t *testing.T) {
+	// the reviewer did not rule out build side effects: Zach allows the build first, whatever the tier
 	archReview := "- missing Ordering line for overlapping card\n" +
 		"SMALL FIX: add Ordering line for overlapping card\nTIER: architecture\nVERDICT: changes"
 	base := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: "2"})
@@ -1103,8 +978,8 @@ func TestPlanReworkCapSmallFixOnArchitectureWaitsForZachPlanApproval(t *testing.
 		t.Fatal(err)
 	}
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelVerdict] != "plan changes" ||
-		l[labelNote] != "architecture: approve the plan to build" || l[labelPlanFix] != "add Ordering line for overlapping card" {
+	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelVerdict] != "plan side effects" ||
+		l[labelNote] != sideEffectNote || l[labelPlanFix] != "add Ordering line for overlapping card" {
 		t.Fatalf("architecture at cap with small fix: labels = %v", l)
 	}
 	msgs := p.sent("c1")
@@ -1284,18 +1159,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
 	planPrompt := strings.ReplaceAll(fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "", ""), "<errands>", "desk")
 
-	f, p := newTestFactory(t,
-		card("c-plan", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-			labelVerdict: "plan changes", labelPlanRounds: "3", labelTier: "risky"}),
-		card("c-code", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-			labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3", labelTier: "low"}),
-		card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
-	if _, err := f.Act("recommend", Body{ID: "c-plan"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Act("recommend", Body{ID: "c-code"}); err != nil {
-		t.Fatal(err)
-	}
+	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
 	dirtyCard, _ := f.card("c-dirty")
 	if err := f.askToCommit(dirtyCard, " M a.go"); err != nil {
 		t.Fatal(err)
@@ -1307,8 +1171,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		"reworkMsg plan": reworkMsg("plan", 1, 3, "fix it"),
 		"reworkMsg code": reworkMsg("code", 1, 3, "fix it"),
 		"askToCommit":    p.sent("c-dirty")[0],
-		"recommend plan": p.sent("c-plan")[0],
-		"recommend code": p.sent("c-code")[0],
+		"arbiter fixes":  arbiterFixMsg("fix it"),
 	}
 	for name, s := range worktreePrompts {
 		for _, want := range []string{"worktree", "/tmp", ".factory-scratch/", ".git/info/exclude", "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {

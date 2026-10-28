@@ -108,7 +108,7 @@ func TestServerRoutesEveryAskAction(t *testing.T) {
 		labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}),
 		card("c2", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}))
 	h := f.Handler()
-	for _, tc := range []struct{ action, id string }{{"recommend", "c1"}, {"rerun", "c2"}} {
+	for _, tc := range []struct{ action, id string }{{"arbiter", "c1"}, {"rerun", "c2"}} {
 		req := httptest.NewRequest("POST", "/api/"+tc.action, strings.NewReader(`{"id":"`+tc.id+`"}`))
 		req.Header.Set("X-Factory", "1")
 		rec := httptest.NewRecorder()
@@ -117,7 +117,7 @@ func TestServerRoutesEveryAskAction(t *testing.T) {
 			t.Errorf("%s: %d %s", tc.action, rec.Code, rec.Body)
 		}
 	}
-	if p.labels("c1")[labelDecided] != "1" || len(p.runsWithLabel(labelArg(labelReviewOf, "c2"))) != 1 {
+	if len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 || len(p.runsWithLabel(labelArg(labelReviewOf, "c2"))) != 1 {
 		t.Errorf("calls = %v", p.calls)
 	}
 }

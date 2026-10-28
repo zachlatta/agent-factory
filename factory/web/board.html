@@ -727,7 +727,7 @@ async function askSubmit(id){
     await post('send',body);askDone(id,'Instructions sent');return;
   }
   if(!x)return;
-  const acceptsAnswers=x.id==='recommend'||x.id==='send'||(x.id==='approve'&&!c.routing&&!x.repo&&!a.actions.some(y=>y.id==='recommend'));
+  const acceptsAnswers=x.id==='send'||(x.id==='approve'&&!c.routing&&!x.repo);
   if(!acceptsAnswers&&(partial||text)){
     toast('Choose a reply option to send your answers and instructions first');return;
   }
@@ -748,7 +748,7 @@ async function askSubmit(id){
 // before the button's own handler, which calls post in the same tick.
 let pressed = null;
 document.addEventListener('click', e=>{ pressed = e.target.closest && e.target.closest('button'); setTimeout(()=>{ pressed=null; }); }, true);
-const busyText = {approve:'Approving…', recommend:'Applying…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
+const busyText = {approve:'Approving…', arbiter:'Handing over…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
   stop:'Stopping…', rerun:'Re-running…', review:'Starting review…', stage:'Moving…', new:'Starting…', scout:'Starting…'};
 let afterLoad = [];
 function busy(btn, action){
@@ -835,7 +835,7 @@ function fillPanel(c, fresh){
     <button onclick="act('review',{kind:'plan'})" title="A fresh Opus agent tries to find fault with the plan">Review plan</button>
     <button onclick="act('review',{kind:'code'})" title="A fresh Opus agent reviews the diff, read-only">${busy?'Review when idle':'Review code'}</button>
     ${c.awaiting==='plan'
-      ? `<button class="primary" onclick="act('approve')" title="Architecture plan: let it build. Code review still runs before it lands">Approve plan &amp; build</button>`
+      ? `<button class="primary" onclick="act('approve')" title="Building it has side effects: let it build. Code review still runs before it lands">Allow &amp; build</button>`
       : `<button class="primary" onclick="act('approve')" title="Tell the agent to land it">Approve &amp; land</button>`}
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
@@ -873,7 +873,7 @@ async function act(a, extra={}){
   const c = findCard(sel)||{};
   const r = await post(a, {id:sel, ...extra});
   toast(r.queued?'Review queued: starts when the agent goes idle'
-    : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Plan approved: agent is building':'Approved: agent is landing it')
+    : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Build allowed: agent is building':'Approved: agent is landing it')
     : a+' done');
   if(c.id&&c.id.startsWith('idea-')){ $('pMsg').value=''; releaseKeyboard(); closePanel(); }
   refresh(); }

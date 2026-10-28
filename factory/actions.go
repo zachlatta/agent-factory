@@ -96,7 +96,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			}
 		}
 		if c.Awaiting == "plan" {
-			// Zach's answer to an architecture plan: revise it, then plan review runs again
+			// Zach's answer to a build he was asked to allow: revise the plan, then plan review runs again
 			msg = "Zach read your plan and wants changes:\n\n" + msg + "\n\nRevise the plan, then restate the " +
 				"whole revised plan (not just the changes) and stop. " + overviewReminder + " Do not build yet."
 			files, err := f.chat(c.ID, msg, b.Attachments)
@@ -104,7 +104,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				return nil, err
 			}
 			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, map[string]string{
-				labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now, labelNote: "revising plan for Zach"})
+				labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now, labelNote: "revising plan for Zach",
+				labelDecided: "1"})
 		}
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
@@ -117,7 +118,11 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			return nil, err
 		}
 		if a := f.agent(c.ID); !sub && c.ArchivedAt == "" && a.L(labelStage) != "" {
-			if err := f.setLabels(c.ID, replyLabels(a, now, f.guarded(c.Repo))); err != nil {
+			labels := replyLabels(a, now, f.guarded(c.Repo))
+			if a.L(labelStage) == "zach" {
+				labels[labelDecided] = "1" // his answer to a stop: later reviews treat it as settled
+			}
+			if err := f.setLabels(c.ID, labels); err != nil {
 				return nil, err
 			}
 		}
@@ -136,11 +141,11 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			if fix := a.L(labelPlanFix); fix != "" {
 				notes = "Apply these fixes from the last plan review: " + fix
 			}
-			if err := f.send(c.ID, buildMsg("Zach approved your plan."+answers, notes)); err != nil {
+			if err := f.send(c.ID, buildMsg("Zach allowed this build."+answers, notes)); err != nil {
 				return nil, err
 			}
 			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
-				labelAwaiting: "", labelZachPlan: "approved", labelNote: "plan approved by Zach"})
+				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"})
 		}
 		msg := landMsg
 		if a, ok := f.agentOK(c.ID); ok {
@@ -162,28 +167,18 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			return nil, err
 		}
 		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelNote: "approved by Zach"})
-	case "recommend":
-		answers := ""
-		if m := strings.TrimSpace(b.Message); m != "" {
-			answers = "\n\nZach's answers:\n" + m + "\n\n"
+	case "arbiter":
+		// Zach hands a review that did not settle to an arbiter agent, even one that ruled before
+		a := f.agent(c.ID)
+		kind := "code"
+		if strings.HasPrefix(a.L(labelVerdict), "plan") {
+			kind = "plan"
 		}
-		// Zach accepts the builder's brief (rework cap or escalation): apply it, then code review as usual
-		if planPending(f.agent(c.ID)) {
-			if err := f.send(c.ID, "Zach accepts the recommendations in your brief."+answers+" Revise the plan to match them, then "+
-				"build it as revised. "+noLiveChangesRule+" "+worktreeRule+" Commit on your branch, do NOT land, and stop with a short summary (including the deploy steps as built, if any). "+overviewReminder+" A code reviewer "+
-				"checks it next, and the factory lands it once the review passes."); err != nil {
-				return nil, err
-			}
-			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
-				labelAwaiting: "", labelZachPlan: "approved", labelDecided: "1", labelNote: "building with Zach's choices"})
-		}
-		if err := f.send(c.ID, "Zach accepts the recommendations in your brief."+answers+" Apply them, commit on your branch, do NOT "+
-			"land, and stop with a short summary (including the deploy steps as built, if any). "+noLiveChangesRule+" "+worktreeRule+" "+overviewReminder+" A code reviewer checks it next, and the factory lands it once the "+
-			"review passes."); err != nil {
+		if err := f.supersedeReviewers(c.ID); err != nil {
 			return nil, err
 		}
-		return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
-			labelDecided: "1", labelNote: "applying Zach's choices"})
+		return ok, f.startArbiter(a, kind, "(Not kept here: the last review is the latest reviewer message in the builder's "+
+			"conversation, or read the card's reviewers.)", false)
 	case "rerun":
 		return ok, f.rerun(c)
 	case "done":

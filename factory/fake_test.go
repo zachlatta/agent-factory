@@ -269,7 +269,8 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	f.quiet = quietState{id: "quiet-anchor", checked: t0}
 	p.cwd["quiet-anchor"] = filepath.Join(f.cfg.StateDir, "quiet-anchor")
 	f.Sleep = func(time.Duration) {}
-	f.GitOut = func(context.Context, string, ...string) (string, error) { return "", fmt.Errorf("no git in tests") }
+	// no git, except an empty diff for the always-ask file check (alwaysask.go), so it hits nothing
+	f.GitOut = gitStub(cleanDiff)
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
 
 	managed := quietManaged(agents)
@@ -288,6 +289,17 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	}
 	f.SetAgents(agents)
 	return f, p
+}
+
+// cleanDiff answers the always-ask file check (alwaysask.go): the card changes no file on the list.
+var cleanDiff = map[string]string{"diff --no-renames --name-only origin/main...HEAD": ""}
+
+// idea is card, started by the factory from an idea: its finished work lands without Zach unless the
+// always-ask check hits.
+func idea(id string, labels map[string]string) Agent {
+	a := card(id, labels)
+	a.Labels[labelPrefix+labelOrigin] = "idea"
+	return a
 }
 
 func card(id string, labels map[string]string) Agent {

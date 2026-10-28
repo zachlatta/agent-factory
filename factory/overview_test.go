@@ -74,7 +74,7 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 }
 
 func TestEmailLeadsWithTheOverview(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"})
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: previewNote, labelVerdict: "code approve"})
 	f, p, m := mailFactory(t, c)
 	storeLog(t, f, p, "c1", "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.")
 	f.Tick()
@@ -109,13 +109,14 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 		"build":        buildMsg("Plan approved.", "(none)"),
 		"rework plan":  reworkMsg("plan", 1, 3, "notes"),
 		"rework code":  reworkMsg("code", 1, 3, "notes"),
-		"summary":      summaryMsg,
-		"brief":        briefMsg("code", true, "notes", briefAsk(card("c1", map[string]string{labelNote: "reviewer escalated"}))),
+		"side effects": sideEffectMsg,
+		"preview":      previewMsg("you asked for it"),
+		"arbiter":      ArbiterPrompt(c, "code", 7478, "unknown", "notes", false),
 		"land":         landMsg,
 		"guarded land": guardedLandMsg,
 		"ui hold":      uiFeedbackHoldMsg("- the button is small"),
 	}
-	// the board's own messages: plan changes, recommendations (plan and code), commit before review
+	// the board's own messages: plan changes, commit before review
 	for _, tc := range []struct {
 		name   string
 		labels map[string]string
@@ -123,10 +124,6 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 		body   Body
 	}{
 		{"plan changes", map[string]string{labelStage: "zach", labelAwaiting: "plan"}, "send", Body{Message: "smaller"}},
-		{"recommend plan", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "plan changes",
-			labelSource: "board"}, "recommend", Body{}},
-		{"recommend code", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"},
-			"recommend", Body{}},
 	} {
 		f.SetAgents([]Agent{card(tc.name, tc.labels)})
 		tc.body.ID = tc.name
@@ -150,7 +147,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 			t.Errorf("%s does not ask for the overview block", name)
 		}
 	}
-	for _, name := range []string{"new card", "plan review", "code review", "summary", "brief"} {
+	for _, name := range []string{"new card", "plan review", "code review", "side effects", "preview", "arbiter"} {
 		if !strings.Contains(prompts[name], "NEEDS FROM ZACH:") {
 			t.Errorf("%s does not teach the whole block", name)
 		}
@@ -158,21 +155,6 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 	for _, kind := range []string{"plan", "code"} {
 		if !strings.HasSuffix(ReviewPrompt(c, kind, 7478, "unknown"), "TIER: <low|risky|architecture>\nVERDICT: <approve|nits|changes|escalate|close>\n") {
 			t.Errorf("%s review no longer ends with TIER and VERDICT", kind)
-		}
-	}
-}
-
-// The brief's NEEDS FROM ZACH lines name every board button by its exact label.
-func TestBriefNamesEveryButtonInItsNeeds(t *testing.T) {
-	ask := briefAsk(card("c1", map[string]string{labelNote: "rework cap reached", labelVerdict: "code changes"}))
-	msg := briefMsg("code", false, "notes", ask)
-	i := strings.Index(msg, "NEEDS FROM ZACH:")
-	if i < 0 {
-		t.Fatal("no NEEDS FROM ZACH: in the brief")
-	}
-	for _, x := range ask.Actions {
-		if !strings.Contains(msg[i:], `"`+x.Label+`"`) {
-			t.Errorf("button %q is not named after NEEDS FROM ZACH:", x.Label)
 		}
 	}
 }

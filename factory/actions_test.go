@@ -170,7 +170,7 @@ func TestApproveUnpassedPlanBuildsInsteadOfLanding(t *testing.T) {
 		t.Errorf("labels = %v", l)
 	}
 	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "Zach approved your plan") || strings.Contains(msgs[0], "Land it now") {
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") || strings.Contains(msgs[0], "Land it now") {
 		t.Errorf("sent = %v", msgs)
 	}
 }

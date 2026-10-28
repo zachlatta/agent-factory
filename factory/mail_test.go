@@ -84,7 +84,7 @@ func longPlan() string {
 		"QUESTION: Which store?\n- Postgres (recommended)\n- SQLite\n"
 }
 
-const planNote = "architecture: approve the plan to build"
+const planNote = sideEffectNote
 
 // planWait is a card waiting for Zach to approve its plan: a decision, so it is emailed.
 func planWait(id string, extra map[string]string) Agent {
@@ -116,7 +116,7 @@ func TestDecisionEmailIsShortAndPlain(t *testing.T) {
 		t.Errorf("the subject must be the question: %v", a["subject"])
 	}
 	for _, want := range []string{"I recommend A.", "Which store?", "A. Postgres (recommended)", "B. SQLite",
-		"Reply with a letter", `"yes" to approve plan & build`, `"drop" to stop it`, "https://board.example/#c1"} {
+		"Reply with a letter", `"yes" to allow & build`, `"drop" to stop it`, "https://board.example/#c1"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text lacks %q:\n%s", want, text)
 		}
@@ -148,7 +148,7 @@ func TestEmailedAsksUsePlainWords(t *testing.T) {
 		"- A calm blue that matches the rest of the page (recommended)\n- A bright red that stands out from everything\n" +
 		"- Green like the old one used to be before\n- Grey so it fades into the page background\n- Black\n- White\n"
 	for _, note := range []string{planNote, previewNote, "review passed: approve to land", "secret scan found 1 hit",
-		"public repo: finished without review", "rework cap reached", "reviewer escalated"} {
+		"public repo: finished without review"} {
 		a := card("c1", map[string]string{labelStage: "zach", labelNote: note})
 		if note == planNote {
 			a = planWait("c1", nil)
@@ -180,7 +180,7 @@ func TestApproveWordOnlyWhenYesApproves(t *testing.T) {
 	c, _ := f.card("c1")
 	ask := askFor(c, f.agent("c1"))
 	words := replyWords(ask)
-	if len(words) != 2 || words[0].Word != "yes" || words[0].Does != "approve plan & build" || words[1].Word != "drop" {
+	if len(words) != 2 || words[0].Word != "yes" || words[0].Does != "allow & build" || words[1].Word != "drop" {
 		t.Errorf("plan words = %+v", words)
 	}
 	stuck := card("c2", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})
@@ -225,7 +225,7 @@ func TestLaterWaitRepliesInTheCardsThread(t *testing.T) {
 }
 
 func TestInboxCardIsEmailedInItsThread(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "zach", labelSource: "email", labelNote: "rework cap reached"})
+	c := inboxCard("c1", map[string]string{labelStage: "zach", labelSource: "email", labelNote: previewNote})
 	f, p, m := mailFactory(t, c)
 	f.cfg.ZachEmail = "bot@example.com" // inbox cards reply to the sender in thread, not ZachEmail
 	m.threads["t1"] = []threadMsg{{ID: "z1"}, {ID: "s1", LabelIDs: []string{"SENT"}}}
@@ -234,7 +234,7 @@ func TestInboxCardIsEmailedInItsThread(t *testing.T) {
 	if len(s) != 1 || s[0].Tool != "reply_to_message" || s[0].Args["message_id"] != "z1" || s[0].Args["to"] != nil {
 		t.Fatalf("sends = %+v", s)
 	}
-	if l := p.labels("c1"); l[labelTold] != "rework cap reached" || l[labelZachThread] != "" {
+	if l := p.labels("c1"); l[labelTold] != previewNote || l[labelZachThread] != "" {
 		t.Errorf("labels = %v", l)
 	}
 	if msgs := p.sent("c1"); len(msgs) != 0 {
@@ -305,10 +305,11 @@ func TestWhichWaitsAreEmailed(t *testing.T) {
 		{"dependency wait", card("c1", map[string]string{labelStage: "zach", labelNote: depAskNote("d0e0001", depDropped)}), nil, false},
 		{"permission prompt", running(card("c1", map[string]string{labelStage: "zach"}), "Bash"), nil, false},
 		{"finished", attention("finished"), nil, false},
-		{"plan approval", planWait("c1", nil), nil, true},
+		{"allow a build", planWait("c1", nil), nil, true},
 		{"preview", card("c1", map[string]string{labelStage: "zach", labelNote: previewNote}), nil, true},
 		{"secret scan", card("c1", map[string]string{labelStage: "zach", labelNote: "secret scan found 1 hit"}), nil, true},
-		{"brief", card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), nil, true},
+		{"older brief", card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), nil, false},
+		{"did not settle", card("c1", map[string]string{labelStage: "zach", labelNote: arbiterStuckNote}), nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, p, m := mailFactory(t, append([]Agent{tc.agent}, tc.extra...)...)
@@ -334,7 +335,7 @@ func TestNeedsNothingDecisionUsesTheAsksQuestion(t *testing.T) {
 	f, p, m := mailFactory(t, planWait("c2", nil))
 	storeLog(t, f, p, "c2", "DECISION: None before building.\nOVERVIEW: x.\nNEEDS FROM ZACH: Nothing now.\n\nPlan.")
 	f.Tick()
-	if s := m.sends(); len(s) != 1 || s[0].Args["subject"] != "Approve this plan?" {
+	if s := m.sends(); len(s) != 1 || s[0].Args["subject"] != "Allow this build?" {
 		t.Errorf("a plan approval must be emailed with its own question: %+v", s)
 	}
 }
@@ -353,10 +354,10 @@ func TestPlainText(t *testing.T) {
 		}
 	}
 }
-func TestArchitecturePlanEmailWaitsForTheSummary(t *testing.T) {
+func TestSideEffectEmailWaitsForTheDecision(t *testing.T) {
 	f, p, m := mailFactory(t, card("c1", map[string]string{labelStage: "plan-review"}), reviewer("r1", "c1", "plan"))
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: writes prod rows\nTIER: architecture\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +365,7 @@ func TestArchitecturePlanEmailWaitsForTheSummary(t *testing.T) {
 	if l[labelStage] != "zach" || l[labelWriting] == "" || l[labelTold] != "" {
 		t.Fatalf("labels = %v", l)
 	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || msgs[0] != summaryMsg {
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.HasPrefix(msgs[0], sideEffectMsg) {
 		t.Errorf("sent = %v", msgs)
 	}
 	// the builder has not written the summary yet: no email
@@ -386,21 +387,19 @@ func TestArchitecturePlanEmailWaitsForTheSummary(t *testing.T) {
 		t.Errorf("sends = %+v", s)
 	}
 }
-func TestBriefEmailWaitsForTheBrief(t *testing.T) {
+
+func TestReviewCapGoesToTheArbiterWithoutEmail(t *testing.T) {
 	labels := map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "2", labelSource: "email"}
 	f, p, m := mailFactory(t)
 	c := inboxCard("c1", labels)
 	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", "code", "changes", p)})
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	msgs := p.sent("c1")
-	if l[labelTold] != "" || l[labelWriting] == "" || len(msgs) != 1 || strings.Contains(msgs[0], "/api/") {
-		t.Errorf("labels = %v sent = %v", l, msgs)
+	if l[labelStage] != "review" || l[labelNote] != arbiterNote || len(p.sent("c1")) != 0 {
+		t.Errorf("labels = %v sent = %v", l, p.sent("c1"))
 	}
-	f.SetAgents([]Agent{withLabels(c, l)})
-	f.Tick()
 	if s := m.sends(); len(s) != 0 {
-		t.Errorf("emailed before the brief: %+v", s)
+		t.Errorf("emailed Zach about agents disagreeing: %+v", s)
 	}
 }
 
