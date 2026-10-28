@@ -103,7 +103,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 	f, p := newTestFactory(t)
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	prompts := map[string]string{
-		"new card":     fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeAppRule, questionRule),
+		"new card":     fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeChangeRule, questionRule),
 		"plan review":  ReviewPrompt(c, "plan", 7478, "unknown"),
 		"code review":  ReviewPrompt(c, "code", 7478, "unknown"),
 		"build":        buildMsg("Plan approved.", "(none)"),

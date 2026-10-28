@@ -22,13 +22,15 @@ var TierHelp = map[string]string{
 	"routine":      "Scheduled run of an approved job. No per-run review; it surfaces only if it gets stuck.",
 	"low":          "Plan review, then code review by another agent. Lands on its own if the factory started it; what Zach asked for comes to him finished first.",
 	"risky":        "Plan review and code review must both pass. Lands on its own if the factory started it; what Zach asked for comes to him finished first.",
-	"architecture": "Plan review, build, code review, then Zach tries the finished change and approves the landing.",
+	"architecture": "Plan review, build, code review, then Zach tries the finished change and approves the landing. A refactor inside the area of the ask does not make a card architecture; one outside it does.",
 }
 
 const tierRules = `Tiers (pick the highest that applies):
 - architecture: new service, datastore, framework or dependency; a change to how components fit
-  together or to a shared interface; any refactor or cleanup (these must cover the whole app, see
-  below); anything hard to undo or publicly visible. Zach tries the finished change before it lands.
+  together or to a shared interface; a refactor or cleanup outside the area of the ask (architecture
+  Zach did not ask for, which always comes to him before landing); anything hard to undo or publicly
+  visible. Zach tries the finished change before it lands.
+  Refactoring inside the area of the ask is part of the change and does not raise its tier.
 - risky: production data, migrations or deletes; money, payments or purchases; auth, secrets or
   permissions; hosts, deploys, cron or infra; email or messages to anyone but Zach; anything that
   runs unattended. Needs plan review and code review sign-off from other agents.
@@ -47,7 +49,7 @@ Use 2 to 6 options, one line each, not in a code block. A yes/no question needs 
 // by names the suggester; note adds a role-specific line.
 func ideaRule(port int, by, note string) string {
 	return fmt.Sprintf(`
-Ideas. If you find work worth doing outside this card's scope (a bug, a gap, a follow-up), do not do it
+Ideas. If you find work worth doing outside this card's scope (a bug or gap outside the area of the ask), do not do it
 here: suggest it as an idea, at most 2 per card, only with a concrete payoff. %sIt never replaces
 finishing this card. First check it is not already an idea or a card in flight:
 `+"`curl -s localhost:%d/api/ideas`"+` and the peers brief. Then:
@@ -56,10 +58,13 @@ curl -s -X POST localhost:%d/api/idea -H 'X-Factory: 1' -H 'Content-Type: applic
 `, note, port, port, by)
 }
 
-const wholeAppRule = `Refactors and cleanups cover the whole app: find every instance of the pattern across the repo
-(grep for it) and change all of them, or list each one left alone and why. A partial refactor that
-leaves two ways of doing the same thing is a blocking finding. If that is too big for one card,
-the plan splits it into ordered cards that together cover everything.`
+// wholeChangeRule is the consistency rule for every plan, build and review: changes are whole.
+const wholeChangeRule = `Whole changes: do each thing one way. A change updates every caller, test, doc and README the old
+behaviour touched, and leaves no old path, flag or fallback behind. Grep for the old name or pattern
+and change every instance, or list each one left alone and why. Refactoring inside the area of the
+ask is part of the job. A partial change (two ways of doing one thing, a stale caller, test or doc,
+an old path left in place) is a blocking finding. If the whole change is too big for one card, the
+plan splits it into ordered cards that together cover everything.`
 
 var (
 	verdictRe  = regexp.MustCompile(`(?i)VERDICT:\s*\**\s*(approve|nits|changes|escalate|close)`)
@@ -204,9 +209,10 @@ var rubric = map[string]string{
 - Does it solve what Zach actually asked, not a nearby problem?
 - Diagnosis: is the cause or approach grounded in evidence the agent looked at?
 - Files, deploy steps (if any), tests, risks and open questions named? Missing facts recorded as questions, not guessed?
-- Scope: nothing unasked-for. Over about 1,000 changed lines means it must be split.
+- Scope: nothing outside the area of the ask. Over about 1,000 changed lines means it must be split.
 - Cheaper or safer approach available?
-- Refactor or cleanup: does it cover the whole app (rule below)?
+- Whole change: does the plan name every caller, test, doc and README it must update, and remove the old
+  path (rule below)? A partial change is a blocking finding.
 - Tier: is the builder's TIER right? Set your own.
 - Build side effects: would building it (not landing it) change anything outside the worktree: prod data
   written or deleted, messages sent to anyone, money spent, hosts or services changed? Check the plan's
@@ -226,13 +232,14 @@ var rubric = map[string]string{
   (including what happens if a step fails part-way or is run twice).
 - Tests: none skipped or weakened. If new tests exist, revert the change locally in a scratch copy and
   confirm they fail (skip if impractical, and say so).
-- Scope: no unrelated files. No secrets, tokens or private data committed. Committed scripts, tests and work
+- Scope: nothing outside the area of the ask. No secrets, tokens or private data committed. Committed scripts, tests and work
   items must not use /tmp for work that belongs in the worktree (tests using t.TempDir() are fine).
 - <visibility> If the repo is public or unknown, any private data in the diff is a blocking finding:
   names or emails of people (other than Zach's public identity), Zach's personal details, internal
   hostnames or tailnet URLs (*.ts.net), local paths (/home/<user>/...), and content from <errands> or PDW.
 - Repo fit: follows that repo's AGENTS.md/README conventions.
-- Refactor or cleanup: every instance across the repo changed (grep for the old pattern)?
+- Whole change (rule below): grep for the old name, path or pattern. Is every caller, test, doc and README
+  updated, with no old path left? A partial change is a blocking finding.
 - Tier: the card is "<tier>". Does the change touch anything above that? Say so with TIER below.
 - Always ask: does Zach have to see it before it lands even if he did not ask for it? Write, right before TIER:
   ` + alwaysAskRule + `
@@ -301,7 +308,7 @@ Rules:
 End your final message with exactly two lines:
 TIER: <low|risky|architecture>
 VERDICT: <approve|nits|changes|escalate|close>
-`, persona[kind], c.Title, c.ID, c.Host, cwd, c.Repo, branch, c.ID, requestSection(c.Request), r, tierRules, wholeAppRule, questionRule)
+`, persona[kind], c.Title, c.ID, c.Host, cwd, c.Repo, branch, c.ID, requestSection(c.Request), r, tierRules, wholeChangeRule, questionRule)
 }
 
 // requestSection shows reviewers Zach's request and his follow-ups (see peers.go).
@@ -954,9 +961,6 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	}
 	f.markDepLanded(a)
 	f.tickDelegate(a, now)
-	if landedWaiting(a) && (a.stopped() || a.parked()) {
-		return f.recheckLanded(a)
-	}
 	if !a.stopped() {
 		return nil
 	}

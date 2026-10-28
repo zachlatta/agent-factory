@@ -1,14 +1,15 @@
 package factory
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
 
 // A card lands only part of its work when its landing agent says something is left: the landing
 // message asks for a REMAINING line. A card with no line, or with something left that needs Zach, waits
-// in Needs Zach; one whose NEEDS FROM ZACH says nothing goes to Done, and what is left goes to an agent
-// as a follow-up idea.
+// in Needs Zach; one whose NEEDS FROM ZACH says nothing goes back to the same card to finish what is left
+// (build, code review, land again), at most workLeftCap rounds, then waits in Needs Zach.
 
 // remainingRule ends every landing message. Completion is read from the assistant reply,
 // so examples in the user prompt cannot count as the agent's answer.
@@ -17,12 +18,13 @@ const remainingRule = " End that summary with a line that says what is left of t
 	"REMAINING: none only when everything this card was asked to do is landed and live; otherwise a line " +
 	"REMAINING: followed by one - line per part of it not done (a commit not pushed, a check of this change " +
 	"not run, a setting this change needs that is not set). Do not list work another card owns, a problem " +
-	"this change did not cause (an expired login, a test failing for reasons unrelated to it) or follow-ups: " +
-	"say those in the summary, and suggest any worth doing as an idea. Run every check of this change you " +
-	"can before you write that line. Start each - line with who must do it: Zach: only for a decision, " +
-	"approval, login or action only he can take, else agent:. Your NEEDS FROM ZACH names every Zach: item " +
-	"and says nothing only when there is none: a card that needs nothing from Zach goes to Done, and its " +
-	"agent: items go to an agent as a follow-up."
+	"this change did not cause (an expired login, a test failing for reasons unrelated to it) or work outside " +
+	"the area of the ask: say those in the summary, and suggest any worth doing as an idea. Run every check " +
+	"of this change you can before you write that line. Start each - line with who must do it: Zach: only " +
+	"for a decision, approval, login or action only he can take, else agent:. Your NEEDS FROM ZACH names " +
+	"every Zach: item and says nothing only when there is none: when it needs nothing from Zach, its agent: " +
+	"items come back to you in this card (at most 2 rounds): you finish them, a code review runs, and you " +
+	"land again."
 
 var (
 	remainingRe     = regexp.MustCompile(`(?i)^[ \t>*_#-]*REMAINING[*_]*\s*:[*_]*[ \t]*(.*)$`)
@@ -67,16 +69,17 @@ func ParseRemaining(text string) (items []string, found bool) {
 	return items, len(items) > 0
 }
 
-// Notes on a landed card: noteWorkLeft waits in Needs Zach (ask.go and mail.go read it), noteForAgents
-// is a Done card's.
-const (
-	noteWorkLeft  = "landed; still to do: "
-	noteForAgents = "landed; left for agents: "
-)
+// noteWorkLeft is the note of a landed card waiting in Needs Zach with work left (ask.go and mail.go read it).
+const noteWorkLeft = "landed; still to do: "
 
-// landedNext is where a verified landing goes from its agent's last reply: the stage, its note, and the
-// items to file as an agent's follow-up (only when it goes to Done with something left).
-func landedNext(reply string) (stage, note string, followUp []string) {
+// workLeftCap is the most rounds a landed card is sent back to finish its own agent work before it
+// waits on the board.
+const workLeftCap = 2
+
+// landedNext is where a verified landing goes from its agent's last reply, after rounds work-left rounds:
+// the stage and its note, and the items to send back to the same card (only for a work-left round).
+// A card goes back only when its reply needs nothing from Zach; any ask for him keeps it in Needs Zach.
+func landedNext(reply string, rounds int) (stage, note string, again []string) {
 	items, found := ParseRemaining(reply)
 	switch {
 	case !found:
@@ -84,13 +87,15 @@ func landedNext(reply string) (stage, note string, followUp []string) {
 	case len(items) == 0:
 		return "landed", "landed", nil
 	}
-	if !needsNothing(reply) {
-		return "zach", trunc(strings.ReplaceAll(noteWorkLeft+strings.Join(items, "; "), ",", ""), 200), nil
+	if needsNothing(reply) {
+		for i, it := range items {
+			items[i] = remainingAgentRe.ReplaceAllString(it, "")
+		}
+		if rounds < workLeftCap {
+			return "building", fmt.Sprintf("finishing work left (round %d of %d)", rounds+1, workLeftCap), items
+		}
 	}
-	for i, it := range items {
-		items[i] = remainingAgentRe.ReplaceAllString(it, "")
-	}
-	return "landed", trunc(strings.ReplaceAll(noteForAgents+strings.Join(items, "; "), ",", ""), 200), items
+	return "zach", trunc(strings.ReplaceAll(noteWorkLeft+strings.Join(items, "; "), ",", ""), 200), nil
 }
 
 // needsNothing reports whether reply asks nothing of Zach: its NEEDS FROM ZACH says nothing and names no
@@ -127,89 +132,47 @@ func rerunLandMsg(guarded bool) string {
 	return "The factory is re-running your landing. " + msg + remainingRule
 }
 
-// landed moves a card whose landing is verified on from its agent's last reply (landedNext). One that
-// needs nothing from Zach goes to Done, and what is left is filed as an idea for an agent.
+// workLeftMsg sends a landed card back to finish the agent work its REMAINING list named. It stays on
+// one line, like the landing message, so a log fallback never reads the rule as the agent's answer.
+func workLeftMsg(items []string, round int) string {
+	return fmt.Sprintf("Your landing is verified, but this card is not done: your REMAINING list has work for "+
+		"an agent, and it belongs to this card (round %d of %d). Do it now in this worktree: %s. Commit any "+
+		"change on your branch and stop with a short summary; do not land: a code review runs on new commits, "+
+		"then the factory tells you to land again. If an item turns out to need Zach, mark it Zach: and ask "+
+		"in NEEDS FROM ZACH.", round, workLeftCap, strings.Join(items, "; ")) + remainingRule
+}
+
+// landed moves a card whose landing is verified on from its agent's last reply (landedNext). Agent work
+// left goes back to the same card, at most workLeftCap rounds; then, or with anything for Zach, the card
+// waits in Needs Zach.
 func (f *Factory) landed(a Agent, c Card, reply string) error {
-	stage, note, followUp := landedNext(reply)
+	rounds := atoi(a.L(labelWorkLeftRounds))
+	stage, note, again := landedNext(reply, rounds)
 	labels := map[string]string{labelStage: stage, labelNote: note, labelLandedVerified: "1",
 		labelAutoReview: "", labelRemainingAsk: ""}
 	if _, found := ParseRemaining(reply); !found {
 		labels[labelRemainingAsk] = a.L(labelRemainingAsk)
 	}
 	switch {
+	case len(again) > 0:
+		f.logf("%s landed with agent work left, sent back: %s", short(a.ID), strings.Join(again, "; "))
+		labels[labelAutoReview], labels[labelSince] = "code", iso(f.Now())
+		labels[labelWorkLeftRounds] = fmt.Sprint(rounds + 1)
+		if err := f.setLabels(a.ID, labels); err != nil {
+			return err
+		}
+		return f.send(a.ID, workLeftMsg(again, rounds+1))
 	case stage == "zach":
 		f.logf("%s landed with work left: %s", short(a.ID), note)
-		labels[labelRemainingChecked] = "1"
-	case len(followUp) > 0:
-		f.logf("%s landed, needs nothing from Zach: %s", short(a.ID), note)
-		f.fileFollowUp(a, c, followUp)
 	default:
 		f.logf("%s finished landing", short(a.ID))
 	}
 	return f.setLabels(a.ID, labels)
 }
 
-// landedFollowUpPrefix starts a follow-up idea's title; a card started from one files no further follow-up.
-const landedFollowUpPrefix = "Follow up on landed "
-
-// fileFollowUp files what a landed card left for agents as one idea in its repo, at its tier.
-func (f *Factory) fileFollowUp(a Agent, c Card, items []string) {
-	title := c.Title
-	if title == "" {
-		title = a.Title
-	}
-	if strings.HasPrefix(title, landedFollowUpPrefix) {
-		f.logf("%s is a follow-up: no further follow-up filed", short(a.ID))
-		return
-	}
-	repo := c.Repo
-	if repo == "" {
-		repo = a.Repo
-	}
-	req := "Card " + short(a.ID) + " (\"" + title + "\") landed and needs nothing from Zach. Finish what its " +
-		"landing agent said is left, or say why it cannot be done:\n- " + strings.Join(items, "\n- ")
-	_, err := f.addIdea(Body{Repo: repo, Tier: a.L(labelTier), By: "factory (landed " + short(a.ID) + ")",
-		Title: landedFollowUpPrefix + short(a.ID) + ": " + title, Request: req,
-		Summary:  "Card " + short(a.ID) + " landed with work left that needs no decision from Zach.",
-		Why:      "Its landing reply said NEEDS FROM ZACH: nothing, and listed what is left.",
-		DoneWhen: "Each item is done or shown not needed, and the card's landed change is unharmed."})
-	if err != nil {
-		f.logf("%s follow-up idea refused: %v", short(a.ID), err)
-	}
-}
-
-// landedWaiting reports a landed card waiting in Needs Zach with work left whose reply was not read for
-// NEEDS FROM ZACH: cards that landed before that rule, read once.
-func landedWaiting(a Agent) bool {
-	return a.L(labelStage) == "zach" && a.L(labelLandedVerified) == "1" && a.L(labelRemainingChecked) == "" &&
-		strings.HasPrefix(a.L(labelNote), noteWorkLeft)
-}
-
-// recheckLanded reads a landedWaiting card's last reply from its session file (never Paseo: the card
-// may be parked) and moves it to Done if it needs nothing from Zach; otherwise it is marked read.
-func (f *Factory) recheckLanded(a Agent) error {
-	reply, err := f.storedReply(a)
-	if err != nil {
-		f.logf("%s landed reply not read: %v", short(a.ID), err)
-		return f.setLabels(a.ID, map[string]string{labelRemainingChecked: "1"})
-	}
-	stage, note, followUp := landedNext(reply)
-	if stage != "landed" || len(followUp) == 0 {
-		return f.setLabels(a.ID, map[string]string{labelRemainingChecked: "1"})
-	}
-	c, _ := f.card(a.ID)
-	f.logf("%s landed earlier and needs nothing from Zach, to Done: %s", short(a.ID), note)
-	f.fileFollowUp(a, c, followUp)
-	labels := map[string]string{labelStage: "landed", labelNote: note, labelRemainingChecked: "1"}
-	if a.parked() {
-		labels[labelParked] = "" // Done drops the park, as the board's Done does
-	}
-	return f.setLabels(a.ID, labels)
-}
-
 // sendLanding starts a new landing attempt with a fresh completion clarification allowance.
 func (f *Factory) sendLanding(id, msg string) error {
-	if err := f.setLabels(id, map[string]string{labelRemainingAsk: "", labelRemainingChecked: ""}); err != nil {
+	if err := f.setLabels(id, map[string]string{labelRemainingAsk: ""}); err != nil {
 		return err
 	}
 	return f.send(id, msg)
@@ -219,7 +182,7 @@ func (f *Factory) sendLanding(id, msg string) error {
 func (f *Factory) finishLanding(a Agent, c Card, reply string) error {
 	if _, found := ParseRemaining(reply); !found && a.L(labelRemainingAsk) == "" {
 		if err := f.setLabels(a.ID, map[string]string{labelStage: "landing", labelAutoReview: "", labelSince: iso(f.Now()),
-			labelLandedVerified: "1", labelRemainingAsk: "1", labelRemainingChecked: "", labelNote: "asking what remains"}); err != nil {
+			labelLandedVerified: "1", labelRemainingAsk: "1", labelNote: "asking what remains"}); err != nil {
 			return err
 		}
 		return f.send(a.ID, "Your landing was verified, but your reply omitted the completion line. Report what remains of this card's request."+remainingRule)

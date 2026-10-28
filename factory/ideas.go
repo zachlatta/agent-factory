@@ -290,7 +290,7 @@ func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 		return f.startPicker(Route{Request: guidance, Title: truncWords("Scout: "+strings.SplitN(strings.TrimSpace(guidance), "\n", 2)[0], 70), Scout: true})
 	}
 	cwd := filepath.Join(f.cfg.Home, "dev", repo)
-	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeAppRule,
+	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeChangeRule,
 		f.cfg.Port, repo), "<repo>", repo)
 	title := "Scout: ideas for " + repo
 	if strings.TrimSpace(guidance) != "" {

@@ -526,11 +526,40 @@ func TestReviewPromptCarriesRules(t *testing.T) {
 	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
 	for _, kind := range []string{"plan", "code"} {
 		pr := ReviewPrompt(c, kind, 7478, "unknown")
-		for _, want := range []string{"DIFFERENT agent", "TIER:", "VERDICT:", "whole app", "Read-only"} {
+		for _, want := range []string{"DIFFERENT agent", "TIER:", "VERDICT:", "Read-only", wholeChangeRule,
+			"Scope: nothing outside the area of the ask", "- Whole change", "A partial change is a blocking finding"} {
 			if !strings.Contains(pr, want) {
 				t.Errorf("%s prompt lacks %q", kind, want)
 			}
 		}
+		if strings.Contains(pr, "unasked-for") || strings.Contains(pr, "no unrelated files") {
+			t.Errorf("%s prompt keeps the old scope rule", kind)
+		}
+	}
+}
+
+// Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
+// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+func TestWholeChangeRules(t *testing.T) {
+	for _, want := range []string{"one way", "caller, test, doc and README", "no old path", "blocking finding"} {
+		if !strings.Contains(wholeChangeRule, want) {
+			t.Errorf("wholeChangeRule lacks %q", want)
+		}
+	}
+	for _, want := range []string{"Refactoring inside the area of the ask is part of the change and does not raise its tier",
+		"a refactor or cleanup outside the area of the ask"} {
+		if !strings.Contains(strings.Join(strings.Fields(tierRules), " "), want) {
+			t.Errorf("tierRules lacks %q", want)
+		}
+	}
+	if strings.Contains(tierRules, "any refactor") {
+		t.Error("tierRules still makes any refactor architecture")
+	}
+	if !strings.Contains(TierHelp["architecture"], "inside the area of the ask") {
+		t.Errorf("TierHelp architecture = %q", TierHelp["architecture"])
+	}
+	if !strings.Contains(ideaRule(7478, "x", ""), "outside the area of the ask") {
+		t.Error("ideaRule still invites follow-ups of the card's own work")
 	}
 }
 

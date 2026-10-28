@@ -122,7 +122,7 @@ func TestAskFullReport(t *testing.T) {
 
 func TestEvidencePrompts(t *testing.T) {
 	for name, prompt := range map[string]string{
-		"new card": fmt.Sprintf(newCardPrompt, "task", "example/repo", "", tierRules, wholeAppRule, questionRule),
+		"new card": fmt.Sprintf(newCardPrompt, "task", "example/repo", "", tierRules, wholeChangeRule, questionRule),
 		"review":   ReviewPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown"),
 		"arbiter":  ArbiterPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown", "notes", true),
 	} {

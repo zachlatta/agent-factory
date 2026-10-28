@@ -29,14 +29,15 @@ func emailHow(thread string) string {
 		"follow the zrl-bot-email skill: short, plain, html plus text)", thread)
 }
 
-// landMsgFor is the landing instruction; a card with an email thread also reports to Zach there.
+// landMsgFor is the landing instruction; a card with an email thread also reports to Zach there, on its
+// first landing only: a work-left round (remaining.go) sends no second email.
 func (f *Factory) landMsgFor(a Agent) string {
 	msg := landMsg
 	if f.guarded(a.Repo) {
 		msg = guardedLandMsg
 	}
 	t := emailThread(a)
-	if t == "" {
+	if t == "" || a.L(labelWorkLeftRounds) != "" {
 		return msg + remainingRule
 	}
 	return msg + " Then tell Zach by email what changed and anything he must do (" + emailHow(t) +

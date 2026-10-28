@@ -68,7 +68,7 @@ The planner (the "Fellow") first picks a track:
 | routine | scheduled runs of an approved job | none per run; surfaces only if blocked |
 | low | docs, copy, an isolated fix, tests, a small feature on existing patterns | plan review, code review |
 | risky | prod data, deletes, migrations, money, auth/secrets, hosts/deploys/cron, messages to others, unattended jobs | plan review and code review both pass |
-| architecture | new service/datastore/framework/dependency, shared interfaces, any refactor or cleanup, hard to undo or public | plan review, code review; always shown to a person before it lands |
+| architecture | new service/datastore/framework/dependency, shared interfaces, a refactor or cleanup outside the area of the ask, hard to undo or public | plan review, code review; always shown to a person before it lands |
 
 - **No plan approvals.** Agents review plans; a person is asked before building only when building
   has side effects. Every plan and plan review ends with `BUILD SIDE EFFECTS: none`, or what
@@ -105,8 +105,12 @@ The planner (the "Fellow") first picks a track:
   file is read from `origin/main`, never the card's copy, so a card cannot loosen the check that
   applies to it, and a card that edits it is always asked. A diff or file it cannot read asks.
   This repo lists its gates there.
-- Refactors and cleanups must cover the whole repo (or list what is left and why); a partial
-  refactor is a blocking finding.
+- Changes are whole (`wholeChangeRule`): one way of doing each thing; every caller, test, doc and
+  README the old behaviour touched is updated, and no old path is left (or each instance left alone is
+  listed with why). Plan and code reviews check it, and a partial change is a blocking finding. Scope
+  is the area of the ask: refactoring inside it is part of the job and does not raise the tier; a
+  refactor outside it is architecture Zach did not ask for, which the code reviewer's `ALWAYS ASK:`
+  line names.
 - Plans and build summaries name their deploy steps (if any). Builders make no live changes
   (install scripts, enabling or restarting services, resizing VMs, external settings) before code
   review: the code reviewer checks the steps, and the landing step runs and verifies them after pushing.
@@ -148,14 +152,15 @@ The planner (the "Fellow") first picks a track:
   line per item), or says nothing, waits in Needs Zach with the list in its note ("Landed, with work
   left" or "Landed: did it finish?", shown on the board and not emailed): reply to send the agent on, or
   mark it Done. REMAINING lists only this card's own request: another card's work, a problem the
-  change did not cause (an expired login, an unrelated failing test) and follow-ups go in the summary
-  or become ideas, so they never hold a finished card. Each item starts with who must do it, `Zach:`
-  or `agent:`. When the message's `NEEDS FROM ZACH:` says nothing (and names no ask), it has no
-  question and no item is Zach's, the card goes to Done instead, with the list in its note
-  (`landed; left for agents: ...`), and the list is filed as one idea, "Follow up on landed <id>: ..."
-  (a card started from such an idea files none). Landed cards already waiting with work left are
-  read once the same way (`factory.remaining-checked`). A landing whose commits differ from the
-  reviewed ones waits as "Landed something other than what was reviewed".
+  change did not cause (an expired login, an unrelated failing test) and work outside the area of the
+  ask go in the summary or become ideas, so they never hold a finished card. Each item starts with who
+  must do it, `Zach:` or `agent:`. When the message's `NEEDS FROM ZACH:` says nothing (and names no
+  ask), it has no question and no item is Zach's, the work left goes back to the same card instead: the
+  agent finishes it in its worktree, new commits get a code review (and, on a card Zach asked for, his
+  finished-work stop again), and it lands again. Only the first landing emails Zach. At most 2 such
+  rounds (`factory.work-left-rounds`, carried across handoffs and not reset by "Send it on"); after
+  that the card waits in Needs Zach with the list. A landing whose commits differ from the reviewed
+  ones waits as "Landed something other than what was reviewed".
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check:
   the reviewer runs it on test data, served on this host's tailnet IP (`tailscale ip -4`, never
   `0.0.0.0`), and clicks through it with computer use. Its non-blocking "UI feedback:" block goes to

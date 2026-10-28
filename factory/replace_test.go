@@ -80,7 +80,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
 		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
 		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelLandedVerified: "1",
-		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelDelegated: "2026-10-25T19:00:00Z", labelArbitrated: "plan", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
+		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelDelegated: "2026-10-25T19:00:00Z", labelArbitrated: "plan", labelWorkLeftRounds: "2", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
 	})
 	old.Labels[gmailThreadLabel] = "th-gmail-1"
 	copied := copyCarriedLabels(old)
@@ -140,7 +140,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		t.Errorf("Card carried gates = %+v", c)
 	}
 	ra := f.agent(repl.ID)
-	for k, want := range map[string]string{labelBase: "base-commit-1", labelZachPlan: "approved", labelZachThread: "th-zach-1", labelSource: "email", labelOrigin: "idea", labelTitled: "1"} {
+	for k, want := range map[string]string{labelBase: "base-commit-1", labelZachPlan: "approved", labelZachThread: "th-zach-1", labelSource: "email", labelOrigin: "idea", labelTitled: "1", labelWorkLeftRounds: "2"} {
 		if got := ra.L(k); got != want {
 			t.Errorf("repl inherited L(%s) = %q, want %q", k, got, want)
 		}

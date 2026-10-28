@@ -135,7 +135,7 @@ func TestApproveCarriesZachsAnswers(t *testing.T) {
 func TestPromptsTeachQuestionFormat(t *testing.T) {
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	for name, p := range map[string]string{
-		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeAppRule, questionRule),
+		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeChangeRule, questionRule),
 		"plan review": ReviewPrompt(c, "plan", 7478, "unknown"),
 		"code review": ReviewPrompt(c, "code", 7478, "unknown"),
 		"arbiter":     ArbiterPrompt(c, "plan", 7478, "unknown", "notes", true),

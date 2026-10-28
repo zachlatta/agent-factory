@@ -51,7 +51,7 @@ func TestPostLandingEmptyReview(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: "code", labelPlanRounds: "1",
-				labelNote: "landed; still to do: finish", labelRemainingChecked: "1"})
+				labelNote: "landed; still to do: finish"})
 			if tc.verified {
 				c.Labels[labelPrefix+labelLandedVerified] = "1"
 			}
@@ -73,7 +73,7 @@ func TestPostLandingEmptyReview(t *testing.T) {
 			}
 			if tc.stage == "landing" {
 				l := p.labels(c.ID)
-				if l[labelRemainingAsk] != "1" || l[labelRemainingChecked] != "" || l[labelAutoReview] != "" {
+				if l[labelRemainingAsk] != "1" || l[labelAutoReview] != "" {
 					t.Fatalf("completion not queued cleanly: %v", l)
 				}
 			}
@@ -146,10 +146,10 @@ func postLandingAnswer(text string) []byte {
 func TestNewLandingPromptsResetClarification(t *testing.T) {
 	for _, route := range []string{"approve", "rerun", "code review", "dependency"} {
 		t.Run(route, func(t *testing.T) {
-			c := idea("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1", labelRemainingChecked: "1"})
+			c := idea("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1"})
 			agents := []Agent{c, reviewer("r1", c.ID, "code")}
 			if route == "dependency" {
-				c = heldCard(map[string]string{labelRemainingAsk: "1", labelRemainingChecked: "1"})
+				c = heldCard(map[string]string{labelRemainingAsk: "1"})
 				agents = []Agent{c, dep("landed", false)}
 			}
 			f, p := newTestFactory(t, agents...)
@@ -170,10 +170,8 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 			if len(p.sent(c.ID)) != 1 {
 				t.Fatalf("no landing prompt: %v", p.sent(c.ID))
 			}
-			for _, key := range []string{labelRemainingAsk, labelRemainingChecked} {
-				if val, ok := l[key]; !ok || val != "" {
-					t.Fatalf("%s not reset: %v", key, l)
-				}
+			if val, ok := l[labelRemainingAsk]; !ok || val != "" {
+				t.Fatalf("%s not reset: %v", labelRemainingAsk, l)
 			}
 		})
 	}

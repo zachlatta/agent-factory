@@ -128,7 +128,7 @@ End your final message with exactly two lines:
 TIER: <low|risky|architecture>
 VERDICT: <approve|changes|escalate|close>
 `, arbiterPersona, c.Title, c.ID, c.Host, cwd, c.Repo, why, c.ID, trunc(last, 8000), requestSection(c.Request),
-		ruling, tierRules, wholeAppRule)
+		ruling, tierRules, wholeChangeRule)
 }
 
 // startArbiter starts the arbiter for card t's gate kind and marks the gate as arbitrated.

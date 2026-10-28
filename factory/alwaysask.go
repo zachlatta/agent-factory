@@ -111,8 +111,8 @@ func (f *Factory) alwaysAskFiles(cwd string) string {
 var alwaysAskRe = regexp.MustCompile(`(?im)^[ \t>*_#-]*ALWAYS[ \t]+ASK[*_]*\s*:[ \t]*(.*)$`)
 
 // alwaysAskRule asks code reviewers for their half of the always-ask check.
-const alwaysAskRule = `ALWAYS ASK: <none, or why Zach must see this before it lands: architecture he did not ask for,
-a change to the factory's own gates or rules, or a new service>`
+const alwaysAskRule = `ALWAYS ASK: <none, or why Zach must see this before it lands: architecture he did not ask for
+(including a refactor outside the area of the ask), a change to the factory's own gates or rules, or a new service>`
 
 // ParseAlwaysAsk returns the reviewer's last ALWAYS ASK line without markdown: "none", the reason, or
 // "" when there is none. The prompt's <placeholder> is skipped.

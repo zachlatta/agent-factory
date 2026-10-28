@@ -151,7 +151,7 @@ func TestAskDetailFromClaudeSession(t *testing.T) {
 	c.Provider, c.SessionID, c.Cwd = "claude", "s1", "/w/c1"
 	f, _ := newTestFactory(t)
 	lines := []string{
-		`{"type":"user","message":{"content":"Plan approved.\nReviewer notes:\n- Scope: nothing unasked-for"}}`,
+		`{"type":"user","message":{"content":"Plan approved.\nReviewer notes:\n- Scope: nothing outside the area of the ask"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Now the tests."},{"type":"thinking","thinking":"hmm"}]}}`,
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u","content":"ok"}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"I added --dry-run.\n\n**Tests:** pass.\nTIER: low"}]}}`,
