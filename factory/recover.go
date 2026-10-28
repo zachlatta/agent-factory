@@ -196,7 +196,13 @@ func (f *Factory) tickError(a Agent, now time.Time) (bool, error) {
 	}
 	if r.Error != errorFingerprint(a) {
 		if !planRetry(&r, a, now) {
-			return true, f.exhaust(a, r)
+			return true, f.exhaustError(a, r)
+		}
+		if r.FromReset && r.Reset.Sub(now) > handoffResetGap {
+			// too long to wait: another model takes the card (handoff.go)
+			if ok, err := f.tryHandoff(a, "its provider limit resets at "+iso(r.Reset)+", over 2 hours away"); ok || err != nil {
+				return true, err
+			}
 		}
 		if err := f.saveRecovery(a, r, nil); err != nil {
 			return true, err
@@ -232,6 +238,19 @@ func planRetry(r *recovery, a Agent, now time.Time) bool {
 	}
 	r.Reset, r.FromReset = observed.Add(errorBackoff[r.Timed]), false
 	return true
+}
+
+// exhaustError ends the same-model retries of a: a hand-off to another model if the card may have
+// one (handoff.go), else the stuck mark.
+func (f *Factory) exhaustError(a Agent, r recovery) error {
+	why := "the same model could not recover"
+	if a.LastError != "" {
+		why = "its provider error: " + trunc(a.LastError, 300)
+	}
+	if ok, err := f.tryHandoff(a, why); ok || err != nil {
+		return err
+	}
+	return f.exhaust(a, r)
 }
 
 // exhaust marks an errored card stuck once its retries ran out. It keeps the card's column.

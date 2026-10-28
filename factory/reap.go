@@ -107,7 +107,8 @@ func (f *Factory) reap(now time.Time) {
 		}
 		switch {
 		case a.L(labelRole) == "" && replacedPredecessor(byID, a):
-			if archive(a, false) {
+			// a model hand-off keeps the old agent until its replacement is confirmed (handoff.go)
+			if !handoffReleased(byID, a) || archive(a, false) {
 				continue
 			}
 		case a.L(labelRole) == "reviewer":

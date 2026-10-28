@@ -1023,6 +1023,7 @@ func (f *Factory) Tick() {
 	if err := f.tickIdeas(); err != nil {
 		f.logf("idea error: %v", err)
 	}
+	f.tickHandoffs(now)
 	f.reap(now)
 	f.tickPreviews(now)
 	f.checkReplies(now)
@@ -1051,6 +1052,9 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return f.deferArchive(a.ID)
 		}
 		return nil
+	}
+	if f.handoffBusy(a) {
+		return nil // tickHandoffs moves it until its replacement is confirmed
 	}
 	if handled, err := f.tickError(a, now); handled || err != nil || a.Status == "error" {
 		return err

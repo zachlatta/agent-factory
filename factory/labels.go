@@ -49,6 +49,7 @@ const (
 	labelHeld       = "held"         // in landing: the land prompt waits for this card to land (deps.go)
 	labelReplaces   = "replaces"     // predecessor card agent id replaced by this agent (replace.go)
 	labelReplacedBy = "replaced-by"  // replacement card agent id that took over this card (replace.go)
+	labelHandoff    = "handoff"      // on the old agent: the step of its one model hand-off (handoff.go)
 	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
 	labelDelegated  = "delegated"    // an email or voice card got the sub-agent section from the factory (inbox.go)

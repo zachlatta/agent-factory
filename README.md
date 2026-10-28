@@ -195,6 +195,20 @@ The planner (the "Fellow") first picks a track:
     delivery is uncertain is never repeated within its 2-minute grace; the next try waits its step.
     A completed turn ends the episode. Resume and Reply on a stuck card each make one attempt and
     do not rearm the retries.
+  - Model hand-off (`factory/handoff.go`): when those same-model retries are used up, or a known
+    reset is more than 2 hours away, the card moves once to another model in the same worktree
+    (`paseo run --workspace`) before it is marked stuck: Opus 5.5 unless Claude is the failing
+    provider, else the best-ranked Frontier model (`rankAgentChoices`), skipping the failing
+    provider, unavailable ones and exhausted plans. The new agent gets the card's first message
+    verbatim (so its gates and the public-repo scan rule carry over), the approved plan with its
+    reviewer notes and the old agent's last reply, plus the carried labels (`factory.recovery`
+    included, so the caps are not reset) and `factory.replaces`. The steps are stored in
+    `factory.handoff` on the old agent (starting, started, confirmed, failed), so a restart finishes
+    them: a missing replacement is started once more after 2 minutes, and one never confirmed within
+    5 minutes ends the hand-off. The old agent gets `factory.replaced-by` and is archived only after
+    the new one is seen running; until then reap leaves it alone, and a failed hand-off's old agent
+    stays until the card lands, is archived or is dropped. With no other model, no readable session
+    or a hand-off already used, the card is marked stuck as before.
   - Reviewers: an errored reviewer, one waiting on a permission prompt (`paseo permit ls`) for 2
     minutes or running with no activity for 20 (without a working sub-agent of its own), and one that
     ends or disappears without a verdict, are superseded and archived, and a fresh one starts, at most
@@ -263,7 +277,8 @@ The planner (the "Fellow") first picks a track:
   lands. The landing message wakes it only after the same review and scan checks. The approval
   follows a replacement card and is cleared on release or cancellation; a stale snapshot cannot
   wake a cancelled card.
-- Replaced cards (`factory/replace.go`): when a card hands off to another agent (`factory.replaces=<old-id>`
+- Replaced cards (`factory/replace.go`): when a card hands off to another agent (the model hand-off
+  above writes `factory.replaces=<old-id>`
   on the replacement, `factory.replaced-by=<new-id>` on the retired predecessor), `resolveCardID`
   follows `factory.replaced-by` to the current card across board cards, ideas, `Waits on:` dependencies,
   reviewer `review-of` links, email reply threads (`factory.zach-thread` and `gmail-thread`) and message
@@ -273,6 +288,7 @@ The planner (the "Fellow") first picks a track:
   (`carriedFactoryLabels` and `carriedRawLabels`) are both copied at handoff and read through the
   replacement chain so approval, review, and public-repo scan gates survive even a partial handoff.
   Write primitives (`setLabels`, `send`, `stop`, `archiveChecked`) always act on the exact single agent ID.
+  Drop and Close archive the card's predecessors too.
 - A duplicate passes its request on. A reviewer (or the Fellow) that finds a duplicate names the
   card it duplicates on a `DUPLICATE OF: <card id>` line. When Zach closes the card at that close
   verdict, the factory keeps its request and the reviewer's notes (`steers.json`) and sends them to
