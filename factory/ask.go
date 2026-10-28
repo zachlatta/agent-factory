@@ -32,6 +32,8 @@ type Ask struct {
 	// can sort out (errors, stalls, stuck steps, landing checks, duplicates) and finished or hand-moved
 	// cards are board-only; Zach is emailed only for decisions.
 	BoardOnly bool `json:"boardOnly,omitempty"`
+	// Ready is set on the Ready for you stop: what changed and the preview (ready.go).
+	Ready *Ready `json:"ready,omitempty"`
 }
 
 // Question is one multiple-choice question an agent asks Zach. He can also write his own answer.
@@ -185,16 +187,9 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
-	case note == previewNote || strings.HasPrefix(note, "review passed") || strings.HasPrefix(note, "review found an architecture change"):
-		// the finished-work stop; the other two notes are its older forms on cards that waited before it
-		why := "Built, tested and passed by code review; nothing is live yet."
-		if w := a.L(labelAskWhy); w != "" {
-			why += " It comes to you because " + w + "."
-		}
-		return &Ask{Title: "Try it, then ship it?", From: "builder",
-			Why: why + " The agent's before and after and its link to try it are below.",
-			Actions: []Action{primary("approve", "Approve & ship"),
-				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
+	case isFinishedNote(note):
+		// Ready for you, the finished-work stop (ready.go)
+		return readyAsk(a.L(labelAskWhy))
 	case note == noVerdictNote:
 		return &Ask{Title: "The review didn't finish properly", From: "reviewer",
 			Why: "The reviewer stopped without a verdict, so the factory can't tell whether the work passed. " +

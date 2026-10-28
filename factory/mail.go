@@ -114,6 +114,8 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	}
 	if w := parseTime(a.L(labelWriting)); !w.IsZero() && !writtenFor(a, w, f.Now()) {
 		return nil // the builder is still to write the decision or preview the email carries
+	} else if !w.IsZero() && ask.Ready != nil && !f.previewSettled(a.ID) && f.Now().Sub(w) <= writeWait {
+		return nil // Ready for you waits for the preview to load or fail, as long as for the builder
 	}
 	f.mu.Lock()
 	retry := f.mailRetry[a.ID]
@@ -127,8 +129,9 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 		}
 		return nil
 	}
-	_, qs, ov := f.askDetail(c, ask)
+	detail, qs, ov := f.askDetail(c, ask)
 	ask.Questions, ask.Overview = qs, ov
+	f.fillReady(ask, a.ID, detail)
 	m := f.composeEmail(a, c, ask)
 	// told first: one email per wait even if the factory stops mid-send
 	if err := f.setLabels(a.ID, map[string]string{labelTold: note}); err != nil {
@@ -474,6 +477,9 @@ func emailQuestion(a Agent, ask *Ask, repos []string) string {
 // composeEmail writes the decision email for card a waiting on ask: one question, under mailWordCap
 // words, answerable with one word, with any before and after screenshots inline.
 func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
+	if ask.Ready != nil {
+		return f.readyEmail(a, c, ask)
+	}
 	title := c.Title
 	if title == "" {
 		title = a.Title

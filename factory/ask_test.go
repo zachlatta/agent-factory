@@ -27,11 +27,15 @@ func TestAskFor(t *testing.T) {
 		{"older plan approval", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}),
 			"Allow this build?", "builder", "approve,reply,close"},
 		{"older hand-sent landing", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
-			"Try it, then ship it?", "builder", "approve,reply,close"},
+			"Ready to try", "builder", "approve,reply,close"},
 		{"older architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
-			"Try it, then ship it?", "builder", "approve,reply,close"},
-		{"finished work", card("c", map[string]string{labelStage: "zach", labelNote: previewNote, labelAskWhy: "you asked for it"}),
-			"Try it, then ship it?", "builder", "approve,reply,close"},
+			"Ready to try", "builder", "approve,reply,close"},
+		{"finished work", card("c", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelAskWhy: "you asked for it"}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"ready for you, second try", card("c", map[string]string{labelStage: "zach", labelNote: readyNote(2)}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"older finished work", card("c", map[string]string{labelStage: "zach", labelNote: "built and reviewed: try the preview and approve to land"}),
+			"Ready to try", "builder", "approve,reply,close"},
 		{"did not settle", card("c", map[string]string{labelStage: "zach", labelNote: arbiterStuckNote}),
 			"Reviews didn't settle", "builder", "arbiter,reply,close"},
 		{"older rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
@@ -76,7 +80,7 @@ func TestAskFor(t *testing.T) {
 		}
 	}
 	// the finished-work stop says why it came to Zach
-	fin := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: previewNote, labelAskWhy: "you asked for it"})}, nil, t0)[0].Ask
+	fin := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelAskWhy: "you asked for it"})}, nil, t0)[0].Ask
 	if !strings.Contains(fin.Why, "because you asked for it") {
 		t.Errorf("finished-work why = %q", fin.Why)
 	}

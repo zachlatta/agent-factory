@@ -43,6 +43,8 @@ type Config struct {
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
 	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't
 	MetricHosts  []string // SSH aliases whose load the board shows besides this host (hostfleet.go)
+	PreviewPorts string   // "lo-hi": the ports previews run and are published on (tryout.go)
+	PreviewMax   int      // previews running at once
 }
 
 func (c *Config) defaults() {
@@ -69,6 +71,12 @@ func (c *Config) defaults() {
 	}
 	if c.IdleCap == 0 {
 		c.IdleCap = defaultIdleCap
+	}
+	if c.PreviewPorts == "" {
+		c.PreviewPorts = "7700-7799"
+	}
+	if c.PreviewMax == 0 {
+		c.PreviewMax = 8
 	}
 	if c.LanesFile == "" {
 		c.LanesFile = filepath.Join(c.Home, ".config/agent-factory/lanes.json")
@@ -156,6 +164,11 @@ type Factory struct {
 	permitAt time.Time       // last `permit ls` that succeeded (addPending)
 	hot      map[string]bool // agents whose file changed in a way the rules act on (watch.go)
 	archiveQ *[]string       // during a Tick: reviewer and scout archives, run after the moves
+
+	previews *PreviewStore            // previews.json (tryout.go)
+	pv       previews                 // running previews
+	runner   PreviewRunner            // host work of previews; nil runs none
+	GoEnv    func() map[string]string // the host's Go cache paths, for previews
 }
 
 const archiveMarkTTL = 10 * time.Minute
@@ -164,7 +177,10 @@ func New(cfg Config, p Paseo) *Factory {
 	cfg.defaults()
 	f := &Factory{cfg: cfg, p: p, ideas: &IdeaStore{path: filepath.Join(cfg.StateDir, "ideas.json")},
 		routes: &RouteStore{path: filepath.Join(cfg.StateDir, "routes.json")}, routing: map[string]bool{},
-		steers:      &SteerStore{path: filepath.Join(cfg.StateDir, "steers.json")},
+		steers:   &SteerStore{path: filepath.Join(cfg.StateDir, "steers.json")},
+		previews: &PreviewStore{path: filepath.Join(cfg.StateDir, "previews.json")},
+		pv:       previews{procs: map[string]PreviewProc{}, busy: map[string]bool{}},
+		runner:   hostRunner{}, GoEnv: runGoEnv,
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
@@ -203,6 +219,11 @@ func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 	agents = applyLineageLabels(f.withArchiveMarks(agents))
 	cards := BuildBoard(agents, f.ideas.List(), f.Now())
 	f.fillAsks(cards, agents, fetch)
+	for _, c := range cards {
+		if c.Ask != nil {
+			f.fillReady(c.Ask, c.ID, c.Ask.Report)
+		}
+	}
 	asked := map[string]CardRequest{} // first prompts of email and voice cards not yet timed (timing.go)
 	for _, a := range f.timings.needsAsked(agents) {
 		asked[a.ID] = f.cardRequest(a)

@@ -83,7 +83,7 @@ func TestAskYesNo(t *testing.T) {
 
 func TestAskQuestionsFromLongReply(t *testing.T) {
 	// finished work: the builder's preview is the detail
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: previewNote})
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)})
 	r := reviewer("r1", "c1", "code")
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
@@ -139,7 +139,7 @@ func TestPromptsTeachQuestionFormat(t *testing.T) {
 		"plan review": ReviewPrompt(c, "plan", 7478, "unknown"),
 		"code review": ReviewPrompt(c, "code", 7478, "unknown"),
 		"arbiter":     ArbiterPrompt(c, "plan", 7478, "unknown", "notes", true),
-		"preview":     previewMsg("you asked for it"),
+		"preview":     readyMsg("you asked for it"),
 	} {
 		if !strings.Contains(p, "QUESTION:") {
 			t.Errorf("%s prompt does not teach the QUESTION: format", name)

@@ -142,6 +142,9 @@ dialog h3{margin:0 0 8px}
 .ask .task{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .ask .task.expanded{display:block}
 .ask .report{margin-top:10px;font-size:12px}.ask summary{cursor:pointer}
+.ask .ready ul{margin:6px 0;padding-left:20px}.ask .ready pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:240px;overflow:auto}
+.ask .ready .preview{display:inline-block;margin:6px 0;padding:10px 18px;border-radius:6px;background:#0969da;color:#fff;font-weight:600;text-decoration:none}
+.ask .ready .wait{font-size:13px;color:var(--mute);margin:6px 0}
 .ask .evidence{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .ask figure{margin:0;flex:1 1 120px;min-width:0}.ask figcaption{font-size:12px;font-weight:600}
 .ask img{max-width:100%;height:auto}.ask .unavailable{font-size:12px;color:var(--mute)}
@@ -660,6 +663,14 @@ function askExpandTask(id,button){
   button.textContent=open?'Show less':'Show full task';
   if(open)askOpen.add(id);else if(!askPicks[id]&&askActions[id]===undefined)askOpen.delete(id);
 }
+/* Ready for you (ready.go): what changed and the factory-run preview */
+function readyHtml(r){
+  const wait={failed:"The preview didn't start.",queued:'Preview not started: too many running. It starts when one stops.',starting:'The preview is still starting.'}[r.state];
+  const link=/^https:\/\//.test(r.preview||'')?`<a class="preview" href="${esc(r.preview)}" target="_blank" rel="noopener">Preview</a>`:'';
+  return `<div class="ready">${(r.changed||[]).length?`<ul>${r.changed.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    ${link||(wait?`<div class="wait">${esc(wait)}</div>`:'')}${r.state==='failed'&&r.log?`<details><summary>Preview log</summary><pre>${esc(r.log)}</pre></details>`:''}
+    ${r.sample?`<details open><summary>Sample output</summary><pre>${esc(r.sample)}</pre></details>`:''}</div>`;
+}
 function askHtml(c){
   const a=c.ask, qs=a.questions||[], ov=a.overview||{}, picks=askPicks[c.id]||{}, req=a.request||{};
   const request=req.Base ? `<div class="request task" id="task-${c.id}">${esc(req.Base)}</div>${req.Base.length>180||req.Base.split('\n').length>3?`<button class="more" onclick="askExpandTask('${c.id}',this)">Show full task</button>`:''}`
@@ -673,12 +684,12 @@ function askHtml(c){
   const choices=decisionChoices(a);
   const selected=askActions[c.id];
   const chosen=choices.find(([,i])=>i===selected)?.[0];
-  const actionChoices=choices.map(([x,i])=>`<button class="opt ${selected===i?'on':''}" data-action="${i}" onclick="askChoose('${c.id}',${typeof i==='string'?"'"+i+"'":i})">${esc(x.label)}${x.primary?' (recommended)':''}</button>`).join('');
+  const actionChoices=choices.map(([x,i])=>`<button class="opt ${selected===i?'on':''}" data-action="${i}" onclick="askChoose('${c.id}',${typeof i==='string'?"'"+i+"'":i})">${esc(x.label)}${x.primary&&!a.ready?' (recommended)':''}</button>`).join('');
   const other=selected==='other', writing=other||chosen?.id==='reply';
   const hint=chosen?.id==='reply'?(chosen.hint||'Message to the agent'):'What should the agent do?';
   return `<div class="ask" onclick="event.stopPropagation()"><div class="from">Original task</div>${request}${followups}
     <div class="from">Needs your input</div><div class="q">${esc(ov.decision||a.title)}</div><div class="needs">${esc(ov.needs||a.why)}</div>
-    ${evidence?`<div class="evidence">${evidence}</div>`:''}${quiz}
+    ${a.ready?readyHtml(a.ready):''}${evidence?`<div class="evidence">${evidence}</div>`:''}${quiz}
     <div class="qq"><div class="opts actions">${actionChoices}<button class="opt ${other?'on':''}" data-action="other" onclick="askChoose('${c.id}','other')">Other…</button></div></div>
     <textarea id="r-${c.id}" aria-label="${other?'Other instructions':'Reply instructions'}" placeholder="${esc(hint)}" style="display:${writing?'block':'none'}" oninput="askOpen.add('${c.id}')"></textarea>
     ${c.routing?`<select id="p-${c.id}" aria-label="Other repo" style="display:${selected===a.actions.findIndex(x=>x.id==='pickrepo')?'block':'none'}">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}

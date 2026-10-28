@@ -106,7 +106,7 @@ func uiFeedbackLandMsg(fb string) string {
 }
 
 // uiFeedbackHoldMsg tells a builder whose card waits for Zach about the reviewer's UI feedback.
-// uiFeedbackPreviewNote carries a UI reviewer's feedback in the message that asks the builder for Zach's preview.
+// uiFeedbackPreviewNote carries a UI reviewer's feedback in the message that asks the builder for Zach's Ready for you.
 const uiFeedbackPreviewNote = "\n\nThe code reviewer tested the UI and left this non-blocking feedback. Do not change anything " +
 	"for it now: show it to Zach in your message, and when you land later, end your summary with it under 'UI feedback:'.\n\n"
 

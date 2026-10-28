@@ -50,7 +50,7 @@ func TestInboxCardComesToZachThenLandsAndEmails(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote {
+	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
 		t.Fatalf("he asked for it, so he sees it first: %v", l)
 	}
 	f, p = newTestFactory(t, withLabels(c, l))

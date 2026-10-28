@@ -91,11 +91,7 @@ The planner (the "Fellow") first picks a track:
     to the factory's own gates or rules, a new service), or the line is missing;
   - the always-ask file check hits.
 
-  It waits in Needs Zach while its builder writes a preview: before and after screenshots at
-  desktop and phone widths, and a live link to try it (the branch on test data or a dry-run mode, on
-  the tailnet under `timeout`, or a static mock-up), uploaded with the file-share skill, restricted
-  to Zach. The card says why it came to him (`factory.ask-why`). Approve lands it; a reply sends it
-  back to building and code review.
+  It stops at Ready for you (below), which says why it came to him (`factory.ask-why`).
 - **Always-ask file check.** The factory lists the files `git diff --no-renames --name-only
   origin/main...HEAD` changes and matches them against built-in patterns (agent rules and gates:
   `AGENTS.md`, `CLAUDE.md`, `.githooks/`, CI workflows, gitleaks config, `.factory.json`; services:
@@ -105,6 +101,38 @@ The planner (the "Fellow") first picks a track:
   file is read from `origin/main`, never the card's copy, so a card cannot loosen the check that
   applies to it, and a card that edits it is always asked. A diff or file it cannot read asks.
   This repo lists its gates there.
+- **Ready for you** is the one stop where a person sees finished work before it lands. The builder
+  writes three `CHANGED:` lines in plain words and any `BEFORE:` / `AFTER:` screenshots; it starts no
+  server and uploads nothing. The factory runs the repo's preview (below) and sends one email:
+  subject "Ready to try: <title>", the three lines, the screenshots, a Preview button and the board
+  link. The board item shows the same with Land, Change and Drop. Email replies: `land` or `land it`
+  lands it; the drop words drop it; anything else is a change request, which sends the card back to
+  building and code review and then to a new Ready for you (`factory.ready` counts them; each has its
+  own note, so its own email). The email waits for the preview to load or fail, at most 10 minutes
+  after the builder was asked.
+- **Previews** (`factory/tryout.go`, `previews.json`). A repo declares one in `.factory.json`, read
+  from `origin/main` only, so a card cannot change what runs on the host before it lands:
+  `"preview": {"run": "<command>", "path": "/", "env": {"KEY": "literal"}}`, or
+  `"preview": {"sample": "<command>"}` for a repo with no UI (its output, up to 4 KB, is shown
+  instead; `run` and `sample` may both be set). With none, Ready for you has the screenshots only.
+  - The factory gives each card a port from `FACTORY_PREVIEW_PORTS` (default 7700-7799), at most
+    `FACTORY_PREVIEW_MAX` (default 8) at once, oldest wait first; the rest show "too many running"
+    and start when one stops.
+  - `run` runs through `sh -c` in the card's worktree, in its own process group, with only `PATH`,
+    `LANG`, `TZ`, the host's Go cache paths (`go env`), `npm_config_cache`, `HOME` set to
+    `StateDir/previews/<card>/home`, `PORT`, `HOST=127.0.0.1` and the declared literals. It must
+    listen on `$HOST:$PORT`. Its output goes to `StateDir/previews/<card>/log`; nothing is written
+    in the worktree.
+  - The factory publishes it with `tailscale serve --bg --https=<port>` on the board URL's host,
+    checks `path` loads on 127.0.0.1 and on that link within 2 minutes, and links it; a failure
+    shows the last 20 log lines. Every 5 minutes it checks again and restarts a dead one once.
+  - It stops when the card leaves Ready for you (landing keeps it): change requested, dropped,
+    done, landed or archived. Stopping kills the process group, removes the tailnet entry and the
+    preview's folder. Tailnet entries in the range and folders no saved preview owns are removed.
+  - The factory's processes stop with it, so after a restart the next Tick starts saved previews
+    again on the same port and link. Only Tick starts or stops previews: a `-dry-run` or
+    `-tick=false` copy never does, even with a copied `previews.json`.
+  - It is not a sandbox: the process runs as the factory's user and could read files by absolute path.
 - Changes are whole (`wholeChangeRule`): one way of doing each thing; every caller, test, doc and
   README the old behaviour touched is updated, and no old path is left (or each instance left alone is
   listed with why). Plan and code reviews check it, and a partial change is a blocking finding. Scope
@@ -457,6 +485,7 @@ acts:
 | `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or let an agent decide; on an approve with questions, it also answers each with its recommended (first) option |
 | `done`, `mark done`, `mark it done` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
+| `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is a change request) |
 | `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with the Yes button when it approves |
 
 Anything else goes to the agent as his instructions, written as a follow-up email block. Each
@@ -596,7 +625,7 @@ in them is published. For their cards:
   him first, and what the factory started (ideas, Scouts, scheduled runs) lands on its own with
   `bin/land`, which scans again before its push, as does the pre-push hook, unless it is on the
   always-ask list. For those, no person approves the landing: what keeps private data out is the
-  code reviewer, told the repo is public, and the scans. Approving a card at its finished-work stop
+  code reviewer, told the repo is public, and the scans. Landing a card at Ready for you
   scans again before the land message.
 - The direct track is off, ideas wait for a person's Start, and reviewers get a public-repo rule
   (any hostname, email, id, quote or secret is blocking).
@@ -677,11 +706,13 @@ approve, 2 on changes, 3 when Zach must decide.
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
+| `FACTORY_PREVIEW_PORTS` | `-preview-ports` | `lo-hi` ports Ready for you previews run and are published on (default `7700-7799`) |
+| `FACTORY_PREVIEW_MAX` | `-preview-max` | previews running at once (default 8) |
 | `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |
 | | `-listen` | address to serve on (default `127.0.0.1:<port>`); `host:0` picks a free port |
 | | `-dry-run` | real data, no changes: only paseo and git reads run, every write is logged to Activity, no Tick, no email, state copied to a temp dir that is deleted when it stops |
 | `FACTORY_ARCHIVE_CLI` | | separate Paseo executable for archive writes (default: `paseo` on PATH; stable version >= 0.13.0 required) |
-| `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks` and `pdw` (logged in) |
+| `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks`, `tailscale` (previews) and `pdw` (logged in) |
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>`.
 

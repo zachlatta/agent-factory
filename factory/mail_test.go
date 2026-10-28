@@ -147,7 +147,7 @@ func TestEmailedAsksUsePlainWords(t *testing.T) {
 	reply := "Built it.\n\nQUESTION: Which colour should the new button be on the phone page?\n" +
 		"- A calm blue that matches the rest of the page (recommended)\n- A bright red that stands out from everything\n" +
 		"- Green like the old one used to be before\n- Grey so it fades into the page background\n- Black\n- White\n"
-	for _, note := range []string{planNote, previewNote, "review passed: approve to land", "secret scan found 1 hit",
+	for _, note := range []string{planNote, readyNote(1), "review passed: approve to land", "secret scan found 1 hit",
 		"public repo: finished without review"} {
 		a := card("c1", map[string]string{labelStage: "zach", labelNote: note})
 		if note == planNote {
@@ -225,7 +225,7 @@ func TestLaterWaitRepliesInTheCardsThread(t *testing.T) {
 }
 
 func TestInboxCardIsEmailedInItsThread(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "zach", labelSource: "email", labelNote: previewNote})
+	c := inboxCard("c1", map[string]string{labelStage: "zach", labelSource: "email", labelNote: readyNote(1)})
 	f, p, m := mailFactory(t, c)
 	f.cfg.ZachEmail = "bot@example.com" // inbox cards reply to the sender in thread, not ZachEmail
 	m.threads["t1"] = []threadMsg{{ID: "z1"}, {ID: "s1", LabelIDs: []string{"SENT"}}}
@@ -234,7 +234,7 @@ func TestInboxCardIsEmailedInItsThread(t *testing.T) {
 	if len(s) != 1 || s[0].Tool != "reply_to_message" || s[0].Args["message_id"] != "z1" || s[0].Args["to"] != nil {
 		t.Fatalf("sends = %+v", s)
 	}
-	if l := p.labels("c1"); l[labelTold] != previewNote || l[labelZachThread] != "" {
+	if l := p.labels("c1"); l[labelTold] != readyNote(1) || l[labelZachThread] != "" {
 		t.Errorf("labels = %v", l)
 	}
 	if msgs := p.sent("c1"); len(msgs) != 0 {
@@ -306,7 +306,7 @@ func TestWhichWaitsAreEmailed(t *testing.T) {
 		{"permission prompt", running(card("c1", map[string]string{labelStage: "zach"}), "Bash"), nil, false},
 		{"finished", attention("finished"), nil, false},
 		{"allow a build", planWait("c1", nil), nil, true},
-		{"preview", card("c1", map[string]string{labelStage: "zach", labelNote: previewNote}), nil, true},
+		{"preview", card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)}), nil, true},
 		{"secret scan", card("c1", map[string]string{labelStage: "zach", labelNote: "secret scan found 1 hit"}), nil, true},
 		{"older brief", card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), nil, false},
 		{"did not settle", card("c1", map[string]string{labelStage: "zach", labelNote: arbiterStuckNote}), nil, false},

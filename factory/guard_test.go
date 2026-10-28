@@ -62,7 +62,7 @@ func TestGuardedCardIsScannedBeforeItLandsOrReachesZach(t *testing.T) {
 			!strings.Contains(msgs[0], "bin/land") || !strings.Contains(msgs[0], "--no-verify")) {
 			t.Errorf("%s: note %q, sent = %v", tc.name, l[labelNote], msgs)
 		}
-		if tc.want == "zach" && (l[labelNote] != previewNote || len(msgs) != 1 || strings.Contains(msgs[0], "Land it now")) {
+		if tc.want == "zach" && (!isReadyNote(l[labelNote]) || len(msgs) != 1 || strings.Contains(msgs[0], "Land it now")) {
 			t.Errorf("%s: note %q, sent = %v", tc.name, l[labelNote], msgs)
 		}
 		if len(*ranges) != 1 || (*ranges)[0] != "origin/main..HEAD" {
@@ -79,7 +79,7 @@ func TestGuardedInboxCardComesToZachThenLandsAndReports(t *testing.T) {
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote {
+	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
 		t.Fatalf("labels = %v", l)
 	}
 	f, p = newTestFactory(t, withLabels(c, l))
@@ -138,7 +138,7 @@ func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 		ranges := fakeScan(f, nil, nil)
 		storeLog(t, f, p, "r1", "VERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
-		if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], "approve to land") {
+		if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
 			t.Errorf("%s: labels = %v", name, l)
 		}
 		for _, m := range p.sent("c1") {

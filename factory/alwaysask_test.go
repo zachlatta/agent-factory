@@ -164,7 +164,7 @@ func TestIdeaTouchingAGateComesToZach(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote || !strings.Contains(l[labelAskWhy], ".githooks/pre-push") {
+	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || !strings.Contains(l[labelAskWhy], ".githooks/pre-push") {
 		t.Errorf("labels = %v", l)
 	}
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], ".githooks/pre-push") {

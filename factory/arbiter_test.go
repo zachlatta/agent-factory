@@ -143,7 +143,7 @@ func TestArbiterRulingOnCode(t *testing.T) {
 	}
 	// approve on work Zach asked for: he sees it finished
 	l, msgs, _ = arbiterRules(t, at(card), "code", "Fine.\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote || len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
+	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
 		t.Errorf("Zach's approve: labels = %v sent = %v", l, msgs)
 	}
 	// changes with MUST FIX: one more round, whose review checks the fixes
@@ -168,7 +168,7 @@ func TestArbiterRulingOnCode(t *testing.T) {
 	}
 	// escalate on factory-started work: it comes to Zach with the reason
 	l, msgs, _ = arbiterRules(t, at(idea), "code", "ALWAYS ASK: it rewrites the landing gate\nTIER: low\nVERDICT: escalate")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote || !strings.Contains(l[labelAskWhy], "rewrites the landing gate") {
+	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || !strings.Contains(l[labelAskWhy], "rewrites the landing gate") {
 		t.Errorf("escalate: labels = %v", l)
 	}
 	if len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {

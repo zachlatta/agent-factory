@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"os/exec"
 	"regexp"
@@ -526,5 +527,48 @@ console.log(JSON.stringify({
 		`"exactNew":"22222222-2222-2222-2222-222222222222","exactOld":"22222222-2222-2222-2222-222222222222","shortOld":"22222222-2222-2222-2222-222222222222","missing":null}`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestBoardPageReadyForYou(t *testing.T) {
+	page := boardPage(t)
+	fn := regexp.MustCompile(`(?s)function readyHtml\(r\)\{.*?\n\}`).FindString(page)
+	if fn == "" {
+		t.Fatal("no readyHtml()")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := `const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));` + "\n" +
+		fn + `
+console.log(JSON.stringify([
+  readyHtml({changed:['Cards <b>group</b>'], preview:'https://board.example:7700/', state:'ready'}),
+  readyHtml({state:'failed', log:'boom'}),
+  readyHtml({preview:'javascript:alert(1)', state:'ready'}),
+  readyHtml({state:'sampled', sample:'out'}),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	var got []string
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	for i, want := range [][]string{
+		{"<li>Cards &lt;b&gt;group&lt;/b&gt;</li>", `href="https://board.example:7700/"`, ">Preview</a>"},
+		{"The preview didn&#39;t start.", "boom"},
+		{},
+		{"Sample output", "out"},
+	} {
+		for _, w := range want {
+			if !strings.Contains(got[i], strings.ReplaceAll(w, "&#39;", "'")) {
+				t.Errorf("readyHtml #%d lacks %q: %s", i, w, got[i])
+			}
+		}
+	}
+	if strings.Contains(got[2], "javascript:") {
+		t.Errorf("a non-https preview link is shown: %s", got[2])
 	}
 }

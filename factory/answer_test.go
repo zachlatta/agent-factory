@@ -163,7 +163,7 @@ func TestEmailApproveOnPublicRepoStillScans(t *testing.T) {
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
 		return []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, nil
 	}
-	_, err := f.Act("answer", Body{Thread: "t9", MessageID: "m2", Text: "approve"})
+	_, err := f.Act("answer", Body{Thread: "t9", MessageID: "m2", Text: "land"})
 	if err == nil || !strings.Contains(err.Error(), "secret scan failed") {
 		t.Fatalf("a scan hit must stop an emailed approve: %v", err)
 	}

@@ -286,7 +286,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 		}
 	}
 	replZach := repl
-	replZach.Labels = map[string]string{labelPrefix + labelStage: "zach", labelPrefix + labelNote: previewNote, labelPrefix + labelReplaces: oldID}
+	replZach.Labels = map[string]string{labelPrefix + labelStage: "zach", labelPrefix + labelNote: readyNote(1), labelPrefix + labelReplaces: oldID}
 	f.SetAgents([]Agent{old, replZach})
 	for _, path := range []string{"/api/evidence/" + oldID + "/after", "/api/evidence/" + newID + "/after"} {
 		rec := httptest.NewRecorder()

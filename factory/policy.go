@@ -419,31 +419,6 @@ const sideEffectMsg = "Your plan passed review, but building it would change som
 	"If the build can avoid the side effect (test data, a dry run, doing it at landing instead), say so and recommend " +
 	"that. Do not ask him about the design: other agents reviewed the plan. Do not start building; stop after this."
 
-// previewNote is the Needs Zach note of a card that passed code review and comes to Zach before it lands
-// (finishedWorkReason): his one stop, where he tries the built change.
-const previewNote = "built and reviewed: try the preview and approve to land"
-
-// previewMsg asks the builder of a card that passed code review and comes to Zach (for reason) for what he needs
-// to try it: before and after, a link he can open on his phone, and his decision.
-func previewMsg(reason string) string {
-	return "Code review passed. It comes to Zach once, now, before it lands (" + reason + "). " +
-		"Write it for reading on a phone, in plain words. Start with three lines:\n" +
-		"DECISION: <land this change?, in one line>\n" +
-		"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
-		"NEEDS FROM ZACH: <try it, then approve the landing or say what to change, and what happens after>\n" +
-		"Then show it to him. If it changes something he sees (a page, an email, a message), take before (origin/main) and " +
-		"after (your branch) screenshots at desktop and phone widths, on test or fake data. Give him a live link he can open " +
-		"on his phone and try: your branch running on test or fake data, or in a dry-run mode the README documents (one " +
-		"that changes nothing), served on this host's tailnet IP (`tailscale ip -4`) and started under `timeout 24h` so it " +
-		"stops on its own (leave that one server running when you stop); where it cannot run safely, a static clickable " +
-		"mock-up instead. Upload the screenshots and any mock-up with the file-share skill, restricted to Zach, check that " +
-		"each link returns 401 without his login, and put the links in your message: a path on this host is not a link he " +
-		"can open. If the overview rule names before and after evidence lines, add them too. If nothing he sees changes, " +
-		"show the before and after behaviour in plain words and how he can try it. Then at most 3 bullets: what could go " +
-		"wrong. Then any question he must answer, each as a QUESTION: block (the question, then 2 to 6 options as - lines, " +
-		"recommended first). Do not land and do not change the code; stop after this."
-}
-
 const noLiveChangesRule = "Do not make live changes (install scripts, enable or restart services, resize VMs, change external settings) before code review: do them in the landing step after review and verify them."
 
 func restate(kind string) string {
@@ -735,10 +710,12 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 		// a scan hit or error stops the card; a clean public-repo card goes on like any other
 		err = set(labelStage, "zach", labelVerdict, verdict, labelNote, scanned)
 	} else if why := f.finishedWorkReason(t, tier, notes, asked); why != "" {
-		// the one stop for Zach: the builder shows him before and after and a link to try (mailZach waits for it)
-		if err = set(labelStage, "zach", labelVerdict, verdict, labelNote, previewNote, labelAskWhy, why,
-			labelWriting, now); err == nil {
-			msg := previewMsg(why)
+		// the one stop for Zach, Ready for you: the builder writes what changed, the factory runs the
+		// preview (tryout.go), and mailZach waits for both
+		n := readyRound(t)
+		if err = set(labelStage, "zach", labelVerdict, verdict, labelNote, readyNote(n), labelReady, fmt.Sprint(n),
+			labelAskWhy, why, labelWriting, now); err == nil {
+			msg := readyMsg(why)
 			if fb != "" {
 				// one message: a second would interrupt the builder writing the first
 				msg += uiFeedbackPreviewNote + fb
@@ -916,6 +893,7 @@ func (f *Factory) Tick() {
 		f.logf("idea error: %v", err)
 	}
 	f.reap(now)
+	f.tickPreviews(now)
 	f.checkReplies(now)
 	f.probeMail()
 }

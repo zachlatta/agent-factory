@@ -227,7 +227,7 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 				t.Fatal(err)
 			}
-			if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != previewNote {
+			if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
 				t.Fatalf("after review: labels = %v", l)
 			}
 		})

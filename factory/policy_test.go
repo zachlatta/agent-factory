@@ -125,7 +125,7 @@ func TestAllowedBuildStillComesToZachFinished(t *testing.T) {
 		reviewer("r1", "c1", "code"))
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelAskWhy] != "you asked for it" {
+	if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || l[labelAskWhy] != "you asked for it" {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -137,7 +137,7 @@ func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
 	storeLog(t, f, p, "r1", "it swapped the database\nTIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelTier] != "architecture" || l[labelNote] != previewNote {
+	if l[labelStage] != "zach" || l[labelTier] != "architecture" || l[labelNote] != readyNote(1) {
 		t.Errorf("labels = %v", l)
 	}
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
@@ -151,7 +151,7 @@ func TestUntieredCardGoesToZachAfterReview(t *testing.T) {
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelAskWhy] != "it had no plan review" || l[labelTier] != "low" {
+	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || l[labelAskWhy] != "it had no plan review" || l[labelTier] != "low" {
 		t.Errorf("labels = %v", l)
 	}
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
@@ -165,7 +165,7 @@ func TestHandReviewedCardWaitsForZachAfterRework(t *testing.T) {
 		reviewer("r1", "c1", "code"))
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelNote] != previewNote {
+	if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
 		t.Errorf("labels = %v", l)
 	}
 	for _, m := range p.sent("c1") {
@@ -1440,13 +1440,14 @@ func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
 	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != previewNote || l[labelWriting] == "" {
+	if l[labelStage] != "zach" || l[labelNote] != readyNote(1) || l[labelReady] != "1" || l[labelWriting] == "" {
 		t.Errorf("labels = %v", l)
 	}
 	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "before and after") || !strings.Contains(msgs[0], "phone") ||
-		!strings.Contains(msgs[0], "file-share") || !strings.Contains(msgs[0], "DECISION:") || strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("preview message = %v", msgs)
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "CHANGED: ") || !strings.Contains(msgs[0], "phone") ||
+		!strings.Contains(msgs[0], "Do not start a server") || strings.Contains(msgs[0], "file-share") ||
+		strings.Contains(msgs[0], "timeout 24h") || !strings.Contains(msgs[0], "DECISION:") || strings.Contains(msgs[0], "Land it now") {
+		t.Errorf("ready message = %v", msgs)
 	}
 
 	// approving the preview lands it; a reply sends it back to building and code review

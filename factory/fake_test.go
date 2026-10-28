@@ -272,6 +272,7 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	// no git, except an empty diff for the always-ask file check (alwaysask.go), so it hits nothing
 	f.GitOut = gitStub(cleanDiff)
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
+	f.runner, f.GoEnv = nil, nil // previews run only in tests that set a fake runner (tryout_test.go)
 
 	managed := quietManaged(agents)
 	for i, a := range agents {

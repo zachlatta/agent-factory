@@ -54,6 +54,8 @@ func main() {
 	metricHosts := flag.String("metric-hosts", os.Getenv("FACTORY_METRIC_HOSTS"), "comma-separated SSH aliases whose load the board shows besides this host (env FACTORY_METRIC_HOSTS)")
 	idleTTL := flag.Duration("idle-ttl", envDuration("FACTORY_IDLE_TTL"), "park a Needs Zach card idle this long (env FACTORY_IDLE_TTL; default 3h)")
 	idleCap := flag.Int("idle-cap", envInt("FACTORY_IDLE_CAP"), "park the longest idle Needs Zach cards while more factory agents than this are idle (env FACTORY_IDLE_CAP; default 10)")
+	previewPorts := flag.String("preview-ports", os.Getenv("FACTORY_PREVIEW_PORTS"), "lo-hi ports Ready for you previews run and are published on (env FACTORY_PREVIEW_PORTS; default 7700-7799)")
+	previewMax := flag.Int("preview-max", envInt("FACTORY_PREVIEW_MAX"), "previews running at once (env FACTORY_PREVIEW_MAX; default 8)")
 	tick := flag.Bool("tick", true, "run the pipeline; -tick=false only serves the board (deploy canary)")
 	listen := flag.String("listen", "", "address to serve on (default 127.0.0.1:<port>; host:0 picks a free port)")
 	dryRun := flag.Bool("dry-run", false, "serve real data, change nothing: buttons only log the paseo and git writes they would make")
@@ -61,7 +63,7 @@ func main() {
 
 	cfg := factory.Config{Host: host, Home: home, StateDir: *state, Port: *port, BoardURL: *boardURL,
 		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail,
-		DryRun: *dryRun, IdleTTL: *idleTTL, IdleCap: *idleCap}
+		DryRun: *dryRun, IdleTTL: *idleTTL, IdleCap: *idleCap, PreviewPorts: *previewPorts, PreviewMax: *previewMax}
 	if *metricHosts != "" {
 		cfg.MetricHosts = splitList(*metricHosts)
 	}

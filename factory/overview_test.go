@@ -74,8 +74,7 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 }
 
 func TestEmailLeadsWithTheOverview(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: previewNote, labelVerdict: "code approve"})
-	f, p, m := mailFactory(t, c)
+	f, p, m := mailFactory(t, planWait("c1", nil))
 	storeLog(t, f, p, "c1", "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.")
 	f.Tick()
 	sends := m.sends()
@@ -110,7 +109,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 		"rework plan":  reworkMsg("plan", 1, 3, "notes"),
 		"rework code":  reworkMsg("code", 1, 3, "notes"),
 		"side effects": sideEffectMsg,
-		"preview":      previewMsg("you asked for it"),
+		"preview":      readyMsg("you asked for it"),
 		"arbiter":      ArbiterPrompt(c, "code", 7478, "unknown", "notes", false),
 		"land":         landMsg,
 		"guarded land": guardedLandMsg,
