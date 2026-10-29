@@ -73,34 +73,29 @@ func PreviewHandler(root string) (http.Handler, error) {
 		if stage[0] == "zach" {
 			a.Labels[labelPrefix+labelAwaiting] = "plan"
 		}
-		// A real session file exercises the normal transcript and Ask parsing paths.
-		dir := filepath.Join(home, ".claude", "projects", strings.NewReplacer("/", "-", ".", "-").Replace(a.Cwd))
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return nil, err
-		}
-		line, err := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{
-			"content": []map[string]string{{"type": "text", "text": previewReply}}}})
-		if err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), append(line, '\n'), 0600); err != nil {
+		// A real session file exercises the normal transcript, request and Ask parsing paths.
+		if err := writePreviewSession(home, a.Cwd, id, previewRequest, previewReply); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
 	}
-	// finished work waiting on Zach: the Ready for you stop with Land / Change / Drop
+	// finished work waiting on Zach: the Ready for you stop with Land / Change / Drop, on its own session
 	ready := agents[slices.IndexFunc(agents, func(a Agent) bool { return a.ID == "preview-zach" })]
-	ready.ID, ready.SessionID, ready.Title = "preview-ready", "preview-zach", "Ready to try: clearer board buttons"
+	ready.ID, ready.SessionID, ready.Title = "preview-ready", "preview-ready", "Ready to try: clearer board buttons"
+	if err := writePreviewSession(home, ready.Cwd, ready.ID, previewReadyRequest, previewReadyReply); err != nil {
+		return nil, err
+	}
 	ready.Labels = maps.Clone(ready.Labels)
 	delete(ready.Labels, labelPrefix+labelAwaiting)
 	ready.Labels[labelPrefix+labelNote] = readyNote(1)
+	// built after a reviewed plan and one code review, as real finished work is
+	ready.Labels[labelPrefix+labelPlanRounds], ready.Labels[labelPrefix+labelCodeRounds] = "1", "1"
 	agents = append(agents, ready)
 	f.hostMetrics.read = func(string) hostReading {
 		return hostReading{Metrics: hostMetrics{CPUCount: 4, Errors: map[string]string{}}}
 	}
 	f.fleet = nil
 	f.SetAgents(agents)
-	f.log = []string{"PREVIEW: fabricated cards; actions only change this preview."}
 	var actionMu sync.Mutex
 	real := f.Handler()
 	// Keep host/process inspection routes out of the preview, including future routes
@@ -131,9 +126,11 @@ func PreviewHandler(root string) (http.Handler, error) {
 		}
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			page, _ := web.ReadFile("web/board.html")
-			// Keep the real embedded board, with only its preview clock fixed.
+			// Keep the real embedded board, with only its preview clock fixed and its preview mode marked:
+			// the page then shows its sample-data notice (#previewNote).
 			clock := fmt.Sprintf("<title>Factory preview</title><script>Date.now=()=>%d;</script>", now.UnixMilli())
-			page = []byte(strings.Replace(string(page), "<title>Factory</title>", clock, 1))
+			html := strings.Replace(string(page), "<title>Factory</title>", clock, 1)
+			page = []byte(strings.Replace(html, `<html lang="en">`, `<html lang="en" data-mode="preview">`, 1))
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.Write(page)
@@ -189,6 +186,12 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 			a.Labels[labelPrefix+labelStage] = "landing"
 		}
 		delete(a.Labels, labelPrefix+labelAwaiting)
+	case "send":
+		// No, Change or an answer: the card moves where the real send moves it (answerLabels)
+		c, _ := f.card(a.ID)
+		for k, v := range answerLabels(c, *a, iso(f.Now()), false) {
+			a.Labels[labelPrefix+k] = v
+		}
 	case "stage":
 		if !validStage(b.Stage) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown stage"})
@@ -208,6 +211,47 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 	f.logf("PREVIEW: simulated %s on a fabricated card; nothing runs", action)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "simulated": true})
 }
+
+// writePreviewSession writes agent id's Claude session file: Zach's request, then the agent's reply.
+func writePreviewSession(home, cwd, id, request, reply string) error {
+	dir := filepath.Join(home, ".claude", "projects", strings.NewReplacer("/", "-", ".", "-").Replace(cwd))
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	var data []byte
+	for _, m := range []map[string]any{
+		{"type": "user", "message": map[string]any{"role": "user", "content": boardHeader + "\n" + request + "\n\nWork in this repo (example/board)."}},
+		{"type": "assistant", "message": map[string]any{"content": []map[string]string{{"type": "text", "text": reply}}}},
+	} {
+		line, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		data = append(append(data, line...), '\n')
+	}
+	return os.WriteFile(filepath.Join(dir, id+".jsonl"), data, 0600)
+}
+
+const previewRequest = "Make the board easy to read on a phone: one column, and every card I need to answer at the top."
+
+const previewReadyRequest = "Make the board's answer buttons clearer on a phone, so one tap does what it says."
+
+// previewReadyReply is finished work: built and reviewed, waiting for Zach to try it and land it.
+const previewReadyReply = `DECISION: Land the clearer board buttons?
+OVERVIEW: Each card's buttons now say what they do, and one tap answers. It is built and reviewed; nothing is live yet.
+NEEDS FROM ZACH: Try it, then land it, ask for a change or drop it.
+
+CHANGED: Every card you answer shows its buttons in one row you can reach with your thumb.
+CHANGED: A tap answers at once, with no separate Submit.
+CHANGED: Drop asks for a second tap before it closes a card.
+
+- A long button label could wrap onto two lines on a small phone.
+
+QUESTION: Should Drop also ask for a reason?
+- No, one extra tap is enough (recommended)
+- Yes, ask for a short reason
+
+TIER: architecture`
 
 const previewReply = `DECISION: Approve the board layout plan?
 OVERVIEW: Make the board easy to read on desktop and phone screens. Check long text, choices, and card details before landing.

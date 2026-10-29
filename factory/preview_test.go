@@ -155,6 +155,70 @@ func TestPreviewSimulatesOnlyFabricatedCardActions(t *testing.T) {
 	}
 }
 
+// No and Change on the sample cards move them where the real send moves them (answerLabels): out of
+// For you, into Working on it.
+func TestPreviewAnswersLeaveForYou(t *testing.T) {
+	h, err := PreviewHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := func() map[string]Card {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+		var b struct {
+			Cards    []Card
+			Sections Sections
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]Card{}
+		for _, c := range b.Cards {
+			out[c.ID] = c
+		}
+		for _, l := range b.Sections.ForYou {
+			out["forYou:"+l.ID] = Card{}
+		}
+		return out
+	}
+	if b := board(); b["preview-ready"].Ask == nil || b["preview-ready"].Ask.Kind != askReady {
+		t.Fatalf("the Ready sample is not finished work: %+v", b["preview-ready"].Ask)
+	}
+	for _, tc := range []struct{ id, body, stage string }{
+		{"preview-zach", `{"id":"preview-zach","choice":"no"}`, "plan"},
+		{"preview-ready", `{"id":"preview-ready","choice":"change","message":"Make Drop red"}`, "building"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/choose", strings.NewReader(tc.body))
+		req.Header.Set("X-Factory", "1")
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
+		}
+		b := board()
+		if _, waiting := b["forYou:"+tc.id]; waiting || b[tc.id].Stage != tc.stage {
+			t.Errorf("%s after %s: stage %q, still for you %v", tc.id, tc.body, b[tc.id].Stage, waiting)
+		}
+	}
+}
+
+// The preview page marks itself, so the board shows its sample-data notice; the real board does not.
+func TestPreviewPageIsMarked(t *testing.T) {
+	h, err := PreviewHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(rec.Body.String(), `<html lang="en" data-mode="preview">`) || !strings.Contains(rec.Body.String(), `id="previewNote"`) {
+		t.Error("the preview page is not marked as the sample")
+	}
+	page, _ := web.ReadFile("web/board.html")
+	if strings.Contains(string(page), `data-mode="preview">`) {
+		t.Error("the real board is marked as the preview")
+	}
+}
+
 func TestRepoPreviewDeclarationUsesSafeCLI(t *testing.T) {
 	raw, err := os.ReadFile("../.factory.json")
 	if err != nil {

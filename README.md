@@ -573,7 +573,8 @@ Every ask has one fixed set of buttons (`factory/choose.go`), the same on the bo
 One tap answers: No sends the agent a plain "No.", the same as replying `no`. Drop takes a second
 tap in place. Change, Answer and Other repo open a text box with Send, and need words. On a decision
 or an open question the options start on the recommended one, which Yes or Answer sends; on finished
-work none is picked, since Land sends no answers: picked options go through Change. With one
+work none is picked, since Land sends no answers: picked options go through Change, and the card says
+so above them ("Optional: tap an option to send it with Change. Land ships what is built as it is."). With one
 question, tapping an option answers at once. The board posts `POST /api/choose` (`id`, `choice`, `message`, `repo`), and an email reply is
 parsed into the same button (Needs Zach email below), so both do the same thing. Either one moves
 the card out of Needs Zach; the other surface then finds nothing waiting (the dispatcher gets 409)
@@ -936,8 +937,13 @@ The helper owns and stops its preview server and browser, including on failure.
 Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `building`,
 `review`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture
 (`preview-zach`, a decision with Yes / No / Change / Drop) includes approval content, long text, and choices;
-`preview-ready` is finished work with Land / Change / Drop. Their buttons are simulated through the
-same `choose` route the board posts. Real API serialization and Ask/transcript parsing build the preview;
+`preview-ready` is finished work with Land / Change / Drop, its own synthetic request and changes, and an
+optional question. Every fixture session starts with a synthetic request, so a card opens on its ask.
+Their buttons are simulated through the same `choose` route the board posts, and move the card where the
+real action does: Land or Yes to landing or building, No, Change or an answer where a real message
+sends it (`answerLabels`), Drop to done. The page is served with `<html data-mode="preview">`, which
+shows a fixed notice that the cards are samples and buttons change only the sample; the real board
+never has it. Real API serialization and Ask/transcript parsing build the preview;
 when a UI needs a new scenario, extend the synthetic inputs in `factory/preview.go`.
 Run `npm run test:board` for browser regression checks.
 

@@ -155,9 +155,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				return nil, err
 			}
 			f.delivered(c.ID, sub)
-			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, map[string]string{
-				labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now, labelNote: "revising plan for Zach",
-				labelDecided: "1"})
+			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, answerLabels(c, f.agent(c.ID), now, f.guarded(c.Repo)))
 		}
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
@@ -171,13 +169,10 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		f.delivered(c.ID, sub)
 		if a := f.agent(c.ID); !sub && c.ArchivedAt == "" && a.L(labelStage) != "" {
-			labels := replyLabels(a, now, f.guarded(c.Repo))
+			labels := answerLabels(c, a, now, f.guarded(c.Repo))
 			if labels[labelAutoReview] == "code" {
 				// his message is a new request: its code review is a generation of its own
 				maps.Copy(labels, newCodeGeneration(a))
-			}
-			if a.L(labelStage) == "zach" {
-				labels[labelDecided] = "1" // his answer to a stop: later reviews treat it as settled
 			}
 			if err := f.setLabels(c.ID, labels); err != nil {
 				return nil, err
@@ -433,6 +428,21 @@ func newCodeGeneration(a Agent) map[string]string {
 // has not passed goes back to plan review, an errand stays in plan, anything else gets a code
 // review. A guarded (public) repo has no direct track, so its errands get a code review too. Nothing
 // is left in Building with no move queued.
+// answerLabels is where Zach's message (No, Change or an answer) moves card c: a plan he was asked to
+// allow goes back to planning, anything else to the step replyLabels picks. The board preview
+// simulates the same move.
+func answerLabels(c Card, a Agent, now string, guarded bool) map[string]string {
+	if c.Awaiting == "plan" {
+		return map[string]string{labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now,
+			labelNote: "revising plan for Zach", labelDecided: "1"}
+	}
+	labels := replyLabels(a, now, guarded)
+	if a.L(labelStage) == "zach" {
+		labels[labelDecided] = "1" // his answer to a stop: later reviews treat it as settled
+	}
+	return labels
+}
+
 func replyLabels(a Agent, now string, guarded bool) map[string]string {
 	switch {
 	case a.L(labelRouting) != "":

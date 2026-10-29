@@ -70,6 +70,10 @@ func TestChooseRunsTheSameActionAsEmail(t *testing.T) {
 			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "No.") {
 				t.Errorf("no: sent %v", s)
 			}
+			// and it leaves Needs Zach: a plan he said no to goes back to planning
+			if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAwaiting] != "" {
+				t.Errorf("no: labels %v", l)
+			}
 		}},
 		{"change", "Use SQLite", "Use SQLite", func(t *testing.T, p *fakePaseo) {
 			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "Use SQLite") || !strings.Contains(s[0], "wants changes") {

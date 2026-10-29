@@ -61,8 +61,25 @@ test('For you and card links render at exact widths and preserve navigation', as
         await page.locator('.fy[data-id="preview-zach"] button[data-choice="no"]').click();
         assert.deepEqual(JSON.parse((await no).postData()), { id: 'preview-zach', choice: 'no' });
         assert.equal(await page.locator('.fy[data-id="preview-zach"] textarea').count(), 0);
-        // finished work starts with no option picked: Land sends no answers
+        // and the answered decision leaves For you for Working on it, as the real send moves it
+        await page.locator('.fy[data-id="preview-zach"]').waitFor({ state: 'detached' });
+        await page.locator('#inbox a.line[data-id="preview-zach"]').waitFor();
+        await page.evaluate(() => load());
+        assert.equal(await page.locator('.fy[data-id="preview-zach"]').count(), 0);
+        // the sample is marked as one on the page itself, not only in the tab title
+        assert.match(await page.locator('#previewNote').innerText(), /sample cards/i);
+        assert.equal(await page.locator('#previewNote').isVisible(), true);
+        // finished work starts with no option picked: Land sends no answers; its options say they are optional
         assert.equal(await page.locator('.fy[data-id="preview-ready"] .opt.on').count(), 0);
+        assert.match(await page.locator('.fy[data-id="preview-ready"] .opthint').innerText(), /Optional.*Change.*Land/);
+        // its panel starts with Zach's own ask and the finished work's changes
+        await page.locator('.fy[data-id="preview-ready"] a.ft').click();
+        await page.locator('#panel.open').waitFor();
+        assert.match(await page.locator('#pAsk').innerText(), /answer buttons clearer on a phone/);
+        assert.match(await page.locator('#pAsk').innerText(), /Land the clearer board buttons\?/);
+        assert.doesNotMatch(await page.locator('#pAsk').innerText(), /Not available/);
+        await page.locator('#panel > .x').click();
+        await page.locator('#panel.open').waitFor({ state: 'hidden' });
         // A periodic refresh must not reopen a query-linked card after it is closed.
         await page.goto(`${url}/?card=preview-zach`);
         await page.locator('#panel.open').waitFor();
