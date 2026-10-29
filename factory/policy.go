@@ -71,7 +71,9 @@ var (
 // sideEffectsRule asks planners and plan reviewers what building a plan would change outside its worktree
 // before landing. An architecture plan goes to building without Zach only when the reviewer writes none.
 const sideEffectsRule = `BUILD SIDE EFFECTS: <none, or what building it changes outside the worktree before landing: prod data
-written or deleted, messages sent to anyone, money spent, hosts or services changed>`
+written or deleted, messages sent to anyone, money spent, hosts or services changed>
+(none means nothing at all happens outside the worktree while building. Write none alone on that line,
+and any reason on the next line: anything else on the line, even "none (code only)", counts as a side effect.)`
 
 // titleCap is the most runes a planner's TITLE line keeps; longer ones are cut at a word.
 const titleCap = 60
@@ -113,9 +115,10 @@ func ParseSmallFix(text string) string {
 	return ""
 }
 
-// ParseSideEffects returns the last BUILD SIDE EFFECTS line without markdown: "none" when building changes
-// nothing outside the worktree, the listed effects otherwise, or "" when there is no line. The prompt's
-// <placeholder> is skipped.
+// ParseSideEffects returns the last BUILD SIDE EFFECTS line without markdown: "none" when the line is a
+// bare none (no, n/a or nothing, with only markdown or a trailing full stop around it), the listed
+// effects otherwise, or "" when there is no line. The prompt's <placeholder> is skipped. Anything after
+// the none on the same line, even a reason, makes it a list of effects: the reason belongs on the next line.
 func ParseSideEffects(text string) string {
 	m := effectsRe.FindAllStringSubmatch(text, -1)
 	for i := len(m) - 1; i >= 0; i-- {
@@ -984,7 +987,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		return err
 	}
 	if a.Status == "error" {
-		return f.mailLimit(a)
+		return nil // an error wait shows on the board; it is never emailed
 	}
 	routing := a.L(labelRouting) != ""
 	if a.L(labelStage) == "plan" && a.L(labelSource) == "board" && a.L(labelBase) == "" && !routing && !a.archived() {

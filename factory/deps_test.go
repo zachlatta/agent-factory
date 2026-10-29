@@ -186,7 +186,7 @@ func TestHeldCardGoesToZachWhenDependencyDroppedOrMissing(t *testing.T) {
 		}
 		a := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: tc.note})
 		ask := askFor(Card{Stage: "zach"}, a)
-		if ask == nil || !strings.Contains(ask.Title, tc.title) || ask.Yes != "approve" || !mailable(ask) {
+		if ask == nil || !strings.Contains(ask.Title, tc.title) || ask.Yes != "approve" || mailable(ask) {
 			t.Fatalf("%s: ask = %+v", name, ask)
 		}
 		// Zach's Approve is the answer: it lands, with no second hold

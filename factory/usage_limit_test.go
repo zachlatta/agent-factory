@@ -308,7 +308,7 @@ func TestLimitCompletedTurnAllowsNextEpisode(t *testing.T) {
 	}
 }
 
-func TestLimitEscalationEmailsWithoutStartingQueuedReview(t *testing.T) {
+func TestLimitEscalationIsBoardOnlyAndStartsNoQueuedReview(t *testing.T) {
 	a := quotaCard("building")
 	a.LastError = "Unknown provider failure"
 	f, p, m := mailFactory(t, a)
@@ -320,8 +320,11 @@ func TestLimitEscalationEmailsWithoutStartingQueuedReview(t *testing.T) {
 	if err := f.tickAgent(a, t0.Add(3*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.sends()) != 1 || len(p.runsWithLabel(labelArg(labelRole, "reviewer"))) != 0 {
-		t.Fatal("error wait skipped notification or started a review")
+	if len(m.sends()) != 0 || len(p.runsWithLabel(labelArg(labelRole, "reviewer"))) != 0 {
+		t.Fatal("error wait was emailed or started a review")
+	}
+	if c, _ := f.card(a.ID); c.Ask == nil || !c.Ask.BoardOnly || p.labels(a.ID)[labelStage] != "zach" {
+		t.Fatalf("error wait must show on the board only: %+v", c.Ask)
 	}
 }
 

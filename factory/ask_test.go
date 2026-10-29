@@ -25,11 +25,11 @@ func TestAskFor(t *testing.T) {
 		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}),
 			"Approve this plan?", "builder", "approve,reply,close"},
 		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
-			"Approve landing?", "builder", "approve,reply,close"},
+			"Ship it?", "builder", "approve,reply,close"},
 		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
-			"Approve landing?", "reviewer", "approve,reply,close"},
+			"Ship it?", "reviewer", "approve,reply,close"},
 		{"architecture preview", card("c", map[string]string{labelStage: "zach", labelNote: previewNote}),
-			"Try it, then approve landing?", "builder", "approve,reply,close"},
+			"Try it, then ship it?", "builder", "approve,reply,close"},
 		{"rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
 			"Reviews didn't settle: your call on the code", "builder", "recommend,reply,approve,close"},
 		{"escalated", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),
@@ -185,7 +185,7 @@ func TestAskDetailJoinsAReplySplitOverBlocks(t *testing.T) {
 	}
 }
 
-// A landed card held in Needs Zach says why, and is emailed; a card moved by hand is not.
+// A landed card held in Needs Zach says why on the board, and is not emailed; nor is a card moved by hand.
 func TestLandedAsks(t *testing.T) {
 	for note, want := range map[string]string{
 		"landed; still to do: push 2 not landed; check production": "push 2 not landed; check production",
@@ -193,7 +193,7 @@ func TestLandedAsks(t *testing.T) {
 		"landed diff differs from the reviewed one: extra commit":  "extra commit",
 	} {
 		ask := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: note})}, nil, t0)[0].Ask
-		if ask == nil || !strings.Contains(ask.Why, want) || !mailable(ask) {
+		if ask == nil || !strings.Contains(ask.Why, want) || mailable(ask) {
 			t.Errorf("%s: ask = %+v", note, ask)
 		}
 	}

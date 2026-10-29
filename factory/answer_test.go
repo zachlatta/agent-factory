@@ -16,6 +16,8 @@ func TestParseAnswer(t *testing.T) {
 		{Text: "When?", Options: []string{"Now", "Later"}}}
 	plan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Approve plan & build"),
 		reply("Send back", ""), act("close", "Drop it")}, Questions: qs}
+	onePlan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Approve plan & build"),
+		reply("Send back", ""), act("close", "Drop it")}, Questions: qs[:1]}
 	brief := &Ask{Yes: "recommend", Actions: []Action{primary("recommend", btnRecommend), act("close", btnDrop)}}
 	briefQs := &Ask{Yes: "recommend", Actions: brief.Actions, Questions: qs}
 	rerun := &Ask{Actions: []Action{primary("rerun", "Re-run"), reply("Reply", "")}}
@@ -44,6 +46,11 @@ func TestParseAnswer(t *testing.T) {
 		{brief, "1A", "send", "1A"},                                              // no questions on the brief
 		{briefQs, "1B", "send", "Zach's answers:\n1. Which store?\n   → SQLite"}, // recommend would drop the choice
 		{briefQs, "yes", "recommend", ""},
+		{plan, "yes", "approve", "1. Which store?\n   → Postgres\n2. When?\n   → Now"}, // yes takes the recommendations
+		{onePlan, "B", "approve", "Which store?\n   → SQLite"},                         // one question: a letter alone
+		{onePlan, "a.", "approve", "→ Postgres"},
+		{plan, "B", "send", "B"}, // two questions: a lone letter is not an answer
+		{onePlan, "G", "send", "G"},
 		{plan, "3C", "send", "3C"},
 		{plan, "wait\n\n> approve", "send", "wait"},
 		{plan, "approve\n\nOn Sun, Oct 25, 2026 at 7:42 PM zrl bot wrote:\n> Needs you", "approve", ""},
@@ -66,7 +73,7 @@ func planWaiting(id string) Agent {
 		labelZachThread: "nt1"})
 }
 
-func TestEmailApproveBuildsAndConfirms(t *testing.T) {
+func TestEmailApproveBuildsWithoutAnEcho(t *testing.T) {
 	f, p, m := mailFactory(t, planWaiting("c1"))
 	res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "Approve."})
 	if err != nil || res.(map[string]string)["action"] != "approve" {
@@ -79,10 +86,8 @@ func TestEmailApproveBuildsAndConfirms(t *testing.T) {
 	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach approved your plan") {
 		t.Errorf("sent = %v", msgs)
 	}
-	s := m.sends()
-	if len(s) != 1 || s[0].Tool != "reply_to_message" || s[0].Args["message_id"] != "m2" ||
-		s[0].Args["text"] != "Approved: building now." || s[0].Args["html"] == nil {
-		t.Errorf("confirmation = %+v", s)
+	if s := m.sends(); len(s) != 0 {
+		t.Errorf("an answer that worked must not be echoed: %+v", s)
 	}
 }
 
@@ -114,8 +119,8 @@ func TestEmailFreeTextGoesToTheAgentAsAFollowUp(t *testing.T) {
 	if l := p.labels("c1"); l[labelStage] != "plan" {
 		t.Errorf("labels = %v", l)
 	}
-	if s := m.sends(); len(s) != 1 || s[0].Args["text"] != "Sent back: the agent is revising the plan." {
-		t.Errorf("confirmation = %+v", s)
+	if s := m.sends(); len(s) != 0 {
+		t.Errorf("an answer that worked must not be echoed: %+v", s)
 	}
 }
 
@@ -127,12 +132,12 @@ func TestEmailDropClosesTheCard(t *testing.T) {
 	if !p.called("archive", "c1") {
 		t.Error("not archived")
 	}
-	if s := m.sends(); len(s) != 1 || !strings.HasPrefix(s[0].Args["text"].(string), "Dropped") {
-		t.Errorf("confirmation = %+v", s)
+	if s := m.sends(); len(s) != 0 {
+		t.Errorf("an answer that worked must not be echoed: %+v", s)
 	}
 }
 
-func TestEmailDoneMarksCardDoneAndConfirms(t *testing.T) {
+func TestEmailDoneMarksCardDone(t *testing.T) {
 	a := card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: browser check",
 		labelZachThread: "nt1"})
 	f, p, m := mailFactory(t, a)
@@ -143,8 +148,8 @@ func TestEmailDoneMarksCardDoneAndConfirms(t *testing.T) {
 	if l := p.labels("c1"); l[labelStage] != "landed" || l[labelNote] != "marked done by Zach" {
 		t.Errorf("labels = %v", l)
 	}
-	if s := m.sends(); len(s) != 1 || s[0].Args["text"] != "Marked done." {
-		t.Errorf("confirmation = %+v", s)
+	if s := m.sends(); len(s) != 0 {
+		t.Errorf("an answer that worked must not be echoed: %+v", s)
 	}
 }
 
@@ -164,8 +169,10 @@ func TestEmailApproveOnPublicRepoStillScans(t *testing.T) {
 	if l := p.labels("c1"); l[labelStage] == "landing" {
 		t.Errorf("landed past a scan hit: %v", l)
 	}
-	if s := m.sends(); len(s) != 1 || !strings.HasPrefix(s[0].Args["text"].(string), "That didn't go through") {
-		t.Errorf("confirmation = %+v", s)
+	s := m.sends()
+	if len(s) != 1 || s[0].Args["message_id"] != "m2" ||
+		s[0].Args["text"] != "That reply didn't go through. Answer on the board: https://board.example/#c1" {
+		t.Errorf("a failed answer gets one plain line: %+v", s)
 	}
 }
 
@@ -204,16 +211,8 @@ func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
 		strings.Contains(msgs[0], "accepts the recommendations") {
 		t.Errorf("sent = %v", msgs)
 	}
-	if s := m.sends(); len(s) != 1 {
-		t.Errorf("confirmation = %+v", s)
-	}
-	c, _ = f.card("c1")
-	ask := askFor(c, f.agent("c1"))
-	_, ask.Questions, _ = f.askDetail(c, ask)
-	for _, w := range replyWords(ask) {
-		if w.Word == "1A 2B" && strings.Contains(w.Does, "approve") {
-			t.Errorf("brief letter answers promise approve: %+v", w)
-		}
+	if s := m.sends(); len(s) != 0 {
+		t.Errorf("an answer that worked must not be echoed: %+v", s)
 	}
 }
 

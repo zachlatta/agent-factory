@@ -1384,6 +1384,114 @@ func TestParseSideEffects(t *testing.T) {
 	}
 }
 
+// Only a bare none means building has no side effects; its reason goes on the next line. Anything else on
+// the line, even a reason that sounds safe, is a side effect, so no reading of free text can skip Zach.
+func TestParseSideEffectsOnlyBareNone(t *testing.T) {
+	for _, s := range []string{"none", "None.", "** None.", "`none`", "NOTHING", "n/a", "no"} {
+		if got := ParseSideEffects("BUILD SIDE EFFECTS: " + s + "\nBecause code and tests stay in the worktree."); got != "none" {
+			t.Errorf("%q = %q, want none", s, got)
+		}
+	}
+	effects := []string{
+		// a none with a reason on the same line, even a safe-sounding one
+		"none (code, test and README changes in the worktree only; deploy happens only at landing)",
+		"none; build uses only worktree changes and fake test data.",
+		"none (code and tests in the worktree only; nothing is sent, deployed or written to prod while building)",
+		"none (synthetic fixtures and temporary-directory stores only; no scheduler, host config, receipt or service changes before landing)",
+		"None — code and tests only.",
+		"none: unit tests on fake data",
+		"nothing. Only the worktree changes.",
+		"none. agents get created only after landing",
+		"none. The change is Go code and unit tests only, with read-only queries.",
+		"none (tests use temporary folders; mail stays untouched)",
+		"none (starting nothing; the UI check uses dry-run, which sends no email and answers no prompts)",
+		// reviewers' counterexamples: real effects behind a none
+		"none to prod; sends a test email",
+		"none outside the worktree; writes one row to the live database",
+		"none; sends a test email to Zach",
+		"none. posts a test message to Slack",
+		"none. archives the old agents",
+		"none, once the fix is applied (the dry run moves to landing). As written, the build copies a jar to the phone and runs it.",
+		"none for the plan as written. A reworked plan would write production data.",
+		"none, except one test email to Zach",
+		"none (but it restarts the dev service)",
+		"no production changes during build. Landing will migrate outbox state.",
+		"writes prod rows",
+		"sends a test email",
+		"none. Starts a scheduler on the host and publishes a release.",
+		"none; rotates the test token and kills the old agent",
+		"none; no review needed, sends Zach a test email",
+		"none. Deploys at landing, and posts to Slack now",
+		"none. Not a big change: emails the team",
+		"none. Runs terraform apply on the prod VPC",
+		"none. Calls the Stripe refund API",
+		"none. Opens a pull request and comments on issues",
+		"none. Nothing is written, and it sends a test email",
+		"none. Posts to Slack, not email",
+		"none. Deploys at landing, and posts to Slack",
+		"none. The live factory is untouched, and it posts to Slack now",
+		"none. Sends no email but posts to Slack",
+		"none. Posts to Slack, and deploys at landing",
+		"none. Restarts the live service and mail is untouched",
+		"none. Existing agents get relabelled, and any anchor agent gets created, only after landing.",
+		"none. The schedule prompt rewrites and the backup happen only in the landing step.",
+		"none (the fake-data server runs on scratch state; the live factory, its stores and mail are untouched)",
+		"none. Writes to prod, the dev database stays unchanged",
+		"none. Sends Zach an email, then the rest happens at landing",
+		"none. No new code, just deploys to prod",
+		"none. No schema change, only restarts the dev service",
+		"none. Nothing big happens until it deploys to prod",
+		"none. Changes the DNS records",
+		"none. Overwrites the config on the server",
+		"none. Reboots the phone",
+		"none. Edits the systemd unit and reloads it",
+		"none. Texts Zach a link",
+		"none. Inserts rows into the Postgres database",
+		"none. Texts Zach before the deploy happens at landing",
+		"none. Code and tests, and changes production",
+		"none (sends nothing to prod, but writes the live table)",
+		"none. No schema change, will restart the prod service",
+		"none. No new tests, will change the prod config",
+		"none. No tests, deploy to prod",
+		"none. Nothing faked, the deploy runs on prod",
+		"none. No mocks, changes go to prod",
+		"none. Sends the email before the deploy happens at landing",
+		"none. Writes to prod before it happens at landing",
+		"none. Changes the card store",
+		"none. Changes data",
+		"none. Restarts prod",
+	}
+	for _, s := range effects {
+		if got := ParseSideEffects("BUILD SIDE EFFECTS: " + s); got == "none" || got == "" {
+			t.Errorf("%q = %q, want it read as a side effect", s, got)
+		}
+	}
+}
+
+// A reviewer that writes a bare none with its reason on the next line lets the plan build first; the same
+// reason on the line stops it for Zach.
+func TestBareNoneWithReasonBelowBuildsFirst(t *testing.T) {
+	for _, tc := range []struct {
+		review string
+		build  bool
+	}{
+		{"BUILD SIDE EFFECTS: none\nCode, tests and README stay in the worktree; the deploy happens only at landing.", true},
+		{"BUILD SIDE EFFECTS: none (code, tests and README in the worktree; the deploy happens only at landing)", false},
+	} {
+		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+			reviewer("r1", "c1", "plan"))
+		storeLog(t, f, p, "r1", "plan is fine\n"+tc.review+"\nTIER: architecture\nVERDICT: approve")
+		storeLog(t, f, p, "c1", "plan: new page\nBUILD SIDE EFFECTS: none\nBuilding changes only the worktree.\nTIER: architecture")
+		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels("c1")
+		if built := l[labelStage] == "building" && l[labelAwaiting] == ""; built != tc.build {
+			t.Errorf("%q: built first = %v, want %v: %v", tc.review, built, tc.build, l)
+		}
+	}
+}
+
 func TestArchitecturePlanWithNoBuildSideEffectsBuildsFirst(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 		reviewer("r1", "c1", "plan"))

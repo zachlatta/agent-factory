@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -39,13 +40,14 @@ func (f *Factory) landMsgFor(a Agent) string {
 		return msg + remainingRule
 	}
 	return msg + " Then tell Zach by email what changed and anything he must do (" + emailHow(t) +
-		"), and archive the thread (modify_thread_labels, remove INBOX)." + remainingRule
+		"; " + strings.Join(strings.Fields(plainEmailRule), " ") + "), and archive the thread (modify_thread_labels, remove INBOX)." + remainingRule
 }
 
 // newCardEmailNote is added to a board card's prompt when it was started from an email thread.
 func newCardEmailNote(thread string) string {
-	return "\nThis card was started from Zach's email (zrl-bot thread " + thread + "). When it lands, or if it " +
-		"stops without landing, tell him there: " + emailHow(thread) + ".\n"
+	return "\nThis card was started from Zach's email (zrl-bot thread " + thread + "). When it lands, tell him " +
+		"there what changed: " + emailHow(thread) + ". Do not email him that work started, stalled or failed: " +
+		"the factory shows that on its board.\n"
 }
 
 // Sub-agents on inbox cards. The dispatcher writes an email or voice card's prompt, so the factory

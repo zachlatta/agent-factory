@@ -71,9 +71,12 @@ The planner (the "Fellow") first picks a track:
 - Architecture cards stop for a person once, before landing, unless building has side effects. Every
   plan and plan review ends with `BUILD SIDE EFFECTS: none`, or what building (not landing) would
   change outside the worktree: prod data written or deleted, messages sent, money spent, hosts or
-  services changed. Only when the plan reviewer writes `none` and the plan lists nothing does the
-  card go to building; otherwise (or with no line) it waits for a person to approve the plan, as
-  before. A built card that passes code review waits in Needs Zach while its builder writes a
+  services changed. Only a bare none counts (`none`, `None.`, `**none**`; also no, n/a or nothing):
+  its reason goes on the next line. Anything else on the line, even a reason that sounds safe
+  (`none (code and tests only)`), is read as a side effect (`ParseSideEffects`), so no reading of free
+  text can let a plan with real effects skip the person. Only when the plan reviewer writes none and
+  the plan lists nothing does the card go to building; otherwise (or with no line) it waits for a
+  person to approve the plan, as before. A built card that passes code review waits in Needs Zach while its builder writes a
   preview: before and after screenshots at desktop and phone widths, and a live link to try it
   (the branch on test data or a dry-run mode, on the tailnet under `timeout`, or a static mock-up),
   uploaded with the file-share skill, restricted to Zach. Approve lands it; a reply sends it back
@@ -108,7 +111,7 @@ The planner (the "Fellow") first picks a track:
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none`. A card that lists work left (`REMAINING:` then one `-`
   line per item), or says nothing, waits in Needs Zach with the list in its note ("Landed, with work
-  left" or "Landed: did it finish?", and emailed like any other wait): reply to send the agent on, or
+  left" or "Landed: did it finish?", shown on the board and not emailed): reply to send the agent on, or
   mark it Done. REMAINING lists only this card's own request: another card's work, a problem the
   change did not cause (an expired login, an unrelated failing test) and follow-ups go in the summary
   or become ideas, so they never hold a finished card. Each item starts with who must do it, `Zach:`
@@ -325,7 +328,8 @@ card) instead of doing it in its card; agents started before this rule do not ha
 
 An email dispatcher (not in this repo) can start agents as cards with labels
 `factory.source=email|voice` and `gmail-thread=<id>`. Those cards follow the same tracks and
-report back in their email thread when they land.
+report back in their email thread when they land, in plain words (see Needs Zach email). They
+never email that work started, stalled or failed: the board shows that.
 
 ### Needs Zach overview
 
@@ -342,7 +346,7 @@ require every question to be answered.
 Every action requires an explicit choice, including cards with only one action. Named reply choices
 keep their hints and recommendation. Send question answers through a reply choice; completion, retry,
 stop and drop refuse to discard filled answers or instructions. Select the action and press Submit once; Other sends typed
-instructions without approving. Drop still asks for confirmation. Emails retain their existing format.
+instructions without approving. Drop still asks for confirmation.
 
 For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`
 folder, excluded from Git before saving. Never commit or force-add evidence. After the overview
@@ -366,13 +370,30 @@ external image URL is used. Images become unavailable if their worktree or file 
 
 ### Needs Zach email
 
-Every card that waits in Needs Zach is emailed to Zach once per wait reason, by the factory itself
-through the zrl-bot mailbox (`pdw call zrl_bot_email_control__*`, `factory/mail.go`). The email
-puts the decision, the title and why, the card and repo, the original task, any inline `Before` /
-`After` screenshots from `.factory-evidence/`, its numbered questions with lettered options, the
-words he can reply with, and an Open board button above the full `Details` report (and hides the
-agent's `Decision` and `Needs from you` lines on stops the factory raises itself after landing, a
-stall or a secret scan).
+Zach is emailed only for decisions, by the factory itself through the zrl-bot mailbox
+(`pdw call zrl_bot_email_control__*`, `factory/mail.go`), once per wait reason. Each ask on the board
+is either emailed or board-only (`Ask.boardOnly`):
+
+- **Emailed:** approve a plan, try a preview, approve landing, a brief (reviews didn't settle, a
+  reviewer escalated), the secret scan's stop, a public-repo push without review, and a repo choice.
+- **Board only:** finished cards and cards moved by hand; a running agent (permission prompt, stall,
+  writing its summary); errors and usage limits; a stuck step or reviewer; a review with no
+  verdict; a reviewer's close or duplicate verdict; dependency waits; and every check after landing
+  (not verified, work left, did it finish, landed diff differs). These are problems for the factory
+  and its agents; the board shows them until a later digest lists them.
+
+The email is the decision alone:
+
+- The subject is the question: the agent's `DECISION:` line, or the ask's own question when the
+  factory raised the stop or the agent decided nothing.
+- The body is under 60 words, not counting the board link: the recommendation first ("I recommend
+  yes.", or "I recommend A." with up to 4 lettered options for one question), what it is about,
+  the agent's overview as far as the words allow, and the one-word replies. Inline `Before` /
+  `After` screenshots from `.factory-evidence/` follow, then an Open board button. The full report
+  stays on the board.
+- Agent text in it passes through `plainText`: backticks, commit hashes, agent ids, file names and
+  the owner of `owner/repo-name` slugs are removed. Factory copy avoids pipeline words (card, track,
+  landing, Fellow), and agents are told to write the same way for anything Zach reads by email.
 
 - Inbox cards answer in their own thread. Other cards start one thread to `FACTORY_ZACH_EMAIL` on
   their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
@@ -380,9 +401,8 @@ stall or a secret scan).
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
   A wait where the builder was just asked for a summary or brief (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).
-- Not emailed: cards moved to Needs Zach by hand, finished cards, and cards with no thread when
-  `FACTORY_ZACH_EMAIL` is unset. A failed send is retried after 5 minutes; a timed-out one is
-  not, since it may have gone out.
+- Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
+  retried after 5 minutes; a timed-out one is not, since it may have gone out.
 - `/api/health` reports the last mailbox check as `mail`; it never fails the health check.
 
 Replies: the email dispatcher checks the sender, then posts his reply to
@@ -393,14 +413,15 @@ acts:
 
 | Reply | Does |
 | --- | --- |
-| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or recommend |
+| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or recommend; on an approve with questions, it also answers each with its recommended (first) option |
 | `done`, `mark done`, `mark it done` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
-| `1B 2A` (only numbers and letters of the email's questions) | answers them, with the Yes button when it approves |
+| `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with the Yes button when it approves |
 
 Anything else goes to the agent as his instructions, written as a follow-up email block. Each
-message is applied once (`factory.answered`), and the factory confirms what it did in one line in
-the thread. An emailed approve of a public-repo landing still runs the secret scan first.
+message is applied once (`factory.answered`). A reply that worked gets no email back (the board
+shows the new state); one that did nothing gets one line in the thread saying so, with the board
+link. An emailed approve of a public-repo landing still runs the secret scan first.
 
 #### Prompt blocks parsed from email cards
 
@@ -443,7 +464,7 @@ records its times in `timings.json` in the state directory, so a restart keeps t
   substitute the clock or another card's commit.
 - **Replied** (email and voice cards): 5 minutes after Done, one read of the card's thread takes
   the last message the mailbox sent after he asked and by Done plus 5 minutes. The factory's own
-  emails (Needs Zach notes, answer confirmations) are recorded when sent and never count.
+  emails (Needs Zach notes, failed-answer notes) are recorded when sent and never count.
   Reply checks also run for errands that commit nothing. A completed inbox card with no confirmed
   reply has `noReply: true` in saved timing, board timing and the timing export; the Timeline says
   “no reply”. This includes exhausted mailbox retries or a missing thread. A later reply outside

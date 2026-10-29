@@ -139,7 +139,7 @@ func TestGuardedScanHitStopsLanding(t *testing.T) {
 	if l[labelStage] != "zach" || l[labelNote] != "secret scan failed: tailnet-hostname a.go:3" {
 		t.Errorf("labels = %v", l)
 	}
-	if a := askFor(Card{Stage: "zach"}, publicCard("c1", l)); a == nil || !strings.HasPrefix(a.Title, "Secret scan") {
+	if a := askFor(Card{Stage: "zach"}, publicCard("c1", l)); a == nil || !strings.HasPrefix(a.Title, "Private text found before publishing") {
 		t.Errorf("ask = %+v", a)
 	}
 }

@@ -19,11 +19,17 @@ type Overview struct {
 const overviewRule = `Start every message where you stop (plan, build or rework summary, review, brief, handoff,
 result) with three lines for Zach. His board shows them on top of the card when it waits on him, and
 he reads them on his phone, so use plain words:
-DECISION: <what Zach decides if this reaches him, one line>
+DECISION: <what Zach decides if this reaches him: one plain question, which is the email subject>
 OVERVIEW: <what it changes, why, and the main risk; at most 3 short sentences>
 NEEDS FROM ZACH: <approve, choose or answer, and what happens after>
 Then the rest of the message. QUESTION: blocks stay as they are, and TIER:, VERDICT: and TRACK:
-lines stay last.` + evidenceRule
+lines stay last. ` + plainEmailRule + evidenceRule
+
+// plainEmailRule is how anything that reaches Zach by email is written. The factory's decision email
+// strips ids, hashes and file names as a backstop (mail.go plainText).
+const plainEmailRule = `Anything Zach reads by email (the DECISION line, OVERVIEW, an email you send him) uses
+plain words: no commit hashes, card or agent ids, repo or file names, and no pipeline words such as
+card, track, landing or Fellow. A decision is one question he can answer with one word, recommendation first.`
 
 // overviewReminder goes in each factory message that asks an agent for a reply it stops on.
 const overviewReminder = "Start that reply with DECISION:, OVERVIEW: and NEEDS FROM ZACH:. Keep the choice and consequence concise; use the question and evidence formats already given when relevant."

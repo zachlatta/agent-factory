@@ -429,7 +429,7 @@ func TestTimingReplyCheckSkips(t *testing.T) {
 }
 
 func TestFactoryEmailsAreRecorded(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
+	c := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"})
 	f, p, _ := mailFactory(t, c)
 	storeLog(t, f, p, "c1", "What now?")
 	f.Tick()
@@ -437,9 +437,9 @@ func TestFactoryEmailsAreRecorded(t *testing.T) {
 	if len(ct.Mails) != 1 || ct.Mails[0].ID != "nm1" || !ct.Mails[0].At.Equal(t0) {
 		t.Errorf("mails = %+v", ct.Mails)
 	}
-	f.confirmAnswer(f.agent("c1"), "m2", "Approved: landing now.")
+	f.answerFailed(f.agent("c1"), "m2")
 	if ct := timing(t, f, "c1"); len(ct.Mails) != 2 {
-		t.Errorf("confirmation not recorded: %+v", ct.Mails)
+		t.Errorf("failed-answer note not recorded: %+v", ct.Mails)
 	}
 }
 

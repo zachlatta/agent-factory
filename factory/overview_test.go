@@ -83,13 +83,16 @@ func TestEmailLeadsWithTheOverview(t *testing.T) {
 		t.Fatalf("sends = %+v", sends)
 	}
 	text, html := sends[0].Args["text"].(string), sends[0].Args["html"].(string)
-	if !strings.HasPrefix(text, "Re-run the build?\nThe build hung.\nNeeds from you: Tap Re-run.\n") {
-		t.Errorf("text does not lead with the overview:\n%s", text)
+	if sends[0].Args["subject"] != "Re-run the build?" {
+		t.Errorf("the decision is the subject: %v", sends[0].Args["subject"])
 	}
-	if strings.Contains(text, "DECISION:") || !strings.Contains(text, "I tried twice.") {
-		t.Errorf("text = %s", text)
+	if !strings.HasPrefix(text, "I recommend yes.\n") || !strings.Contains(text, "The build hung.") {
+		t.Errorf("text does not lead with the recommendation, then the overview:\n%s", text)
 	}
-	if !strings.Contains(html, "Re-run the build?") || !strings.Contains(html, "Needs from you") {
+	if strings.Contains(text, "DECISION:") || strings.Contains(text, "I tried twice.") {
+		t.Errorf("the report stays on the board: %s", text)
+	}
+	if !strings.Contains(html, "I recommend yes.") || !strings.Contains(html, "The build hung.") {
 		t.Errorf("html lacks the overview: %s", html)
 	}
 }

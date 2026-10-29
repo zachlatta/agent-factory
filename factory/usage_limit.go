@@ -187,18 +187,3 @@ func limitAsk(a Agent) *Ask {
 	return &Ask{Title: "Agent error: resume the interrupted step?", From: "builder", Why: why,
 		Actions: []Action{primary("resume", "Resume"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 }
-
-// An error wait can be emailed without admitting an errored agent to completion rules.
-func (f *Factory) mailLimit(a Agent) error {
-	if a.archived() || a.L(labelStage) != "zach" || a.L(labelNote) != limitNote || f.Mail == nil || lineageTold(f.byID(), a) == waitNote(a) {
-		return nil
-	}
-	c, ok := f.card(a.ID)
-	if !ok || !mailable(c.Ask) {
-		return nil
-	}
-	if live, err := f.stillStopped(a); !live {
-		return err
-	}
-	return f.mailZach(a, c)
-}

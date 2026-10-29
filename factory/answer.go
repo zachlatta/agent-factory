@@ -13,8 +13,8 @@ import (
 
 // Zach's email answers to a card waiting on him. The zrl-bot dispatcher checks the sender, then POSTs
 // his reply here (/api/answer: thread, message_id, text). Only a whole reply from a closed word list
-// approves or drops; anything else goes to the agent as his instructions. The factory confirms what
-// it did with a one-line reply in the thread.
+// approves or drops; anything else goes to the agent as his instructions. A reply that worked gets no
+// email back (the board shows the new state); one that did nothing gets one plain line saying so.
 
 // ErrNoCard, ErrNotWaiting and ErrSharedThread tell the dispatcher to fall back to its own handling.
 var (
@@ -30,6 +30,7 @@ var (
 	dropWords    = []string{"drop", "drop it", "close", "close it", "cancel"}
 	letterReply  = regexp.MustCompile(`^\d[a-f]([ ,]+\d[a-f])*$`)
 	letterPair   = regexp.MustCompile(`(\d)([a-f])`)
+	loneLetter   = regexp.MustCompile(`^[a-f]$`)
 	quoteHeader  = regexp.MustCompile(`^On .+wrote:$`)
 	spaces       = regexp.MustCompile(`\s+`)
 )
@@ -63,8 +64,15 @@ func parseAnswer(text string, ask *Ask) answer {
 		return answer{}
 	}
 	yesActs := ask.Yes == "approve" || ask.Yes == "recommend"
+	if len(ask.Questions) == 1 && loneLetter.MatchString(clean) {
+		clean = "1" + clean // one question: its letter alone answers it
+	}
 	switch {
 	case slices.Contains(approveWords, clean) && yesActs && actionFor(ask, ask.Yes) != nil:
+		// on an approve, yes takes the recommended (first) option of every question, as the email says
+		if ask.Yes == "approve" && len(ask.Questions) > 0 {
+			return answer{Action: "approve", Message: recommendedAnswers(ask.Questions)}
+		}
 		return answer{Action: ask.Yes}
 	case slices.Contains(doneWords, clean) && actionFor(ask, "done") != nil:
 		return answer{Action: "done"}
@@ -81,6 +89,16 @@ func parseAnswer(text string, ask *Ask) answer {
 		}
 	}
 	return answer{Action: "send", Message: replyText(text)}
+}
+
+// recommendedAnswers is every question answered with its first (recommended) option.
+func recommendedAnswers(qs []Question) string {
+	var b strings.Builder
+	for i := range qs {
+		fmt.Fprintf(&b, "%da ", i+1)
+	}
+	expanded, _ := expandLetters(strings.TrimSpace(b.String()), qs)
+	return expanded
 }
 
 // expandLetters turns "1b 2a" into the questions and chosen options, as the board sends them. ok is
@@ -156,46 +174,26 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if err := f.setLabels(a.ID, map[string]string{labelAnswered: b.MessageID}); err != nil {
 		return nil, err
 	}
-	planWait := c.Awaiting == "plan" || planPending(a)
 	_, err = f.Act(ans.Action, Body{ID: a.ID, Message: ans.Message, Via: "email"})
-	f.confirmAnswer(a, b.MessageID, ackLine(ans.Action, planWait, err, f.cardLink(a.ID)))
 	if err != nil {
+		// his answer did nothing: say so once, plainly; a reply that worked gets no echo
+		f.logf("%s email answer %s failed: %v", short(a.ID), ans.Action, err)
+		f.answerFailed(a, b.MessageID)
 		return nil, err
 	}
 	f.logf("%s answered by email: %s", short(a.ID), ans.Action)
 	return map[string]string{"card": a.ID, "action": ans.Action}, nil
 }
 
-// ackLine is the one-line confirmation of an email answer.
-func ackLine(action string, plan bool, err error, link string) string {
-	if err != nil {
-		s := "That didn't go through: " + trunc(err.Error(), 200) + "."
-		if link != "" {
-			s += " Answer on the board: " + link
-		}
-		return s
-	}
-	switch {
-	case action == "done":
-		return "Marked done."
-	case action == "close":
-		return "Dropped: the card is archived and nothing lands."
-	case action == "recommend":
-		return "Going with its recommendations: building now."
-	case action == "approve" && plan:
-		return "Approved: building now."
-	case action == "approve":
-		return "Approved: landing now."
-	case plan:
-		return "Sent back: the agent is revising the plan."
-	}
-	return "Sent to the agent: it will act on it."
-}
-
-// confirmAnswer replies in the thread to Zach's answer with line. A failure is only logged.
-func (f *Factory) confirmAnswer(a Agent, messageID, line string) {
+// answerFailed replies in the thread to Zach's answer that it did not go through, with the board
+// link. A failure to send is only logged.
+func (f *Factory) answerFailed(a Agent, messageID string) {
 	if f.Mail == nil {
 		return
+	}
+	line := "That reply didn't go through."
+	if link := f.cardLink(a.ID); link != "" {
+		line += " Answer on the board: " + link
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -203,7 +201,7 @@ func (f *Factory) confirmAnswer(a Agent, messageID, line string) {
 		html.EscapeString(line) + `</div>`
 	if _, err := f.sendMail(ctx, a.ID, "reply_to_message", map[string]any{"message_id": messageID, "text": line,
 		"html": h, "omit_quote": true}); err != nil {
-		f.logf("%s: confirming the email answer: %v", short(a.ID), err)
+		f.logf("%s: telling Zach his email answer failed: %v", short(a.ID), err)
 	}
 }
 

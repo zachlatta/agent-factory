@@ -28,6 +28,10 @@ type Ask struct {
 	// "say" get explicit Yes/No reply choices alongside Other on the board.
 	Yes string `json:"yes,omitempty"`
 	No  string `json:"no,omitempty"`
+	// BoardOnly: the wait shows on the board but is never emailed. Problems the factory or an agent
+	// can sort out (errors, stalls, stuck steps, landing checks, duplicates) and finished or hand-moved
+	// cards are board-only; Zach is emailed only for decisions.
+	BoardOnly bool `json:"boardOnly,omitempty"`
 }
 
 // Question is one multiple-choice question an agent asks Zach. He can also write his own answer.
@@ -58,7 +62,35 @@ func askFor(c Card, a Agent) *Ask {
 		return nil
 	}
 	ask.Yes, ask.No = yesNo(ask)
+	ask.BoardOnly = boardOnly(c, a, ask)
 	return ask
+}
+
+// boardOnly reports whether the wait is shown on the board only, never emailed: a finished or
+// hand-moved card, a running agent (permission prompt, stall, writing its summary), an error or usage
+// limit, a stuck step or reviewer, a review with no verdict, a close or duplicate verdict, a dependency
+// wait, and the checks after landing. Decisions (plans, previews, landings, briefs, repo choice, the
+// secret scan, an agent waiting on him) are emailed.
+func boardOnly(c Card, a Agent, ask *Ask) bool {
+	note := a.L(labelNote)
+	switch {
+	case ask.Title == finishedTitle || ask.Title == handTitle:
+		return true
+	case a.Status == "running":
+		return true
+	case note == limitNote || strings.HasPrefix(note, "history unavailable"):
+		return true
+	case note == "stuck" || note == noVerdictNote:
+		return true
+	case isDepAskNote(note):
+		return true
+	case note == "landing not verified" || note == "landed; did not say what remains" ||
+		strings.HasPrefix(note, "landed; still to do: ") || strings.HasPrefix(note, "landed diff differs"):
+		return true
+	case a.L(labelVerdict) == "close" && ask.Title == closeTitle:
+		return true
+	}
+	return false
 }
 
 // yesNo maps the board's Yes/No buttons onto the ask, by its buttons. A brief (rework cap or escalation)
@@ -89,6 +121,7 @@ func yesNo(ask *Ask) (string, string) {
 }
 
 const finishedTitle = "Finished: read the result"
+const closeTitle = "Reviewer thinks this isn't needed"
 const handTitle = "Moved here by hand"
 const repoTitle = "Which repo should this start in?"
 
@@ -140,29 +173,29 @@ func baseAsk(c Card, a Agent) *Ask {
 			Actions: []Action{primary("approve", "Approve plan & build"),
 				reply("Send back with changes", "What should change in the plan?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
-		return &Ask{Title: "Secret scan stopped this landing", From: "builder",
+		return &Ask{Title: "Private text found before publishing: fix it?", From: "builder",
 			Why: "This repo is public. The factory's scan " + strings.TrimPrefix(note, "secret scan ") +
 				". Nothing was published. Ask the agent to remove it (rewrite its own unpushed commits), then approve to scan again.",
-			Actions: []Action{{ID: "reply", Label: "Tell it to fix", Primary: true, Hint: "e.g. remove it and rewrite your commits"}, act("approve", "Scan again & land"), act("close", "Drop it")}}
+			Actions: []Action{{ID: "reply", Label: "Tell it to fix", Primary: true, Hint: "e.g. remove it and rewrite your commits"}, act("approve", "Scan again & ship"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "public repo: finished without review"):
-		return &Ask{Title: "Pushed to a public repo without review", From: "builder",
+		return &Ask{Title: "Published without review: check it?", From: "builder",
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
 	case note == previewNote:
-		return &Ask{Title: "Try it, then approve landing?", From: "builder",
+		return &Ask{Title: "Try it, then ship it?", From: "builder",
 			Why: "It is an architecture change, built and passed by code review; nothing is live yet. The agent's before and after and its link to try it are below.",
-			Actions: []Action{primary("approve", "Approve & land"),
+			Actions: []Action{primary("approve", "Approve & ship"),
 				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "review found an architecture change"):
-		return &Ask{Title: "Approve landing?", From: "reviewer",
+		return &Ask{Title: "Ship it?", From: "reviewer",
 			Why: "The code passed review, but the reviewer found it changes the architecture, which needs your OK.",
-			Actions: []Action{primary("approve", "Approve & land"),
+			Actions: []Action{primary("approve", "Approve & ship"),
 				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "review passed"):
-		return &Ask{Title: "Approve landing?", From: "builder",
+		return &Ask{Title: "Ship it?", From: "builder",
 			Why: "Another agent reviewed the work and passed it. This card was sent to review by hand, so you decide whether it lands.",
-			Actions: []Action{primary("approve", "Approve & land"),
+			Actions: []Action{primary("approve", "Approve & ship"),
 				reply("Ask for changes", "What should it change?"), act("close", "Drop it")}}
 	case note == noVerdictNote:
 		return &Ask{Title: "The review didn't finish properly", From: "reviewer",
@@ -172,7 +205,7 @@ func baseAsk(c Card, a Agent) *Ask {
 	case note == "rework cap reached" || note == "reviewer escalated":
 		return briefAsk(a)
 	case a.L(labelVerdict) == "close":
-		return &Ask{Title: "Reviewer thinks this isn't needed", From: "reviewer",
+		return &Ask{Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
 			Actions: []Action{primary("close", "Close it"), reply("Keep going", "Why it is still needed")}}
 	case isDepAskNote(note):

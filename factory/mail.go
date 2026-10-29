@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -92,9 +93,9 @@ func (m email) withoutAttachments() email {
 	return email{Subject: m.Subject, Text: m.Text, HTML: h}
 }
 
-// mailable reports whether Zach is emailed about this ask: not for finished cards or hand moves.
+// mailable reports whether Zach is emailed about this ask: only decisions, never board-only waits.
 func mailable(ask *Ask) bool {
-	return ask != nil && ask.Title != finishedTitle && ask.Title != handTitle
+	return ask != nil && !ask.BoardOnly
 }
 
 // mailZach emails Zach why card a waits on him, once per wait note.
@@ -126,12 +127,9 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 		}
 		return nil
 	}
-	detail, qs, ov := f.askDetail(c, ask)
+	_, qs, ov := f.askDetail(c, ask)
 	ask.Questions, ask.Overview = qs, ov
-	if req := f.cardRequest(a); req.Base != "" || len(req.FollowUps) > 0 {
-		ask.Request = &req
-	}
-	m := f.composeEmail(a, c, ask, detail)
+	m := f.composeEmail(a, c, ask)
 	// told first: one email per wait even if the factory stops mid-send
 	if err := f.setLabels(a.ID, map[string]string{labelTold: note}); err != nil {
 		return err
@@ -307,26 +305,21 @@ func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
 // replyWord is one word Zach can answer with by email and what it does.
 type replyWord struct{ Word, Does string }
 
-// replyWords lists the email answers for ask, matching parseAnswer.
+// replyWords lists the one-word email answers for ask, matching parseAnswer.
 func replyWords(ask *Ask) []replyWord {
 	var out []replyWord
 	if yes := actionFor(ask, ask.Yes); yes != nil && (ask.Yes == "approve" || ask.Yes == "recommend") {
-		out = append(out, replyWord{"approve", "same as the \"" + yes.Label + "\" button"})
-	}
-	if x := actionFor(ask, "done"); x != nil {
-		out = append(out, replyWord{"done", "same as \"" + x.Label + "\""})
-	}
-	if x := actionFor(ask, "close"); x != nil {
-		out = append(out, replyWord{"drop", "same as \"" + x.Label + "\": the card is archived and nothing lands"})
-	}
-	if len(ask.Questions) > 0 {
-		does := "answers the questions above"
-		if ask.Yes == "approve" {
-			does += ", then the same as \"approve\""
-		} else {
-			does += "; the agent gets your answers"
+		does := strings.ToLower(yes.Label)
+		if len(ask.Questions) > 1 {
+			does = "take the recommended answers"
 		}
-		out = append(out, replyWord{"1A 2B", does})
+		out = append(out, replyWord{"yes", does})
+	}
+	if actionFor(ask, "done") != nil {
+		out = append(out, replyWord{"done", "mark it done"})
+	}
+	if actionFor(ask, "close") != nil {
+		out = append(out, replyWord{"drop", "stop it"})
 	}
 	return out
 }
@@ -350,35 +343,11 @@ func (f *Factory) cardLink(id string) string {
 
 func letter(i int) string { return string(rune('A' + i)) }
 
-// factoryCheckWait reports whether card a stopped for a check the Factory raised itself after
-// landing, a stall, a secret scan, or an unreviewed public-repo push, where the builder's last
-// reply was not written as a decision for Zach.
-func factoryCheckWait(a Agent) bool {
+// factoryRaised reports whether card a stopped for a check the factory raised itself (a secret scan,
+// an unreviewed public-repo push), where the agent's last reply was not written as a decision for Zach.
+func factoryRaised(a Agent) bool {
 	note := a.L(labelNote)
-	return strings.HasPrefix(note, "landed; still to do:") ||
-		note == "landed; did not say what remains" ||
-		note == "landing not verified" ||
-		strings.HasPrefix(note, "landed diff differs") ||
-		note == "stuck" ||
-		strings.HasPrefix(note, "secret scan") ||
-		strings.HasPrefix(note, "public repo: finished without review")
-}
-
-func requestSummary(r *CardRequest) string {
-	if r == nil {
-		return ""
-	}
-	var parts []string
-	if b := strings.TrimSpace(r.Base); b != "" {
-		parts = append(parts, truncWords(b, 120))
-	}
-	if n := len(r.FollowUps); n > 0 {
-		fu := r.FollowUps[n-1]
-		if txt := strings.TrimSpace(fu.Text); txt != "" {
-			parts = append(parts, fu.label()+": "+truncWords(txt, 80))
-		}
-	}
-	return strings.Join(parts, "\n\n")
+	return strings.HasPrefix(note, "secret scan") || strings.HasPrefix(note, "public repo: finished without review")
 }
 
 type evidenceSlot struct {
@@ -414,132 +383,232 @@ func loadEvidenceSlots(cwd string, ev Evidence) []evidenceSlot {
 	return out
 }
 
-// composeEmail writes the email for card a waiting on ask, putting the decision, original task,
-// inline evidence screenshots, questions, reply words and board link above the full Detail report.
-func (f *Factory) composeEmail(a Agent, c Card, ask *Ask, detail string) email {
+// Decision emails. The subject is the question; the body, under mailWordCap words, leads with the
+// recommendation and any choices, then what it is about, then the one-word replies and a board link. The full report
+// stays on the board. Agent text passes through plainText, so no hash, id, repo slug or file name
+// reaches Zach.
+const (
+	mailWordCap    = 59 // words in the body, not counting the board link
+	subjectCap     = 90 // runes in the subject
+	questionCap    = 12 // words of a question
+	optionCap      = 5  // words of an option
+	optionsEmailed = 4  // options listed per question
+)
+
+var (
+	uuidRe     = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	hexRe      = regexp.MustCompile(`(?i)\b[0-9a-f]{7,40}\b`)
+	digitRe    = regexp.MustCompile(`[0-9]`)
+	letterRe   = regexp.MustCompile(`(?i)[a-f]`)
+	fileNameRe = regexp.MustCompile(`(?i)[\w./-]*\w\.(go|md|py|ts|tsx|js|mjs|json|html|css|ya?ml|sh|toml|sql|txt|jsonl|kt|swift|rb)(:\d+(-\d+)?)?\b`)
+	slugRe     = regexp.MustCompile(`\b[a-z0-9_.-]+/([a-z0-9_.-]*[-_][a-z0-9_.-]*)\b`)
+	spaceRe    = regexp.MustCompile(`[ \t]+`)
+	spacePunct = regexp.MustCompile(` +([,.;:)])`)
+	emptyParen = regexp.MustCompile(`\(\s*\)`)
+)
+
+// plainText strips what Zach should never have to read in an email from agent text: backticks,
+// commit hashes and agent ids, file names, and the owner part of the repos named in repos.
+func plainText(s string, repos ...string) string {
+	s = strings.ReplaceAll(s, "`", "")
+	s = uuidRe.ReplaceAllString(s, "")
+	s = hexRe.ReplaceAllStringFunc(s, func(w string) string {
+		if digitRe.MatchString(w) && letterRe.MatchString(w) {
+			return ""
+		}
+		return w
+	})
+	s = fileNameRe.ReplaceAllString(s, "")
+	for _, r := range repos {
+		if i := strings.Index(r, "/"); i > 0 {
+			s = strings.ReplaceAll(s, r, r[i+1:])
+		}
+	}
+	s = dropOwners(s)
+	s = emptyParen.ReplaceAllString(s, "")
+	s = spaceRe.ReplaceAllString(s, " ")
+	s = spacePunct.ReplaceAllString(s, "$1")
+	return strings.TrimSpace(s)
+}
+
+// dropOwners cuts the owner from owner/repo-name slugs outside links; and/or and Wi-Fi/cellular stay.
+func dropOwners(s string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range slugRe.FindAllStringSubmatchIndex(s, -1) {
+		if m[0] > 0 && strings.ContainsRune("/:.", rune(s[m[0]-1])) {
+			continue // part of a link or path
+		}
+		b.WriteString(s[last:m[0]])
+		b.WriteString(s[m[2]:m[3]])
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// firstWords is s cut to n words, marked with "…" when cut.
+func firstWords(s string, n int) string {
+	w := strings.Fields(s)
+	if len(w) <= n {
+		return strings.Join(w, " ")
+	}
+	return strings.TrimRight(strings.Join(w[:n], " "), ",;:.-") + "…"
+}
+
+func wordCount(s string) int { return len(strings.Fields(s)) }
+
+// emailQuestion is the email's subject: the agent's DECISION line, unless the factory raised the
+// stop or the agent decided nothing, then the ask's own question.
+func emailQuestion(a Agent, ask *Ask, repos []string) string {
+	q := ask.Title
+	if ov := ask.Overview; ov != nil && !factoryRaised(a) {
+		if d := plainText(ov.Decision, repos...); d != "" && !needsNothingRe.MatchString(d) {
+			q = d
+		}
+	}
+	return truncWords(q, subjectCap)
+}
+
+// composeEmail writes the decision email for card a waiting on ask: one question, under mailWordCap
+// words, answerable with one word, with any before and after screenshots inline.
+func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 	title := c.Title
 	if title == "" {
 		title = a.Title
 	}
-	repo := c.Repo
-	if repo == "" {
-		repo = "no repo"
-	}
+	repos := []string{c.Repo, a.Repo}
 	cwd := c.Cwd
 	if cwd == "" {
 		cwd = a.Cwd
 	}
-	link := f.cardLink(a.ID)
-	words := replyWords(ask)
-	hideDecision := factoryCheckWait(a)
-	reqText := requestSummary(ask.Request)
+	subject := emailQuestion(a, ask, repos)
 	slots := loadEvidenceSlots(cwd, ask.Evidence)
 	var atts []mailAttachment
 	for _, s := range slots {
 		atts = append(atts, s.att)
 	}
 
-	var t strings.Builder
-	if ov := ask.Overview; ov != nil && !hideDecision {
-		for _, l := range []string{ov.Decision, ov.Overview, prefixed("Needs from you: ", ov.Needs)} {
-			if l != "" {
-				t.WriteString(l + "\n")
-			}
+	// required lines: the recommendation, the choices and how to answer
+	var lead, reply []string
+	var options []string
+	words := replyWords(ask)
+	switch qs := ask.Questions; {
+	case len(qs) == 1:
+		if subject != firstWords(plainText(qs[0].Text, repos...), questionCap) {
+			lead = append(lead, firstWords(plainText(qs[0].Text, repos...), questionCap))
 		}
-		t.WriteString("\n")
+		lead = append(lead, "I recommend A.")
+		for j, o := range qs[0].Options {
+			if j == optionsEmailed {
+				break
+			}
+			options = append(options, letter(j)+". "+firstWords(plainText(o, repos...), optionCap))
+		}
+		reply = append(reply, "Reply with a letter")
+	case len(qs) > 1:
+		var rec []string
+		for i := range qs {
+			rec = append(rec, fmt.Sprintf("%dA", i+1))
+		}
+		lead = append(lead, fmt.Sprintf("%d questions; I recommend %s.", len(qs), strings.Join(rec, " ")))
+		reply = append(reply, "Reply with letters like "+strings.Join(rec, " "))
+	case ask.Yes == "approve" || ask.Yes == "recommend":
+		lead = append(lead, "I recommend yes.")
 	}
-	fmt.Fprintf(&t, "%s\n%s\n\nCard: %s (%s)\n", ask.Title, ask.Why, title, repo)
-	if ov := ask.Overview; ov != nil && hideDecision && ov.Overview != "" {
-		fmt.Fprintf(&t, "Summary: %s\n", ov.Overview)
+	for _, w := range words {
+		reply = append(reply, fmt.Sprintf("%q to %s", w.Word, w.Does))
 	}
-	if reqText != "" {
-		fmt.Fprintf(&t, "\nOriginal task:\n%s\n", reqText)
+	replyLine := "Reply " + strings.TrimPrefix(strings.Join(reply, ", "), "Reply ")
+	if len(reply) == 0 {
+		replyLine = "Reply with what to do"
+	}
+	replyLine += ", or write what to change."
+	if len(ask.Questions) == 0 && len(words) == 0 {
+		replyLine = "Reply with what to do."
+	}
+
+	// optional lines, as the word budget allows: what it is about, and the agent's overview
+	used := wordCount(strings.Join(lead, " ")) + wordCount(strings.Join(options, " ")) + wordCount(replyLine)
+	var about, overview string
+	if t := plainText(title, repos...); t != "" && !strings.EqualFold(t, subject) {
+		about = "About: " + firstWords(t, 14)
+		if used+wordCount(about) > mailWordCap {
+			about = ""
+		}
+		used += wordCount(about)
+	}
+	if ov := ask.Overview; ov != nil && !factoryRaised(a) && mailWordCap-used >= 6 {
+		overview = firstWords(plainText(ov.Overview, repos...), mailWordCap-used)
+	}
+
+	link := f.cardLink(a.ID)
+	var body []string
+	body = append(body, lead...)
+	body = append(body, options...)
+	if about != "" {
+		body = append(body, about)
+	}
+	if overview != "" {
+		body = append(body, overview)
+	}
+	body = append(body, replyLine)
+	var t strings.Builder
+	for _, l := range body {
+		t.WriteString(l + "\n")
 	}
 	for _, s := range slots {
-		fmt.Fprintf(&t, "\n%s screenshot: %s (attached)\n", s.label, s.name)
+		fmt.Fprintf(&t, "%s screenshot attached.\n", s.label)
 	}
-	if len(ask.Questions) > 0 {
-		t.WriteString("\nQuestions:\n")
-		for i, q := range ask.Questions {
-			fmt.Fprintf(&t, "%d. %s\n", i+1, q.Text)
-			for j, o := range q.Options {
-				fmt.Fprintf(&t, "   %s. %s\n", letter(j), o)
-			}
-		}
-	}
-	t.WriteString("\nHow to answer: reply with one of these alone.\n")
-	for _, w := range words {
-		fmt.Fprintf(&t, "- \"%s\": %s\n", w.Word, w.Does)
-	}
-	t.WriteString("- Anything else goes to the agent as your instructions.\n")
 	if link != "" {
 		fmt.Fprintf(&t, "\nOpen the board: %s\n", link)
-	}
-	if strings.TrimSpace(detail) != "" {
-		fmt.Fprintf(&t, "\nDetails:\n%s\n", detail)
 	}
 
 	e := html.EscapeString
 	buildHTML := func(includeImages bool) string {
 		var h strings.Builder
-		h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
-		if ov := ask.Overview; ov != nil && !hideDecision {
-			if ov.Decision != "" {
-				fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(ov.Decision))
-			}
-			if ov.Overview != "" {
-				fmt.Fprintf(&h, `<p style="white-space:pre-wrap">%s</p>`, e(ov.Overview))
-			}
-			if ov.Needs != "" {
-				fmt.Fprintf(&h, `<div style="white-space:pre-wrap;background:#fff8c5;border-left:3px solid #d4a72c;`+
-					`padding:8px 12px;margin-bottom:12px"><b>Needs from you:</b> %s</div>`, e(ov.Needs))
+		h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:16px;line-height:1.5;color:#1f2328;max-width:640px">`)
+		for i, l := range lead {
+			if i == 0 {
+				fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(l))
+			} else {
+				fmt.Fprintf(&h, "<p>%s</p>", e(l))
 			}
 		}
-		fmt.Fprintf(&h, `<p><b>%s</b><br>%s</p><p style="color:#59636e">Card: %s (%s)</p>`, e(ask.Title), e(ask.Why), e(title), e(repo))
-		if ov := ask.Overview; ov != nil && hideDecision && ov.Overview != "" {
-			fmt.Fprintf(&h, `<p style="white-space:pre-wrap"><b>Summary:</b> %s</p>`, e(ov.Overview))
+		if len(options) > 0 {
+			h.WriteString("<p>")
+			for i, o := range options {
+				if i > 0 {
+					h.WriteString("<br>")
+				}
+				h.WriteString(e(o))
+			}
+			h.WriteString("</p>")
 		}
-		if reqText != "" {
-			fmt.Fprintf(&h, `<div style="white-space:pre-wrap;background:#f6f8fa;border-left:3px solid #d1d9e0;`+
-				`padding:8px 12px;margin:12px 0"><b>Original task:</b><br>%s</div>`, e(reqText))
+		if about != "" {
+			fmt.Fprintf(&h, `<p style="color:#59636e">%s</p>`, e(about))
 		}
-		if includeImages && len(slots) > 0 {
+		if overview != "" {
+			fmt.Fprintf(&h, "<p>%s</p>", e(overview))
+		}
+		if includeImages {
 			for _, s := range slots {
 				fmt.Fprintf(&h, `<div style="margin:12px 0"><p style="margin:0 0 4px;font-weight:600">%s</p>`+
 					`<img src="cid:%s" alt="%s" style="max-width:100%%;border:1px solid #d1d9e0;border-radius:6px"></div>`,
 					e(s.label), e(s.cid), e(s.label))
 			}
 		}
-		if len(ask.Questions) > 0 {
-			h.WriteString(`<h3 style="border-bottom:1px solid #d1d9e0">Questions</h3><ol>`)
-			for _, q := range ask.Questions {
-				fmt.Fprintf(&h, "<li>%s", e(q.Text))
-				for j, o := range q.Options {
-					fmt.Fprintf(&h, "<br>%s. %s", letter(j), e(o))
-				}
-				h.WriteString("</li>")
-			}
-			h.WriteString("</ol>")
-		}
-		h.WriteString(`<h3 style="border-bottom:1px solid #d1d9e0">How to answer</h3><p>Reply with one of these alone:</p><ul>`)
-		for _, w := range words {
-			fmt.Fprintf(&h, "<li><b>%s</b>: %s</li>", e(w.Word), e(w.Does))
-		}
-		h.WriteString("<li>Anything else goes to the agent as your instructions.</li></ul>")
+		fmt.Fprintf(&h, "<p>%s</p>", e(replyLine))
 		if link != "" {
 			fmt.Fprintf(&h, `<p><a href="%s" style="display:inline-block;background:#0969da;color:#ffffff;text-decoration:none;`+
 				`font-weight:600;padding:10px 18px;border-radius:6px">Open board</a></p>`, e(link))
-		}
-		if strings.TrimSpace(detail) != "" {
-			fmt.Fprintf(&h, `<h3 style="border-bottom:1px solid #d1d9e0;margin-top:20px">Details</h3>`+
-				`<div style="white-space:pre-wrap;border-left:3px solid #d1d9e0;padding-left:12px">%s</div>`, e(detail))
 		}
 		h.WriteString("</div>")
 		return h.String()
 	}
 
 	return email{
-		Subject:     "Needs you: " + truncWords(title, 80),
+		Subject:     subject,
 		Text:        t.String(),
 		HTML:        buildHTML(true),
 		HTMLNoImage: buildHTML(false),
@@ -575,12 +644,4 @@ func (f *Factory) probeMail() {
 type mailProbe struct {
 	at     time.Time
 	status string
-}
-
-// prefixed is p+s, or "" when s is empty.
-func prefixed(p, s string) string {
-	if s == "" {
-		return ""
-	}
-	return p + s
 }
