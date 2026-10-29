@@ -10,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -201,65 +204,214 @@ func storedText(home string, a Agent, n int) (string, error) {
 	return strings.Join(entries, "\n"), nil
 }
 
-// lineIndex is the byte offset where each complete line of f starts, then the end of the last one:
-// line n is [idx[n-1], idx[n]-1). A last line with no newline counts only when it is whole JSON;
-// otherwise it is still being written and is left for a later read.
-func lineIndex(f *os.File) ([]int64, error) {
-	idx := []int64{0}
-	buf := make([]byte, 1<<20)
-	var pos int64
-	for {
-		n, err := f.Read(buf)
-		for i := 0; i < n; {
-			j := bytes.IndexByte(buf[i:n], '\n')
+// lineIdx is where each complete line of a file starts, then the end of the last one: line n is
+// [off[n-1], off[n]-1). A last line with no newline counts only when it is whole JSON; otherwise it
+// is still being written and is left for a later read. held is set when it counted: its end is then
+// stored as if a newline followed it.
+type lineIdx struct {
+	off  []int64
+	held bool
+}
+
+func (x lineIdx) lines() int { return len(x.off) - 1 }
+
+// errStaleIndex is a line index that no longer matches its file, which changed in place.
+var errStaleIndex = errors.New("line index is stale")
+
+// indexScanned counts the bytes scanned for newlines, so tests can see what a read scanned.
+var indexScanned atomic.Int64
+
+// scanIndex adds to x the lines of f's bytes [from, size). x holds every line ending before from
+// and no held line. It then checks again whether a last line with no newline is whole.
+func scanIndex(f *os.File, from, size int64, x lineIdx) (lineIdx, error) {
+	buf := make([]byte, min(1<<20, max(size-from, 1)))
+	for pos := from; pos < size; {
+		b := buf[:min(int64(len(buf)), size-pos)]
+		if _, err := f.ReadAt(b, pos); err != nil {
+			if err == io.EOF { // shorter than its Stat: it changed while being read
+				err = errStaleIndex
+			}
+			return x, err
+		}
+		indexScanned.Add(int64(len(b)))
+		for i := 0; ; {
+			j := bytes.IndexByte(b[i:], '\n')
 			if j < 0 {
 				break
 			}
 			i += j + 1
-			idx = append(idx, pos+int64(i))
+			x.off = append(x.off, pos+int64(i))
 		}
-		pos += int64(n)
-		if err == io.EOF {
-			if last := idx[len(idx)-1]; pos > last && pos-last <= maxLine {
-				b := make([]byte, pos-last)
-				if _, err := f.ReadAt(b, last); err == nil && json.Valid(b) {
-					idx = append(idx, pos+1) // as if it ended in a newline
-				}
+		pos += int64(len(b))
+	}
+	if last := x.off[len(x.off)-1]; size > last && size-last <= maxLine {
+		b := make([]byte, size-last)
+		if _, err := f.ReadAt(b, last); err == nil && json.Valid(b) {
+			x.off, x.held = append(x.off, size+1), true
+		}
+	}
+	return x, nil
+}
+
+// lineIndexes keeps the line index of the session files read last, so a read scans only the bytes
+// added since the one before. An entry stays good while its file is the same file with the same
+// size and mtime; a file that only grew is scanned from its old end. A shrink, an earlier or a
+// changed mtime at the same size, or another file at the path rebuilds it, as does a line that
+// lineAt finds no longer ends where the index says.
+var lineIndexes = struct {
+	sync.Mutex
+	m    map[string]*indexEntry
+	tick uint64
+}{m: map[string]*indexEntry{}}
+
+const lineIndexCap = 64 // files
+
+type indexEntry struct {
+	info os.FileInfo
+	x    lineIdx // shared: never written once stored
+	used uint64
+}
+
+// indexFor is the line index of f, open at path.
+func indexFor(f *os.File, path string) (lineIdx, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return lineIdx{}, err
+	}
+	lineIndexes.Lock()
+	prev := lineIndexes.m[path]
+	if prev != nil {
+		lineIndexes.tick++
+		prev.used = lineIndexes.tick
+	}
+	lineIndexes.Unlock()
+	x, from := lineIdx{off: []int64{0}}, int64(0)
+	if prev != nil && os.SameFile(prev.info, info) {
+		size, mt := info.Size(), info.ModTime()
+		switch {
+		case size == prev.info.Size() && mt.Equal(prev.info.ModTime()):
+			return prev.x, nil
+		case size > prev.info.Size() && !mt.Before(prev.info.ModTime()):
+			x, from = prev.x, prev.info.Size()
+			if x.held {
+				x.off, x.held = x.off[:len(x.off)-1:len(x.off)-1], false
 			}
-			return idx, nil
 		}
-		if err != nil {
-			return idx, err
+	}
+	x, err = scanIndex(f, from, info.Size(), x)
+	if err != nil {
+		return x, err
+	}
+	x.off = slices.Clip(x.off) // so a later append copies rather than writes into a shared array
+	storeIndex(path, prev, info, x)
+	return x, nil
+}
+
+// storeIndex saves x as the index of path's file info, built from the entry prev, unless another
+// read has since saved a newer index of the same file.
+func storeIndex(path string, prev *indexEntry, info os.FileInfo, x lineIdx) {
+	lineIndexes.Lock()
+	defer lineIndexes.Unlock()
+	if cur := lineIndexes.m[path]; cur != nil && cur != prev && os.SameFile(cur.info, info) &&
+		cur.info.Size() >= info.Size() && !cur.info.ModTime().Before(info.ModTime()) {
+		return
+	}
+	if _, ok := lineIndexes.m[path]; !ok && len(lineIndexes.m) >= lineIndexCap {
+		var oldest string
+		for p, e := range lineIndexes.m {
+			if oldest == "" || e.used < lineIndexes.m[oldest].used {
+				oldest = p
+			}
 		}
+		delete(lineIndexes.m, oldest)
+	}
+	lineIndexes.tick++
+	lineIndexes.m[path] = &indexEntry{info: info, x: x, used: lineIndexes.tick}
+}
+
+// dropIndex forgets path's line index.
+func dropIndex(path string) {
+	lineIndexes.Lock()
+	delete(lineIndexes.m, path)
+	lineIndexes.Unlock()
+}
+
+// withIndex calls fn with path open and its line index. When fn finds the index stale it calls fn
+// once more with an index built from scratch.
+func withIndex(path string, fn func(f *os.File, x lineIdx) error) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for try := 0; ; try++ {
+		x, err := indexFor(f, path)
+		if err == nil {
+			err = fn(f, x)
+		}
+		if !errors.Is(err, errStaleIndex) || try == 1 {
+			return err
+		}
+		dropIndex(path)
 	}
 }
 
 const maxLine = 256 << 20 // longer lines are skipped
 
-// lineAt is line n of f (no newline), or nil when it is too long to read.
-func lineAt(f *os.File, idx []int64, n int) ([]byte, error) {
-	size := idx[n] - idx[n-1] - 1
-	if size > maxLine {
+// lineAt is line n of f (no newline), or nil when it is too long to read. It is errStaleIndex when
+// the line does not start and end at a newline as x says, or holds one: the file changed in place.
+func lineAt(f *os.File, x lineIdx, n int) ([]byte, error) {
+	start, end := x.off[n-1], x.off[n]-1
+	if end-start > maxLine {
 		return nil, nil
 	}
-	b := make([]byte, size)
-	_, err := f.ReadAt(b, idx[n-1])
-	return b, err
+	held := x.held && n == x.lines() // no newline after it yet
+	lo, hi := start, end+1
+	if n > 1 {
+		lo--
+	}
+	if held {
+		hi = end
+	}
+	b := make([]byte, hi-lo)
+	if _, err := f.ReadAt(b, lo); err != nil {
+		if err == io.EOF {
+			err = errStaleIndex
+		}
+		return nil, err
+	}
+	if n > 1 {
+		if b[0] != '\n' {
+			return nil, errStaleIndex
+		}
+		b = b[1:]
+	}
+	if !held {
+		if b[len(b)-1] != '\n' {
+			return nil, errStaleIndex
+		}
+		b = b[:len(b)-1]
+	}
+	if bytes.IndexByte(b, '\n') >= 0 {
+		return nil, errStaleIndex
+	}
+	return b, nil
 }
 
 // readLines reads the page p of the session file at path.
 func readLines(path string, parse lineParser, p Page) (Transcript, error) {
 	res := Transcript{Events: []Event{}, Path: path}
-	f, err := os.Open(path)
-	if err != nil {
-		return res, err
-	}
-	defer f.Close()
-	idx, err := lineIndex(f)
-	if err != nil {
-		return res, err
-	}
-	total := len(idx) - 1
+	err := withIndex(path, func(f *os.File, x lineIdx) (err error) {
+		res, err = readPage(f, x, path, parse, p)
+		return err
+	})
+	return res, err
+}
+
+// readPage reads the page p of the session file f at path, with its line index x.
+func readPage(f *os.File, x lineIdx, path string, parse lineParser, p Page) (Transcript, error) {
+	res := Transcript{Events: []Event{}, Path: path}
+	total := x.lines()
 	used, count := 0, 0
 	// take reports whether line n's events still fit the page; a page always takes its first line
 	take := func(evs []Event) bool {
@@ -278,7 +430,7 @@ func readLines(path string, parse lineParser, p Page) (Transcript, error) {
 		return true
 	}
 	events := func(n int) ([]Event, error) {
-		line, err := lineAt(f, idx, n)
+		line, err := lineAt(f, x, n)
 		if err != nil || line == nil {
 			return nil, err
 		}
@@ -423,16 +575,14 @@ func TranscriptImage(home string, src TranscriptSource, ref string) (string, []b
 	}
 	n, _ := strconv.Atoi(m[1])
 	k, _ := strconv.Atoi(m[2])
-	f, err := os.Open(path)
-	if err != nil {
-		return "", nil, errNoImage
-	}
-	defer f.Close()
-	idx, err := lineIndex(f)
-	if err != nil || n >= len(idx) {
-		return "", nil, errNoImage
-	}
-	line, err := lineAt(f, idx, n)
+	var line []byte
+	err := withIndex(path, func(f *os.File, x lineIdx) (err error) {
+		if n > x.lines() {
+			return errNoImage
+		}
+		line, err = lineAt(f, x, n)
+		return err
+	})
 	if err != nil || line == nil {
 		return "", nil, errNoImage
 	}
@@ -490,21 +640,24 @@ func firstFile(patterns ...string) string {
 }
 
 // scanLines calls fn for each complete line of path, in order.
+// Every line is read before fn sees any, so a stale index found partway never repeats a line.
 func scanLines(path string, fn func(n int, line []byte)) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	idx, err := lineIndex(f)
-	if err != nil {
-		return err
-	}
-	for n := 1; n < len(idx); n++ {
-		line, err := lineAt(f, idx, n)
-		if err != nil {
-			return err
+	var lines [][]byte
+	err := withIndex(path, func(f *os.File, x lineIdx) error {
+		lines = make([][]byte, x.lines()+1)
+		for n := 1; n <= x.lines(); n++ {
+			line, err := lineAt(f, x, n)
+			if err != nil {
+				return err
+			}
+			lines[n] = line
 		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for n, line := range lines {
 		if line != nil {
 			fn(n, line)
 		}

@@ -1211,8 +1211,11 @@ Computer-use access keeps the role's existing action approvals and read-only res
   Paseo (resuming an archived one). Decision reads use the same session-file readers.
   `/api/transcript/{id}` sends pages of about 300 KB at whole lines: `tail=1`
   is the newest page, `before=N` the page before line N, `after=N` new lines to poll (`more` means
-  read again now; a line still being written waits until it ends). Images carry a `ref` instead of
-  their data and are fetched from `/api/transcript/{id}/image/{ref}` (PNG, JPEG, GIF or WebP, for
+  read again now; a line still being written waits until it ends). Where each line starts is kept for
+  the last 64 session files read, with their size and mtime, so a request scans only the bytes added
+  since the last one for line ends. A shrink, an earlier mtime, a new mtime at the same size, another
+  file at the path, or a line that no longer starts and ends at a newline rebuilds it from the start.
+  Images carry a `ref` instead of their data and are fetched from `/api/transcript/{id}/image/{ref}` (PNG, JPEG, GIF or WebP, for
   agents on the board), so a tool's images load only when it is opened. The page loads older pages
   as you scroll up, and all of them before a search. A card whose agent was replaced shows the earlier agents' history
   (events with `prev`, image refs ending in `.<prev>`) on the newest-first page that reaches its
