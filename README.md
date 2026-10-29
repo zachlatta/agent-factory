@@ -538,7 +538,8 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
 
 - **For you**: the Needs Zach cards whose ask is not board-only (`Ask.BoardOnly`, the same rule that
   decides what is emailed): finished work to try, a decision, or an agent's question. Each shows its
-  question (the agent's `DECISION:` line, else the ask's title); on Ready for you, what changed and
+  question (the agent's `DECISION:` line, else the ask's title, which then stays on the title row:
+  "Ready to try", "Allow this build?"); on Ready for you, what changed and
   the factory-run Preview button (or why there is none yet); its before/after images; and its buttons.
 - **No answer yet**: email and voice requests that ended with no reply, and requests other parts of
   the factory add (`AddNoAnswer`).
@@ -936,7 +937,8 @@ The helper owns and stops its preview server and browser, including on failure.
 
 Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `building`,
 `review`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture
-(`preview-zach`, a decision with Yes / No / Change / Drop) includes approval content, long text, and choices;
+(`preview-zach`, a decision with Yes / No / Change / Drop) is the one question asked before building: a
+reviewed plan whose build has a side effect (restarting a test service), with its reason;
 `preview-ready` is finished work with Land / Change / Drop, its own synthetic request and changes, and an
 optional question. Every fixture session starts with a synthetic request, so a card opens on its ask.
 Their buttons are simulated through the same `choose` route the board posts, and move the card where the

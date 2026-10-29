@@ -23,7 +23,7 @@ test('For you and card links render at exact widths and preserve navigation', as
       const questions=await readFile(join(out,'phone-questions.png'));
       assert.equal(questions.readUInt32BE(16),390);
       assert.equal(questions.readUInt32BE(20),844);
-      assert.match(await readFile(join(out,'phone-questions.txt'),'utf8'),/Keep the clear layout/);
+      assert.match(await readFile(join(out,'phone-questions.txt'),'utf8'),/one extra tap is enough/);
       assert.match(await readFile(join(out,'phone.txt'),'utf8'),/FOR YOU/i);
       // the desktop kanban is a view; the phone stays on For you
       const columns = await capture(url, { view: 'columns', out });
@@ -37,9 +37,13 @@ test('For you and card links render at exact widths and preserve navigation', as
         await page.locator('#inbox .sec').first().waitFor();
         assert.equal(await page.locator('.tabs').count(), 0);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        // the decision is the one asked before building: allow a side effect, with its plain reason in the card
+        assert.equal(await page.locator('.fy[data-id="preview-zach"] .fk').innerText(), 'Allow this build?');
+        assert.match(await page.locator('.fy[data-id="preview-zach"] a.fq').innerText(), /restart the test board service/);
         // tapping a For you card's title opens it; a working card's line opens it too
         await page.locator('.fy[data-id="preview-zach"] a.ft').click();
         await page.locator('#panel.open').waitFor();
+        assert.match(await page.locator('#pAsk').innerText(), /card list load faster[\s\S]*down for about ten seconds/);
         await page.locator('#panel > .x').click();
         await page.locator('#panel.open').waitFor({ state: 'hidden' });
         await page.locator('.line[data-id="preview-building"]').click();
@@ -69,6 +73,8 @@ test('For you and card links render at exact widths and preserve navigation', as
         // the sample is marked as one on the page itself, not only in the tab title
         assert.match(await page.locator('#previewNote').innerText(), /sample cards/i);
         assert.equal(await page.locator('#previewNote').isVisible(), true);
+        // each For you card names its kind of stop: finished work to try, a build to allow
+        assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready to try');
         // finished work starts with no option picked: Land sends no answers; its options say they are optional
         assert.equal(await page.locator('.fy[data-id="preview-ready"] .opt.on').count(), 0);
         assert.match(await page.locator('.fy[data-id="preview-ready"] .opthint').innerText(), /Optional.*Change.*Land/);

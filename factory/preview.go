@@ -70,23 +70,29 @@ func PreviewHandler(root string) (http.Handler, error) {
 			Status: "idle", CreatedAt: now.Add(-time.Hour), LastActivityAt: now.Add(-time.Minute),
 			Labels: map[string]string{labelPrefix + labelStage: stage[0], labelPrefix + labelTier: "architecture",
 				labelPrefix + labelSource: "board", labelPrefix + labelSeen: strconv.FormatInt(now.Unix(), 10)}}
+		request, reply := previewRequest, previewReply
 		if stage[0] == "zach" {
+			// the one question before building: a reviewed plan whose build has a side effect (sideEffectStop)
+			a.Title, request, reply = "Board card list loads faster", previewDecisionRequest, previewDecisionReply
 			a.Labels[labelPrefix+labelAwaiting] = "plan"
+			a.Labels[labelPrefix+labelVerdict] = "plan side effects"
+			a.Labels[labelPrefix+labelNote] = sideEffectNote
 		}
 		// A real session file exercises the normal transcript, request and Ask parsing paths.
-		if err := writePreviewSession(home, a.Cwd, id, previewRequest, previewReply); err != nil {
+		if err := writePreviewSession(home, a.Cwd, id, request, reply); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
 	}
 	// finished work waiting on Zach: the Ready for you stop with Land / Change / Drop, on its own session
 	ready := agents[slices.IndexFunc(agents, func(a Agent) bool { return a.ID == "preview-zach" })]
-	ready.ID, ready.SessionID, ready.Title = "preview-ready", "preview-ready", "Ready to try: clearer board buttons"
+	ready.ID, ready.SessionID, ready.Title = "preview-ready", "preview-ready", "Clearer board buttons"
 	if err := writePreviewSession(home, ready.Cwd, ready.ID, previewReadyRequest, previewReadyReply); err != nil {
 		return nil, err
 	}
 	ready.Labels = maps.Clone(ready.Labels)
 	delete(ready.Labels, labelPrefix+labelAwaiting)
+	delete(ready.Labels, labelPrefix+labelVerdict)
 	ready.Labels[labelPrefix+labelNote] = readyNote(1)
 	// built after a reviewed plan and one code review, as real finished work is
 	ready.Labels[labelPrefix+labelPlanRounds], ready.Labels[labelPrefix+labelCodeRounds] = "1", "1"
@@ -253,17 +259,24 @@ QUESTION: Should Drop also ask for a reason?
 
 TIER: architecture`
 
-const previewReply = `DECISION: Approve the board layout plan?
-OVERVIEW: Make the board easy to read on desktop and phone screens. Check long text, choices, and card details before landing.
-NEEDS FROM ZACH: Choose an option so the agent can build it.
+// previewReply is a plan in progress on the other stages' cards: nothing is asked of Zach.
+const previewReply = `DECISION: Nothing for you yet.
+OVERVIEW: The board shows one column on a phone, with the cards waiting on you at the top. Long titles wrap instead of scrolling sideways.
+NEEDS FROM ZACH: Nothing now. You see the finished work with a preview before it lands.
 
-The preview uses synthetic cards. Tap a card's title to see its details, or switch to All columns on a desktop.
+The plan changes the board page only, and is checked at phone and desktop widths on sample cards.
 
-QUESTION: Which layout should the agent build?
-- Keep the clear layout (recommended)
-- Ask for a revised layout
-
+BUILD SIDE EFFECTS: none
 TIER: architecture`
+
+const previewDecisionRequest = "Make the board's card list load faster on a phone."
+
+// previewDecisionReply is a side-effect decision: allow the build to do one thing outside its worktree.
+const previewDecisionReply = `DECISION: Allow this build to restart the test board service once?
+OVERVIEW: Building it restarts the test board (never the live one) to measure how fast the new card list loads. The test board is down for about ten seconds.
+NEEDS FROM ZACH: Approve to build, or say what to change.
+
+Measuring on a copy instead avoids the restart, but takes longer to set up.`
 
 // previewPaseo never starts a process. Session reads normally satisfy logs; the
 // fallback stays synthetic so changes to transcript discovery cannot reach Paseo.

@@ -35,7 +35,7 @@ func TestPreviewIsolatedRealHandler(t *testing.T) {
 		if route == "/api/hosts" && !strings.Contains(r.Body.String(), `"cpuCount":4`) {
 			t.Fatal("host metrics did not use fake reader")
 		}
-		if route == "/api/transcript/preview-zach" && (strings.Contains(r.Body.String(), `"fallback":true`) || !strings.Contains(r.Body.String(), "Approve the board layout plan?")) {
+		if route == "/api/transcript/preview-zach" && (strings.Contains(r.Body.String(), `"fallback":true`) || !strings.Contains(r.Body.String(), "restart the test board service once?")) {
 			t.Fatal("real transcript reader did not load fixture session")
 		}
 		if route == "/api/board" {
