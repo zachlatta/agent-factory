@@ -594,7 +594,10 @@ function render(){
     const lc = lanes[k];
     h += `<div class="lane">${esc(LANE_NAMES[k]||k)}<small>${esc(LANDS[k]||($('group').value==='repo'?k:''))}</small><small>${lc.filter(c=>c.stage!=='landed').length} open · ${lc.filter(c=>c.stage==='landed').length} landed</small></div>`;
     for(const s of stages){
-      let cs = lc.filter(c=>c.stage===s[0]).sort((a,b)=>(b.lastActivityAt||'').localeCompare(a.lastActivityAt||''));
+      // newest activity first; waiting ideas keep the server's start order (priority, then age) after any Scouts
+      const waitingIdea = c => c.stage==='idea' && c.idea && c.idea.status==='waiting';
+      let cs = lc.filter(c=>c.stage===s[0]).sort((a,b)=>waitingIdea(a)!==waitingIdea(b) ? (waitingIdea(a)?1:-1)
+        : waitingIdea(a) ? B.cards.indexOf(a)-B.cards.indexOf(b) : (b.lastActivityAt||'').localeCompare(a.lastActivityAt||''));
       let more = '';
       const ck=k+'|'+s[0], cap = s[0]==='landed' ? ($('showLanded').checked?1e9:4) : (open_.has(ck)?1e9:6);
       if(cs.length>cap){ more=`<div class="more" onclick="${s[0]==='landed'?"$('showLanded').click()":`open_.add('${esc(ck).replace(/'/g,"")}');render()`}">+${cs.length-cap} more</div>`; cs=cs.slice(0,cap); }

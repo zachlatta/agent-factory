@@ -68,7 +68,7 @@ func PreviewHandler(root string) (http.Handler, error) {
 	if err := f.ideas.save([]Idea{{ID: "idea-preview", Title: "Make the board easier to read", Repo: "example/board",
 		Summary: "Check an idea before starting it in the selected repo.", Why: "Keep the next action clear on a phone.",
 		Request: "Build a readable board layout.", DoneWhen: "Desktop and phone layouts are checked.",
-		By: "preview", Tier: "low", Status: "waiting", CreatedAt: now.Add(-time.Hour)}}); err != nil {
+		By: "preview", Tier: "low", Priority: "high", Status: "waiting", CreatedAt: now.Add(-time.Hour)}}); err != nil {
 		return nil, err
 	}
 	var agents []Agent
