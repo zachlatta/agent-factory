@@ -227,7 +227,7 @@ func TestDigestKeepsShippedCardsThatLeftTheBoard(t *testing.T) {
 }
 
 // The digest is opt-in: with no FACTORY_DIGEST_TO it never sends, not even to Zach's usual address,
-// and records nothing, so setting the address later that evening still sends that day's digest once.
+// and records no sent day, so setting the address later that evening still sends that day's digest once.
 func TestDigestNeedsAnExplicitAddress(t *testing.T) {
 	f, m, now := digestFactory(t, 20, 0)
 	f.cfg.DigestTo = ""
@@ -354,5 +354,125 @@ func TestDigestFailedSendKeepsItsLines(t *testing.T) {
 	d := digests(m)
 	if len(d) < 2 || !strings.Contains(d[len(d)-1].Args["text"].(string), "Phone board") {
 		t.Errorf("the retry lost the shipped card: %+v", d)
+	}
+}
+
+// A digest never takes a card off the board's Shipped today: one that shipped in the morning and
+// left the board after the 6 PM digest is still listed until the day ends.
+func TestDigestKeepsShippedTodayOnTheBoard(t *testing.T) {
+	f, m, now := digestFactory(t, 10, 0)
+	loc := f.cfg.Location
+	ts := now.Format(time.RFC3339)
+	f.mu.Lock()
+	board := f.cards
+	f.cards = append(append([]Card{}, board...), Card{ID: "d1", Short: "d1", Title: "Phone board", Stage: "landed",
+		Source: "board", Timing: &TimingView{LandedAt: ts, Stages: []StageSpan{{Stage: "landed", Start: ts}}}})
+	f.mu.Unlock()
+	f.recordShipped()
+	*now = time.Date(2026, 10, 28, 18, 0, 0, 0, loc)
+	f.tickDigest()
+	if d := digests(m); len(d) != 1 || !strings.Contains(d[0].Args["text"].(string), "Phone board") {
+		t.Fatalf("digest = %+v", d)
+	}
+	// 10 PM: it has left the board
+	*now = time.Date(2026, 10, 28, 22, 0, 0, 0, loc)
+	f.mu.Lock()
+	f.cards = board
+	f.mu.Unlock()
+	f.recordShipped()
+	if got := sectionIDs(f.sections().Shipped); len(got) != 1 || got[0] != "d1" {
+		t.Errorf("the morning card vanished from Shipped today after the digest: %v", got)
+	}
+	// the next day it is gone, and the next digest does not repeat it
+	*now = time.Date(2026, 10, 29, 18, 0, 0, 0, loc)
+	f.recordShipped()
+	if got := f.sections().Shipped; len(got) != 0 {
+		t.Errorf("yesterday's card is still listed: %+v", got)
+	}
+	f.tickDigest()
+	if d := digests(m); len(d) == 2 && strings.Contains(d[1].Args["text"].(string), "Phone board") {
+		t.Errorf("the second digest repeats the card: %s", d[1].Args["text"])
+	}
+}
+
+// A card is selected by whether a digest listed it, never by a time cutoff: one that finished just
+// before the digest but reached the board's snapshot only after it was read, or whose landing was
+// confirmed only later, is in exactly the next digest; one listed is never listed again.
+func TestDigestListsEachCardExactlyOnce(t *testing.T) {
+	f, m, now := digestFactory(t, 18, 0)
+	loc := f.cfg.Location
+	f.mu.Lock()
+	board := f.cards
+	f.mu.Unlock()
+	landed := func(id, title string, at time.Time, confirmed bool) Card {
+		ts := at.Format(time.RFC3339)
+		tv := &TimingView{Stages: []StageSpan{{Stage: "landed", Start: ts}}}
+		if confirmed {
+			tv.LandedAt = ts
+		}
+		return Card{ID: id, Short: id, Title: title, Stage: "landed", Source: "board", Timing: tv}
+	}
+	setBoard := func(cards ...Card) {
+		f.mu.Lock()
+		f.cards = append(append([]Card{}, board...), cards...)
+		f.mu.Unlock()
+	}
+	listed := func(n int) string {
+		d := digests(m)
+		if len(d) != n {
+			t.Fatalf("digests = %d, want %d", len(d), n)
+		}
+		return d[n-1].Args["text"].(string)
+	}
+	before := time.Date(2026, 10, 28, 17, 59, 59, 0, loc)
+	onBoard := landed("d0", "On the board", time.Date(2026, 10, 28, 17, 0, 0, 0, loc), true)
+	late := landed("d1", "Late snapshot", before, true)           // finished before 6 PM, seen after the digest read the board
+	unconfirmed := landed("d2", "Confirmed later", before, false) // Done, landing not yet confirmed
+	setBoard(onBoard, unconfirmed)                                // not recorded by a pass yet: the digest reads the board itself
+	f.tickDigest()
+	if text := listed(1); !strings.Contains(text, "On the board") || strings.Contains(text, "Late snapshot") || strings.Contains(text, "Confirmed later") {
+		t.Fatalf("first digest:\n%s", text)
+	}
+	// the next pass sees the late card and confirms the other's landing; both leave the board by morning
+	*now = time.Date(2026, 10, 28, 18, 5, 0, 0, loc)
+	unconfirmed.Timing.LandedAt = unconfirmed.Timing.Stages[0].Start
+	setBoard(onBoard, late, unconfirmed)
+	f.recordShipped()
+	*now = time.Date(2026, 10, 29, 9, 0, 0, 0, loc)
+	setBoard()
+	f.recordShipped()
+	*now = time.Date(2026, 10, 29, 18, 0, 0, 0, loc)
+	f.recordShipped()
+	f.tickDigest()
+	text := listed(2)
+	for _, w := range []string{"Late snapshot", "Confirmed later", "Wed 5:59 PM"} {
+		if !strings.Contains(text, w) {
+			t.Errorf("second digest lacks %q:\n%s", w, text)
+		}
+	}
+	if strings.Contains(text, "On the board") {
+		t.Errorf("second digest repeats a listed card:\n%s", text)
+	}
+	*now = now.Add(24 * time.Hour)
+	f.tickDigest()
+	if text := listed(3); strings.Contains(text, "Late snapshot") || strings.Contains(text, "Confirmed later") {
+		t.Errorf("third digest repeats:\n%s", text)
+	}
+}
+
+// The first digest ever lists the day's finished cards, not the ledger's week of them.
+func TestFirstDigestListsOnlyThatDay(t *testing.T) {
+	f, m, now := digestFactory(t, 9, 0)
+	ts := now.Add(-24 * time.Hour).Format(time.RFC3339)
+	f.mu.Lock()
+	board := f.cards
+	f.cards = append(append([]Card{}, board...), Card{ID: "d1", Short: "d1", Title: "Yesterday's fix", Stage: "landed",
+		Source: "board", Timing: &TimingView{LandedAt: ts, Stages: []StageSpan{{Stage: "landed", Start: ts}}}})
+	f.mu.Unlock()
+	f.recordShipped()
+	*now = now.Add(9 * time.Hour)
+	f.tickDigest()
+	if d := digests(m); len(d) != 1 || strings.Contains(d[0].Args["text"].(string), "Yesterday") {
+		t.Errorf("first digest = %+v", d)
 	}
 }

@@ -608,9 +608,10 @@ At 6 PM in Zach's time zone the factory sends one email, the daily digest (`fact
 to `FACTORY_DIGEST_TO`. It is the only status email: decisions are emailed as they come (below),
 and everything else waits for it.
 
-It is opt-in. With no `FACTORY_DIGEST_TO` it is off and records nothing; it never falls back to
-`FACTORY_ZACH_EMAIL`. The operator sets `FACTORY_DIGEST_TO` once the delivery below is chosen and
-ready; a digest set after 6 PM still goes out that evening.
+It is opt-in. With no `FACTORY_DIGEST_TO` no digest is sent; it never falls back to
+`FACTORY_ZACH_EMAIL`. Finished cards are still recorded in `digest.json` (the board's Shipped today
+reads it). The operator sets `FACTORY_DIGEST_TO` once the delivery below is chosen and ready; a
+digest set after 6 PM still goes out that evening, listing that day's finished cards.
 `/api/health` reports its last state as `digest` (off, nothing to report, sent, send failed,
 possibly sent); it never fails the health check.
 
@@ -618,10 +619,13 @@ possibly sent); it never fails the health check.
   Waiting on you, Shipped (with the time), In progress, Stuck, and No answer yet, then the
   count of routine runs and the board link. The subject counts them ("Factory today: 2 shipped,
   1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs and file names are cut.
-- Shipped and No answer yet cover everything that finished since the last digest was built,
-  whatever the day: a card that lands at 7 PM is in the next evening's digest, and a digest never
-  lists a card a previous one did. `digest.json` keeps those cards after they leave the board
-  (a week at most while no digest goes out).
+- Shipped and No answer yet list every finished card no digest has listed yet, whatever the day:
+  a card that lands at 7 PM, or whose landing is confirmed only after a digest went out, is in the
+  next one. Selection is by card, not by a time cutoff, so a card is listed exactly once and never
+  dropped. Each pass records the board's finished cards in `digest.json`, and a digest marks the
+  ones it lists (unmarked again if the send surely failed). The ledger keeps a line for a week, so
+  it outlives the card's time on the board and a failing digest catches up; the first digest ever
+  lists only that day's.
 - The factory writes it itself from the board; no agent turn.
 - `digest.json` in the state directory keeps the day last sent, written before the send, so a
   restart never sends a day twice, and a factory that was down at 6 PM still sends that evening.

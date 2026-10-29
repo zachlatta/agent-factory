@@ -154,15 +154,15 @@ func finishedLine(c Card, done time.Time) (SectionLine, finishedKind) {
 	return line, finishedShipped
 }
 
-// FinishedSince is the shipped and unanswered lines of the cards that reached Done after since,
-// whatever the day: the daily digest lists everything finished since the last one went out.
-func FinishedSince(cards []Card, since time.Time) (shipped, noAnswer []SectionLine) {
+// Finished is the shipped and unanswered lines of the board's Done cards, whatever the day: the daily
+// digest's ledger records them so each is listed once (digest.go).
+func Finished(cards []Card) (shipped, noAnswer []SectionLine) {
 	for _, c := range cards {
 		if c.Stage != "landed" || c.Source == "scout" || c.Tier == "routine" || c.Source == "schedule" {
 			continue
 		}
 		done := doneAt(c)
-		if done.IsZero() || !done.After(since) {
+		if done.IsZero() {
 			continue
 		}
 		switch l, kind := finishedLine(c, done); kind {
