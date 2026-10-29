@@ -19,7 +19,17 @@ import (
 // through their code review. Any other Paseo agent (a scheduled job, say) asks for one with
 // POST /api/land-review {"by": "<its PASEO_AGENT_ID>", "why": "..."} once its work is committed, waits
 // on GET /api/land-review/<by>, and lands only on approve or nits for the same HEAD. The `land-review`
-// command (this binary under that name) does both.
+// command (this binary under that name) does both; bin/land and the pre-push hook run it for every
+// agent push, after the rebase, so what is published is what was approved.
+//
+// A factory card asks too, and only while it is authorized to land (cardLandBlock, on the board's
+// snapshot and on the card's current agent file and Paseo state). When its HEAD is the commit a
+// completed code review passed (factory.code-approved, which every new review clears), that approval
+// is the answer and no reviewer runs. Any other HEAD (a rebase, a conflict fix, a card approved before
+// the marker existed) gets a fresh landing review of the actual candidate; its approval, if the card
+// is still authorized when it finishes, becomes the card's reviewed and approved commit. A card's
+// earlier landing-review record is never proof. An outside agent's finished approval of the same HEAD
+// in the same checkout is handed out again. Every answer is given only after the checkout is checked.
 
 // LandReview is one landing review, stored by the requesting agent's id.
 type LandReview struct {
@@ -33,6 +43,7 @@ type LandReview struct {
 	Status     string    `json:"status"` // running, done
 	Verdict    string    `json:"verdict,omitempty"`
 	Findings   string    `json:"findings,omitempty"`
+	Card       bool      `json:"card,omitempty"` // asked by a factory card: its approval must still be authorized
 	StartedAt  time.Time `json:"startedAt"`
 	DoneAt     time.Time `json:"doneAt,omitzero"`
 }
@@ -120,8 +131,17 @@ func (f *Factory) startLandReview(b Body) (LandReview, error) {
 		return LandReview{}, fmt.Errorf("agent %s is archived or unknown", short(b.By))
 	}
 	by := ag.Id
-	if r, ok := f.landReviews.Get(by); ok && r.Status == "running" {
-		return r, nil
+	a, known := f.agentOK(by)
+	if known && a.L(labelRole) != "" {
+		return LandReview{}, fmt.Errorf("agent %s is a factory %s: it does not land", short(by), a.L(labelRole))
+	}
+	isCard := known && a.L(labelStage) != ""
+	if isCard {
+		cur, why := f.currentCardLandBlock(by)
+		if why != "" {
+			return LandReview{}, fmt.Errorf("card %s is not authorized to land: %s", short(by), why)
+		}
+		a = cur
 	}
 	cwd, err := f.landReviewCwd(ag.Cwd)
 	if err != nil {
@@ -145,7 +165,23 @@ func (f *Factory) startLandReview(b Body) (LandReview, error) {
 		return LandReview{}, err
 	}
 	head = strings.TrimSpace(head)
-	a, _ := f.agentOK(by)
+	prev, had := f.landReviews.Get(by)
+	same := had && prev.Head == head && prev.Cwd == cwd && prev.Card == isCard
+	switch {
+	case same && prev.Status == "running":
+		return prev, nil
+	case isCard && head == strings.TrimSpace(a.L(labelReviewed)) && head == strings.TrimSpace(a.L(labelCodeOK)):
+		r := LandReview{By: by, Head: head, Cwd: cwd, Repo: a.Repo, Visibility: f.visibility(cwd), Card: true,
+			Why: trunc(strings.TrimSpace(b.Why), 500), Status: "done", Verdict: "approve", StartedAt: f.Now(), DoneAt: f.Now(),
+			Findings: "HEAD is the commit the card's code review approved for landing: no new review."}
+		if err := f.landReviews.put(r, f.Now()); err != nil {
+			return LandReview{}, err
+		}
+		f.logf("landing review for %s at %s: its code approval stands", short(by), short(head))
+		return r, nil
+	case !isCard && same && prev.Status == "done" && (prev.Verdict == "approve" || prev.Verdict == "nits"):
+		return prev, nil
+	}
 	c := Card{ID: by, Host: f.cfg.Host, Title: a.Title, Cwd: cwd, Repo: a.Repo, Branch: a.Branch, WorkspaceID: a.WorkspaceID}
 	if c.Title == "" {
 		c.Title = "agent " + short(by)
@@ -157,12 +193,26 @@ func (f *Factory) startLandReview(b Body) (LandReview, error) {
 		return LandReview{}, err
 	}
 	r := LandReview{By: by, Review: rid, Head: head, Cwd: cwd, Repo: c.Repo, Visibility: vis, Why: why,
-		Status: "running", StartedAt: f.Now()}
+		Card: isCard, Status: "running", StartedAt: f.Now()}
 	if err := f.landReviews.put(r, f.Now()); err != nil {
 		return r, err
 	}
 	f.logf("started landing review %s for %s at %s (%s)", short(rid), short(by), short(head), vis)
 	return r, nil
+}
+
+// landReviewView is agent by's latest landing review as GET /api/land-review reports it: a card's
+// approval reads as an escalation once the card may no longer land (current state, as at the start
+// and finish). The stored record is left as it was.
+func (f *Factory) landReviewView(by string) (LandReview, bool) {
+	r, ok := f.landReviews.Get(by)
+	if !ok || !r.Card || r.Status != "done" || (r.Verdict != "approve" && r.Verdict != "nits") {
+		return r, ok
+	}
+	if _, why := f.currentCardLandBlock(r.By); why != "" {
+		r.Verdict, r.Findings = "escalate", "The card is no longer authorized to land ("+why+"): do not land.\n\n"+r.Findings
+	}
+	return r, true
 }
 
 // landReviewCwd resolves cwd (symlinks too) and checks it is a git checkout under landReviewRoots.
@@ -195,14 +245,89 @@ func (f *Factory) landReviewCwd(cwd string) (string, error) {
 	return real, nil
 }
 
+// cardLandBlock is why factory card a may not land now ("" when it may): it must be in Landing,
+// not archived or parked, not held on a dependency, not replaced, with a reviewed commit recorded, no
+// review queued and no rejecting verdict.
+func cardLandBlock(a Agent) string {
+	v := a.L(labelVerdict)
+	switch {
+	case a.ID == "":
+		return "not on the board"
+	case a.archived():
+		return "archived or parked"
+	case a.L(labelReplacedBy) != "":
+		return "replaced by " + short(a.L(labelReplacedBy))
+	case a.L(labelStage) != "landing":
+		return "stage is " + a.L(labelStage) + ", not landing"
+	case a.L(labelHeld) != "":
+		return "held until " + a.L(labelHeld) + " lands"
+	case a.L(labelAutoReview) != "":
+		return "a " + a.L(labelAutoReview) + " review is queued"
+	case v == "close" || strings.HasSuffix(v, " changes") || strings.HasSuffix(v, " none"):
+		return "last verdict is " + v
+	case strings.TrimSpace(a.L(labelReviewed)) == "":
+		return "no reviewed commit recorded"
+	}
+	return ""
+}
+
+// currentCardLandBlock checks card id from current state, not only the board's snapshot (a Drop, a
+// move or a new review since the last read looks the same there): the snapshot, the card's Paseo agent
+// file and Paseo's archive state must each pass cardLandBlock, and no code or plan reviewer of the card
+// may be pending. It returns the card with its current labels; a failed read blocks.
+func (f *Factory) currentCardLandBlock(id string) (Agent, string) {
+	snap, ok := f.agentOK(id)
+	if !ok {
+		return Agent{}, "not on the board"
+	}
+	if why := cardLandBlock(snap); why != "" {
+		return snap, why
+	}
+	labels, err := f.agentFileLabels(snap.ID)
+	if err != nil {
+		return snap, "current state unreadable: " + trunc(err.Error(), 150)
+	}
+	archived, _, err := f.liveState(snap.ID)
+	if err != nil {
+		return snap, "current state unreadable: " + trunc(err.Error(), 150)
+	}
+	cur := snap
+	cur.Labels = labels
+	if archived && cur.ArchivedAt.IsZero() {
+		cur.ArchivedAt = f.Now()
+	}
+	if why := cardLandBlock(cur); why != "" {
+		return cur, why
+	}
+	byID := f.byID()
+	for _, r := range f.agents() {
+		if r.L(labelRole) == "reviewer" && r.L(labelReviewKind) != "land" && r.L(labelApplied) == "" &&
+			sameCard(byID, r.L(labelReviewOf), snap.ID) {
+			return cur, "review " + short(r.ID) + " is pending"
+		}
+	}
+	return cur, ""
+}
+
 // finishLandReview records a landing reviewer's verdict for the agent that asked. The agent reads it
-// from GET /api/land-review; nothing is sent to it and no card moves.
+// from GET /api/land-review; nothing is sent to it and no card moves. A card's approval is usable only
+// if the card is still authorized to land, from current state: then the approved HEAD becomes its
+// reviewed and approved commit (before the approval is stored, so a failed label write is retried),
+// else the answer is an escalation.
 func (f *Factory) finishLandReview(rev Agent, verdict, notes string) error {
 	by := rev.L(labelReviewOf)
 	r, ok := f.landReviews.Get(by)
 	if !ok || r.Review != rev.ID {
 		f.logf("landing reviewer %s: no matching request from %s", short(rev.ID), short(by))
 		return nil
+	}
+	if r.Card && (verdict == "approve" || verdict == "nits") {
+		if _, why := f.currentCardLandBlock(by); why != "" {
+			f.logf("landing review %s for %s: %s approval withheld, card %s", short(rev.ID), short(by), verdict, why)
+			verdict, notes = "escalate", "The card is no longer authorized to land ("+why+"): do not land.\n\n"+notes
+		} else if err := f.setLabels(by, map[string]string{labelReviewed: r.Head, labelCodeOK: r.Head}); err != nil {
+			return err
+		}
 	}
 	r.Status, r.Verdict, r.Findings, r.DoneAt = "done", verdict, notes, f.Now()
 	if err := f.landReviews.put(r, f.Now()); err != nil {

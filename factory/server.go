@@ -435,7 +435,7 @@ func (f *Factory) handleSeen(w http.ResponseWriter, r *http.Request) {
 
 // handleLandReview reports an agent's latest landing review (running, or done with verdict and findings).
 func (f *Factory) handleLandReview(w http.ResponseWriter, r *http.Request) {
-	rv, ok := f.landReviews.Get(r.PathValue("by"))
+	rv, ok := f.landReviewView(r.PathValue("by"))
 	if !ok {
 		writeJSON(w, 404, map[string]string{"error": "no landing review for this agent"})
 		return

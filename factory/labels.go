@@ -57,6 +57,10 @@ const (
 	labelReady      = "ready"        // Ready for you stops so far: each gets its own note and email (ready.go)
 )
 
+// labelCodeOK is the HEAD a completed code review (or arbiter) passed, set where the card moves on
+// (passCode) and cleared when any review starts. bin/land's landing review reuses only that approval.
+const labelCodeOK = "code-approved"
+
 // labelLandedVerified records that commits reached main and passed the reviewed-change check.
 // It survives later work on the card and closure.
 const labelLandedVerified = "landed-verified"

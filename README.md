@@ -703,11 +703,19 @@ the deployer keeps the factory running this repo's `main` from GitHub: every min
 healthy, and restarts a hung one. So work lands live within a minute, and `install.sh` is only for
 the first install. Logs: `journalctl --user -u agent-factory -u agent-factory-deploy`.
 
-### Landing reviews for other agents
+### Landing reviews before publication
 
-An agent outside the card flow (a scheduled job, say) can ask for a review before it lands:
-`land-review -why "..."` (a link to the factory binary) once its work is committed. It exits 0 on
-approve, 2 on changes, 3 when Zach must decide.
+`bin/land` and the pre-push hook require a landing review for agent pushes
+(`PASEO_AGENT_ID` set). It checks the actual commit after the rebase, including conflict
+resolutions. A completed code approval of that commit is reused; a changed commit gets a
+fresh independent review. A factory card must still be authorized to land, with no queued
+or pending code review. Dropped, replaced, held and parked cards cannot publish.
+
+An agent outside the card flow can also run `land-review -why "..."` (a link to the factory
+binary) once its work is committed. It exits 0 on approve, 2 on changes, 3 when Zach must
+decide. The same completed approval can be reused for the same commit and checkout.
+An unavailable or rejecting review stops publication. The secret scan still runs on every
+push. Agent pushes can publish only the checkout's reviewed HEAD.
 
 ### Host config
 

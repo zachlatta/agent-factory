@@ -1,9 +1,16 @@
 #!/bin/sh
-# This repo is public and every push publishes: scan every commit the push would send.
+# This repo is public and every push publishes: scan every commit the push would send. An agent
+# (PASEO_AGENT_ID set) may push only its checkout's HEAD, and only once the factory's landing review
+# approves that exact commit; a review that does not approve, or cannot run, refuses the push.
 set -eu
-scan="$(git rev-parse --show-toplevel)/bin/scan"
+root="$(git rev-parse --show-toplevel)"
+scan="$root/bin/scan"
+bin="${FACTORY_BIN:-$HOME/.local/share/agent-factory/factory}"
 zero=0000000000000000000000000000000000000000
-while read -r _ local _ remote; do
+head=$(git rev-parse -q --verify HEAD || true)
+other="" # pushed refs other than HEAD
+pushes=0
+while read -r _ local ref remote; do
 	[ "$local" = "$zero" ] && continue # deleting a ref publishes nothing
 	if [ "$remote" != "$zero" ]; then
 		rng="$remote..$local"
@@ -13,4 +20,28 @@ while read -r _ local _ remote; do
 		rng="$local" # first push: all of history
 	fi
 	"$scan" "$rng"
+	pushes=1
+	[ "$local" = "$head" ] || other="$other $ref"
 done
+[ -n "${PASEO_AGENT_ID:-}" ] && [ "$pushes" = 1 ] || exit 0
+if [ -n "$other" ]; then
+	echo "pre-push: an agent pushes only its reviewed HEAD; refusing:$other" >&2
+	exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+	echo "pre-push: uncommitted changes; the landing review needs a clean checkout" >&2
+	exit 1
+fi
+if [ ! -x "$bin" ] || ! grep -aq 'api/land-review' "$bin"; then
+	echo "pre-push: $bin has no land-review command, so HEAD cannot be reviewed; refusing the push" >&2
+	exit 1
+fi
+if ! "$bin" land-review -why "pre-push: $head, exactly as it will be pushed" >&2 </dev/null; then
+	echo "pre-push: the landing review did not approve $head; refusing the push" >&2
+	exit 1
+fi
+# the review approved the checkout's HEAD when it ran: it must still be the commit being pushed
+if [ "$(git rev-parse HEAD)" != "$head" ] || [ -n "$(git status --porcelain)" ]; then
+	echo "pre-push: the checkout changed during the landing review; refusing the push" >&2
+	exit 1
+fi

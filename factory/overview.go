@@ -85,7 +85,7 @@ func ParseOverview(text string) (string, *Overview) {
 				}
 				break
 			}
-			if questionLine.MatchString(lines[j]) {
+			if questionLine.MatchString(lines[j]) || changedLine.MatchString(lines[j]) {
 				break
 			}
 			fields[key] = append(fields[key], strings.TrimRight(lines[j], " \t"))

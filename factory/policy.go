@@ -707,6 +707,8 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 		labels[labelVerdict] = verdict
 		return f.setLabels(target, labels)
 	}
+	// the passed review's identity: bin/land's landing review reuses it only for this HEAD
+	labels[labelCodeOK] = strings.TrimSpace(t.L(labelReviewed))
 	fb := uiFeedback(notes)
 	scanned := ""
 	if f.guarded(t.Repo) {
@@ -761,7 +763,14 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 // needs a clean worktree, so that what it reads is what lands: a dirty one gets the builder a message
 // to commit first, and the review stays queued until it stops again.
 func (f *Factory) StartReview(c Card, kind string) (string, error) {
-	labels := map[string]string{labelAutoReview: "", labelSince: iso(f.Now())}
+	// a new review is a new generation: no earlier code approval stands for it, even if this one
+	// waits on a dirty tree or fails to start
+	if f.agent(c.ID).L(labelCodeOK) != "" {
+		if err := f.setLabels(c.ID, map[string]string{labelCodeOK: ""}); err != nil {
+			return "", err
+		}
+	}
+	labels := map[string]string{labelAutoReview: "", labelSince: iso(f.Now()), labelCodeOK: ""}
 	if kind == "code" && c.Cwd != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		dirty, err := f.dirtyStatus(ctx, c.Cwd)
