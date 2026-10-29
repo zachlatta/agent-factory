@@ -108,7 +108,7 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 		return
 	}
 	ask.Ready.Changed = ParseChanged(text)
-	if p, ok := f.previews.get(id); ok {
+	if p, ok := f.previewOf(id); ok {
 		ask.Ready.State, ask.Ready.Log, ask.Ready.Sample = p.State, p.Log, p.Sample
 		if p.State == previewReady {
 			ask.Ready.Preview = p.URL

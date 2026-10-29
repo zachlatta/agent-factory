@@ -130,9 +130,14 @@ The planner (the "Fellow") first picks a track:
   - The factory publishes it with `tailscale serve --bg --https=<port>` on the board URL's host,
     checks `path` loads on 127.0.0.1 and on that link within 2 minutes, and links it; a failure
     shows the last 20 log lines. Every 5 minutes it checks again and restarts a dead one once.
+    Serve changes run one at a time; one refused because another client is changing the serve
+    config is tried up to 5 times in all, with about 4 seconds of backoff; any other error fails at once.
   - It stops when the card leaves Ready for you (landing keeps it): change requested, dropped,
     done, landed or archived. Stopping kills the process group, removes the tailnet entry and the
     preview's folder. Tailnet entries in the range and folders no saved preview owns are removed.
+  - A preview belongs to the card, not the agent: it stays saved under the agent that started it,
+    and a fresh agent that takes over the card (such as the lander) keeps its port, link, process
+    and folder.
   - The factory's processes stop with it, so after a restart the next Tick starts saved previews
     again on the same port and link. Only Tick starts or stops previews: a `-dry-run` or
     `-tick=false` copy never does, even with a copied `previews.json`.

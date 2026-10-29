@@ -3,6 +3,7 @@ package factory
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -535,5 +536,188 @@ func TestExistingReadyPreviewNonePicksUpTrustedDeclaration(t *testing.T) {
 	f.tickPreviews(t0.Add(6 * time.Minute))
 	if _, stopped := runner.count(); stopped != 1 {
 		t.Fatalf("owned preview cleanup: %d", stopped)
+	}
+}
+
+// A fresh lander replaces the Ready agent in the same worktree: the preview started for the Ready
+// agent keeps its port, link, process and folder, is found under the new agent, starts again after
+// a factory restart, and is cleaned up once when the card is done or dropped.
+func TestPreviewFollowsTheCardThroughAHandoff(t *testing.T) {
+	handoff := func(listPredecessor bool) []Agent {
+		old := withLabels(readyCard("c1"), map[string]string{labelReplacedBy: "c2"})
+		old.ArchivedAt = t0
+		lander := withLabels(readyCard("c2"), map[string]string{labelStage: "landing", labelReplaces: "c1"})
+		lander.Cwd = "/w/c1"
+		if listPredecessor {
+			return []Agent{old, lander}
+		}
+		return []Agent{lander}
+	}
+	for name, leave := range map[string]map[string]string{
+		"done":    {labelStage: "landed", labelNote: "marked done by Zach"},
+		"dropped": {labelStage: "zach", labelNote: "closed by Zach"},
+	} {
+		for _, listed := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/predecessor listed %v", name, listed), func(t *testing.T) {
+				f, _, r := previewFactory(t, runSpec, readyCard("c1"))
+				f.tickPreviews(t0)
+				before := waitPreview(t, f, "c1", previewReady)
+				f.SetAgents(handoff(listed))
+				f.tickPreviews(t0)
+				if p, ok := f.previews.get("c1"); !ok || p != before {
+					t.Fatalf("after the hand-off preview = %+v %v, want %+v", p, ok, before)
+				}
+				if starts, stopped := r.count(); starts != 1 || stopped != 0 || !r.served[7700] {
+					t.Fatalf("starts %d, stopped %d, served %v", starts, stopped, r.served)
+				}
+				if _, err := os.Stat(filepath.Join(f.previewDir("c1"), "home")); err != nil {
+					t.Fatalf("preview folder: %v", err)
+				}
+				if !f.previewSettled("c2") {
+					t.Error("the lander's preview is not settled")
+				}
+				ask := readyAsk("")
+				f.fillReady(ask, "c2", "CHANGED: one")
+				if ask.Ready.Preview != before.URL {
+					t.Errorf("lander's link = %q, want %q", ask.Ready.Preview, before.URL)
+				}
+
+				// a factory restart starts it again on the same port, folder and worktree
+				g, _, r2 := previewFactory(t, runSpec, handoff(listed)...)
+				g.cfg.StateDir = f.cfg.StateDir
+				g.previews = f.previews
+				t.Cleanup(g.pv.wg.Wait)
+				g.tickPreviews(t0)
+				waitFor(t, "restart", func() bool { n, _ := r2.count(); return n == 1 })
+				g.pv.wg.Wait() // the restart publishes and checks it in the background
+				if p := waitPreview(t, g, "c1", previewReady); p.Port != 7700 || p.URL != before.URL {
+					t.Errorf("after restart preview = %+v", p)
+				}
+				st := r2.starts[0]
+				if st.Dir != "/w/c1" || !slices.Contains(st.Env, "HOME="+filepath.Join(f.cfg.StateDir, "previews", "c1", "home")) {
+					t.Errorf("restart = %+v", st)
+				}
+				if _, ok := g.previews.get("c2"); ok {
+					t.Error("a second preview was saved for the lander")
+				}
+
+				agents := handoff(listed)
+				agents[len(agents)-1] = withLabels(agents[len(agents)-1], leave)
+				g.SetAgents(agents)
+				g.tickPreviews(t0)
+				g.tickPreviews(t0)
+				if _, ok := g.previews.get("c1"); ok {
+					t.Error("preview still saved")
+				}
+				if _, stopped := r2.count(); stopped != 1 || r2.served[7700] || !slices.Equal(r2.unserve, []int{7700}) {
+					t.Errorf("stopped %d, served %v, unserved %v", stopped, r2.served, r2.unserve)
+				}
+				if _, err := os.Stat(f.previewDir("c1")); !os.IsNotExist(err) {
+					t.Errorf("preview folder left: %v", err)
+				}
+			})
+		}
+	}
+}
+
+// fakeTailscale answers the host runner's tailscale calls: each port's first conflicts calls
+// report a serve config conflict, err (if set) fails every call, and overlapping calls are counted.
+type fakeTailscale struct {
+	mu        sync.Mutex
+	conflicts int
+	err       error
+	calls     map[string]int
+	inFlight  int
+	overlaps  int
+	slept     []time.Duration
+}
+
+func (ts *fakeTailscale) run(args ...string) ([]byte, error) {
+	ts.mu.Lock()
+	ts.inFlight++
+	if ts.inFlight > 1 {
+		ts.overlaps++
+	}
+	key := strings.Join(args, " ")
+	ts.calls[key]++
+	n := ts.calls[key]
+	ts.mu.Unlock()
+	time.Sleep(time.Millisecond)
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.inFlight--
+	switch {
+	case ts.err != nil:
+		return nil, ts.err
+	case n <= ts.conflicts:
+		return nil, fmt.Errorf("tailscale %s: exit status 1: Another client is changing the serve config; please try again. (preconditions failed: etag mismatch)", key)
+	}
+	return nil, nil
+}
+
+func (ts *fakeTailscale) sleep(d time.Duration) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.slept = append(ts.slept, d)
+}
+
+func newFakeTailscale() (*fakeTailscale, hostRunner) {
+	ts := &fakeTailscale{calls: map[string]int{}}
+	return ts, hostRunner{tailscale: ts.run, sleep: ts.sleep}
+}
+
+func TestServeRetriesAServeConfigConflict(t *testing.T) {
+	ts, r := newFakeTailscale()
+	ts.conflicts = 2
+	if err := r.Serve(7700); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	if err := r.Unserve(7700); err != nil {
+		t.Fatalf("Unserve: %v", err)
+	}
+	if n := ts.calls["serve --bg --https=7700 http://127.0.0.1:7700"]; n != 3 {
+		t.Errorf("serve calls = %d, want 3", n)
+	}
+	if n := ts.calls["serve --https=7700 off"]; n != 3 {
+		t.Errorf("unserve calls = %d, want 3", n)
+	}
+	if len(ts.slept) != 4 {
+		t.Errorf("slept %v", ts.slept)
+	}
+}
+
+func TestServeConflictThatPersistsFails(t *testing.T) {
+	ts, r := newFakeTailscale()
+	ts.conflicts = 100
+	err := r.Serve(7700)
+	if err == nil || !strings.Contains(err.Error(), "etag mismatch") {
+		t.Fatalf("Serve = %v, want the conflict", err)
+	}
+	if n := ts.calls["serve --bg --https=7700 http://127.0.0.1:7700"]; n != serveTries {
+		t.Errorf("calls = %d, want %d", n, serveTries)
+	}
+}
+
+func TestServeOtherErrorsAreNotRetried(t *testing.T) {
+	ts, r := newFakeTailscale()
+	ts.err = errors.New("tailscale serve: exit status 1: serve config denied")
+	if err := r.Serve(7700); err == nil {
+		t.Fatal("Serve succeeded")
+	}
+	if n := ts.calls["serve --bg --https=7700 http://127.0.0.1:7700"]; n != 1 || len(ts.slept) != 0 {
+		t.Errorf("calls = %d, slept %v", n, ts.slept)
+	}
+}
+
+func TestServeChangesAreSerialized(t *testing.T) {
+	ts, r := newFakeTailscale()
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() { r.Serve(7700 + i) })
+		wg.Go(func() { r.Unserve(7750 + i) })
+	}
+	wg.Wait()
+	if ts.overlaps != 0 {
+		t.Errorf("%d tailscale serve changes overlapped", ts.overlaps)
 	}
 }

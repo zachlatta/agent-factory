@@ -325,22 +325,57 @@ func (f *Factory) previewEnvFor(id string, spec *PreviewSpec, port int) []string
 		filepath.Join(f.previewDir(id), "home"), port)
 }
 
+// previewKey is the id agent a's card preview is saved under: a's own, or a predecessor's in the
+// card's lineage, since a hand-off keeps the preview (its port, process, HOME and log) where it was.
+func previewKey(byID map[string]Agent, a Agent, saved map[string]Preview) (string, bool) {
+	ids := []string{a.ID}
+	lin := cardLineage(byID, a.ID)
+	for i := len(lin) - 1; i >= 0; i-- {
+		ids = append(ids, lin[i].ID)
+	}
+	ids = append(ids, a.L(labelReplaces)) // the predecessor may no longer be listed
+	for _, id := range ids {
+		if _, ok := saved[id]; ok && id != "" {
+			return id, true
+		}
+	}
+	return a.ID, false
+}
+
+// previewOf is card id's saved preview, found through its lineage.
+func (f *Factory) previewOf(id string) (Preview, bool) {
+	saved := f.previews.all()
+	byID := f.byID()
+	a, ok := byID[id]
+	if !ok {
+		a = Agent{ID: id}
+	}
+	key, ok := previewKey(byID, a, saved)
+	return saved[key], ok
+}
+
 // tickPreviews starts, checks and stops previews so that exactly the cards at Ready for you (or
-// landing from it) have one, at most cfg.PreviewMax running, oldest wait first.
+// landing from it) have one, at most cfg.PreviewMax running, oldest wait first. A preview is saved
+// under the agent that started it and follows the card through hand-offs.
 func (f *Factory) tickPreviews(now time.Time) {
 	if f.passive() || f.runner == nil {
 		return
 	}
 	saved := f.previews.all()
-	var wanted []Agent
+	byID := f.byID()
+	type wantedPreview struct {
+		a   Agent
+		key string
+	}
+	var wanted []wantedPreview
 	want := map[string]bool{}
 	for _, a := range f.agents() {
-		if a.gone() || a.L(labelRole) != "" || !previewIDSafe.MatchString(a.ID) {
+		if a.gone() || a.L(labelRole) != "" || !previewIDSafe.MatchString(a.ID) || replacedPredecessor(byID, a) {
 			continue
 		}
-		_, has := saved[a.ID]
-		if readyStop(a) || (has && a.L(labelStage) == "landing") {
-			wanted, want[a.ID] = append(wanted, a), true
+		key, has := previewKey(byID, a, saved)
+		if !want[key] && (readyStop(a) || (has && a.L(labelStage) == "landing")) {
+			wanted, want[key] = append(wanted, wantedPreview{a, key}), true
 		}
 	}
 	for id, p := range saved {
@@ -350,21 +385,25 @@ func (f *Factory) tickPreviews(now time.Time) {
 		}
 	}
 	f.previewOrphans(saved)
-	sort.SliceStable(wanted, func(i, j int) bool { return wanted[i].L(labelWriting) < wanted[j].L(labelWriting) })
+	sort.SliceStable(wanted, func(i, j int) bool { return wanted[i].a.L(labelWriting) < wanted[j].a.L(labelWriting) })
 	running := 0
 	for _, p := range saved {
 		if p.Port > 0 && (p.State == previewStarting || p.State == previewReady) {
 			running++
 		}
 	}
-	for _, a := range wanted {
-		p, ok := saved[a.ID]
-		_, live := f.pv.proc(a.ID)
+	for _, w := range wanted {
+		a := w.a
+		p, ok := saved[w.key]
+		_, live := f.pv.proc(w.key)
 		switch {
-		case !ok || p.State == previewQueued || (p.State == previewNone && f.previewSpec(a.Cwd) != nil):
+		case !ok || p.State == previewQueued || (p.State == previewNone && f.previewSpec(p.Cwd) != nil):
 			// A later trusted declaration can enable an existing Ready card.
 			// Missing declarations only read state; they do not rewrite previewNone.
-			if f.startPreview(a, saved, running) {
+			if !ok {
+				p = Preview{Card: a.ID, Cwd: a.Cwd}
+			}
+			if f.startPreview(p, saved, running) {
 				running++
 			}
 			saved = f.previews.all()
@@ -377,11 +416,11 @@ func (f *Factory) tickPreviews(now time.Time) {
 	}
 }
 
-// startPreview starts card a's preview, or records that it has none or must wait. It reports whether
-// a process was started.
-func (f *Factory) startPreview(a Agent, saved map[string]Preview, running int) bool {
-	spec := f.previewSpec(a.Cwd)
-	p := Preview{Card: a.ID, Cwd: a.Cwd, State: previewNone}
+// startPreview starts preview p (its Card and Cwd set), or records that it has none or must wait.
+// It reports whether a process was started.
+func (f *Factory) startPreview(from Preview, saved map[string]Preview, running int) bool {
+	spec := f.previewSpec(from.Cwd)
+	p := Preview{Card: from.Card, Cwd: from.Cwd, State: previewNone}
 	if spec == nil {
 		f.savePreview(p)
 		return false
@@ -644,12 +683,31 @@ func (f *Factory) previewSettled(id string) bool {
 	if f.passive() || f.runner == nil {
 		return true
 	}
-	p, ok := f.previews.get(id)
+	p, ok := f.previewOf(id)
 	return ok && p.State != previewStarting
 }
 
-// hostRunner is the PreviewRunner for this host: sh, tailscale serve and HTTP.
-type hostRunner struct{}
+// hostRunner is the PreviewRunner for this host: sh, tailscale serve and HTTP. Tests set
+// tailscale and sleep; nil uses the real command and time.Sleep.
+type hostRunner struct {
+	tailscale func(args ...string) ([]byte, error)
+	sleep     func(time.Duration)
+}
+
+// serveMu serializes this factory's tailscale serve changes: the tailnet serve config is one
+// shared document, and previews start, stop and restart concurrently.
+var serveMu sync.Mutex
+
+// serveTries is how many times a serve change is tried while another client is changing the serve
+// config; other errors are not retried.
+const serveTries = 5
+
+// serveConflict reports whether err is tailscale refusing a serve change because the config changed
+// underneath it.
+func serveConflict(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "etag mismatch") || strings.Contains(msg, "another client is changing the serve config")
+}
 
 func (hostRunner) Start(dir, command string, env []string, logPath string) (PreviewProc, error) {
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -703,19 +761,46 @@ func tailscale(args ...string) ([]byte, error) {
 	return out, nil
 }
 
-func (hostRunner) Serve(port int) error {
+func (r hostRunner) ts(args ...string) ([]byte, error) {
+	if r.tailscale != nil {
+		return r.tailscale(args...)
+	}
+	return tailscale(args...)
+}
+
+// change runs one tailscale serve change, one at a time, trying again with a growing pause while
+// another client is changing the serve config. The last error is returned.
+func (r hostRunner) change(args ...string) error {
+	sleep := r.sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	var err error
+	for i := range serveTries {
+		if i > 0 {
+			sleep(time.Duration(250<<(i-1)) * time.Millisecond)
+		}
+		serveMu.Lock()
+		_, err = r.ts(args...)
+		serveMu.Unlock()
+		if err == nil || !serveConflict(err) {
+			return err
+		}
+	}
+	return err
+}
+
+func (r hostRunner) Serve(port int) error {
 	p := strconv.Itoa(port)
-	_, err := tailscale("serve", "--bg", "--https="+p, "http://127.0.0.1:"+p)
-	return err
+	return r.change("serve", "--bg", "--https="+p, "http://127.0.0.1:"+p)
 }
 
-func (hostRunner) Unserve(port int) error {
-	_, err := tailscale("serve", "--https="+strconv.Itoa(port), "off")
-	return err
+func (r hostRunner) Unserve(port int) error {
+	return r.change("serve", "--https="+strconv.Itoa(port), "off")
 }
 
-func (hostRunner) Served() ([]int, error) {
-	out, err := tailscale("serve", "status", "--json")
+func (r hostRunner) Served() ([]int, error) {
+	out, err := r.ts("serve", "status", "--json")
 	if err != nil {
 		return nil, err
 	}
