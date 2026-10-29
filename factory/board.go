@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sort"
@@ -10,7 +11,7 @@ import (
 
 // Stages are the board's columns, in order: id, name, help text.
 var Stages = [][3]string{
-	{"idea", "Ideas", "Suggested by agents, and Scouts looking for them. Ideas start on their own, a few at a time."},
+	{"idea", "Ideas", "Suggested by agents, and Scouts looking for them. Ideas start on their own by priority, a few at a time per repo."},
 	{"plan", "Plan", "Agent writes a plan. No code yet."},
 	{"plan-review", "Plan review", "A different agent tries to find fault with the plan."},
 	{"building", "Building", "Agent is working."},
@@ -115,7 +116,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 	for _, a := range agents {
 		running[a.ID] = a.Status == "running" && !a.archived()
 	}
-	// Ideas behind cards: started ones by their card, waiting ones in start order (oldest first).
+	// Ideas behind cards: started ones by their card, waiting ones in start order (ideaOrder).
 	fromIdea := map[string]*IdeaView{}
 	var waiting []Idea
 	for _, i := range ideas {
@@ -128,7 +129,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			waiting = append(waiting, i)
 		}
 	}
-	sort.SliceStable(waiting, func(a, b int) bool { return waiting[a].CreatedAt.Before(waiting[b].CreatedAt) })
+	ideaOrder(waiting)
 	out := make([]Card, 0, len(tops))
 	for _, a := range tops {
 		kids := children[a.ID]
@@ -244,11 +245,13 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 		c.Idea = fromIdea[a.ID]
 		out = append(out, c)
 	}
-	for n, i := range waiting {
+	line := map[string]int{} // place in its repo's line
+	for _, i := range waiting {
+		line[i.Repo]++
 		out = append(out, Card{ID: i.ID, Short: i.ID, Host: "", Title: i.Title, Repo: i.Repo, Status: "waiting",
 			Source: "idea", Stage: "idea", Labelled: true, Flags: []string{}, Note: "from " + i.By, Tier: i.Tier,
 			Origin: "idea", CreatedAt: iso(i.CreatedAt), LastActivityAt: iso(i.CreatedAt), Children: []Child{},
-			Idea: ideaView(i, n+1)})
+			Idea: ideaView(i, line[i.Repo])})
 	}
 	return out
 }
@@ -316,7 +319,7 @@ func unread(a Agent) bool {
 
 func ideaView(i Idea, queue int) *IdeaView {
 	return &IdeaView{ID: i.ID, Summary: i.Summary, Why: i.Why, DoneWhen: i.DoneWhen, By: i.By,
-		CreatedAt: iso(i.CreatedAt), Status: i.Status, Queue: queue, Agent: i.Agent, Thinking: i.Thinking, Note: i.Note}
+		CreatedAt: iso(i.CreatedAt), Status: i.Status, Priority: cmp.Or(i.Priority, "normal"), Queue: queue, Agent: i.Agent, Thinking: i.Thinking, Note: i.Note}
 }
 
 func short(id string) string {

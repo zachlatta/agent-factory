@@ -116,9 +116,19 @@ func (f *Factory) handleBoard(w http.ResponseWriter, r *http.Request) {
 	if cards == nil {
 		cards = []Card{}
 	}
+	// each waiting idea's repo caps, and why auto-start is paused (ideas.go)
+	ideaCaps, ideaHold, lanes := map[string]RepoIdeaCaps{}, "", f.lanes()
+	for _, c := range cards {
+		if c.Stage == "idea" && c.Idea != nil && c.Idea.Status == "waiting" {
+			ideaCaps[c.Repo] = lanes[c.Repo].ideaCaps()
+		}
+	}
+	if len(ideaCaps) > 0 {
+		ideaHold = f.ideaHold()
+	}
 	writeJSON(w, 200, map[string]any{"cards": cards, "sections": f.sections(), "updated": iso(updated), "errors": errs, "stages": Stages,
 		"hosts": []string{f.cfg.Host}, "log": log, "repos": f.Repos(), "tiers": TierHelp,
-		"caps": map[string]int{"ideaWip": f.cfg.IdeaWIP, "ideaDaily": f.cfg.IdeaDaily, "rework": f.cfg.ReworkCap}})
+		"caps": map[string]int{"rework": f.cfg.ReworkCap}, "ideaCaps": ideaCaps, "ideaHold": ideaHold})
 }
 
 // handleIdeas lists every idea (all statuses), newest first, with the request cut short.

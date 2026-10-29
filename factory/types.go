@@ -139,7 +139,9 @@ type Idea struct {
 	Repo      string    `json:"repo"`
 	By        string    `json:"by"`
 	Tier      string    `json:"tier"`
-	Agent     string    `json:"agent,omitempty"` // AgentChoice id to build it ("" = default)
+	Priority  string    `json:"priority,omitempty"` // high, normal or low ("" = normal); ideas start by priority, then age
+	Schedule  string    `json:"schedule,omitempty"` // the Paseo schedule that filed it, by name ("" = not a schedule)
+	Agent     string    `json:"agent,omitempty"`    // AgentChoice id to build it ("" = default)
 	Thinking  string    `json:"thinking,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	Status    string    `json:"status"` // waiting, started, dismissed
@@ -159,7 +161,8 @@ type IdeaView struct {
 	By        string `json:"by"`
 	CreatedAt string `json:"createdAt"`
 	Status    string `json:"status"`
-	Queue     int    `json:"queue,omitempty"` // waiting ideas: 1 = next to start
+	Priority  string `json:"priority"`
+	Queue     int    `json:"queue,omitempty"` // waiting ideas: 1 = next to start in its repo
 	Agent     string `json:"agent,omitempty"` // AgentChoice id it will be built with ("" = default)
 	Thinking  string `json:"thinking,omitempty"`
 	Note      string `json:"note,omitempty"` // started ideas: Zach's changes before starting
@@ -180,6 +183,8 @@ type Body struct {
 	DoneWhen    string            `json:"doneWhen"`
 	By          string            `json:"by"`
 	Tier        string            `json:"tier"`
+	Priority    string            `json:"priority"` // idea: high, normal or low ("" = normal)
+	Schedule    string            `json:"schedule"` // idea: the name of the Paseo schedule filing it
 	Origin      string            `json:"origin"`
 	Agent       string            `json:"agent"`      // AgentChoice id for a new card, an idea, or starting an idea
 	Thinking    string            `json:"thinking"`   // optional model-specific effort for new cards and ideas

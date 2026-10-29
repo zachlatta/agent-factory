@@ -85,6 +85,14 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	if tierRank(b.Tier) >= 0 {
 		idea.Tier = b.Tier
 	}
+	p, err := ideaPriority(b.Priority)
+	if err != nil {
+		return Idea{}, err
+	}
+	idea.Priority = p
+	if name := trunc(strings.TrimSpace(b.Schedule), 80); name != "" {
+		idea.Schedule, idea.By = name, "schedule "+name
+	}
 	if err := checkAgentID(b.Agent); err != nil {
 		return Idea{}, err
 	}
@@ -98,7 +106,7 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 		}
 	}
 	idea.Agent, idea.Thinking = b.Agent, b.Thinking
-	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
+	err = f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for _, i := range ideas {
 			if !strings.EqualFold(i.Title, idea.Title) {
 				continue
@@ -197,17 +205,77 @@ func (s *IdeaStore) replaceCard(oldID, newID string) error {
 	})
 }
 
-// tickIdeas starts the oldest waiting idea if the in-flight and daily caps allow.
+// ideaPriorities ranks idea priorities, most urgent first.
+var ideaPriorities = map[string]int{"high": 0, "normal": 1, "low": 2}
+
+// ideaPriority checks a submitted priority; "" is normal.
+func ideaPriority(p string) (string, error) {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if p == "" {
+		return "normal", nil
+	}
+	if _, ok := ideaPriorities[p]; !ok {
+		return "", fmt.Errorf("priority %q: use high, normal or low", p)
+	}
+	return p, nil
+}
+
+// priorityRank orders an idea's priority; an empty or unknown one (ideas from before priorities) is normal.
+func priorityRank(p string) int {
+	if r, ok := ideaPriorities[p]; ok {
+		return r
+	}
+	return ideaPriorities["normal"]
+}
+
+// ideaOrder sorts ideas in start order: by priority, then oldest first.
+func ideaOrder(ideas []Idea) {
+	sort.SliceStable(ideas, func(a, b int) bool {
+		if ra, rb := priorityRank(ideas[a].Priority), priorityRank(ideas[b].Priority); ra != rb {
+			return ra < rb
+		}
+		return ideas[a].CreatedAt.Before(ideas[b].CreatedAt)
+	})
+}
+
+// ideaUsageFloor: no idea starts on its own while the agent it would use has this percentage or
+// less of its weekly usage left.
+const ideaUsageFloor = 20
+
+// ideaHold says why ideas are not starting on their own, or "" when they may. An auto-start runs
+// on the usage-balanced suggestion (resolveAgent with no agent), so that agent's weekly window is
+// checked. Unknown usage does not hold.
+func (f *Factory) ideaHold() string {
+	a, ok := agentByID(f.suggestedAgent())
+	if !ok {
+		return ""
+	}
+	for _, w := range f.providerUsages()[a.providerID()].Windows {
+		if w.Label == "7d" && w.RemainingPct <= ideaUsageFloor {
+			return fmt.Sprintf("Paused: the suggested agent (%s) has %d%% of its weekly usage left", a.Label, w.RemainingPct)
+		}
+	}
+	return ""
+}
+
+// tickIdeas starts at most one waiting idea: the first in start order (ideaOrder) whose repo is
+// under its in-flight and daily caps, unless ideaHold pauses auto-start.
 func (f *Factory) tickIdeas() error {
 	ideas := f.ideas.List()
 	var waiting []Idea
 	for _, i := range ideas {
-		// a public repo's ideas wait for Zach's Start (guard.go)
-		if i.Status == "waiting" && !f.guarded(i.Repo) {
+		if i.Status == "waiting" {
 			waiting = append(waiting, i)
 		}
 	}
 	if len(waiting) == 0 {
+		return nil
+	}
+	hold := f.ideaHold()
+	if f.noteOnce("idea-hold", hold) && hold != "" {
+		f.logf("ideas: %s", hold)
+	}
+	if hold != "" {
 		return nil
 	}
 	now := f.Now().In(f.cfg.Location)
@@ -216,31 +284,36 @@ func (f *Factory) tickIdeas() error {
 	for _, a := range f.agents() {
 		agents[a.ID] = a
 	}
-	startedToday, inFlight := 0, 0
+	startedToday, inFlight := map[string]int{}, map[string]int{}
 	for _, i := range ideas {
 		if i.Status != "started" {
 			continue
 		}
 		if i.StartedBy == "auto" && i.StartedAt.In(f.cfg.Location).Format("2006-01-02") == day {
-			startedToday++
+			startedToday[i.Repo]++
 		}
 		a, ok := agents[resolveCardID(agents, i.Card)]
 		switch {
 		case !ok && now.Sub(i.StartedAt) < 10*time.Minute: // just started, not on disk yet
-			inFlight++
+			inFlight[i.Repo]++
 		case ok && a.Status != "error" && !a.archived() && Derive(a) != "landed" && Derive(a) != "zach":
-			inFlight++
+			inFlight[i.Repo]++
 		}
 	}
-	if inFlight >= f.cfg.IdeaWIP || startedToday >= f.cfg.IdeaDaily {
+	ideaOrder(waiting)
+	lanes := f.lanes()
+	for _, i := range waiting {
+		caps := lanes[i.Repo].ideaCaps()
+		if inFlight[i.Repo] >= caps.InFlight || startedToday[i.Repo] >= caps.Daily {
+			continue
+		}
+		if _, err := f.startIdea(i.ID, "auto", "", "", ""); err != nil {
+			return err
+		}
+		f.logf("started idea %s in %s (%d/%d in flight, %d/%d today)", i.ID, i.Repo, inFlight[i.Repo]+1,
+			caps.InFlight, startedToday[i.Repo]+1, caps.Daily)
 		return nil
 	}
-	sort.Slice(waiting, func(a, b int) bool { return waiting[a].CreatedAt.Before(waiting[b].CreatedAt) })
-	if _, err := f.startIdea(waiting[0].ID, "auto", "", "", ""); err != nil {
-		return err
-	}
-	f.logf("started idea %s (%d/%d in flight, %d/%d today)", waiting[0].ID, inFlight+1, f.cfg.IdeaWIP,
-		startedToday+1, f.cfg.IdeaDaily)
 	return nil
 }
 
@@ -273,7 +346,8 @@ Rules:
 
 Submit each idea:
 curl -s -X POST localhost:%d/api/idea -H 'X-Factory: 1' -H 'Content-Type: application/json' \
-  -d '{"repo":"%s","by":"scout","tier":"<low|risky|architecture>","title":"<outcome>","summary":"<plain words>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
+  -d '{"repo":"%s","by":"scout","tier":"<low|risky|architecture>","priority":"<high|normal|low>","title":"<outcome>","summary":"<plain words>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
+Priority is normal unless your evidence shows it is urgent (high) or can wait (low); ideas start on their own by priority, then age.
 
 Then stop with a one-line list of what you submitted.
 `

@@ -26,8 +26,6 @@ type Config struct {
 	Window    time.Duration // archived agents stay in Done this long
 	Poll      time.Duration
 	ReworkCap int           // review rounds per gate before the card goes to Zach
-	IdeaWIP   int           // agent-suggested cards in flight at once
-	IdeaDaily int           // agent-suggested cards started per day
 	IdleTTL   time.Duration // a Needs Zach card idle this long is parked (reap.go)
 	IdleCap   int           // more live idle factory agents than this parks the longest idle (reap.go)
 	Location  *time.Location
@@ -64,12 +62,6 @@ func (c *Config) defaults() {
 	}
 	if c.ReworkCap == 0 {
 		c.ReworkCap = 3
-	}
-	if c.IdeaWIP == 0 {
-		c.IdeaWIP = 2
-	}
-	if c.IdeaDaily == 0 {
-		c.IdeaDaily = 5
 	}
 	if c.IdleTTL == 0 {
 		c.IdleTTL = defaultIdleTTL

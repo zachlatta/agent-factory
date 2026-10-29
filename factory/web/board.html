@@ -60,6 +60,9 @@ main{padding:12px 16px calc(80px + env(safe-area-inset-bottom));overflow-x:auto}
 .tier.risky{background:#fff1e5;color:#bc4c00}
 .tier.architecture{background:#fbefff;color:var(--purple)}
 .tier.routine{background:#eef1f4;color:var(--mute)}
+.prio{display:inline-block;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;margin:3px 3px 0 0;letter-spacing:.02em}
+.prio.high{background:#ffebe9;color:#cf222e}
+.prio.low{background:#eef1f4;color:var(--mute)}
 .tiers{font-size:12px;margin:6px 0 10px;display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:baseline}
 .ausage{margin:4px 0 8px;border:1px solid var(--line);border-radius:6px;background:#f6f8fa;font-size:12px}
 .ausage .arow{display:grid;grid-template-columns:minmax(110px,1.1fr) 1fr auto;gap:8px;align-items:center;padding:4px 8px;border-top:1px solid #eaeef2;cursor:pointer}
@@ -709,7 +712,7 @@ function cardHtml(c){
     <div class="t"><span class="dot ${dot}"></span><span>${esc(c.title)}</span></div>
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
-    <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
+    <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?`<div class="ask" onclick="event.stopPropagation()">${askKind(c.ask)}<div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?askTodo(c.ask)+evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
   </div>`;
@@ -958,13 +961,27 @@ function fillAsk(c){
 // and the builder's technical brief (fetched on open, folded).
 const briefs = {}, briefFull = new Set();
 const mdIdea = s => md(String(s||'').replace(/~/g, '\\~')); // "~200 lines" is not strikethrough
+// prioChip: a waiting idea's priority on its card; normal shows nothing
+function prioChip(c){
+  const p = c.stage==='idea' && c.idea && c.idea.priority;
+  return p==='high'||p==='low' ? `<span class="prio ${p}">${p} priority</span>` : '';
+}
+const prioHelp = {high:'High: starts before normal and low ideas.', normal:'Normal: starts in the order it was suggested.', low:'Low: starts after high and normal ideas.'};
+// ideaStartText: when the factory starts this repo's ideas on its own (lanes.json caps), and any pause
+function ideaStartText(c){
+  const cap = (B.ideaCaps||{})[c.repo] || {inFlight:2, daily:5};
+  const auto = cap.inFlight>0 && cap.daily>0
+    ? `The factory starts this repo's ideas on its own, up to ${cap.inFlight} at a time and ${cap.daily} a day, unless you dismiss it.`
+    : `Ideas in this repo never start on their own; use <b>Start now</b>.`;
+  return auto + (B.ideaHold ? ` <b>${esc(B.ideaHold)}</b>; ideas start again once it has more.` : '');
+}
 function ideaHtml(c, isIdea){
-  const i = c.idea, caps = B.caps||{};
+  const i = c.idea;
   const tier = c.tier ? `<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span> ${esc((B.tiers||{})[c.tier]||'')}`
     : 'No tier guess yet; the plan review sets it.';
   const brief = briefs[i.id];
-  const next = isIdea ? `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line':esc('number '+i.queue+' in line')}.
-      The factory starts ideas on its own, up to ${caps.ideaWip||2} at a time and ${caps.ideaDaily||5} a day, unless you dismiss it.
+  const next = isIdea ? `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line for this repo':esc('number '+i.queue+' in line for this repo')}.
+      ${ideaStartText(c)}
       Each one is then planned and reviewed like any card; this tier decides how much review it gets. <b>Start now</b> skips the line.</div>` : '';
   return `${isIdea?'':'<h4>Started from this idea</h4>'}
     <h4>What it proposes</h4>
@@ -973,6 +990,7 @@ function ideaHtml(c, isIdea){
     <h4>Why</h4><div class="md">${i.why?mdIdea(i.why):'<i>Not given.</i>'}</div>
     ${i.doneWhen?`<h4>Done when</h4><div class="md">${mdIdea(i.doneWhen)}</div>`:''}
     <h4>Tier</h4><div class="md">${tier}</div>
+    ${isIdea?`<h4>Priority</h4><div class="md">${esc(prioHelp[i.priority]||prioHelp.normal)}</div>`:''}
     <h4>Suggested by</h4><div class="md">${esc(i.by||'agent')}, ${ago(i.createdAt)}</div>
     ${next}
     <h4>Technical brief for the builder</h4>

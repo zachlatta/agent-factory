@@ -36,18 +36,17 @@ func TestLimitReset(t *testing.T) {
 func TestErroredIdeaReleasesCapacity(t *testing.T) {
 	a := quotaCard("building")
 	f, p := newTestFactory(t, a)
-	f.cfg.IdeaWIP = 1
-	if err := f.ideas.save([]Idea{{ID: "started", Status: "started", Card: a.ID, StartedAt: t0.Add(-time.Hour), StartedBy: "auto"}, {ID: "waiting", Status: "waiting", Request: "Improve checks", Repo: "example/desk"}}); err != nil {
+	setLanes(t, f, `{"example/desk":{"name":"desk","ideas":{"inFlight":1,"daily":1}}}`)
+	if err := f.ideas.save([]Idea{{ID: "started", Status: "started", Repo: "example/desk", Card: a.ID, StartedAt: t0.Add(-time.Hour), StartedBy: "auto"}, {ID: "waiting", Status: "waiting", Request: "Improve checks", Repo: "example/desk"}}); err != nil {
 		t.Fatal(err)
 	}
-	f.cfg.IdeaDaily = 1
 	if err := f.tickIdeas(); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.runsWithLabel(labelArg(labelOrigin, "idea"))) != 0 {
 		t.Fatal("daily cap bypassed")
 	}
-	f.cfg.IdeaDaily = 2
+	setLanes(t, f, `{"example/desk":{"name":"desk","ideas":{"inFlight":1,"daily":2}}}`)
 	if err := f.tickIdeas(); err != nil {
 		t.Fatal(err)
 	}

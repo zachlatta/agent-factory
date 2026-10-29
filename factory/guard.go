@@ -16,7 +16,8 @@ import (
 // config, so a card cannot weaken the scan that checks it). Reviewers are told the repo is public,
 // and private data in the diff is blocking. A card lands on its own once its code review approves
 // and that scan passes, under the usual tier rules; a scan hit or error stops it for Zach. Their
-// ideas wait for Zach's Start, and the direct track is off. Other repos are unaffected.
+// ideas start on their own like any repo's (ideas.go), and the direct track is off. Other repos are
+// unaffected.
 
 // guarded reports whether repo is in Config.Guarded.
 func (f *Factory) guarded(repo string) bool {

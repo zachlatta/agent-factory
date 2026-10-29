@@ -225,21 +225,15 @@ func TestGuardedDirectTrackGoesToZach(t *testing.T) {
 	}
 }
 
-func TestGuardedIdeasWaitForZach(t *testing.T) {
+func TestGuardedIdeasAutoStart(t *testing.T) {
+	// a public repo's ideas start on their own like any repo's; the scan still runs before landing
 	f, p := newTestFactory(t)
 	if _, err := f.Act("idea", Body{Request: "public one", Repo: publicRepo}); err != nil {
 		t.Fatal(err)
 	}
 	f.Tick()
-	if n := len(p.runsWithLabel(labelArg(labelOrigin, "idea"))); n != 0 {
-		t.Fatalf("public-repo idea auto-started (%d)", n)
-	}
-	if _, err := f.Act("idea", Body{Request: "private one"}); err != nil {
-		t.Fatal(err)
-	}
-	f.Tick()
 	if n := len(p.runsWithLabel(labelArg(labelOrigin, "idea"))); n != 1 {
-		t.Fatalf("private-repo idea did not start (%d)", n)
+		t.Fatalf("public-repo idea did not start (%d)", n)
 	}
 }
 

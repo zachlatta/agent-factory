@@ -56,7 +56,8 @@ here: suggest it as an idea, at most 2 per card, only with a concrete payoff. %s
 finishing this card. First check it is not already an idea or a card in flight:
 `+"`curl -s localhost:%d/api/ideas`"+` and the peers brief. Then:
 curl -s -X POST localhost:%d/api/idea -H 'X-Factory: 1' -H 'Content-Type: application/json' \
-  -d '{"repo":"<owner/repo>","by":"%s","tier":"<low|risky|architecture>","title":"<outcome, at most 60 characters>","summary":"<1-2 plain sentences>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
+  -d '{"repo":"<owner/repo>","by":"%s","tier":"<low|risky|architecture>","priority":"<high|normal|low>","title":"<outcome, at most 60 characters>","summary":"<1-2 plain sentences>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
+Priority is normal unless your evidence shows it is urgent (high) or can wait (low); ideas start on their own by priority, then age.
 `, note, port, port, by)
 }
 

@@ -58,7 +58,7 @@ func TestIdeasStartedTitleBlockedFor14Days(t *testing.T) {
 
 func TestTickStartsIdeasWithinCaps(t *testing.T) {
 	f, p := newTestFactory(t)
-	f.cfg.IdeaWIP, f.cfg.IdeaDaily = 2, 3
+	setLanes(t, f, `{"example/desk":{"name":"desk","ideas":{"inFlight":2,"daily":3}}}`)
 	for _, r := range []string{"one", "two", "three", "four"} {
 		if _, err := f.Act("idea", Body{Request: r}); err != nil {
 			t.Fatal(err)
@@ -103,7 +103,7 @@ func TestTickStartsIdeasWithinCaps(t *testing.T) {
 
 func TestDailyCapResetsNextDay(t *testing.T) {
 	f, p := newTestFactory(t)
-	f.cfg.IdeaWIP, f.cfg.IdeaDaily = 5, 1
+	setLanes(t, f, `{"example/desk":{"name":"desk","ideas":{"inFlight":5,"daily":1}}}`)
 	f.Act("idea", Body{Request: "a"})
 	f.Act("idea", Body{Request: "b"})
 	f.Tick()

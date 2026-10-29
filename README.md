@@ -534,9 +534,27 @@ are unavailable, not evidence of zero usage. Cache and reasoning fields remain s
 ### Ideas
 
 Any agent can suggest work with `POST /api/idea` (header `X-Factory: 1`; `repo`, `title`,
-`summary`, `why`, `doneWhen`, `request`, optional `tier`). The factory starts the oldest waiting
-idea, at most 2 in flight and 5 a day; a person can Start or Dismiss any idea. Errored cards do not count
-toward the in-flight cap; when they resume, the count can temporarily exceed that cap. Titles that repeat
+`summary`, `why`, `doneWhen`, `request`, optional `tier`, `priority` and `schedule`). A person can
+Start or Dismiss any idea; otherwise the factory starts them on its own:
+
+- **Priority.** `priority` is `high`, `normal` (the default) or `low`; anything else is rejected.
+  Waiting ideas start by priority, then oldest first, and the board lists them in that order with
+  a High or Low chip and each idea's place in its repo's line.
+- **Caps per repo.** Each repo has its own caps in `lanes.json`:
+  `"ideas": {"inFlight": 2, "daily": 5}` (those are the defaults, for any field or repo not listed;
+  0 means never on its own). Each tick starts at most one idea, the first in line whose repo is
+  under both caps. Errored cards do not count toward the in-flight cap; when they resume, the count
+  can temporarily exceed it. Public repos are no exception: their cards land under the
+  finished-work rule and the secret scan.
+- **Usage floor.** An auto-start runs on the auto-suggested agent (see Repo and agent per card). While
+  that agent's plan has 20% or less of its 7-day window left, no idea starts on its own, the board's
+  idea panel says why, and Start still works. Unknown usage does not hold.
+- **Schedules.** A Paseo schedule that files an idea sends `schedule` (its name, at most 80
+  characters): the idea is stored with it, and `by` reads `schedule <name>`. Scheduled self-improve
+  jobs that would change code file one batched idea per repo this way instead of committing, so
+  their fixes go through the same review as any card.
+
+Titles that repeat
 a waiting, dismissed or recently started idea are rejected. "Suggest ideas" on the board starts a
 read-only Scout that submits up to 3, guided by the dialog's prompt; with Repo Auto, a picker first
 chooses the repo from that prompt, as for new cards. The text in “What should it do?” is passed to the Scout
@@ -936,7 +954,7 @@ in them is published. For their cards:
   always-ask list. For those, no person approves the landing: what keeps private data out is the
   code reviewer, told the repo is public, and the scans. Landing a card at Ready for you
   scans again before the land message.
-- The direct track is off, ideas wait for a person's Start, and reviewers get a public-repo rule
+- The direct track is off, and reviewers get a public-repo rule
   (any hostname, email, id, quote or secret is blocking).
 
 Other repos are unaffected.
@@ -1107,7 +1125,7 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_DEFAULT_REPO` | `-default-repo` | `owner/repo` for cards with none given; errands are recorded there (required for cards with no repo) |
 | `FACTORY_GUARDED_REPOS` | `-guarded` | comma-separated public repos (default this one) |
 | `FACTORY_PRIVATE_RULES` | `-private-rules` | private scan patterns (default `~/.config/agent-factory/denylist`) |
-| `FACTORY_LANES` | `-lanes` | board lane names per repo, `{"owner/repo": {"name": "...", "lands": "..."}}` (default `~/.config/agent-factory/lanes.json`) |
+| `FACTORY_LANES` | `-lanes` | per repo: board lane name, how it lands and idea caps, `{"owner/repo": {"name": "...", "lands": "...", "ideas": {"inFlight": 2, "daily": 5}}}` (default `~/.config/agent-factory/lanes.json`) |
 | `FACTORY_IDLE_TTL` | `-idle-ttl` | park a Needs Zach card idle this long (default `3h`) |
 | `FACTORY_IDLE_CAP` | `-idle-cap` | park the longest idle Needs Zach cards while more factory agents than this are idle (default 10) |
 | `FACTORY_STAGE_HANDOFF` | `-stage-handoff` | `on` (default): each new stage of a card starts a fresh agent with a short handoff; `off`: resume the card's session |
