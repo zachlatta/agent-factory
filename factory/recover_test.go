@@ -471,6 +471,25 @@ func TestLandedDiffDiffersOnAPublicRepo(t *testing.T) {
 	}
 }
 
+func TestLandedDiffRecoveryReviewsPublishedHead(t *testing.T) {
+	c := card("c1", map[string]string{
+		labelStage: "building", labelAutoReview: "code", labelPlanRounds: "1",
+		labelSince: ago(10 * time.Minute), labelLandedVerified: "1", labelReviewed: "h1",
+	})
+	b, _ := json.Marshal(recovery{Lands: 1, LandedDiff: true})
+	c.Labels[labelPrefix+labelRecovery] = base64.RawURLEncoding.EncodeToString(b)
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.GitOut = gitStub(map[string]string{
+		"rev-list origin/main..HEAD": "", "rev-parse HEAD": "h2\n", "status --porcelain": "",
+	})
+	storeLog(t, f, p, c.ID, "The published change needs no further edits.\nREMAINING: none")
+	f.Tick()
+	if l := p.labels(c.ID); l[labelStage] != "review" || l[labelReviewed] != "h2" || p.runs != 1 {
+		t.Fatalf("published recovery skipped review: labels %v runs %d", l, p.runs)
+	}
+}
+
 func TestReLandAfterRecoveryStillScans(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "1",
 		labelReviewed: reviewedSHA})

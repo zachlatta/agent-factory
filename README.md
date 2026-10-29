@@ -291,7 +291,8 @@ The planner (the "Fellow") first picks a track:
   not on main is told once to land its work item again, then marked stuck.
 - A landing whose commits differ from the reviewed ones goes back to building the same way: the
   agent checks what landed and fixes forward, code review covers what landed, and the land prompt
-  says not to push again if HEAD is already on main. On a public repo the factory first scans the
+  says not to push again if HEAD is already on main. This review still runs when an earlier landing
+  was verified and there are no unpushed commits. On a public repo the factory first scans the
   range that landed (`factory.base..HEAD`). A hit, or a scan that cannot run, waits in Needs Zach as
   "Landed something other than what was reviewed" and is emailed: something unreviewed is already
   public.

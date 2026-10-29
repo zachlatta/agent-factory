@@ -1174,7 +1174,9 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
-		if a.L(labelStage) == "building" && a.L(labelAutoReview) == "code" && a.L(labelLandedVerified) == "1" {
+		// A landed-diff recovery must review the published HEAD even when there are no
+		// unpushed commits. A verification carried from an earlier landing cannot cover it.
+		if a.L(labelStage) == "building" && a.L(labelAutoReview) == "code" && a.L(labelLandedVerified) == "1" && !readRecovery(a).LandedDiff {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			commits, err := f.GitOut(ctx, c.Cwd, "rev-list", "origin/main..HEAD")
 			cancel()
