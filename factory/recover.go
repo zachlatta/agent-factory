@@ -415,7 +415,8 @@ func newestReviewerOf(agents []Agent, id string) (Agent, bool) {
 }
 
 // replaceReviewer retires card a's reviewers and starts a fresh one of kind, at most reviewerRetryCap
-// times per review round; then reviewersExhausted takes over. why says what went wrong.
+// times per review round; then reviewersExhausted takes over. why says what went wrong. Like every
+// review recovery, it runs with card a's gate held (decide, checkStuck).
 func (f *Factory) replaceReviewer(a Agent, kind, why string) error {
 	n := atoi(a.L(labelReviewerRetries))
 	if err := f.supersedeReviewers(a.ID); err != nil {
@@ -428,7 +429,7 @@ func (f *Factory) replaceReviewer(a Agent, kind, why string) error {
 		return err
 	}
 	f.logf("%s %s reviewer %s; starting replacement %d of %d", short(a.ID), kind, why, n+1, reviewerRetryCap)
-	return f.rerunReview(a, kind)
+	return f.rerunReviewLocked(f.gate(a.ID), a, kind)
 }
 
 // replaceLenses replaces each lens of card a's open panel that has no result (blocked, or gone), at

@@ -190,13 +190,17 @@ func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 		labelVerdict: "code approve", labelCodeRounds: "1", labelNote: "review passed: approve to land",
 		labelReviewed: reviewedSHA}))
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) { return nil, nil }
-	// rev-parse is a read, so the dry run passes it through: HEAD is still the reviewed commit
+	// rev-parse and status are reads, so the dry run passes them through: HEAD is still the reviewed
+	// commit, with nothing uncommitted
 	f.Git, f.GitOut = f.dryRunGit(
 		func(_ context.Context, _ string, args ...string) error { gitCalls.add(args); return nil },
 		func(_ context.Context, _ string, args ...string) (string, error) {
 			gitCalls.add(args)
-			if strings.Join(args, " ") == "rev-parse HEAD" {
+			switch strings.Join(args, " ") {
+			case "rev-parse HEAD":
 				return reviewedSHA + "\n", nil
+			case "status --porcelain":
+				return "", nil
 			}
 			return "", errors.New("no git in tests")
 		})

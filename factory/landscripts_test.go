@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeFactoryBin stands in for the installed factory binary: it logs each call, passes `scan`, and
@@ -26,6 +27,27 @@ esac
 exit 9
 `
 
+// fakeGo logs each call. With $FAKE/hold present, `go test` waits (up to 30 s) for $FAKE/release,
+// so a test can inspect a landing run while its long step is under way.
+const fakeGo = `#!/bin/sh
+echo "go $*" >>"$FAKE/log"
+if [ "$1" = test ] && [ -f "$FAKE/hold" ]; then
+	echo held >"$FAKE/holding"
+	i=0
+	while [ ! -f "$FAKE/release" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+fi
+`
+
+// fakePaseoBin stands in for the paseo CLI: it logs each call, keeps the last label value set in
+// $FAKE/marker, and exits with $FAKE/paseo-exit (default 0).
+const fakePaseoBin = `#!/bin/sh
+echo "paseo $*" >>"$FAKE/log"
+for a in "$@"; do
+	case "$a" in factory.land-run=*) echo "${a#factory.land-run=}" >"$FAKE/marker" ;; esac
+done
+exit "$(cat "$FAKE/paseo-exit" 2>/dev/null || echo 0)"
+`
+
 // scriptRepo is a clone (wt) of a bare origin carrying this repo's bin/land, bin/scan and pre-push
 // hook, another clone (other) that pushes main too, and the fake binary in fake.
 type scriptRepo struct {
@@ -43,7 +65,9 @@ func newScriptRepo(t *testing.T) *scriptRepo {
 	os.MkdirAll(filepath.Join(root, "home"), 0o755)
 	os.MkdirAll(s.fake, 0o755)
 	os.WriteFile(filepath.Join(s.fake, "factory"), []byte(fakeFactoryBin), 0o755)
-	os.WriteFile(filepath.Join(s.fake, "go"), []byte("#!/bin/sh\necho \"go $*\" >>\"$FAKE/log\"\n"), 0o755)
+	os.WriteFile(filepath.Join(s.fake, "go"), []byte(fakeGo), 0o755)
+	// shadows any real paseo on PATH: a test never updates a real agent
+	os.WriteFile(filepath.Join(s.fake, "paseo"), []byte(fakePaseoBin), 0o755)
 	s.env = append(os.Environ(), "HOME="+filepath.Join(root, "home"), "FAKE="+s.fake,
 		"FACTORY_BIN="+filepath.Join(s.fake, "factory"), "PATH="+s.fake+":"+os.Getenv("PATH"),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@users.noreply.github.com", "GIT_COMMITTER_NAME=t",
@@ -149,7 +173,9 @@ func TestLandReviewsTheRebasedHeadBeforePushing(t *testing.T) {
 	if r := s.reviews(); len(r) != 2 || r[0] != head || r[1] != head {
 		t.Errorf("reviews = %v, want the rebased %s twice", r, head)
 	}
-	if sc := s.scans(); len(sc) != 2 || !strings.Contains(sc[0], "origin/main..HEAD") || !strings.Contains(sc[1], ".."+head) {
+	// bin/land scans from the main it fetched and rebased onto, pinned by commit
+	if sc := s.scans(); len(sc) != 2 || !strings.Contains(sc[0], " "+s.git(s.wt, "rev-parse", "HEAD~1")+"..HEAD") ||
+		!strings.Contains(sc[1], ".."+head) {
 		t.Errorf("scans = %v", sc)
 	}
 }
@@ -247,6 +273,32 @@ func TestLandRetriesARaceWithAFreshReview(t *testing.T) {
 	}
 }
 
+func TestLandRetriesWhenSharedOriginMainAdvancesDuringReview(t *testing.T) {
+	s := newScriptRepo(t)
+	s.agent()
+	first := s.commit(s.wt, "a.txt", "mine\n")
+	// while bin/land's first review runs, another worktree lands on main and, sharing this
+	// checkout's refs, updates origin/main here too
+	s.mutate("1", "echo theirs >'"+filepath.Join(s.other, "b.txt")+"' && git -C '"+s.other+"' add b.txt && "+
+		"git -C '"+s.other+"' commit -q -m theirs && git -C '"+s.other+"' push -q origin main && "+
+		"git -C '"+s.wt+"' fetch -q origin main")
+	out, err := s.land()
+	if err != nil {
+		t.Fatalf("land: %v\n%s", err, out)
+	}
+	head := s.git(s.wt, "rev-parse", "HEAD")
+	r := s.reviews()
+	if s.main() != head || head == first || len(r) < 3 || r[0] != first || r[len(r)-2] != head || r[len(r)-1] != head {
+		t.Errorf("main %s HEAD %s first %s reviews %v\n%s", s.main(), head, first, r, out)
+	}
+	if !strings.Contains(out, "retrying") || strings.Contains(out, "did not move") {
+		t.Errorf("want a retry:\n%s", out)
+	}
+	if s.git(s.wt, "rev-parse", "HEAD~1") != s.git(s.other, "rev-parse", "HEAD") {
+		t.Errorf("HEAD %s is not rebased onto the other landing", head)
+	}
+}
+
 func TestLandAsAPersonKeepsTheScanOnlyPath(t *testing.T) {
 	s := newScriptRepo(t)
 	head := s.commit(s.wt, "a.txt", "mine\n")
@@ -256,6 +308,74 @@ func TestLandAsAPersonKeepsTheScanOnlyPath(t *testing.T) {
 	}
 	if len(s.reviews()) != 0 || len(s.scans()) != 2 {
 		t.Errorf("log = %v", s.log())
+	}
+	for _, l := range s.log() {
+		if strings.HasPrefix(l, "paseo ") {
+			t.Errorf("a person's landing registered with Paseo: %q", l)
+		}
+	}
+}
+
+// An agent's bin/land records its own process with the factory before any long step, and the
+// record names a live bin/land exactly while it runs.
+func TestLandRegistersItsRunBeforeLongSteps(t *testing.T) {
+	s := newScriptRepo(t)
+	s.agent()
+	head := s.commit(s.wt, "a.txt", "mine\n")
+	os.WriteFile(filepath.Join(s.fake, "hold"), nil, 0o644)
+	type result struct {
+		out string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := s.land()
+		done <- result{out, err}
+	}()
+	held := false
+	for i := 0; i < 300 && !held; i++ {
+		_, err := os.Stat(filepath.Join(s.fake, "holding"))
+		held = err == nil
+		if !held {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	marker, _ := os.ReadFile(filepath.Join(s.fake, "marker"))
+	live, why := landRunLive(strings.TrimSpace(string(marker)), time.Now())
+	os.WriteFile(filepath.Join(s.fake, "release"), nil, 0o644)
+	r := <-done
+	if !held {
+		t.Fatalf("bin/land never reached its tests:\n%s", r.out)
+	}
+	if !live {
+		t.Errorf("marker %q of the running bin/land reads as not live: %s", marker, why)
+	}
+	if r.err != nil || s.main() != head {
+		t.Fatalf("land: %v\n%s", r.err, r.out)
+	}
+	log := s.log()
+	if len(log) == 0 || !strings.HasPrefix(log[0], "paseo agent update agent1 --label factory.land-run=") {
+		t.Errorf("first call is not the registration: %v", log)
+	}
+	if live, _ := landRunLive(strings.TrimSpace(string(marker)), time.Now()); live {
+		t.Errorf("marker %q still live after bin/land exited", marker)
+	}
+}
+
+func TestLandStopsWhenItsRunCannotBeRegistered(t *testing.T) {
+	s := newScriptRepo(t)
+	s.agent()
+	before := s.main()
+	s.commit(s.wt, "a.txt", "mine\n")
+	os.WriteFile(filepath.Join(s.fake, "paseo-exit"), []byte("1"), 0o644)
+	out, err := s.land()
+	if err == nil || s.main() != before {
+		t.Fatalf("landed without a registered run: %v\n%s", err, out)
+	}
+	for _, l := range s.log() {
+		if !strings.HasPrefix(l, "paseo ") {
+			t.Errorf("ran %q after the registration failed", l)
+		}
 	}
 }
 

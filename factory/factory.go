@@ -108,6 +108,7 @@ type Factory struct {
 	panelMu    sync.Mutex              // guards panels and lenses (panel.go)
 	panels     map[string]string       // card id -> its open panel round ("" closed), ahead of stale snapshots
 	lenses     map[string]lensResult   // panel reviewer id -> its recorded result, ahead of stale snapshots
+	cardGates  sync.Map                // card ID -> *cardGate: its follow-ups and review verdicts (actions.go)
 
 	cfg    Config
 	p      Paseo

@@ -79,7 +79,8 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelTold: "architecture: approve the plan to build",
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
 		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
-		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
+		labelCodeRoundsFrom: "1",
+		labelZachPlan:       "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
 		labelLandedVerified: "1",
 		labelRecovery:       "e30", labelReviewerRetries: "1",
 		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
@@ -89,6 +90,13 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 	copied := copyCarriedLabels(old)
 	if copied[labelPrefix+labelHeldApproved] == "" {
 		t.Error("copyCarriedLabels dropped Zach's held approval")
+	}
+	if copied[labelPrefix+labelCodeRoundsFrom] != "1" {
+		t.Error("handoff lost the new request's bounded review generation")
+	}
+	partial := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "building", labelReplaces: old.ID})
+	if inherited := applyLineageLabels([]Agent{old, partial})[1]; inherited.L(labelCodeRoundsFrom) != "1" {
+		t.Error("partial handoff lost the new request's bounded review generation")
 	}
 	for _, k := range carriedFactoryLabels {
 		if k != labelTold && copied[labelPrefix+k] == "" {

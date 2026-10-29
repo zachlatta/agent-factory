@@ -3,7 +3,10 @@
 # push (other agents push main too). Never pass --no-verify: the pre-push hook scans again.
 # An agent (PASEO_AGENT_ID set) also needs the factory's landing review to approve exactly the
 # rebased HEAD before the push; a review that does not approve, or cannot run, stops without pushing,
-# and only a push that main moved under is retried.
+# and only a push that main moved under is retried. Each try pins the fetched main as its base:
+# origin/main is shared by every worktree, so another one may move it at any time. An agent's run first
+# records its PID and start time on its agent (factory.land-run), or stops: the factory reads the agent's
+# idle turn as a landing still under way only while that exact process runs.
 set -eu
 root=$(git rev-parse --show-toplevel)
 cd "$root"
@@ -12,14 +15,27 @@ if [ -n "$(git status --porcelain)" ]; then
 	echo "land: uncommitted changes; commit or drop them first" >&2
 	exit 1
 fi
+if [ -n "${PASEO_AGENT_ID:-}" ]; then
+	# Record this run (PID and start time) on the agent before any long step, so the factory reads
+	# the agent's idle turn as a landing still under way only while this exact process lives.
+	started=$(LC_ALL=C TZ=UTC ps -o lstart= -p $$ | tr -s ' :' '__' | sed 's/^_//;s/_$//')
+	case "$started" in
+	'' | *[!A-Za-z0-9_]*) started= ;;
+	esac
+	if [ -z "$started" ] || ! paseo agent update "$PASEO_AGENT_ID" --label "factory.land-run=$$.$started" >/dev/null; then
+		echo "land: could not record this landing run with the factory; not landing" >&2
+		exit 1
+	fi
+fi
 for try in 1 2 3 4 5; do
 	git fetch -q origin main
-	git rebase -q origin/main
-	if [ -z "$(git rev-list origin/main..HEAD)" ]; then
+	base=$(git rev-parse --verify FETCH_HEAD^{commit})
+	git rebase -q "$base"
+	if [ -z "$(git rev-list "$base..HEAD")" ]; then
 		echo "land: nothing to land"
 		exit 0
 	fi
-	bin/scan origin/main..HEAD
+	bin/scan "$base..HEAD"
 	go vet ./...
 	go test ./...
 	if [ -n "${PASEO_AGENT_ID:-}" ]; then
@@ -36,7 +52,6 @@ for try in 1 2 3 4 5; do
 			echo "land: the checkout changed during the landing review; not pushing" >&2
 			exit 1
 		fi
-		main=$(git rev-parse origin/main)
 	fi
 	if git push -q origin HEAD:main; then
 		echo "land: pushed $(git rev-parse --short HEAD) to main"
@@ -44,7 +59,7 @@ for try in 1 2 3 4 5; do
 	fi
 	if [ -n "${PASEO_AGENT_ID:-}" ]; then
 		git fetch -q origin main
-		if [ "$(git rev-parse origin/main)" = "$main" ]; then
+		if [ "$(git rev-parse --verify FETCH_HEAD^{commit})" = "$base" ]; then
 			echo "land: push failed and main did not move (a scan or review refused it); not retrying" >&2
 			exit 1
 		fi

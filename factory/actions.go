@@ -4,10 +4,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Act runs one board action (POST /api/<action>).
@@ -60,19 +63,37 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			// archived: no move would come for it in a working column
 			return nil, errors.New("this card is parked: reply to it to wake it first")
 		}
-		if b.Stage == "landed" && c.ArchivedAt == "" { // archiveAgent drops a parked card's park
-			if err := f.archiveAgent(c.ID); err != nil {
+		labels := map[string]string{labelStage: b.Stage, labelSince: now}
+		if b.Stage == "landed" {
+			g := f.gate(c.ID)
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			if c.ArchivedAt == "" { // archiveAgent drops a parked card's park
+				if err := f.archiveAgent(c.ID); err != nil {
+					return nil, err
+				}
+			}
+			labels[labelAutoReview] = ""
+			if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), labels)); err != nil {
 				return nil, err
 			}
+			return ok, f.endReviews(g, c.ID)
 		}
-		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: b.Stage, labelSince: now}))
+		f.reopen(c.ID)
+		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), labels))
 	case "review":
 		kind := b.Kind
 		if kind != "plan" {
 			kind = "code"
 		}
+		f.reopen(c.ID)
 		if c.Status == "running" {
-			return map[string]bool{"queued": true}, f.setLabels(c.ID, map[string]string{labelAutoReview: kind, labelSince: now})
+			labels := map[string]string{labelAutoReview: kind, labelSince: now}
+			if f.agent(c.ID).L(labelStage) == "landed" {
+				// out of Done, so the queued review starts once the agent stops
+				labels[labelStage] = map[string]string{"code": "building", "plan": "plan"}[kind]
+			}
+			return map[string]bool{"queued": true}, f.setLabels(c.ID, labels)
 		}
 		_, err := f.StartReview(c, kind)
 		return ok, err
@@ -91,13 +112,34 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			// his email reply, as a follow-up block so the card's request and reviewer prompts show it
 			msg, via = f.emailFollowUp(msg), "Zach answered by email while the card waited on him:\n\n"
 		}
+		if !sub {
+			// a review running now did not see this message or the work it asks for: from here on its
+			// verdict is retired, even one a Tick is about to apply from an older list (ApplyVerdict)
+			g := f.gate(c.ID)
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			g.followUp = f.Now()
+		}
 		if a := f.agent(c.ID); errorStuck(a) {
-			return ok, f.resumeError(a, via+msg, b.Attachments)
+			if !sub {
+				if err := f.retireReviews(c.ID); err != nil {
+					return nil, err
+				}
+			}
+			if err := f.resumeError(a, via+msg, b.Attachments); err != nil {
+				return nil, err
+			}
+			f.delivered(c.ID, sub)
+			return ok, nil
 		}
 		if a := f.agent(c.ID); a.L(labelStage) == "zach" && strings.HasPrefix(a.L(labelNote), "history unavailable") {
 			// Retire the paused review before sending new work. Its file can appear
 			// later, but its verdict must never decide the response to this message.
 			if err := f.supersedeReviewers(c.ID); err != nil {
+				return nil, err
+			}
+		} else if !sub {
+			if err := f.retireReviews(c.ID); err != nil {
 				return nil, err
 			}
 		}
@@ -109,6 +151,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			f.delivered(c.ID, sub)
 			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, map[string]string{
 				labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now, labelNote: "revising plan for Zach",
 				labelDecided: "1"})
@@ -123,8 +166,13 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		f.delivered(c.ID, sub)
 		if a := f.agent(c.ID); !sub && c.ArchivedAt == "" && a.L(labelStage) != "" {
 			labels := replyLabels(a, now, f.guarded(c.Repo))
+			if labels[labelAutoReview] == "code" {
+				// his message is a new request: its code review is a generation of its own
+				maps.Copy(labels, newCodeGeneration(a))
+			}
 			if a.L(labelStage) == "zach" {
 				labels[labelDecided] = "1" // his answer to a stop: later reviews treat it as settled
 			}
@@ -198,10 +246,17 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		return ok, f.startArbiter(a, kind, "(Not kept here: the last review is the latest reviewer message in the builder's "+
 			"conversation, or read the card's reviewers.)", false)
 	case "rerun":
+		f.reopen(c.ID)
 		return ok, f.rerun(c)
 	case "done":
+		g := f.gate(c.ID)
+		g.mu.Lock()
+		defer g.mu.Unlock()
 		if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landed",
-			labelNote: "marked done by Zach"})); err != nil {
+			labelNote: "marked done by Zach", labelAutoReview: ""})); err != nil {
+			return nil, err
+		}
+		if err := f.endReviews(g, c.ID); err != nil {
 			return nil, err
 		}
 		if c.Parked != "" {
@@ -256,6 +311,75 @@ func (f *Factory) dropAgent(id string) error {
 	return nil
 }
 
+// cardGate orders a card's follow-ups (Act send), review starts (StartReview) and review verdicts
+// (ApplyVerdict) in this process, which do not otherwise wait for each other, and keeps the time of
+// its last follow-up: a verdict from a reviewer started before it is retired, and no review starts
+// until the builder has acted on a delivered one, even when the Tick doing it read its agents before
+// the follow-up's labels were written. After a restart the labels alone hold.
+type cardGate struct {
+	mu        sync.Mutex
+	followUp  time.Time // a follow-up began: earlier reviewers are retired
+	delivered time.Time // that follow-up reached the builder, and its labels queue the next step
+	finished  bool      // Zach finished the card: no review starts or applies until he reopens it
+}
+
+// reopen lets card id's reviews run again after Zach finished it: his explicit review, re-run or
+// move out of Done. Done's stamp is no message the builder must answer first, so it goes too; reviewers
+// started before Done stay retired (followUp). His message reopens the card too (delivered).
+func (f *Factory) reopen(id string) {
+	g := f.gate(id)
+	g.mu.Lock()
+	if g.finished {
+		g.finished, g.delivered = false, time.Time{}
+	}
+	g.mu.Unlock()
+}
+
+func (f *Factory) gate(id string) *cardGate {
+	g, _ := f.cardGates.LoadOrStore(id, &cardGate{})
+	return g.(*cardGate)
+}
+
+// delivered records that card id's follow-up reached its builder; the caller holds the card's gate.
+func (f *Factory) delivered(id string, sub bool) {
+	if !sub {
+		g := f.gate(id)
+		g.delivered, g.finished = g.followUp, false
+	}
+}
+
+// endReviews ends card id's review generation when Zach finishes the card, for a caller holding its gate
+// g: no review queued or started before now starts or applies (ApplyVerdict, startReview), and its
+// unapplied code and plan reviewers are retired. Only his next message starts a new generation.
+func (f *Factory) endReviews(g *cardGate, id string) error {
+	g.followUp = f.Now()
+	g.delivered, g.finished = g.followUp, true
+	return f.retireReviews(id)
+}
+
+// retireReviews retires card id's unapplied code and plan reviewers, like supersedeReviewers, before
+// a message gives the card new work: their late verdicts must not pass it. A landing review is left
+// alone: it answers bin/land, which checks the commit it lands itself.
+func (f *Factory) retireReviews(id string) error {
+	byID := f.byID()
+	for _, r := range f.agents() {
+		if r.L(labelRole) != "reviewer" || !sameCard(byID, r.L(labelReviewOf), id) || r.L(labelApplied) != "" ||
+			r.L(labelReviewKind) == "land" {
+			continue
+		}
+		if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
+			return err
+		}
+		if r.archived() {
+			continue
+		}
+		if err := f.archiveAgent(r.ID); err != nil {
+			f.logf("reviewer %s superseded but not archived: %v", short(r.ID), err)
+		}
+	}
+	return nil
+}
+
 // planPending reports whether a board card's plan has not passed review or Zach yet. Its rework-cap
 // or escalation cards then mean "approve the plan", and Zach's replies go back to plan review.
 // A card in Done (say, a direct-track errand) has no plan pending.
@@ -276,6 +400,28 @@ func errandPass(a Agent) bool {
 		return true
 	}
 	return a.L(labelStage) == "plan" && a.L(labelCodeRounds) == "" && a.L(labelVerdict) == ""
+}
+
+// labelCodeRoundsFrom is the code round count when Zach's latest follow-up started a new code review
+// generation: the rework cap counts only the rounds after it, so his new request gets its own bounded
+// review while automatic rework inside a generation still stops at the cap.
+const labelCodeRoundsFrom = "code-rounds-from"
+
+// newCodeGeneration is the labels that start card a's new code review generation after Zach's
+// follow-up: the cap counts from its current round, the code arbiter may rule again and reviewer
+// replacements start fresh. Round numbers, plan state and approvals are kept.
+func newCodeGeneration(a Agent) map[string]string {
+	labels := map[string]string{labelCodeRoundsFrom: a.L(labelCodeRounds), labelReviewerRetries: ""}
+	if arbitrated(a, "code") {
+		var keep []string
+		for _, k := range strings.Fields(a.L(labelArbitrated)) {
+			if k != "code" {
+				keep = append(keep, k)
+			}
+		}
+		labels[labelArbitrated] = strings.Join(keep, " ")
+	}
+	return labels
 }
 
 // replyLabels places a factory card after Zach replies to it, so its next move is queued once the

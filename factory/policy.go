@@ -501,6 +501,20 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	if kind == "" {
 		kind = "code"
 	}
+	var g *cardGate
+	if kind != "land" {
+		g = f.gate(resolveCardID(f.byID(), target))
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if !g.followUp.IsZero() && !rev.CreatedAt.After(g.followUp) {
+			// the card got a follow-up after this review started: the verdict does not cover it
+			if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
+				return err
+			}
+			f.logf("reviewer %s: %s had a follow-up since it started, verdict retired", short(rev.ID), short(target))
+			return f.deferArchive(rev.ID)
+		}
+	}
 	text, err := storedText(f.cfg.Home, rev, 6)
 	if err != nil {
 		return f.unreadableReview(rev, err)
@@ -580,9 +594,23 @@ type reviewOutcome struct {
 }
 
 // decide moves card t once per review round. consume, when set, records the deciding reviewer's
-// verdict; it runs after the plan is read, so an unreadable plan leaves the review to retry.
+// verdict; it runs after the plan is read, so an unreadable plan leaves the review to retry. The
+// caller holds t's gate: a round started before t's last follow-up does not cover it and moves nothing.
 func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	target, kind, verdict, notes := t.ID, r.kind, r.verdict, r.notes
+	g := f.gate(target)
+	if !g.followUp.IsZero() && !r.started.After(g.followUp) {
+		f.logf("%s review round of %s started before its last follow-up: not applied", kind, short(target))
+		return nil
+	}
+	if t.L(labelStage) == "landed" || g.finished {
+		// a finished card stays finished: only Zach's message reopens it
+		f.logf("%s verdict for finished %s not applied", kind, short(target))
+		if consume != nil {
+			return consume()
+		}
+		return nil
+	}
 	src := r.source
 	if src.ID == "" {
 		src = t
@@ -642,6 +670,10 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	roundsKey := roundsLabel(kind)
 	rounds := atoi(t.L(roundsKey)) + 1
 	labels[roundsKey] = fmt.Sprint(rounds)
+	gen := rounds // the round within this review generation, which the cap counts
+	if kind == "code" {
+		gen -= atoi(t.L(labelCodeRoundsFrom))
+	}
 	set := func(kv ...string) error {
 		for i := 0; i+1 < len(kv); i += 2 {
 			labels[kv[i]] = kv[i+1]
@@ -658,7 +690,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 		err = f.passPlan(t, labels, "plan "+verdict, tier, notes, builderPlan, builderReply, "", "Plan approved by the plan reviewer.")
 	case verdict == "approve" || verdict == "nits":
 		err = f.passCode(t, labels, "code "+verdict, tier, notes, "")
-	case verdict == "changes" && rounds < f.cfg.ReworkCap:
+	case verdict == "changes" && gen < f.cfg.ReworkCap:
 		back := "building"
 		if kind == "plan" {
 			back = "plan"
@@ -666,9 +698,9 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 		}
 		if err = set(labelStage, back, labelVerdict, kind+" changes", labelSince, now, labelAutoReview, kind); err == nil {
 			if kind == "code" {
-				err = f.advance(labeled(t, labels), "code-review fixes", reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
+				err = f.advance(labeled(t, labels), "code-review fixes", reworkMsg(kind, gen, f.cfg.ReworkCap, notes))
 			} else {
-				err = f.send(target, reworkMsg(kind, rounds, f.cfg.ReworkCap, notes))
+				err = f.send(target, reworkMsg(kind, gen, f.cfg.ReworkCap, notes))
 			}
 		}
 	case verdict == "changes" && kind == "plan" && smallFix != "":
@@ -808,6 +840,24 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 // A code review needs a clean worktree, so that what it reads is what lands: a dirty one gets the
 // builder a message to commit first, and the review stays queued until it stops again.
 func (f *Factory) StartReview(c Card, kind string) (string, error) {
+	g := f.gate(c.ID)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return f.startReview(g, c, kind)
+}
+
+// startReview is StartReview for a caller holding card c's gate g. A follow-up delivered since the
+// builder last acted (in the newest list) has not been answered yet: no review starts, and the
+// follow-up's own labels keep the next step queued.
+func (f *Factory) startReview(g *cardGate, c Card, kind string) (string, error) {
+	if g.finished {
+		f.logf("%s: finished by Zach, no %s review", c.Short, kind)
+		return "", nil
+	}
+	if !g.delivered.IsZero() && !f.agent(c.ID).LastActivityAt.After(g.delivered) {
+		f.logf("%s: follow-up not answered yet, %s review waits", c.Short, kind)
+		return "", nil
+	}
 	// a new review is a new generation: no earlier code approval stands for it, even if this one
 	// waits on a dirty tree or fails to start
 	if f.agent(c.ID).L(labelCodeOK) != "" {
@@ -892,11 +942,12 @@ const (
 )
 
 // reviewHold reports why card a may not be approved for landing or sent a land prompt yet: nil when
-// its HEAD is still the commit its code review saw (factory.reviewed), else the labels that move it.
-// A moved HEAD goes back to a fresh code review (since cleared, so it starts once the agent is
-// stopped); a HEAD that cannot be read stops the card for Zach. A card with no reviewed commit keeps
-// the older on-main checks in a private repo, but stops in a public one, where nothing unreviewed
-// may be published. Zach's approval is no review: it is checked the same way.
+// its HEAD is still the commit its code review saw (factory.reviewed) and its worktree is clean, else
+// the labels that move it. A moved HEAD or uncommitted work goes back to a fresh code review (since
+// cleared, so it starts once the agent is stopped); a HEAD or status that cannot be read stops the
+// card for Zach. A card with no reviewed commit keeps the older on-main checks in a private repo,
+// but stops in a public one, where nothing unreviewed may be published. Zach's approval is no
+// review: it is checked the same way.
 func (f *Factory) reviewHold(a Agent, cwd, repo string) map[string]string {
 	zach := func(note string) map[string]string {
 		return map[string]string{labelStage: "zach", labelNote: note, labelStuckFrom: "review",
@@ -913,15 +964,25 @@ func (f *Factory) reviewHold(a Agent, cwd, repo string) map[string]string {
 		return zach(unverifiedReviewNote + "could not read HEAD: no worktree")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	head, err := f.GitOut(ctx, cwd, "rev-parse", "HEAD")
-	cancel()
 	if err != nil {
 		return zach(unverifiedReviewNote + "could not read HEAD: " + trunc(err.Error(), 150))
 	}
+	stale := map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: "", labelHeld: "",
+		labelNote: staleReviewNote}
 	if head = strings.TrimSpace(head); head != reviewed {
 		f.logf("%s HEAD %s is not the reviewed %s: fresh code review", short(a.ID), short(head), short(reviewed))
-		return map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: "", labelHeld: "",
-			labelNote: staleReviewNote}
+		return stale
+	}
+	// uncommitted work on the reviewed commit was not reviewed either: it is committed and reviewed first
+	dirty, err := f.dirtyStatus(ctx, cwd)
+	if err != nil {
+		return zach(unverifiedReviewNote + "could not read worktree status: " + trunc(err.Error(), 150))
+	}
+	if dirty != "" {
+		f.logf("%s has uncommitted work on the reviewed %s: fresh code review", short(a.ID), short(reviewed))
+		return stale
 	}
 	return nil
 }
@@ -1107,7 +1168,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return err
 		}
 		return f.tickPicker(a)
-	case a.L(labelAutoReview) != "" && (acted || since.IsZero()):
+	case a.L(labelAutoReview) != "" && (acted || since.IsZero()) && a.L(labelStage) != "landed": // Done needs no review
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
@@ -1167,12 +1228,30 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
-		// Read before recording a landing: history retries must not repeat that write.
-		reply, err := f.storedReply(a)
+		if f.landReviewPending(a) {
+			return nil // bin/land is waiting on its landing review: the landing has no result yet
+		}
+		if f.landRunning(a) {
+			return nil // this agent's bin/land is still running: its scan, tests or push are not done
+		}
+		// Read before recording a landing: history retries must not repeat that write. Only this
+		// agent's own reply counts: a replaced agent's report is not this landing's result.
+		reply, err := storedReplyOne(f.cfg.Home, a)
 		if err != nil {
 			return f.waitForHistory(a, a, err)
 		}
+		if strings.TrimSpace(reply) == "" {
+			// the turn ended on a command or its result: a landing still running, or one that
+			// stalled, which the stopped-step recovery nudges and then re-runs
+			return f.checkStuck(a, now)
+		}
 		if ok, why := f.landedOnMain(c.Cwd, a.L(labelBase)); !ok {
+			if _, found := ParseRemaining(reply); !found && a.L(labelLandRun) != "" {
+				// its bin/land run is over but the reply has no REMAINING line, which the final report
+				// ends with: a progress note written while it ran, and the agent has not reported yet.
+				// One that never reports goes through the stopped-step recovery.
+				return f.checkStuck(a, now)
+			}
 			// a push failure or rebase conflict: the card fixes its branch, then code review again
 			f.logf("%s landing not verified: %s", short(a.ID), why)
 			return f.returnToBuild(a, "landing not verified", landFailMsg(why), false)
@@ -1238,6 +1317,19 @@ var stuckWhy = map[string]string{
 	"landing":     "Landing agent stopped without landing",
 }
 
+// landReviewPending reports whether card a's landing review is still deciding: its record is running
+// and its reviewer is listed, not archived, and either running or stopped with its verdict not yet
+// applied. Failed, blocked and missing reviewers do not hide a final report or its recovery path.
+func (f *Factory) landReviewPending(a Agent) bool {
+	lr, ok := f.landReviews.Get(a.ID)
+	if !ok || lr.Status != "running" {
+		return false
+	}
+	r, ok := f.agentOK(lr.Review)
+	return ok && lr.Review != "" && !r.archived() && !reviewerBlocked(f.agents(), r, f.Now()) &&
+		(r.Status == "running" || r.L(labelApplied) == "")
+}
+
 // checkStuck recovers a stopped factory card when no automatic move is coming for it: nothing should
 // sit waiting. It runs after the other rules, so a card reaching it had no move this Tick. A review
 // column replaces its gone or blocked reviewer (replaceReviewer); plan, building and landing get a
@@ -1264,6 +1356,15 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 		if reviewPending(agents, a.ID, now) || unappliedStoppedReviewer(agents, a.ID) {
 			return nil
 		}
+		// review recovery starts and decides reviews: it holds the card's gate, and a review that
+		// started before a delivered follow-up is not recovered (the follow-up queued the next one)
+		g := f.gate(a.ID)
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if !g.delivered.IsZero() && !parseTime(a.L(labelSince)).After(g.delivered) {
+			f.logf("%s: review predates its last follow-up, not recovered", short(a.ID))
+			return nil
+		}
 		if stage == "review" && f.panelReady(a) {
 			return f.closePanel(a) // its last reviewer finished but the panel did not close (an unreadable report)
 		}
@@ -1282,13 +1383,14 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 	return f.stepStuck(a, c, stage)
 }
 
-func (f *Factory) rerunReview(a Agent, kind string) error {
+// rerunReviewLocked starts a fresh review of kind for card a, for a caller holding a's gate g.
+func (f *Factory) rerunReviewLocked(g *cardGate, a Agent, kind string) error {
 	c, ok := f.card(a.ID)
 	if !ok {
 		c = Card{ID: a.ID, Short: short(a.ID), Title: a.Title, Host: a.Host, Cwd: a.Cwd, Repo: a.Repo,
 			WorkspaceID: a.WorkspaceID, Tier: a.L(labelTier)}
 	}
-	_, err := f.StartReview(c, kind)
+	_, err := f.startReview(g, c, kind)
 	return err
 }
 

@@ -292,8 +292,9 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	return f, p
 }
 
-// cleanDiff answers the always-ask file check (alwaysask.go): the card changes no file on the list.
-var cleanDiff = map[string]string{"diff --no-renames --name-only origin/main...HEAD": ""}
+// cleanDiff answers the always-ask file check (alwaysask.go): the card changes no file on the list,
+// and its worktree has no uncommitted work (reviewHold).
+var cleanDiff = map[string]string{"diff --no-renames --name-only origin/main...HEAD": "", "status --porcelain": ""}
 
 // idea is card, started by the factory from an idea: its finished work lands without Zach unless the
 // always-ask check hits.

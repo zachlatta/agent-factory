@@ -11,7 +11,10 @@ import (
 const shellRule = "Shell commands: Claude Code asks for permission before some rm commands even in bypass mode, and " +
 	"nobody responds to it, so you would hang. rm takes only literal absolute paths: no glob, $VAR, $(...) or ~, and " +
 	"no cd earlier in the same command (run cd as its own command if needed). Never run cd X && git or any compound command combining cd and git; use git -C X instead. rm outside your worktree, such as in /tmp, asks too. " +
-	"A factory -dry-run deletes its own temp state when you stop it."
+	"A factory -dry-run deletes its own temp state when you stop it. " +
+	"Wait on your original tool task handle or a verified exact process ID. Do not poll pgrep -f: " +
+	"the watcher can match itself or other agents. A watcher timeout is not a failed command; " +
+	"read the original result before retrying."
 
 // scratchSafetyRule applies to every agent using the card's shared worktree.
 const scratchSafetyRule = "Never run commands from inside .factory-scratch/. Keep your working directory at the worktree root. " +

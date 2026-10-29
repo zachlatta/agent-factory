@@ -21,9 +21,12 @@ rules below, and calls the `paseo` CLI for every move (labels on agents are the 
   the watcher cannot start (not Linux, no `~/.paseo/agents`), which is logged once.
 - The loop also wakes when a rule's grace window ends (a reviewer's first minute, a card's 45 s
   after a move) instead of waiting for the next poll.
-- Paseo calls stay in order: a card's move is check, labels, send, and moves of different cards
-  share the board and labels, so they never run at the same time. Instead, a finished reviewer's or
-  Scout's archive waits until the pass's moves are sent.
+- Within a pass, card moves run in order: check, labels, send. A finished reviewer's or
+  Scout's archive waits until the pass's moves are sent. Board actions can interleave with a pass;
+  landing approvals and dependency releases recheck the current card state before proceeding.
+- Agent prompts require waiting on the original command's task handle or a verified exact process
+  ID. Process-pattern polling can match its own watcher or another agent's work. A watcher timeout
+  is checked against the original command result before retrying.
 - `paseo permit ls` runs at most every 15 seconds; reads in between keep the prompts it last found,
   unless an agent's file flags a permission wait it did not see. The archive CLI's version check
   runs once per executable (again if the file changes or an archive fails).
@@ -285,9 +288,14 @@ The planner (the "Fellow") first picks a track:
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
 - Every code approval, landing approval, landing retry and dependency release checks that HEAD
-  is still the commit captured for code review. A changed HEAD queues a fresh code review; a
+  is still the commit captured for code review and the worktree is clean. Changed or uncommitted
+  work queues a fresh code review; a
   failed read, or a public card with no captured reviewed commit, stops without landing. That
   technical stop is board-only and offers Re-run the review, never an approval that skips it.
+- A follow-up retires the earlier plan and code reviews. A verdict for work from before the
+  follow-up cannot declare the revised request ready; the builder finishes it and a new review runs.
+- Marking a card Done cancels its queued reviews and retires its open plan and code reviews.
+  A new follow-up or explicit action can reopen the finished work.
 - An approval for a parked card held on a dependency authorizes one release when that dependency
   lands. The landing message wakes it only after the same review and scan checks. The approval
   follows a replacement card and is cleared on release or cancellation; a stale snapshot cannot
@@ -876,6 +884,12 @@ binary) once its work is committed. It exits 0 on approve, 2 on changes, 3 when 
 decide. The same completed approval can be reused for the same commit and checkout.
 An unavailable or rejecting review stops publication. The secret scan still runs on every
 push. Agent pushes can publish only the checkout's reviewed HEAD.
+Each landing attempt pins the fetched main commit before rebasing and scanning. If main
+advances during review, a rejected push retries from a new fetched commit with another review;
+shared remote-tracking refs cannot hide that change.
+Before its long steps, an agent's landing command records its process ID and start time on the
+agent. On the factory's host it waits while that exact command runs, for at most two hours, so an idle agent
+or a progress note does not count as a failed landing. If recording the run fails, nothing lands.
 
 ### Host config
 

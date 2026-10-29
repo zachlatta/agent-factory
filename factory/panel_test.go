@@ -339,7 +339,7 @@ func TestPublicRepoPanelStillScans(t *testing.T) {
 	c.Repo = "zachlatta/agent-factory"
 	f, p := newTestFactory(t, c, r1, r2)
 	f.cfg.Guarded = []string{"zachlatta/agent-factory"}
-	f.GitOut = gitStub(map[string]string{"rev-parse HEAD": "h1\n"})
+	f.GitOut = gitStub(map[string]string{"rev-parse HEAD": "h1\n", "status --porcelain": ""})
 	scanned := false
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
 		scanned = true
