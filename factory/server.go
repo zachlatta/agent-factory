@@ -47,6 +47,7 @@ func (f *Factory) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics", gzipHandler(f.handleMetrics))
 	mux.HandleFunc("GET /api/timings", gzipHandler(f.handleTimings))
 	mux.HandleFunc("GET /api/deploy", gzipHandler(f.handleDeploy))
+	mux.HandleFunc("GET /api/unanswered", gzipHandler(f.handleUnanswered))
 	mux.HandleFunc("GET /api/transcript/{id}", gzipHandler(f.handleTranscript))
 	mux.HandleFunc("GET /api/transcript/{id}/image/{ref}", f.handleTranscriptImage)
 	mux.HandleFunc("GET /api/logs/{id}", gzipHandler(f.handleLogs))
@@ -349,7 +350,7 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 var actions = map[string]bool{"new": true, "idea": true, "scout": true, "stage": true, "review": true, "send": true,
 	"approve": true, "arbiter": true, "rerun": true, "resume": true, "stop": true, "archive": true, "done": true, "close": true,
-	"land-review": true, "answer": true, "choose": true}
+	"land-review": true, "answer": true, "choose": true, "dismiss-request": true}
 
 func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 	// a custom header blocks cross-site form posts (browsers can't add one without CORS)

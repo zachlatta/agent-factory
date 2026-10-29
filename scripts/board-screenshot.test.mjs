@@ -70,6 +70,21 @@ test('For you and card links render at exact widths and preserve navigation', as
         await page.locator('#inbox a.line[data-id="preview-zach"]').waitFor();
         await page.evaluate(() => load());
         assert.equal(await page.locator('.fy[data-id="preview-zach"]').count(), 0);
+        // a request with no answer keeps Dismiss beside its status on the phone, and Dismiss removes it
+        // from No answer yet; a reload (the next board poll) does not bring it back
+        const request = page.locator('#inbox .line.stuck', { hasText: 'Order more desk lamps' });
+        const dismiss = request.locator('.ls button.link');
+        assert.equal(await dismiss.innerText(), 'Dismiss');
+        const [rowBox, buttonBox] = [await request.boundingBox(), await dismiss.boundingBox()];
+        assert.ok(buttonBox.x + buttonBox.width <= rowBox.x + rowBox.width && buttonBox.y >= rowBox.y);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        const dismissed = page.waitForRequest(r => r.url().endsWith('/api/dismiss-request'));
+        await dismiss.click();
+        assert.deepEqual(JSON.parse((await dismissed).postData()), { id: 'sample-request-1' });
+        await request.waitFor({ state: 'detached' });
+        await page.evaluate(() => load());
+        assert.equal(await page.locator('#inbox .line', { hasText: 'Order more desk lamps' }).count(), 0);
+        assert.equal(await page.locator('#inbox .line.stuck', { hasText: 'Move the team call' }).count(), 1);
         // the sample is marked as one on the page itself, not only in the tab title
         assert.match(await page.locator('#previewNote').innerText(), /sample cards/i);
         assert.equal(await page.locator('#previewNote').isVisible(), true);

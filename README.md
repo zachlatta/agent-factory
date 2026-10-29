@@ -326,7 +326,8 @@ The planner (the "Fellow") first picks a track:
   deduplication (`factory.answered` and `factory.told`), timings, token usage, peers, steers, evidence,
   board `#<id>` links, and `/t/<id>` transcripts (which stitch the predecessor turns and a system
   switch divider ahead of the replacement session). Carried lifecycle, gate, and thread labels
-  (`carriedFactoryLabels` and `carriedRawLabels`) are both copied at handoff and read through the
+  (`carriedFactoryLabels`, and `carriedRawLabels`: the email dispatcher's `gmail-thread`, `source`
+  and `voice-memo`) are both copied at handoff and read through the
   replacement chain so approval, review, and public-repo scan gates survive even a partial handoff.
   Write primitives (`setLabels`, `send`, `stop`, `archiveChecked`) always act on the exact single agent ID.
   Drop and Close archive the card's predecessors too.
@@ -453,11 +454,10 @@ has available, so Opus can ask Codex, Gemini or Muse and the other way round (`f
 - At most 6 running at once per agent; no secrets in their prompts. A card's sub-agents edit only
   the files it assigns them and never commit; a reviewer's sub-agents are read-only. An agent's own
   sub-agent tool (Claude's Agent tool, say) is allowed too.
-- Email and voice-memo cards get the same section from the factory, not from the dispatcher's
-  prompt: one note while the card is in plan, running and under 2 minutes old (checked again with
-  Paseo just before sending, since a message interrupts the command a running agent is on and would
-  start an extra turn for a stopped one), or else appended to the next message the factory sends it.
-  `factory.delegated` marks it sent.
+- Email and voice-memo cards get the same section in their first prompt, since the factory writes
+  it (see "Email and voice-memo cards"). A fresh stage agent reads it in the original instructions
+  its handoff quotes, so the handoff does not add it again; a card the dispatcher started itself
+  before then, whose first prompt lacks it, gets it once in each fresh stage's handoff instead.
 - On the board, sub-agents fold into their card at any depth (a reviewer's own sub-agents too).
   The card shows how many there are and how many run, with a chip (title and model) for each
   running one; the "sub-agents" box shows all of them. The card panel has a row per sub-agent with
@@ -526,10 +526,22 @@ card) instead of doing it in its card; agents started before this rule do not ha
 
 ### Email and voice-memo cards
 
-An email dispatcher (not in this repo) can start agents as cards with labels
-`factory.source=email|voice` and `gmail-thread=<id>`. Those cards follow the same tracks and
-report back in their email thread when they land, in plain words (see Needs Zach email). They
-never email that work started, stalled or failed: the board shows that.
+An email dispatcher (not in this repo) starts every card for an email or a voice memo through
+`POST /api/new`, as the board does, so all three get the same Fellow prompt, tracks and gates:
+
+- `request`: Zach's own words, verbatim (the email body with its quoted history cut, the subject for
+  a subject-only email, or the transcript). It goes under the prompt's `Zach's request:` line, which
+  `/api/peers` and reviewer prompts read for every card.
+- `origin`: `email` or `voice` (the card's `factory.source`); `thread`: the email thread the card
+  reports in (`gmail-thread=<id>`); `title`: the dispatcher's subject line (kept, not renamed).
+- `inbox`: the dispatcher's own section, added last: how to read the thread, which message to answer
+  and how, and when Zach asked (a `- Date:` or `- Recorded:` line, for card timing).
+- `labels`: only the dispatcher's own, without the `factory.` prefix: `source=<FACTORY_INBOX_SOURCE>`
+  and `voice-memo=<recording>`. Any other label, an `inbox` or `labels` on a board card, an inbox card
+  with no thread, or one with repo `auto` is refused.
+
+Those cards report back in their email thread when they land, in plain words (see Needs Zach
+email). They never email that work started, stalled or failed: the board shows that.
 
 ### For you board
 
@@ -541,8 +553,11 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
   question (the agent's `DECISION:` line, else the ask's title, which then stays on the title row:
   "Ready to try", "Allow this build?"); on Ready for you, what changed and
   the factory-run Preview button (or why there is none yet); its before/after images; and its buttons.
-- **No answer yet**: email and voice requests that ended with no reply, and requests other parts of
-  the factory add (`AddNoAnswer`).
+- **No answer yet**: requests from Zach that got no answer, from one source: the email dispatcher's
+  watchdog (see "Unanswered requests"). Each says why, in the watchdog's plain words when it gives
+  them ("no answer yet: from before the watchdog started"), and can be dismissed. A card's `noReply` timing is a metric
+  only: a card that landed is shipped even when its reply is missing, one that ended with neither a
+  landing nor a reply is not, and neither is listed here, since the watchdog flags its request.
 - **Working on it**: one plain line per card ("planning", "being reviewed", "waiting on <title>"),
   stuck ones first: board-only waits (the factory's own trouble, finished or hand-moved cards),
   stalls and errors.
@@ -622,7 +637,10 @@ possibly sent); it never fails the health check.
   Waiting on you, Shipped (with the time), In progress, Stuck, and No answer yet, then the
   count of routine runs and the board link. The subject counts them ("Factory today: 2 shipped,
   1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs and file names are cut.
-- Shipped and No answer yet list every finished card no digest has listed yet, whatever the day:
+- No answer yet is the board's list as it stands: the dispatcher's requests not dismissed (see
+  "Unanswered requests"), so a dismissed request leaves the board and the digest alike, and one
+  still unanswered is listed again the next evening.
+- Shipped lists every finished card no digest has listed yet, whatever the day:
   a card that lands at 7 PM, or whose landing is confirmed only after a digest went out, is in the
   next one. Selection is by card, not by a time cutoff, so a card is listed exactly once and never
   dropped. Each pass records the board's finished cards in `digest.json`, and a digest marks the
@@ -733,12 +751,14 @@ a public-repo landing still runs the secret scan first.
 
 #### Prompt blocks parsed from email cards
 
-The email dispatcher writes Zach's own words into an email card's prompts in these blocks, and the
+The email dispatcher writes Zach's own words into a card's follow-ups in these blocks, and the
 factory reads them from the card's Claude session file to show the card's request and follow-ups
 (`/api/peers`, reviewer prompts; `factory/peers.go`). The same text is in the dispatcher's README.
-Change both or neither.
+Change both or neither. The first prompt is the board's, with the request under `Zach's request:`.
 
-- `Zach's email:` is the header line in the first prompt.
+- `Zach's email:` was the header line in the first prompt of cards the dispatcher started itself.
+  The factory still reads it, and an old card's `- Subject:` line, for those cards' history; remove
+  both readers after 2026-11-27, when such session files are 30 days old.
 - `Zach's follow-up email (<RFC 5322 date>):` is the header line in each steered follow-up.
 - `(end of Zach's email)` closes either block.
 - Between the header and the end line: Zach's own words, with the quoted history cut.
@@ -753,6 +773,22 @@ The factory writes one block of its own, not part of the dispatcher's contract: 
 request, under `Zach's request from closed duplicate card <id> (<RFC 5322 date>):` and closed by the
 same end line. It holds only Zach's words (the reviewer's notes follow the block), and it adds to the
 kept card's request rather than overriding it.
+
+### Unanswered requests
+
+The email dispatcher keeps a ledger of every request Zach sends it (each email and follow-up, each
+voice-memo task) and checks that each got an answer in its thread. Those that did not, and that
+nothing is working on, it writes to a JSON file whose path is host config
+(`FACTORY_UNANSWERED_PATH`): `{"updated": "<RFC 3339>", "requests": [{"key", "source", "thread",
+"asked", "subject", "why"}]}`. The dispatcher is the file's only writer and rewrites it whole.
+
+The factory reads it into the board's **No answer yet** list (`factory/unanswered.go`), which the
+daily digest reads too, and serves it at `GET /api/unanswered`. Dismiss (`POST /api/dismiss-request`
+with `{"id": "<key>"}`) records the key in the factory's own `dismissed-requests.json`, never in
+the dispatcher's file, so a dismissal survives a restart and the dispatcher's rewrites, for as long
+as the dispatcher lists the request (a key it no longer lists is dropped a month after its
+dismissal). A missing or unreadable file lists nothing. A card that ended with no reply is not listed
+here, on the board or in the digest (the watchdog flags its request); if it landed, it is still shipped.
 
 ### Card timing
 
@@ -909,6 +945,8 @@ Use the checked-in headless helper for this board's layout checks. It builds the
 then captures **1280x800 desktop** and **390x844 phone** viewports. It never connects to the
 live board or reads real card/state files. No pipeline runs. Supported buttons simulate changes to fabricated cards in memory; they never
 invoke the real action pipeline, start agents, run Git, send messages or write production data.
+No answer yet lists two fabricated requests from a sample dispatcher file in the preview's own
+temporary state; their Dismiss runs the real dismissal there, never on that file.
 
 First exclude local outputs, then install the pinned development dependency:
 
@@ -1039,6 +1077,7 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_STAGE_HANDOFF` | `-stage-handoff` | `on` (default): each new stage of a card starts a fresh agent with a short handoff; `off`: resume the card's session |
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
+| `FACTORY_UNANSWERED_PATH` | `-unanswered` | the dispatcher's JSON file of requests with no answer (none: the No answer yet list is empty) |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
 | `FACTORY_DIGEST_TO` | `-digest-to` | where the 6 PM daily digest goes (none: no digest; it never falls back to `FACTORY_ZACH_EMAIL`). An exactly allowed recipient, set once its delivery is ready (Daily digest) |
 | `FACTORY_PREVIEW_PORTS` | `-preview-ports` | `lo-hi` ports Ready for you previews run and are published on (default `7700-7799`) |

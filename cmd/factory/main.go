@@ -52,6 +52,7 @@ func main() {
 	private := flag.String("private-rules", os.Getenv("FACTORY_PRIVATE_RULES"), "file of private scan patterns (env FACTORY_PRIVATE_RULES; default ~/.config/agent-factory/denylist)")
 	zachEmail := flag.String("zach-email", os.Getenv("FACTORY_ZACH_EMAIL"), "address cards with no email thread email Zach at (env FACTORY_ZACH_EMAIL)")
 	digestTo := flag.String("digest-to", os.Getenv("FACTORY_DIGEST_TO"), "address the 6 PM daily digest goes to (env FACTORY_DIGEST_TO; none: no digest, never -zach-email); an exactly allowed recipient, set once its delivery is ready (README Daily digest)")
+	unanswered := flag.String("unanswered", os.Getenv("FACTORY_UNANSWERED_PATH"), "the email dispatcher's JSON file of requests with no answer (env FACTORY_UNANSWERED_PATH)")
 	metricHosts := flag.String("metric-hosts", os.Getenv("FACTORY_METRIC_HOSTS"), "comma-separated SSH aliases whose load the board shows besides this host (env FACTORY_METRIC_HOSTS)")
 	idleTTL := flag.Duration("idle-ttl", envDuration("FACTORY_IDLE_TTL"), "park a Needs Zach card idle this long (env FACTORY_IDLE_TTL; default 3h)")
 	idleCap := flag.Int("idle-cap", envInt("FACTORY_IDLE_CAP"), "park the longest idle Needs Zach cards while more factory agents than this are idle (env FACTORY_IDLE_CAP; default 10)")
@@ -66,7 +67,7 @@ func main() {
 	cfg := factory.Config{Host: host, Home: home, StateDir: *state, Port: *port, BoardURL: *boardURL,
 		DefaultRepo: *defRepo, PrivateRules: *private, LanesFile: *lanes, Rev: rev, ReadOnly: !*tick, ZachEmail: *zachEmail, DigestTo: *digestTo,
 		DryRun: *dryRun, IdleTTL: *idleTTL, IdleCap: *idleCap, PreviewPorts: *previewPorts, PreviewMax: *previewMax,
-		NoStageHandoff: *stageHandoff == "off"}
+		NoStageHandoff: *stageHandoff == "off", Unanswered: *unanswered}
 	if *metricHosts != "" {
 		cfg.MetricHosts = splitList(*metricHosts)
 	}

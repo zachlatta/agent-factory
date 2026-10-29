@@ -560,8 +560,10 @@ func queuedPrompt(line []byte) (string, bool) {
 	return strings.Join(texts, "\n"), len(texts) > 0
 }
 
-// requestOf cuts Zach's request out of a card's first prompt: the board's "Zach's request:" block,
-// else the email's "Zach's email:" block, else (older email cards) the subject; "" if none.
+// requestOf cuts Zach's request out of a card's first prompt: the "Zach's request:" block that every
+// card started by newCard has (board, email and voice), else, for cards the email dispatcher started
+// itself before it used newCard, the "Zach's email:" block or the subject; "" if none. Remove those
+// two old readers after 2026-11-27, when such session files are 30 days old.
 func requestOf(prompt string) string {
 	lines := strings.Split(prompt, "\n")
 	for i, l := range lines {

@@ -73,8 +73,8 @@ func TestBuildSections(t *testing.T) {
 	if got := sectionIDs(s.Shipped); !slices.Equal(got, []string{"e1", "d1"}) {
 		t.Errorf("shipped today = %v, want newest first, no drops, nothing from yesterday", got)
 	}
-	if got := sectionIDs(s.NoAnswer); !slices.Equal(got, []string{"e2"}) {
-		t.Errorf("noAnswer = %v", got)
+	if len(s.NoAnswer) != 0 {
+		t.Errorf("noAnswer = %v, want none: only the dispatcher's watchdog flags requests", sectionIDs(s.NoAnswer))
 	}
 	if got := sectionIDs(s.Routine); !slices.Equal(got, []string{"r2", "r1"}) {
 		t.Errorf("routine = %v", got)
@@ -144,5 +144,29 @@ func TestSectionsListRecoveryStuckCards(t *testing.T) {
 	}
 	if len(s.Working) != 1 || s.Working[0].ID != "w1" {
 		t.Errorf("working = %+v", s.Working)
+	}
+}
+
+// Shipped follows the landing or reply itself: a card that landed is shipped even when its email reply
+// is missing (noReply is a metric; the watchdog flags the request), while an errand that ended with no
+// reply and no landing is neither shipped nor answered.
+func TestShippedFollowsLandingNotMissingMail(t *testing.T) {
+	now := t0
+	at := now.Add(-time.Hour).Format(time.RFC3339)
+	cards := []Card{
+		{ID: "l1", Title: "Landed, reply missing", Stage: "landed", Source: "email",
+			Timing: &TimingView{LandedAt: at, NoReply: true, Stages: []StageSpan{{Stage: "landed", Start: at}}}},
+		{ID: "n1", Title: "Errand, no reply", Stage: "landed", Source: "email",
+			Timing: &TimingView{NoReply: true, Stages: []StageSpan{{Stage: "landed", Start: at}}}},
+	}
+	s := BuildSections(cards, now, time.UTC)
+	if got := sectionIDs(s.Shipped); !slices.Equal(got, []string{"l1"}) || s.Shipped[0].State != "shipped" {
+		t.Errorf("board shipped = %+v, want only the landed card, as shipped", s.Shipped)
+	}
+	if got := sectionIDs(Finished(cards)); !slices.Equal(got, []string{"l1"}) {
+		t.Errorf("digest ledger = %v, want only the landed card", got)
+	}
+	if len(s.NoAnswer) != 0 {
+		t.Errorf("noAnswer = %+v, want none: only the watchdog flags requests", s.NoAnswer)
 	}
 }

@@ -21,7 +21,8 @@ type Sections struct {
 
 // SectionLine is one card (or request) in plain words: its title and a short state.
 type SectionLine struct {
-	ID    string `json:"id,omitempty"` // the card; "" for a request that never became one
+	ID    string `json:"id,omitempty"`  // the card; "" for a request that never became one
+	Key   string `json:"key,omitempty"` // a request that never became a card: its key, to dismiss it (unanswered.go)
 	Title string `json:"title"`
 	State string `json:"state"`
 	At    string `json:"at,omitempty"` // RFC 3339: when it shipped, or its last activity
@@ -52,8 +53,7 @@ func (f *Factory) sections() Sections {
 	f.mu.Unlock()
 	s := BuildSections(cards, now, f.cfg.Location)
 	// cards finished today that have left the board
-	shipped, noAnswer := f.finishedToday(now)
-	s.Shipped, s.NoAnswer = mergeLines(s.Shipped, shipped), mergeLines(s.NoAnswer, noAnswer)
+	s.Shipped = mergeLines(s.Shipped, f.finishedToday(now))
 	for _, src := range srcs {
 		s.NoAnswer = append(s.NoAnswer, src(now)...)
 	}
@@ -103,11 +103,8 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 			if !sameDay(done, now, loc) {
 				continue
 			}
-			switch l, kind := finishedLine(c, done); kind {
-			case finishedShipped:
+			if l, ok := finishedLine(c, done); ok {
 				s.Shipped = append(s.Shipped, l)
-			case finishedNoAnswer:
-				s.NoAnswer = append(s.NoAnswer, l)
 			}
 		default:
 			if st := stuckFlag(c); st != "" {
@@ -129,34 +126,30 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 	return s
 }
 
-type finishedKind int
-
-const (
-	finishedNone     finishedKind = iota // not listed: dropped, or Done with no landing or reply
-	finishedShipped                      // landed, or answered with a reply
-	finishedNoAnswer                     // ended with no reply
-)
-
-// finishedLine is the line of a card that reached Done at done, and where it is listed.
-func finishedLine(c Card, done time.Time) (SectionLine, finishedKind) {
+// finishedLine is the Shipped line of a card that reached Done at done, and whether it is listed: a
+// landing (shipped, even when its email reply is missing) or a reply (answered). A dropped card and one
+// done with neither are not. noReply is a metric only: the email dispatcher's watchdog flags a request
+// with no answer (unanswered.go), so No answer yet has one source, which Dismiss clears on the board
+// and in the digest alike.
+func finishedLine(c Card, done time.Time) (SectionLine, bool) {
 	line := SectionLine{ID: c.ID, Title: c.Title, At: done.Format(time.RFC3339)}
 	switch {
-	case c.Timing != nil && c.Timing.NoReply:
-		line.State = "no answer sent"
-		return line, finishedNoAnswer
-	case dropped(c) || c.Timing == nil || (c.Timing.LandedAt == "" && c.Timing.RepliedAt == ""):
-		return line, finishedNone
-	case c.Timing.LandedAt == "":
+	case dropped(c) || c.Timing == nil:
+		return line, false
+	case c.Timing.LandedAt != "":
+		line.State = "shipped"
+	case c.Timing.RepliedAt != "" && !c.Timing.NoReply:
 		line.State = "answered"
 	default:
-		line.State = "shipped"
+		return line, false
 	}
-	return line, finishedShipped
+	return line, true
 }
 
-// Finished is the shipped and unanswered lines of the board's Done cards, whatever the day: the daily
-// digest's ledger records them so each is listed once (digest.go).
-func Finished(cards []Card) (shipped, noAnswer []SectionLine) {
+// Finished is the Shipped lines of the board's Done cards, whatever the day: the daily digest's ledger
+// records them so each is listed once (digest.go).
+func Finished(cards []Card) []SectionLine {
+	var shipped []SectionLine
 	for _, c := range cards {
 		if c.Stage != "landed" || c.Source == "scout" || c.Tier == "routine" || c.Source == "schedule" {
 			continue
@@ -165,14 +158,11 @@ func Finished(cards []Card) (shipped, noAnswer []SectionLine) {
 		if done.IsZero() {
 			continue
 		}
-		switch l, kind := finishedLine(c, done); kind {
-		case finishedShipped:
+		if l, ok := finishedLine(c, done); ok {
 			shipped = append(shipped, l)
-		case finishedNoAnswer:
-			noAnswer = append(noAnswer, l)
 		}
 	}
-	return shipped, noAnswer
+	return shipped
 }
 
 func sortNewest(ls []SectionLine) {

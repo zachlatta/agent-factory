@@ -167,27 +167,29 @@ type IdeaView struct {
 
 // Body is the JSON body of every POST /api/<action>.
 type Body struct {
-	ID          string       `json:"id"`
-	Stage       string       `json:"stage"`
-	Kind        string       `json:"kind"`
-	Message     string       `json:"message"` // send: the message; starting an idea: Zach's changes
-	Attachments []Attachment `json:"attachments"`
-	Request     string       `json:"request"`
-	Repo        string       `json:"repo"`
-	Title       string       `json:"title"`
-	Why         string       `json:"why"`
-	Summary     string       `json:"summary"`
-	DoneWhen    string       `json:"doneWhen"`
-	By          string       `json:"by"`
-	Tier        string       `json:"tier"`
-	Origin      string       `json:"origin"`
-	Agent       string       `json:"agent"`      // AgentChoice id for a new card, an idea, or starting an idea
-	Thinking    string       `json:"thinking"`   // optional model-specific effort for new cards and ideas
-	Thread      string       `json:"thread"`     // new card: zrl-bot Gmail thread to report in; answer: the reply's thread
-	MessageID   string       `json:"message_id"` // answer: Zach's reply
-	Text        string       `json:"text"`       // answer: the reply's text
-	Choice      string       `json:"choice"`     // choose: the answer's Choice id (choose.go)
-	Via         string       `json:"-"`          // "email": an answer by email (answer.go), not the board
+	ID          string            `json:"id"`
+	Stage       string            `json:"stage"`
+	Kind        string            `json:"kind"`
+	Message     string            `json:"message"` // send: the message; starting an idea: Zach's changes
+	Attachments []Attachment      `json:"attachments"`
+	Request     string            `json:"request"`
+	Repo        string            `json:"repo"`
+	Title       string            `json:"title"`
+	Why         string            `json:"why"`
+	Summary     string            `json:"summary"`
+	DoneWhen    string            `json:"doneWhen"`
+	By          string            `json:"by"`
+	Tier        string            `json:"tier"`
+	Origin      string            `json:"origin"`
+	Agent       string            `json:"agent"`      // AgentChoice id for a new card, an idea, or starting an idea
+	Thinking    string            `json:"thinking"`   // optional model-specific effort for new cards and ideas
+	Thread      string            `json:"thread"`     // new card: zrl-bot Gmail thread to report in; answer: the reply's thread
+	Inbox       string            `json:"inbox"`      // new email or voice card: the dispatcher's section on reading and answering its thread
+	Labels      map[string]string `json:"labels"`     // new email or voice card: the dispatcher's own tracking labels (inboxLabels)
+	MessageID   string            `json:"message_id"` // answer: Zach's reply
+	Text        string            `json:"text"`       // answer: the reply's text
+	Choice      string            `json:"choice"`     // choose: the answer's Choice id (choose.go)
+	Via         string            `json:"-"`          // "email": an answer by email (answer.go), not the board
 }
 
 type Attachment struct {

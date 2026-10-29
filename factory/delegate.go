@@ -53,11 +53,14 @@ func (f *Factory) delegateRule(reviewer bool) string {
 	return delegateText(opts, reviewer)
 }
 
+// delegateMarker opens the sub-agent section; a prompt that has it has the section (stagePrompt).
+const delegateMarker = "Sub-agents. Zach allows you to hand parts of this work to sub-agents"
+
 // delegateText renders the sub-agent section. It is appended to prompts, never formatted, so it
 // may hold %.
 func delegateText(opts []delegateOption, reviewer bool) string {
 	var b strings.Builder
-	b.WriteString("\nSub-agents. Zach allows you to hand parts of this work to sub-agents, including models from other " +
+	b.WriteString("\n" + delegateMarker + ", including models from other " +
 		"providers (for a second opinion, a parallel search, or a model better at a task). On factory cards this " +
 		"overrides the start-here rules on subagents and on Opus-only launches. Your own sub-agent tool (such as " +
 		"Claude's Agent tool) is fine too. To start a Paseo sub-agent, run one of these from your shell (it prints the " +

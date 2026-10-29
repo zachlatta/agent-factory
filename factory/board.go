@@ -75,10 +75,10 @@ func source(a Agent) string {
 		return "idea"
 	case a.L(labelRole) == "scout":
 		return "scout"
-	case inboxAgent(a):
-		return "email"
-	case a.Labels["voice-memo"] != "":
+	case a.L(labelSource) == "voice" || a.Labels["voice-memo"] != "":
 		return "voice memo"
+	case a.L(labelSource) == "email" || inboxAgent(a):
+		return "email"
 	case a.Labels["paseo.schedule-id"] != "":
 		return "schedule"
 	case a.L(labelSource) == "board":

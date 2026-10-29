@@ -29,6 +29,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	case "choose":
 		b.Via = "" // the board's answer; email answers come through answer
 		return f.choose(b)
+	case "dismiss-request":
+		return ok, f.dismissRequest(b.ID)
 	}
 	if strings.HasPrefix(b.ID, "idea-") {
 		switch action {
@@ -554,7 +556,14 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	source, extra, err := inboxIntake(b)
+	if err != nil {
+		return nil, err
+	}
 	if repo == autoRepo {
+		if source != "board" {
+			return nil, errors.New("an email or voice card names its repo")
+		}
 		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: agent.ID, Thinking: agent.Thinking}
 		if tierRank(b.Tier) >= 0 {
 			r.Tier = b.Tier
@@ -563,8 +572,9 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	}
 	repoDir := filepath.Join(f.cfg.Home, "dev", repo)
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
-		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),
+		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))
+	args = append(args, extra...)
 	if branch := f.freeBranch(repoDir, branchSlug(title)); branch != "" {
 		args = append(args, "--new-branch", branch)
 	}
@@ -588,6 +598,9 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	if t := strings.TrimSpace(b.Thread); t != "" {
 		args = append(args, "--label", gmailThreadLabel+"="+t)
 		prompt += newCardEmailNote(t)
+	}
+	if in := strings.TrimSpace(b.Inbox); in != "" {
+		prompt += "\n" + in + "\n"
 	}
 	args = append(args, "--background", "--quiet", prompt)
 	out, err := f.paseo(args...)

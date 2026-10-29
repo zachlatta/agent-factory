@@ -1,16 +1,19 @@
 package factory
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
-	"time"
 )
 
 // Cards from Zach's inbox: emails to the agents' address and voice-memo tasks start cards here. The
-// zrl-bot dispatcher starts each email or voice-memo agent as a card (factory.source email or voice,
-// stage plan, plus its gmail-thread label). Errands finish in one pass as before; code work
-// goes through the gates like a board card. The card tells Zach in its email thread when it lands;
-// whenever it waits on him, the factory emails him there itself (mail.go).
+// zrl-bot dispatcher starts each one through POST /api/new like a board card (origin email or voice,
+// Zach's words as the request, its thread, and an Inbox section on answering there), so all three
+// get the same Fellow prompt and gates. Errands finish in one pass; code work goes through the gates.
+// The card tells Zach in its email thread when it lands; whenever it waits on him, the factory emails
+// him there itself (mail.go).
 
 // gmailThreadLabel is the zrl-bot dispatcher's label (no factory. prefix) naming a card's email thread.
 const gmailThreadLabel = "gmail-thread"
@@ -58,44 +61,43 @@ func newCardEmailNote(thread string) string {
 		"the factory shows that on its board.\n"
 }
 
-// Sub-agents on inbox cards. The dispatcher writes an email or voice card's prompt, so the factory
-// adds the sub-agent section (delegateRule) itself: one note in the card's first minutes, while its
-// agent still runs its first turn, or else appended to the next message the factory sends it.
-// factory.delegated marks it sent. A message to a running agent interrupts the command it is running,
-// so the note goes only to a young card (still reading its skills); a message to a stopped one would
-// start an extra turn whose reply replaces the TRACK or TIER reply the factory reads, so never then.
-
-// delegateWindow is how long after an inbox card starts the factory sends it the sub-agent note.
-const delegateWindow = 2 * time.Minute
-
-const delegateNote = "Factory note: you may use sub-agents on this card, as below. No reply needed; continue your current task.\n"
-
-// tickDelegate sends a young, running email or voice card in plan its sub-agent section once.
-func (f *Factory) tickDelegate(a Agent, now time.Time) {
-	if !fromInbox(a) || a.archived() || a.Status != "running" || a.L(labelStage) != "plan" ||
-		a.L(labelDelegated) != "" || now.Sub(a.CreatedAt) > delegateWindow {
-		return
+// inboxIntake checks a new card's inbox fields: its factory.source (email or voice for the dispatcher's
+// cards, else board) and the dispatcher's own labels as paseo flags. An inbox card names its thread;
+// only an inbox card carries an Inbox section or dispatcher labels, and only these, without the
+// factory. prefix: source=<InboxSource> (the dispatcher's own agents) and voice-memo=<recording>. The
+// card gets the same Fellow prompt as a board card, sub-agent section included.
+func inboxIntake(b Body) (string, []string, error) {
+	source := "board"
+	if b.Origin == "email" || b.Origin == "voice" {
+		source = b.Origin
 	}
-	// the snapshot can be a poll old: never wake a card that has stopped since
-	if archived, running, err := f.liveState(a.ID); err != nil || archived || !running {
-		return
+	if source == "board" {
+		if strings.TrimSpace(b.Inbox) != "" || len(b.Labels) > 0 {
+			return "", nil, errors.New("inbox and labels are only for email and voice cards")
+		}
+		return source, nil, nil
 	}
-	if err := f.send(a.ID, delegateNote); err != nil {
-		f.logf("%s sub-agent note not sent: %v", short(a.ID), err)
-		return
+	if strings.TrimSpace(b.Thread) == "" {
+		return "", nil, errors.New("an email or voice card needs its thread")
 	}
-	f.logf("%s got the sub-agent section", short(a.ID))
+	keys := make([]string, 0, len(b.Labels))
+	for k := range b.Labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var args []string
+	for _, k := range keys {
+		ok := k == "source" && InboxSource != "" && b.Labels[k] == InboxSource
+		if k == "voice-memo" {
+			ok = voiceMemoLabel.MatchString(b.Labels[k])
+		}
+		if !ok {
+			return "", nil, fmt.Errorf("label %q is not one the dispatcher may set", k)
+		}
+		args = append(args, "--label", k+"="+b.Labels[k])
+	}
+	return source, args, nil
 }
 
-// withDelegateRule appends the sub-agent section to a message for an email or voice card that has
-// not had it, and names the agent to mark; any other message is unchanged.
-func (f *Factory) withDelegateRule(id, msg string) (string, string) {
-	a, ok := f.agentOK(id)
-	if !ok || !fromInbox(a) || a.L(labelDelegated) != "" {
-		return msg, ""
-	}
-	if st := a.L(labelStage); st == "landing" || st == "landed" {
-		return msg, ""
-	}
-	return msg + "\n" + f.delegateRule(false), a.ID
-}
+// voiceMemoLabel is the dispatcher's voice-memo label value: the recording, slugged.
+var voiceMemoLabel = regexp.MustCompile(`^[a-z0-9-]{1,60}$`)

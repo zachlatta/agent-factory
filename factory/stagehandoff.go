@@ -211,7 +211,9 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 			"list them, read them from the previous agent's transcript before you land.\n")
 	}
 	fmt.Fprintf(&b, "\n=== This step ===\n%s\n", msg)
-	if fromInbox(a) {
+	if fromInbox(a) && !strings.Contains(first, delegateMarker) {
+		// an email or voice card the dispatcher started itself, before /api/new: its first prompt
+		// lacks the sub-agent section every newer card's has
 		b.WriteString("\n" + f.delegateRule(false))
 	}
 	return b.String(), nil

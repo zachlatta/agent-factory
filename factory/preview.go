@@ -39,10 +39,22 @@ func PreviewHandler(root string) (http.Handler, error) {
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0700); err != nil {
 		return nil, err
 	}
-	f := New(Config{Host: "preview", Home: home, StateDir: state, ReadOnly: true,
-		DefaultRepo: "example/board", Guarded: []string{}}, previewPaseo{})
 	// Freeze ages for reproducible captures, and prevent every optional process hook.
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	// the email dispatcher's file of requests with no answer, fabricated: Dismiss records the real
+	// dismissal in the preview's own state, never in this file (unanswered.go)
+	unanswered := filepath.Join(state, "sample-unanswered.json")
+	sample, _ := json.Marshal(unansweredFile{Updated: iso(now), Requests: []UnansweredRequest{
+		{Key: "sample-request-1", Source: "email", Thread: "sample-thread-1", Asked: iso(now.Add(-3 * time.Hour)),
+			Subject: "Order more desk lamps", Why: "the agent stopped without replying"},
+		{Key: "sample-request-2", Source: "voice", Thread: "sample-thread-2", Asked: iso(now.Add(-2 * time.Hour)),
+			Subject: "Move the team call to Thursday", Why: "no reply in the thread"},
+	}})
+	if err := os.WriteFile(unanswered, sample, 0600); err != nil {
+		return nil, err
+	}
+	f := New(Config{Host: "preview", Home: home, StateDir: state, ReadOnly: true,
+		DefaultRepo: "example/board", Guarded: []string{}, Unanswered: unanswered}, previewPaseo{})
 	f.Now = func() time.Time { return now }
 	f.GitOut = func(context.Context, string, ...string) (string, error) {
 		return "", fmt.Errorf("git disabled in preview")
@@ -147,10 +159,12 @@ func PreviewHandler(root string) (http.Handler, error) {
 }
 
 // previewAction deliberately does not call Act: it cannot launch agents, run Git,
-// send messages, or approve a real card. ReadOnly stays enabled as a second guard.
+// send messages, or approve a real card. ReadOnly stays enabled as a second guard. Dismiss on a
+// sample request writes only the preview's own dismissal store.
 func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimPrefix(r.URL.Path, "/api/")
-	supported := map[string]bool{"approve": true, "send": true, "stage": true, "close": true, "archive": true, "done": true, "stop": true, "seen": true, "choose": true}
+	supported := map[string]bool{"approve": true, "send": true, "stage": true, "close": true, "archive": true, "done": true, "stop": true, "seen": true, "choose": true,
+		"dismiss-request": true}
 	if !supported[action] || r.Header.Get("X-Factory") != "1" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "preview: only sample-card actions are simulated"})
 		return
@@ -158,6 +172,16 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 	var b Body
 	if json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&b) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid preview action"})
+		return
+	}
+	if action == "dismiss-request" {
+		// a sample request: the real dismissal, recorded in the preview's own state directory
+		if err := f.dismissRequest(b.ID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "preview: " + err.Error()})
+			return
+		}
+		f.logf("PREVIEW: dismissed a fabricated request; nothing runs")
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "simulated": true})
 		return
 	}
 	agents := slices.Clone(f.agents())

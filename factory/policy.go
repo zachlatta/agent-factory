@@ -1145,7 +1145,6 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	}
 	f.markDepLanded(a)
 	f.clearNudges(a)
-	f.tickDelegate(a, now)
 	if heldApprovedParked(a) && a.Status != "running" {
 		// Zach approved this card while its dependency was in flight, then it was parked: release it
 		// (or stop it for him) once the dependency lands. No other parked card is moved.

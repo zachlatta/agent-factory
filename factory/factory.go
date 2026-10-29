@@ -49,6 +49,7 @@ type Config struct {
 	MetricHosts  []string // SSH aliases whose load the board shows besides this host (hostfleet.go)
 	PreviewPorts string   // "lo-hi": the ports previews run and are published on (tryout.go)
 	PreviewMax   int      // previews running at once
+	Unanswered   string   // the email dispatcher's file of requests with no answer (unanswered.go); "" = none
 }
 
 func (c *Config) defaults() {
@@ -111,11 +112,12 @@ type Factory struct {
 	lenses     map[string]lensResult   // panel reviewer id -> its recorded result, ahead of stale snapshots
 	cardGates  sync.Map                // card ID -> *cardGate: its follow-ups and review verdicts (actions.go)
 
-	cfg    Config
-	p      Paseo
-	ideas  *IdeaStore
-	routes *RouteStore
-	steers *SteerStore // closed duplicates' requests on their way to the kept card (steer.go)
+	cfg       Config
+	p         Paseo
+	ideas     *IdeaStore
+	routes    *RouteStore
+	steers    *SteerStore   // closed duplicates' requests on their way to the kept card (steer.go)
+	dismissed *DismissStore // flagged requests Zach dismissed (unanswered.go)
 
 	hostMetrics hostSampler
 	fleet       *hostFleet
@@ -197,6 +199,7 @@ func New(cfg Config, p Paseo) *Factory {
 		previews: &PreviewStore{path: filepath.Join(cfg.StateDir, "previews.json")},
 		pv:       previews{procs: map[string]PreviewProc{}, busy: map[string]bool{}},
 		runner:   hostRunner{}, GoEnv: runGoEnv,
+		dismissed:   &DismissStore{path: filepath.Join(cfg.StateDir, "dismissed-requests.json")},
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
@@ -206,6 +209,7 @@ func New(cfg Config, p Paseo) *Factory {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}
 		f.Git, f.GitOut = f.dryRunGit(runGit, runGitOut)
 	}
+	f.noAnswer = append(f.noAnswer, f.noAnswerLines)
 	f.timings = newTimingStore(filepath.Join(cfg.StateDir, "timings.json"), func() time.Time { return f.Now() }, f.cfg.Location)
 	f.timings.readOnly = cfg.ReadOnly
 	f.Scan = f.runScan
@@ -558,18 +562,12 @@ func (f *Factory) send(id, msg string, images ...string) error {
 	if err := f.quietBeforeSend(id); err != nil {
 		return err
 	}
-	msg, mark := f.withDelegateRule(id, msg)
 	args := []string{"send", "--no-wait"}
 	for _, p := range images {
 		args = append(args, "--image", p)
 	}
 	if _, err := f.paseo(append(args, id, msg)...); err != nil {
 		return err
-	}
-	if mark != "" {
-		if err := f.setLabels(mark, map[string]string{labelDelegated: iso(f.Now())}); err != nil {
-			f.logf("%s sub-agent section sent, label not set: %v", short(mark), err)
-		}
 	}
 	f.resume(id)
 	return nil

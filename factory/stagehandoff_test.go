@@ -545,3 +545,25 @@ func TestWorkLeftAfterLandingRunsInAFreshAgent(t *testing.T) {
 		t.Error("the work left is not in the handoff")
 	}
 }
+
+// An email card the dispatcher started itself, before it used /api/new, has no sub-agent section in its
+// first prompt: its fresh stage agent gets the section once, in the handoff, so it keeps the delegation
+// Zach allowed. No message is sent to the old session for it.
+func TestLegacyInboxCardKeepsSubAgentsInFreshStages(t *testing.T) {
+	a, f, p := planCard(t, reviewer("r1", "c1", "plan"))
+	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %v", p.calls)
+	}
+	prompt := runs[0][len(runs[0])-1]
+	if n := strings.Count(prompt, delegateMarker); n != 1 {
+		t.Errorf("the sub-agent section is in the fresh agent's prompt %d times, want once:\n%s", n, prompt)
+	}
+	if msgs := p.sent(a.ID); len(msgs) != 0 {
+		t.Errorf("the old session got a message: %v", msgs)
+	}
+}

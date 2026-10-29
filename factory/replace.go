@@ -18,17 +18,19 @@ var carriedFactoryLabels = []string{
 	labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
 	labelDecided, labelPlanFix, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone,
-	labelHeld, labelHeldApproved, labelDelegated, labelArbitrated, labelWorkLeftRounds, labelRecovery,
+	labelHeld, labelHeldApproved, labelArbitrated, labelWorkLeftRounds, labelRecovery,
 	labelReviewerRetries, labelModelHandoff,
 }
 
 var chainCarriedFactoryLabels = []string{
 	labelZachThread, labelSource, labelOrigin, labelTitled,
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
-	labelDelegated, labelArbitrated, labelWorkLeftRounds, labelModelHandoff,
+	labelArbitrated, labelWorkLeftRounds, labelModelHandoff,
 }
 
-var carriedRawLabels = []string{gmailThreadLabel}
+// carriedRawLabels are the email dispatcher's own labels on a card it started (inbox.go): its thread, its
+// source=<InboxSource> and a voice memo's recording.
+var carriedRawLabels = []string{gmailThreadLabel, "source", "voice-memo"}
 
 func lookupAgentByPrefix(byID map[string]Agent, id string) (Agent, bool) {
 	if id == "" {

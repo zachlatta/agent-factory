@@ -299,7 +299,7 @@ func TestDigestListsWhatFinishedAfterTheLastOne(t *testing.T) {
 	if d := digests(m); len(d) != 1 || !strings.Contains(d[0].Args["text"].(string), "Morning fix") {
 		t.Fatalf("first digest = %+v", d)
 	}
-	// 7 PM: one lands and one ends unanswered, after that digest
+	// 7 PM: one lands and one ends with no reply, after that digest
 	*now = time.Date(2026, 10, 28, 19, 0, 0, 0, loc)
 	evening := done("d1", "Evening fix", *now, false)
 	unanswered := done("d2", "Evening question", *now, true)
@@ -316,10 +316,14 @@ func TestDigestListsWhatFinishedAfterTheLastOne(t *testing.T) {
 		t.Fatalf("digests = %d, want 2", len(d))
 	}
 	text, subj := d[1].Args["text"].(string), d[1].Args["subject"].(string)
-	for _, w := range []string{"Evening fix", "Wed 7:00 PM", "Evening question", "https://board.example/#d1", "https://board.example/#d2"} {
+	for _, w := range []string{"Evening fix", "Wed 7:00 PM", "https://board.example/#d1"} {
 		if !strings.Contains(text, w) {
 			t.Errorf("second digest lacks %q:\n%s", w, text)
 		}
+	}
+	// a card that ended with no reply is not listed: the dispatcher's watchdog flags its request
+	if strings.Contains(text, "Evening question") {
+		t.Errorf("second digest lists the card that sent no answer:\n%s", text)
 	}
 	if strings.Contains(text, "Morning fix") || !strings.Contains(subj, "1 shipped") {
 		t.Errorf("second digest repeats the first or miscounts: %s\n%s", subj, text)

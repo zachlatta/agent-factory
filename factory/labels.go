@@ -52,7 +52,6 @@ const (
 	labelHandoff    = "handoff"      // on the old agent: the step of its one model hand-off (handoff.go)
 	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
-	labelDelegated  = "delegated"    // an email or voice card got the sub-agent section from the factory (inbox.go)
 	labelArbiter    = "arbiter"      // on a reviewer: it is its card's arbiter (arbiter.go)
 	labelArbitrated = "arbitrated"   // the gates ("plan", "code"; space-separated) whose arbiter already ruled
 	labelAskWhy     = "ask-why"      // why a card whose code review passed comes to Zach before it lands (alwaysask.go)

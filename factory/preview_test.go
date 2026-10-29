@@ -269,3 +269,55 @@ func TestRepoPreviewBootstrapThenReadyLifecycle(t *testing.T) {
 		t.Fatalf("preview cleanup: %d", stopped)
 	}
 }
+
+// The preview lists a fabricated unanswered request, and its Dismiss runs the real dismissal against the
+// preview's own store: the request leaves No answer yet, the sample dispatcher file is never written, and
+// only a listed sample key is accepted.
+func TestPreviewDismissesASampleRequest(t *testing.T) {
+	root := t.TempDir()
+	h, err := PreviewHandler(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noAnswer := func() []SectionLine {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+		var b struct{ Sections Sections }
+		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+			t.Fatal(err)
+		}
+		return b.Sections.NoAnswer
+	}
+	before := noAnswer()
+	if len(before) != 2 || before[0].Key == "" || before[0].ID != "" {
+		t.Fatalf("sample requests = %+v", before)
+	}
+	file := filepath.Join(root, "state", "sample-unanswered.json")
+	sample, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dismiss := func(key string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/dismiss-request", strings.NewReader(`{"id":"`+key+`"}`))
+		req.Header.Set("X-Factory", "1")
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := dismiss("not-a-sample"); got != 400 {
+		t.Errorf("unknown key: %d", got)
+	}
+	if got := dismiss(before[0].Key); got != 200 {
+		t.Fatalf("dismiss: %d", got)
+	}
+	after := noAnswer()
+	if len(after) != 1 || after[0].Key != before[1].Key {
+		t.Errorf("after Dismiss = %+v", after)
+	}
+	if now, _ := os.ReadFile(file); string(now) != string(sample) {
+		t.Error("the sample dispatcher file changed")
+	}
+	if _, err := os.Stat(filepath.Join(root, "state", "dismissed-requests.json")); err != nil {
+		t.Errorf("the dismissal is not in the preview's own store: %v", err)
+	}
+}

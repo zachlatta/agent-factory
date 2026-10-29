@@ -173,6 +173,7 @@ button.link{border:0;background:none;color:var(--blue);padding:8px 0 0;font-size
 .line{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer;overflow-wrap:anywhere}
 .line .lt{flex:1 1 200px;min-width:0}.line .ls{color:var(--mute);font-size:12.5px}
 .line.stuck .ls{color:var(--red)}.line:not([data-id]){cursor:default}a.line{color:inherit;text-decoration:none}a.line:hover .lt{text-decoration:underline}
+.line .ls button.link{padding:0;font-size:inherit}
 button.filter{margin-top:16px;border-radius:99px;font-size:12.5px}button.filter.on{background:var(--ink);color:#fff}
 #panel h4{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;margin:14px 0 4px}
 #panel h4:first-child{margin-top:0}
@@ -525,6 +526,12 @@ function lineHtml(l, cls){
   if(!l.id) return `<div class="line ${cls||''}">${inner}</div>`;
   return `<a class="line ${cls||''}" data-id="${esc(l.id)}" href="?card=${encodeURIComponent(l.id)}" onclick="event.preventDefault();openPanel(this.dataset.id)">${inner}</a>`;
 }
+// noAnswerHtml: a request with no answer; one that never became a card can be dismissed (unanswered.go)
+function noAnswerHtml(l){
+  if(!l.key) return lineHtml(l,'stuck');
+  return lineHtml(l,'stuck').replace(/<\/span><\/div>$/, ` · <button class="link" data-key="${esc(l.key)}" onclick="dismissRequest(this.dataset.key)">Dismiss</button></span></div>`);
+}
+async function dismissRequest(key){ await post('dismiss-request',{id:key}); toast('Dismissed'); refresh(); }
 function forYouHtml(c){
   const repo = repoTag(c);
   // the title and the question open the card (its ask, preview and details)
@@ -541,7 +548,7 @@ function inboxHtml(S, q){
   const fy = f(S.forYou).map(l=>findCard(l.id)).filter(c=>c&&c.ask);
   const work = f(S.stuck).map(l=>lineHtml(l,'stuck')).concat(f(S.working).map(l=>lineHtml(l)));
   let h = secHtml('For you', fy.length) + (fy.map(forYouHtml).join('') || '<div class="none">Nothing waits on you.</div>');
-  if(S.noAnswer.length) h += secHtml('No answer yet', f(S.noAnswer).length) + f(S.noAnswer).map(l=>lineHtml(l,'stuck')).join('');
+  if(S.noAnswer.length) h += secHtml('No answer yet', f(S.noAnswer).length) + f(S.noAnswer).map(noAnswerHtml).join('');
   h += secHtml('Working on it', work.length) + (work.join('') || '<div class="none">Nothing in progress.</div>');
   h += secHtml('Shipped today', f(S.shipped).length) + (f(S.shipped).map(l=>lineHtml(l,'shipped')).join('') || '<div class="none">Nothing yet today.</div>');
   h += `<button class="filter ${showRoutine?'on':''}" onclick="showRoutine=!showRoutine;render()">Routine runs (${S.routine.length})</button>`
