@@ -483,3 +483,50 @@ func TestScheduleRejectsNullIdentityInsideGitCheckout(t *testing.T) {
 		t.Fatal("accepted non-Git identity inside a Git checkout")
 	}
 }
+
+func TestScheduleAcceptsNullIdentityOutsideCheckout(t *testing.T) {
+	// This accept path requires an actual workspace outside every Git checkout.
+	// Allocate only this empty workspace outside worktree-local test scratch.
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err = filepath.EvalSymlinks(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := os.MkdirTemp(cache, "factory-non-git-validation-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(workspace); err != nil {
+			t.Error(err)
+		}
+	})
+	for p := workspace; ; p = filepath.Dir(p) {
+		if _, err := os.Lstat(filepath.Join(p, ".git")); !os.IsNotExist(err) {
+			t.Fatal("non-Git fixture has a Git ancestor or cannot be inspected")
+		}
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	f := newScheduleFixture(t)
+	nonGit := func(m map[string]any) {
+		m["canonicalPath"] = workspace
+		m["commonDir"] = nil
+		m["branch"] = nil
+		m["head"] = nil
+	}
+	f.request.Identity = scheduleEdit(f.request.Identity, nonGit)
+	f.request.Receipt = scheduleEdit(f.request.Receipt, nonGit)
+	f.request.Release.CanonicalPath = workspace
+	f.request.Release.CommonDir = ""
+	f.request.Release.Branch = ""
+	f.request.Release.Head = ""
+	f.request.Release.ReceiptDigest = scheduleHash(f.request.Receipt)
+	if err := f.validate(); err != nil {
+		t.Fatalf("valid null-identity workspace refused: %v", err)
+	}
+}
