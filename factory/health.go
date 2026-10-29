@@ -31,7 +31,7 @@ type Health struct {
 	TickRunningFor string         `json:"tickRunningFor,omitempty"`
 	LastLoopDone   string         `json:"lastLoopDone,omitempty"`
 	Mail           string         `json:"mail,omitempty"`   // last mailbox check: "ok" or its error; never fails the check (mail.go)
-	Digest         string         `json:"digest,omitempty"` // the daily digest's last state: off, held, sent; never fails the check (digest.go)
+	Digest         string         `json:"digest,omitempty"` // the daily digest's last state: off, nothing to report, sent, send failed, possibly sent; never fails the check (digest.go)
 	Live           bool           `json:"live"`
 	OK             bool           `json:"ok"`
 	Agents         AgentCounts    `json:"agents"`

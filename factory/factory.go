@@ -45,7 +45,7 @@ type Config struct {
 	PrivateRules string   // file of private scan patterns (hostnames and the like), never in a repo
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
 	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't
-	DigestTo     string   // where the daily digest goes (digest.go); "" = ZachEmail
+	DigestTo     string   // where the daily digest goes (digest.go); "" = no digest, never ZachEmail
 	MetricHosts  []string // SSH aliases whose load the board shows besides this host (hostfleet.go)
 	PreviewPorts string   // "lo-hi": the ports previews run and are published on (tryout.go)
 	PreviewMax   int      // previews running at once
