@@ -203,7 +203,7 @@ func (f *Factory) applyArbiter(t Agent, kind, verdict, notes, tier, builderPlan,
 			labelNote, "applying the arbiter's fixes", labelPlanFix, fixes); err != nil {
 			return err
 		}
-		return f.send(t.ID, arbiterFixMsg(notes))
+		return f.advance(labeled(t, labels), "code-review fixes", arbiterFixMsg(notes))
 	case kind == "code" && verdict == "escalate":
 		why := "the agent that settled its review wants you to decide"
 		if r := ParseAlwaysAsk(notes); r != "" && r != "none" {

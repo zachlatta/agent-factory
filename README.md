@@ -231,21 +231,28 @@ The planner (the "Fellow") first picks a track:
     column starts the count afresh.
   - Failed landings: see the landing checks below. Each card gets at most 2 returns to building,
     then `stuck=landing failed`.
-- Fresh agent per stage (`factory/stagehandoff.go`): when a plan is approved (by its reviewer or by
-  Zach, or Zach accepts a brief's choices) and when a code review asks for changes, the card does not
-  resume its session, whose context by then is re-read on every call. The factory starts a new agent
-  on the same model (`factory.agent`, else the agent's provider and model) in the same worktree,
-  through the same steps as a model hand-off (`factory.handoff` kind `stage`). Its first message is a
-  short handoff: the card's original instructions verbatim, Zach's follow-ups, the approved plan, the
-  branch's commits and diffstat, the previous agent's last message (once, not if it is the plan) and
-  the stage message, plus every earlier agent's Paseo id and session id, with how to read their full
-  transcripts (`paseo logs`, or PDW `pdw readme agent-sessions`, `marts_ai_conversations`,
-  `pdw search`) when the handoff is not enough. The prompt is kept in the state dir (`handoffs/`)
-  until the new agent is confirmed, so a restart retries the same one; a swap that does not start
-  (no known model, no readable first session, two failed starts) sends the stage message to the old
-  session instead, as before. Plan rework, landing, Zach's replies and summary, brief or preview
-  requests stay in the session. Stage swaps do not use up the card's one model hand-off
-  (`factory.model-handoff` marks that). `FACTORY_STAGE_HANDOFF=off` turns the swaps off.
+- Fresh agent per stage (`factory/stagehandoff.go`): every move of a card to new work starts a new
+  agent instead of resuming its session, whose context by then is re-read on every call. That is a
+  passed plan going to build (plan reviewer, arbiter or Zach), plan-review fixes, code-review or
+  arbiter fixes, the land prompt (after code review, Zach's approval, a re-run or a released hold),
+  and a failed landing, a dropped dependency or work left after a landing going back to building. The new agent runs the same
+  model (`factory.agent`, else the agent's provider and model) in the same worktree, through the same
+  steps as a model hand-off (`factory.handoff` kind `stage`), with the card's labels: reviewed commit,
+  code approval, held approval, review generation (`factory.code-rounds-from`), recovery counts and
+  email thread. A fresh lander is authorized like any card agent: the landing review reads its own
+  labels, and the replaced agent can no longer land. Its first message is a short handoff: the card's
+  original instructions verbatim, Zach's follow-ups, the approved plan, the branch's commits and
+  diffstat, the previous agent's last message (once, not if it is the plan) and the stage message,
+  plus every earlier agent's Paseo id and session id, with how to read their full transcripts
+  read-only when the handoff is not enough: PDW (`pdw readme agent-sessions`, `marts_ai_conversations`,
+  `pdw search`) or the factory's paged `/api/transcript/{id}`, never `paseo logs`, which loads (and can
+  resume) an archived agent; a lander is told to take the deploy steps from the reviewed build summary.
+  The prompt is kept in the state dir (`handoffs/`) until the new agent is confirmed, so a restart
+  retries the same one; a swap that does not start (no known model, no readable first session, two
+  failed starts) sends the stage message to the old session instead, as before, and so does a parked
+  card, which the send wakes. Messages within a stage stay in the session: Zach's replies, steers,
+  nudges, and summary, brief or preview requests. Stage swaps do not use up the card's one model
+  hand-off (`factory.model-handoff` marks that). `FACTORY_STAGE_HANDOFF=off` turns the swaps off.
 - A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
   the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
   or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
@@ -904,7 +911,7 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_LANES` | `-lanes` | board lane names per repo, `{"owner/repo": {"name": "...", "lands": "..."}}` (default `~/.config/agent-factory/lanes.json`) |
 | `FACTORY_IDLE_TTL` | `-idle-ttl` | park a Needs Zach card idle this long (default `3h`) |
 | `FACTORY_IDLE_CAP` | `-idle-cap` | park the longest idle Needs Zach cards while more factory agents than this are idle (default 10) |
-| `FACTORY_STAGE_HANDOFF` | `-stage-handoff` | `on` (default): build and code-review fixes start a fresh agent with a short handoff; `off`: resume the card's session |
+| `FACTORY_STAGE_HANDOFF` | `-stage-handoff` | `on` (default): each new stage of a card starts a fresh agent with a short handoff; `off`: resume the card's session |
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |

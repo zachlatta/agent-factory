@@ -572,12 +572,13 @@ func (f *Factory) returnToBuild(a Agent, note, msg string, landedDiff bool) erro
 		return f.markStuck(a, stuckLanding)
 	}
 	f.logf("%s %s: back to building", short(a.ID), note)
-	if err := f.updateRecovery(a, func(r *recovery) { r.Lands++; r.LandedDiff = landedDiff },
-		map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: iso(f.Now()),
-			labelNote: rebuildingNotePrefix + note, labelHeld: ""}); err != nil {
+	// saveRecovery adds the new recovery label to labels, so a fresh agent carries the raised count
+	labels := map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: iso(f.Now()),
+		labelNote: rebuildingNotePrefix + note, labelHeld: ""}
+	if err := f.updateRecovery(a, func(r *recovery) { r.Lands++; r.LandedDiff = landedDiff }, labels); err != nil {
 		return err
 	}
-	return f.send(a.ID, msg)
+	return f.advance(labeled(a, labels), "fixing a failed landing", msg)
 }
 
 func landFailMsg(why string) string {
@@ -650,12 +651,13 @@ func (f *Factory) rebuildWithoutDep(a Agent, id, state string) error {
 		what = "is not on the board (a wrong id, or it left the board before it landed)"
 	}
 	f.logf("%s held: %s %s; back to building", short(a.ID), id, state)
-	if err := f.setLabels(a.ID, clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
+	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
 		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "",
-		labelNote: rebuildingNotePrefix + id + " " + state})); err != nil {
+		labelNote: rebuildingNotePrefix + id + " " + state})
+	if err := f.setLabels(a.ID, labels); err != nil {
 		return err
 	}
-	return f.send(a.ID, "Card "+id+", which your approved plan lands after, "+what+". Do not land now. Decide "+
+	return f.advance(labeled(a, labels), "rebuilding without the card it waited on", "Card "+id+", which your approved plan lands after, "+what+". Do not land now. Decide "+
 		"yourself: if this change needs that card's work, rebuild without it (bring in what you need, or cut the part "+
 		"that depends on it); if it does not, say so and change nothing. Rebase on origin/main, rerun the tests and "+
 		"commit on your branch. Then stop with a short summary that says which you chose. Code review runs again, "+

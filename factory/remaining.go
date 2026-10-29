@@ -161,7 +161,7 @@ func (f *Factory) landed(a Agent, c Card, reply string) error {
 		if err := f.setLabels(a.ID, labels); err != nil {
 			return err
 		}
-		return f.send(a.ID, workLeftMsg(again, rounds+1))
+		return f.advance(labeled(a, labels), "work left after landing", workLeftMsg(again, rounds+1))
 	case stage == "zach":
 		f.logf("%s landed with work left: %s", short(a.ID), note)
 	default:
@@ -171,11 +171,11 @@ func (f *Factory) landed(a Agent, c Card, reply string) error {
 }
 
 // sendLanding starts a new landing attempt with a fresh completion clarification allowance.
-func (f *Factory) sendLanding(id, msg string) error {
-	if err := f.setLabels(id, map[string]string{labelRemainingAsk: ""}); err != nil {
+func (f *Factory) sendLanding(a Agent, msg string) error {
+	if err := f.setLabels(a.ID, map[string]string{labelRemainingAsk: ""}); err != nil {
 		return err
 	}
-	return f.send(id, msg)
+	return f.advance(labeled(a, map[string]string{labelRemainingAsk: ""}), "landing", msg)
 }
 
 // finishLanding asks once for an omitted completion line before involving a person.

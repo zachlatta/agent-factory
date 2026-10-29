@@ -72,7 +72,8 @@ func TestPlanApprovedBuildsInAFreshAgent(t *testing.T) {
 	for _, want := range []string{
 		stageHandoffMarker, "Fellow instructions: plan, then build", "PLAN: add the widget", "abc1234 Add the widget",
 		"factory/widget.go | 12", "Plan approved by the plan reviewer", "Build it now, as planned",
-		"c1", testSession("c1"), "paseo logs", "pdw readme agent-sessions", "marts_ai_conversations", "pdw search",
+		"c1", testSession("c1"), "pdw readme agent-sessions", "marts_ai_conversations", "pdw search",
+		"/api/transcript/<agent id>?tail=1", "before=<line>", "Never run `paseo logs`",
 		"Do not start over",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -160,29 +161,141 @@ func TestCodeReworkRunsInAFreshAgentWithFindings(t *testing.T) {
 	}
 }
 
-func TestPlanReworkAndLandingStayInTheSameSession(t *testing.T) {
-	t.Run("plan rework", func(t *testing.T) {
-		a, f, p := planCard(t, reviewer("r1", "c1", "plan"))
-		storeLog(t, f, p, "r1", "BLOCKING: name the widget\nVERDICT: changes")
-		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-			t.Fatal(err)
+func TestPlanReworkRunsInAFreshAgent(t *testing.T) {
+	a, f, p := planCard(t, reviewer("r1", "c1", "plan"))
+	storeLog(t, f, p, "r1", "BLOCKING: name the widget\nVERDICT: changes")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 || len(p.sent(a.ID)) != 0 {
+		t.Fatalf("plan rework did not start a fresh agent: %v", p.calls)
+	}
+	joined := strings.Join(runs[0], " ")
+	for _, want := range []string{labelPrefix + labelStage + "=plan", labelPrefix + labelAutoReview + "=plan",
+		labelPrefix + labelPlanRounds + "=1", labelPrefix + labelReplaces + "=c1"} {
+		if !strings.Contains(joined, "--label "+want) {
+			t.Errorf("missing label %s", want)
 		}
-		if len(stageRuns(p)) != 0 || len(p.sent(a.ID)) != 1 {
-			t.Fatalf("plan rework should resume the planner: %v", p.calls)
+	}
+	prompt := runs[0][len(runs[0])-1]
+	for _, want := range []string{"plan-review fixes", "PLAN: add the widget", "name the widget", "requested changes to your plan"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
 		}
-	})
-	t.Run("landing", func(t *testing.T) {
-		a := card("c1", map[string]string{labelStage: "review", labelAgent: "opus", labelTier: "low", labelPlanRounds: "1"})
-		f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"))
-		storeLog(t, f, p, a.ID, planLog)
-		storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
-		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-			t.Fatal(err)
+	}
+}
+
+// landCard is a card in code review whose reviewed commit is recorded, with a readable session.
+func landCard(t *testing.T) (Agent, *Factory, *fakePaseo) {
+	a := idea("c1", map[string]string{labelStage: "review", labelAgent: "opus", labelTier: "low", labelPlanRounds: "1",
+		labelCodeRounds: "2", labelCodeRoundsFrom: "1", labelReviewed: "rev1", labelZachThread: "zt-1"})
+	a.Labels[gmailThreadLabel] = "thread-1"
+	f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"))
+	storeLog(t, f, p, a.ID, planLog+"\n[User] Build it now, as planned.\nBuilt it. Deploy steps: none.")
+	f.GitOut = gitStub(map[string]string{"rev-parse HEAD": "rev1\n", "status --porcelain": "", "diff --no-renames --name-only origin/main...HEAD": "widget.go\n", "log --oneline origin/main..HEAD": "rev1 Add the widget",
+		"diff --stat origin/main...HEAD": " widget.go | 3 +++"})
+	return a, f, p
+}
+
+func TestLandingRunsInAFreshAgentThatPassesTheLandingGate(t *testing.T) {
+	a, f, p := landCard(t)
+	storeLog(t, f, p, "r1", "Fine.\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	if p.labels(a.ID)[labelStage] != "landing" {
+		t.Fatalf("the card did not move to landing: %v", p.labels(a.ID))
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 || len(p.sent(a.ID)) != 0 {
+		t.Fatalf("landing did not start a fresh agent: %v", p.calls)
+	}
+	run := runs[0]
+	prompt := run[len(run)-1]
+	for _, want := range []string{"Land it now", "Built it. Deploy steps: none.", "deploy steps of the reviewed build summary", "PLAN: add the widget"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
 		}
-		if len(stageRuns(p)) != 0 || len(p.sent(a.ID)) != 1 {
-			t.Fatalf("landing should resume the builder: %v", p.calls)
+	}
+	// the new agent as Paseo shows it: exactly the labels it was started with
+	r := card("new-agent-1", nil)
+	r.Labels = quietRunLabels(run)
+	r.Status = "running"
+	old := withLabels(a, p.labels(a.ID))
+	if why := cardLandBlock(r); why != "" {
+		t.Fatalf("the fresh lander is not authorized: %s (labels %v)", why, r.Labels)
+	}
+	for k, want := range map[string]string{labelReviewed: "rev1", labelCodeOK: "rev1", labelCodeRoundsFrom: "1",
+		labelZachThread: "zt-1", labelStage: "landing"} {
+		if r.L(k) != want {
+			t.Errorf("%s = %q, want %q", k, r.L(k), want)
 		}
-	})
+	}
+	if r.Labels[gmailThreadLabel] != "thread-1" {
+		t.Error("the email thread did not follow the lander")
+	}
+	f.SetAgents([]Agent{old, r})
+	f.tickHandoffs(t0.Add(time.Minute))
+	if why := cardLandBlock(withLabels(old, p.labels(a.ID))); why == "" {
+		t.Fatal("the replaced agent can still land")
+	}
+	if got := resolveCardID(f.byID(), "c1"); got != "new-agent-1" {
+		t.Fatalf("card resolves to %s", got)
+	}
+}
+
+func TestFailedLandingReturnsInAFreshAgentWithItsCount(t *testing.T) {
+	a, f, p := landCard(t)
+	a = withLabels(a, map[string]string{labelStage: "landing"})
+	f.SetAgents([]Agent{a})
+	if err := f.returnToBuild(a, "landing failed", landFailMsg("push rejected"), false); err != nil {
+		t.Fatal(err)
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 || len(p.sent(a.ID)) != 0 {
+		t.Fatalf("no fresh agent: %v", p.calls)
+	}
+	r := card("new-agent-1", nil)
+	r.Labels = quietRunLabels(runs[0])
+	if r.L(labelStage) != "building" || r.L(labelAutoReview) != "code" || readRecovery(r).Lands != 1 {
+		t.Fatalf("labels = %v (lands %d)", r.Labels, readRecovery(r).Lands)
+	}
+	if !strings.Contains(runs[0][len(runs[0])-1], "push rejected") {
+		t.Error("the failure is not in the handoff")
+	}
+}
+
+func TestDroppedDependencyRebuildsInAFreshAgent(t *testing.T) {
+	a, f, p := landCard(t)
+	a = withLabels(a, map[string]string{labelStage: "landing", labelHeld: "dep1", labelWaitsOn: "dep1"})
+	f.SetAgents([]Agent{a})
+	if err := f.rebuildWithoutDep(a, "dep1", "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 || len(p.sent(a.ID)) != 0 {
+		t.Fatalf("no fresh agent: %v", p.calls)
+	}
+	r := card("new-agent-1", nil)
+	r.Labels = quietRunLabels(runs[0])
+	if r.L(labelStage) != "building" || r.L(labelHeld) != "" || r.L(labelWaitsOn) != "" {
+		t.Fatalf("labels = %v", r.Labels)
+	}
+}
+
+func TestParkedCardIsWokenNotReplaced(t *testing.T) {
+	a, f, p := landCard(t)
+	a = withLabels(a, map[string]string{labelStage: "landing", labelParked: "1"})
+	a.ArchivedAt = t0
+	p.archived[a.ID] = true
+	f.SetAgents([]Agent{a})
+	if err := f.sendLanding(a, "Land it now."); err != nil {
+		t.Fatal(err)
+	}
+	if len(stageRuns(p)) != 0 || len(p.sent(a.ID)) != 1 {
+		t.Fatalf("a parked card should be woken by a send: %v", p.calls)
+	}
 }
 
 func TestZachApprovalBuildsInAFreshAgent(t *testing.T) {
@@ -353,4 +466,78 @@ func mustChoice(t *testing.T, id string) AgentChoice {
 		t.Fatal(id)
 	}
 	return c
+}
+
+func TestArbiterCodeFixesRunInAFreshAgent(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "3",
+		labelCodeRoundsFrom: "1", labelArbitrated: "code", labelNote: arbiterNote, labelAgent: "opus"})
+	arb := reviewer("a1", c.ID, "code")
+	arb.Labels[labelPrefix+labelArbiter] = "1"
+	f, p := newTestFactory(t, c, arb)
+	storeLog(t, f, p, c.ID, "[User] Fellow instructions: plan, then build.\nPlan: make the requested change.\nBUILD SIDE EFFECTS: none\nTIER: low")
+	storeLog(t, f, p, "a1", "MUST FIX: handle the empty list\nALWAYS ASK: none\nTIER: low\nVERDICT: changes")
+	if err := f.ApplyVerdict(f.agent("a1")); err != nil {
+		t.Fatal(err)
+	}
+	l, msgs := p.labels(c.ID), p.sent(c.ID)
+	if len(msgs) != 0 {
+		t.Fatalf("the old session was resumed: %v", msgs)
+	}
+	if l[labelStage] != "building" || l[labelPlanFix] != "handle the empty list" {
+		t.Fatalf("old agent labels = %v", l)
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %v", p.calls)
+	}
+	joined := strings.Join(runs[0], " ")
+	for _, want := range []string{
+		labelPrefix + labelReplaces + "=c1", labelPrefix + labelStage + "=building", labelPrefix + labelAutoReview + "=code",
+		labelPrefix + labelPlanFix + "=handle the empty list", labelPrefix + labelArbitrated + "=code",
+		labelPrefix + labelCodeRounds + "=3", labelPrefix + labelCodeRoundsFrom + "=1", labelPrefix + labelNote + "=applying the arbiter's fixes",
+	} {
+		if !strings.Contains(joined, "--label "+want) {
+			t.Errorf("missing label %s", want)
+		}
+	}
+	prompt := runs[0][len(runs[0])-1]
+	for _, want := range []string{"code-review fixes", "MUST FIX: handle the empty list", "do NOT land", "Plan: make the requested change."} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if s := parseHandoff(p.labels("c1")[labelHandoff]); s.Phase != "started" || s.Kind != "stage" {
+		t.Fatalf("hand-off state = %+v", s)
+	}
+}
+
+func TestArbiterCodeFixesFallBackToResume(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "3",
+		labelArbitrated: "code", labelNote: arbiterNote})
+	_, msgs, p := arbiterRules(t, c, "code", "MUST FIX: handle the empty list\nALWAYS ASK: none\nTIER: low\nVERDICT: changes")
+	if len(stageRuns(p)) != 0 || len(msgs) != 1 || !strings.Contains(msgs[0], "handle the empty list") {
+		t.Fatalf("with no known model the old session should get the fixes: %v", p.calls)
+	}
+}
+
+func TestWorkLeftAfterLandingRunsInAFreshAgent(t *testing.T) {
+	a, f, p := landCard(t)
+	a = withLabels(a, map[string]string{labelStage: "landing", labelOrigin: ""})
+	f.SetAgents([]Agent{a})
+	c, _ := f.card(a.ID)
+	if err := f.landed(a, c, "DECISION: none\nOVERVIEW: landed.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING:\n- agent: measure the tokens"); err != nil {
+		t.Fatal(err)
+	}
+	runs := stageRuns(p)
+	if len(runs) != 1 || len(p.sent(a.ID)) != 0 {
+		t.Fatalf("work left did not start a fresh agent: %v", p.calls)
+	}
+	r := card("new-agent-1", nil)
+	r.Labels = quietRunLabels(runs[0])
+	if r.L(labelStage) != "building" || r.L(labelAutoReview) != "code" || r.L(labelLandedVerified) != "1" || r.L(labelWorkLeftRounds) != "1" {
+		t.Fatalf("labels = %v", r.Labels)
+	}
+	if !strings.Contains(runs[0][len(runs[0])-1], "measure the tokens") {
+		t.Error("the work left is not in the handoff")
+	}
 }

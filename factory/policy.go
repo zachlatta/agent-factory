@@ -700,7 +700,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 			if kind == "code" {
 				err = f.advance(labeled(t, labels), "code-review fixes", reworkMsg(kind, gen, f.cfg.ReworkCap, notes))
 			} else {
-				err = f.send(target, reworkMsg(kind, gen, f.cfg.ReworkCap, notes))
+				err = f.advance(labeled(t, labels), "plan-review fixes", reworkMsg(kind, gen, f.cfg.ReworkCap, notes))
 			}
 		}
 	case verdict == "changes" && kind == "plan" && smallFix != "":
@@ -826,7 +826,7 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 			if fb != "" {
 				msg += uiFeedbackLandMsg(fb)
 			}
-			err = f.sendLanding(target, msg)
+			err = f.sendLanding(labeled(t, labels), msg)
 		}
 	}
 	if err == nil && fb != "" && labels[labelStage] == "zach" {

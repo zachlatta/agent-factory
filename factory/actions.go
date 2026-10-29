@@ -228,11 +228,12 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				return nil, errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
 			}
 		}
-		if err := f.sendLanding(c.ID, "Zach approved this on the factory board."+answers+" "+msg); err != nil {
+		next := clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landing", labelSince: now,
+			labelNote: "approved by Zach"})
+		if err := f.sendLanding(labeled(f.agent(c.ID), next), "Zach approved this on the factory board."+answers+" "+msg); err != nil {
 			return nil, err
 		}
-		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landing", labelSince: now,
-			labelNote: "approved by Zach"}))
+		return ok, f.setLabels(c.ID, next)
 	case "arbiter":
 		// Zach hands a review that did not settle to an arbiter agent, even one that ruled before
 		a := f.agent(c.ID)
@@ -482,10 +483,11 @@ func (f *Factory) rerunStep(c Card, from string) error {
 				return errors.Join(errors.New(note), f.setLabels(c.ID, map[string]string{labelNote: note}))
 			}
 		}
-		if err := f.sendLanding(c.ID, rerunLandMsg(guarded)); err != nil {
+		next := map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run"}
+		if err := f.sendLanding(labeled(f.agent(c.ID), next), rerunLandMsg(guarded)); err != nil {
 			return err
 		}
-		return f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: iso(f.Now()), labelNote: "landing re-run"})
+		return f.setLabels(c.ID, next)
 	case "plan", "plan-review", "building", "review":
 		kind := "code"
 		if from == "plan" || from == "plan-review" {

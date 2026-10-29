@@ -11,14 +11,18 @@ import (
 	"time"
 )
 
-// Fresh agents per stage. When a card's plan is approved (by the plan reviewer or Zach) and when a
-// code review asks for changes, the factory starts a new agent on the same model in the same
-// worktree instead of resuming the card's session, which by then re-reads hundreds of thousands of
-// tokens on every call. The new agent gets a compact handoff (stagePrompt) and the ids of the earlier
-// agents, whose full transcripts it can read in Paseo or PDW. The swap is a model hand-off of kind
-// "stage" (handoff.go): same steps, labels carried, the old agent archived once the new one is
-// confirmed. Anything that keeps the swap from starting sends the stage message to the old session,
-// as before. Plan rework, landing, Zach's replies and summary or preview requests stay in the session.
+// Fresh agents per stage. Every move of a card to new work starts a new agent on the same model in the
+// same worktree instead of resuming the card's session, which by then re-reads hundreds of thousands
+// of tokens on every call: a passed plan (plan reviewer, arbiter or Zach) going to build, plan-review
+// fixes, code-review or arbiter fixes, the land prompt (sendLanding), and a failed landing, a dropped
+// dependency or work left after a landing going back to building. The new agent gets a compact handoff (stagePrompt) and the ids of
+// the earlier agents, whose full transcripts it can read in PDW or the transcript API. The swap is a model hand-off
+// of kind "stage" (handoff.go): same steps, the card's labels carried (reviewed commit, code approval,
+// held approval, review generation, recovery counts, email thread), the old agent archived once the
+// new one is confirmed. A lander is checked from its own labels by the landing review like any card
+// agent (landreview.go). Anything that keeps the swap from starting sends the stage message to the old
+// session, as before; so does a parked (archived) card, which a send wakes (reap.go). Messages within a
+// stage stay in the session: Zach's replies, steers, nudges, and summary, brief or preview requests.
 
 // stageHandoffMarker opens every stage handoff prompt; a later swap reads its sections back.
 const stageHandoffMarker = "Factory stage handoff."
@@ -176,9 +180,15 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 		}
 		b.WriteString(")\n")
 	}
-	b.WriteString("Read their full transcripts only when this handoff is not enough: `paseo logs <agent id>` (local and " +
-		"current), or PDW: `pdw readme agent-sessions`, then marts_ai_conversations.sessions and .events by session_id " +
-		"(or this worktree's cwd), or `pdw search`. PDW can lag by a few minutes.\n\n")
+	port := f.cfg.Port
+	if port == 0 {
+		port = 7478
+	}
+	fmt.Fprintf(&b, "Read their full transcripts only when this handoff is not enough, and only read-only: in PDW "+
+		"(`pdw readme agent-sessions`, then marts_ai_conversations.sessions and .events by session_id, or this "+
+		"worktree's cwd, or `pdw search`; PDW can lag by a few minutes), or from the factory's transcript API, newest "+
+		"page first: `curl -s 'localhost:%d/api/transcript/<agent id>?tail=1'`, then `before=<line>` for older pages. "+
+		"Never run `paseo logs` on an earlier agent: it loads that agent in Paseo and can resume an archived one.\n\n", port)
 	b.WriteString("=== Original instructions ===\nThey still apply (rules, gates, the public-repo scan, the opening lines), " +
 		"but this step replaces their \"Step 1\".\n\n")
 	b.WriteString(strings.TrimSpace(first))
@@ -198,6 +208,10 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 	fmt.Fprintf(&b, "\n=== Branch ===\n%s\n", f.stageBranch(a.Cwd))
 	if last != "" && last != plan && !strings.Contains(plan, last) {
 		fmt.Fprintf(&b, "\n=== Last message of the previous agent ===\n%s\n", trunc(last, handoffTextCap))
+	}
+	if step == "landing" {
+		b.WriteString("\nLanding: run the deploy steps of the reviewed build summary. If the messages above do not " +
+			"list them, read them from the previous agent's transcript before you land.\n")
 	}
 	fmt.Fprintf(&b, "\n=== This step ===\n%s\n", msg)
 	if fromInbox(a) {

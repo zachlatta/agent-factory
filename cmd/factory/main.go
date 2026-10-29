@@ -58,7 +58,7 @@ func main() {
 	previewMax := flag.Int("preview-max", envInt("FACTORY_PREVIEW_MAX"), "previews running at once (env FACTORY_PREVIEW_MAX; default 8)")
 	tick := flag.Bool("tick", true, "run the pipeline; -tick=false only serves the board (deploy canary)")
 	listen := flag.String("listen", "", "address to serve on (default 127.0.0.1:<port>; host:0 picks a free port)")
-	stageHandoff := flag.String("stage-handoff", envOr("FACTORY_STAGE_HANDOFF", "on"), "on: build and code-review fixes start a fresh agent with a short handoff; off: resume the card's session (env FACTORY_STAGE_HANDOFF)")
+	stageHandoff := flag.String("stage-handoff", envOr("FACTORY_STAGE_HANDOFF", "on"), "on: each new stage of a card starts a fresh agent with a short handoff; off: resume the card's session (env FACTORY_STAGE_HANDOFF)")
 	dryRun := flag.Bool("dry-run", false, "serve real data, change nothing: buttons only log the paseo and git writes they would make")
 	flag.Parse()
 
