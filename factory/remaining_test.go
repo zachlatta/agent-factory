@@ -254,3 +254,18 @@ func TestWorkLeftCapWaitsOnTheBoard(t *testing.T) {
 		t.Errorf("sent = %v", p.sent("c1"))
 	}
 }
+
+func TestLandedClearsStuckMark(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelStuck: stuckLanding})
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.Git = func(context.Context, string, ...string) error { return nil }
+	storeLog(t, f, p, "c1", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING: none")
+	if err := f.landed(c, Card{ID: c.ID, Cwd: c.Cwd}, "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING: none"); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if v, ok := l[labelStuck]; !ok || v != "" || l[labelStage] != "landed" {
+		t.Fatalf("labels = %v", l)
+	}
+}

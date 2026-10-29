@@ -12,6 +12,8 @@ import (
 
 // Automatic recovery. Errors, usage limits, stalls, failed reviewers, dropped dependencies and failed
 // landings are retried by the factory or handed back to the card, never to Needs Zach or email.
+// An errored card whose reviewed work is already verified on origin/main and whose last report says
+// nothing remains goes to Done with the error in its note instead of retrying (usage_limit.go).
 // Every kind has a hard cap; when it runs out the card keeps its column marked stuck
 // (factory.stuck, markStuck): a board flag and the daily digest, never an email.
 //
@@ -59,8 +61,9 @@ type recovery struct {
 	Nudges     int
 	NudgeStage string
 	// failed landings sent back to building (or a direct card told to land again)
-	Lands      int
-	LandedDiff bool // the last return was a landed diff that differs: its HEAD may already be on main
+	Lands       int
+	LandedDiff  bool   // the last return was a landed diff that differs: its HEAD may already be on main
+	LandChecked string // last (errorFingerprint@lastActivityAt) whose landedBeforeError git check failed
 }
 
 func readRecovery(a Agent) (r recovery) {
@@ -84,6 +87,8 @@ func (f *Factory) recoveryState(a Agent) recovery {
 	r := readRecovery(a)
 	if cached := f.recoveries[a.ID]; cached.Revision > r.Revision {
 		r = cached
+	} else if cached.Revision == r.Revision && cached.LandChecked != "" {
+		r.LandChecked = cached.LandChecked
 	}
 	return r
 }
@@ -152,14 +157,36 @@ func stuckAsk(a Agent) *Ask {
 		Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 }
 
-// tickError consumes errored working cards before ordinary completion rules can run. A known reset
-// resumes on the same model once; other errors, and a repeat after that resume, retry after each
-// errorBackoff step; then the card is marked stuck. Error text comes from the saved agent snapshot.
+// tickError consumes errored working cards before ordinary completion rules can run. When a card's
+// reviewed work is already verified on origin/main and its last report says nothing remains, it
+// moves to Done with the error in its note (landedBeforeError). Otherwise a known reset resumes on
+// the same model once; other errors, and a repeat after that resume, retry after each errorBackoff
+// step; then the card is marked stuck. Error text comes from the saved agent snapshot.
 func (f *Factory) tickError(a Agent, now time.Time) (bool, error) {
-	if a.archived() || stuckWhy[a.L(labelStage)] == "" {
+	legacyWait := a.L(labelStage) == "zach" && a.L(labelNote) == legacyLimitNote
+	if a.archived() || (stuckWhy[a.L(labelStage)] == "" && !legacyWait) {
 		return false, nil
 	}
-	if _, ok := f.card(a.ID); !ok {
+	c, ok := f.card(a.ID)
+	if !ok {
+		return false, nil
+	}
+	if a.Status == "error" {
+		f.recoveryMu.Lock()
+		r := f.recoveryState(a)
+		completed := r.Phase == "complete" && !a.LastUserMessageAt.After(r.UserAt)
+		f.recoveryMu.Unlock()
+		if completed {
+			return true, nil // an older error snapshot cannot reopen a completed episode
+		}
+		if done, err := f.landedBeforeError(a, c); done || err != nil {
+			return true, err
+		}
+	}
+	if legacyWait {
+		if a.Status == "error" {
+			return f.migrateWait(a, c)
+		}
 		return false, nil
 	}
 	f.recoveryMu.Lock()
@@ -191,7 +218,7 @@ func (f *Factory) tickError(a Agent, now time.Time) (bool, error) {
 		r.Error = "" // the attempt failed: plan the next one
 	}
 	if r.Phase == "" || r.Phase == "complete" {
-		r = recovery{Revision: r.Revision, Nudges: r.Nudges, NudgeStage: r.NudgeStage, Lands: r.Lands,
+		r = recovery{Revision: r.Revision, LandChecked: r.LandChecked, Nudges: r.Nudges, NudgeStage: r.NudgeStage, Lands: r.Lands,
 			LandedDiff: r.LandedDiff, Stage: a.L(labelStage), UserAt: a.LastUserMessageAt}
 	}
 	if r.Error != errorFingerprint(a) {
@@ -679,6 +706,9 @@ func (f *Factory) migrateWait(a Agent, c Card) (bool, error) {
 	var move func() error
 	switch {
 	case note == legacyLimitNote:
+		if done, err := f.landedBeforeError(a, c); done || err != nil {
+			return true, err
+		}
 		r := readRecovery(a)
 		if stuckWhy[r.Stage] == "" {
 			return false, nil

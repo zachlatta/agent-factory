@@ -692,3 +692,29 @@ func TestRecoveryPersistenceFailureAndInspectFailureDoNotSend(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyErrorWaitMovesToDoneWhenLanded(t *testing.T) {
+	const doneReport = "DECISION: None.\nOVERVIEW: Landed.\nNEEDS FROM ZACH: nothing\n\nREMAINING: none"
+	exhausted, _ := json.Marshal(map[string]any{"Stage": "landing", "Phase": "blocked"})
+	for _, status := range []string{"idle", "error"} {
+		t.Run(status, func(t *testing.T) {
+			c := card("c1", map[string]string{
+				labelStage:       "zach",
+				labelNote:        legacyLimitNote,
+				labelReviewed:    "h1",
+				legacyLimitLabel: base64.RawURLEncoding.EncodeToString(exhausted),
+			})
+			c.Cwd = t.TempDir()
+			c.Status = status
+			f, p, m := mailFactory(t, c)
+			f.Git = func(context.Context, string, ...string) error { return nil }
+			f.GitOut = gitStub(withAnswers(landedGit, "rev-parse HEAD", "n2\n"))
+			storeLog(t, f, p, c.ID, doneReport)
+			f.Tick()
+			l := p.labels(c.ID)
+			if v, ok := l[labelStuck]; !ok || v != "" || l[labelStage] != "landed" || l[labelNote] != "landed; "+legacyLimitNote || len(p.sent(c.ID)) != 0 || len(m.sends()) != 0 {
+				t.Fatalf("labels %v sent %v mails %v", l, p.sent(c.ID), m.sends())
+			}
+		})
+	}
+}

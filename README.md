@@ -197,12 +197,14 @@ The planner (the "Fellow") first picks a track:
   `factory.limit-recovery` and is read from it once). It survives restarts, and a handoff to a
   replacement agent carries it and `factory.reviewer-retries` (`carriedFactoryLabels`), so a
   handoff cannot reset a cap. The stuck mark is not carried.
-  - Card agent errors: a recognized quota reset gets one resume on the same model at the reset
-    plus 30 seconds. Unknown errors, and a repeat after that resume, retry on the same model 2, 10
-    and 30 minutes after each failure. Then the card is marked `stuck=agent error`. A send whose
-    delivery is uncertain is never repeated within its 2-minute grace; the next try waits its step.
-    A completed turn ends the episode. Resume and Reply on a stuck card each make one attempt and
-    do not rearm the retries.
+  - Card agent errors: an errored card whose reviewed work is already verified on `origin/main` and
+    whose last report says nothing remains (`REMAINING: none` and nothing needed from Zach) moves to
+    Done and keeps the error in its note. Otherwise a recognized quota reset gets one resume on the
+    same model at the reset plus 30 seconds. Unknown errors, and a repeat after that resume, retry
+    on the same model 2, 10 and 30 minutes after each failure. Then the card is marked
+    `stuck=agent error`. A send whose delivery is uncertain is never repeated within its 2-minute
+    grace; the next try waits its step. A completed turn ends the episode. Resume and Reply on a
+    stuck card each make one attempt and do not rearm the retries.
   - Model hand-off (`factory/handoff.go`): when those same-model retries are used up, or a known
     reset is more than 2 hours away, the card moves once to another model in the same worktree
     (`paseo run --workspace`) before it is marked stuck: Opus 5.5 unless Claude is the failing

@@ -1250,7 +1250,8 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			// stalled, which the stopped-step recovery nudges and then re-runs
 			return f.checkStuck(a, now)
 		}
-		if ok, why := f.landedOnMain(c.Cwd, a.L(labelBase)); !ok {
+		switch status, why := f.checkLanding(a, c.Cwd); status {
+		case landNotOnMain:
 			if _, found := ParseRemaining(reply); !found && a.L(labelLandRun) != "" {
 				// its bin/land run is over but the reply has no REMAINING line, which the final report
 				// ends with: a progress note written while it ran, and the agent has not reported yet.
@@ -1260,12 +1261,9 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			// a push failure or rebase conflict: the card fixes its branch, then code review again
 			f.logf("%s landing not verified: %s", short(a.ID), why)
 			return f.returnToBuild(a, "landing not verified", landFailMsg(why), false)
-		}
-		if reviewed := a.L(labelReviewed); reviewed != "" {
-			if ok, why := f.landedAsReviewed(c.Cwd, reviewed); !ok {
-				f.logf("%s landed diff differs from the reviewed one: %s", short(a.ID), why)
-				return f.landedDiffDiffers(a, c, why)
-			}
+		case landDiffers:
+			f.logf("%s landed diff differs from the reviewed one: %s", short(a.ID), why)
+			return f.landedDiffDiffers(a, c, why)
 		}
 		f.recordLanded(a, c.Cwd)
 		return f.finishLanding(a, c, reply)
@@ -1678,6 +1676,28 @@ func (f *Factory) landedOnMain(cwd, base string) (bool, string) {
 		return false, "HEAD not on origin/main: " + err.Error()
 	}
 	return true, ""
+}
+
+type landCheck int
+
+const (
+	landVerified landCheck = iota
+	landNotOnMain
+	landDiffers
+)
+
+// checkLanding verifies that card a's worktree at cwd has its commits on origin/main and, when a
+// reviewed commit is recorded, that what landed matches what was reviewed.
+func (f *Factory) checkLanding(a Agent, cwd string) (landCheck, string) {
+	if ok, why := f.landedOnMain(cwd, a.L(labelBase)); !ok {
+		return landNotOnMain, why
+	}
+	if reviewed := strings.TrimSpace(a.L(labelReviewed)); reviewed != "" {
+		if ok, why := f.landedAsReviewed(cwd, reviewed); !ok {
+			return landDiffers, why
+		}
+	}
+	return landVerified, ""
 }
 
 func trunc(s string, n int) string {

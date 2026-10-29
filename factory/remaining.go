@@ -123,6 +123,29 @@ func needsNothing(reply string) bool {
 	return true
 }
 
+// landedNothingRemains reports whether reply says nothing remains (REMAINING: none), asks no
+// QUESTION block, and when an overview block or NEEDS FROM ZACH line is present, asks nothing of
+// Zach (needsNothing).
+func landedNothingRemains(reply string) bool {
+	stage, _, _ := landedNext(reply, 0)
+	if stage != "landed" {
+		return false
+	}
+	rest, qs := ParseQuestions(reply)
+	if len(qs) > 0 {
+		return false
+	}
+	if _, ov := ParseOverview(rest); ov != nil {
+		return needsNothing(reply)
+	}
+	for _, l := range strings.Split(rest, "\n") {
+		if m := overviewKey.FindStringSubmatch(l); m != nil && (m[1] == "NEEDS FROM ZACH" || m[1] == "NEEDS") {
+			return needsNothing("DECISION: None.\n" + l + "\n" + rest)
+		}
+	}
+	return true
+}
+
 // rerunLandMsg is the landing message a re-run sends (actions.go rerun).
 func rerunLandMsg(guarded bool) string {
 	msg := landMsg
@@ -146,12 +169,28 @@ func workLeftMsg(items []string, round int) string {
 // left goes back to the same card, at most workLeftCap rounds; then, or with anything for Zach, the card
 // waits in Needs Zach.
 func (f *Factory) landed(a Agent, c Card, reply string) error {
+	return f.landedError(a, c, reply, "")
+}
+
+// landedError moves a card whose landing is verified on from its agent's last reply, sharing the
+// label builder with landed. When errNote is non-empty and the card moves to Done (stage "landed"),
+// it keeps the error in factory.note and completes error recovery together in one update.
+func (f *Factory) landedError(a Agent, c Card, reply, errNote string) error {
 	rounds := atoi(a.L(labelWorkLeftRounds))
 	stage, note, again := landedNext(reply, rounds)
 	labels := map[string]string{labelStage: stage, labelNote: note, labelLandedVerified: "1",
-		labelAutoReview: "", labelRemainingAsk: ""}
+		labelAutoReview: "", labelRemainingAsk: "", labelStuck: ""}
 	if _, found := ParseRemaining(reply); !found {
 		labels[labelRemainingAsk] = a.L(labelRemainingAsk)
+	}
+	if errNote != "" && stage == "landed" {
+		note = trunc(strings.ReplaceAll(note+"; "+errNote, ",", ";"), 200)
+		labels[labelNote] = note
+		f.logf("%s finished landing before error: %s", short(a.ID), note)
+		return f.updateRecovery(a, func(r *recovery) {
+			r.Phase, r.UserAt = "complete", a.LastUserMessageAt
+			r.FromReset, r.ResetUsed, r.Timed, r.Manual = false, false, 0, false
+		}, labels)
 	}
 	switch {
 	case len(again) > 0:
