@@ -119,15 +119,24 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 // landWords land a card at Ready for you; dropWords drop it; any other reply is a change request.
 var landWords = []string{"land", "land it"}
 
-// readyAnswer applies the Ready for you reply rule.
-func readyAnswer(text string) answer {
-	switch clean := cleanReply(text); {
+// readyAnswer applies the Ready for you reply rule. Letters answer the builder's questions (qs) and go to
+// it like any change request.
+func readyAnswer(text string, qs []Question) answer {
+	clean := cleanReply(text)
+	if len(qs) == 1 && loneLetter.MatchString(clean) {
+		clean = "1" + clean // one question: its letter alone answers it
+	}
+	switch {
 	case clean == "":
 		return answer{}
 	case slices.Contains(landWords, clean):
 		return answer{Action: "approve"}
 	case slices.Contains(dropWords, clean):
 		return answer{Action: "close"}
+	case letterReply.MatchString(clean):
+		if expanded, ok := expandLetters(clean, qs); ok {
+			return answer{Action: "send", Message: "Zach's answers:\n" + expanded}
+		}
 	}
 	return answer{Action: "send", Message: replyText(text)}
 }
@@ -147,10 +156,12 @@ func previewWaitText(r *Ready) string {
 
 // readyEmail is the Ready for you email: what changed, screenshots, the Preview button, how to answer.
 func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
+	repos := []string{c.Repo, a.Repo}
 	title := c.Title
 	if title == "" {
 		title = a.Title
 	}
+	title = plainText(title, repos...)
 	cwd := c.Cwd
 	if cwd == "" {
 		cwd = a.Cwd
@@ -163,7 +174,6 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		atts = append(atts, s.att)
 	}
 	// agent text passes through plainText, as in every email: no hashes, ids, repo slugs or file names
-	repos := []string{c.Repo, a.Repo}
 	var changed []string
 	for _, l := range r.Changed {
 		changed = append(changed, plainText(l, repos...))
@@ -172,9 +182,25 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		changed = []string{plainText(ask.Overview.Overview, repos...)}
 	}
 	answerLine := "Reply \"land\" to ship it, \"drop\" to drop it, or say what to change."
+	if len(ask.Questions) > 0 { // shorter, to stay under the email word cap with the questions
+		answerLine = "Reply \"land\", \"drop\", or what to change. Letters like 1A answer the questions."
+	}
+	var qs []string                   // the builder's questions, numbered, with lettered options
+	for i, q := range ask.Questions { // cut like a decision email's (mail.go): the board has them whole
+		qs = append(qs, fmt.Sprintf("%d. %s", i+1, firstWords(plainText(q.Text, repos...), questionCap)))
+		for j, o := range q.Options {
+			if j == optionsEmailed {
+				break
+			}
+			qs = append(qs, fmt.Sprintf("   %s. %s", letter(j), firstWords(plainText(o, repos...), optionCap)))
+		}
+	}
 
 	var t strings.Builder
-	fmt.Fprintf(&t, "Ready to try: %s\n\nWhat changed:\n", title)
+	fmt.Fprintf(&t, "Ready to try: %s\n", title)
+	if len(changed) > 0 {
+		t.WriteString("\nWhat changed:\n")
+	}
 	for _, l := range changed {
 		fmt.Fprintf(&t, "- %s\n", l)
 	}
@@ -188,6 +214,9 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	}
 	if r.Sample != "" {
 		fmt.Fprintf(&t, "\nSample output:\n%s\n", r.Sample)
+	}
+	if len(qs) > 0 {
+		fmt.Fprintf(&t, "\n%s\n", strings.Join(qs, "\n"))
 	}
 	fmt.Fprintf(&t, "\n%s\n", answerLine)
 	if link != "" {
@@ -222,6 +251,9 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		if r.Sample != "" {
 			fmt.Fprintf(&h, `<p style="margin-bottom:4px"><b>Sample output</b></p><pre style="white-space:pre-wrap;`+
 				`background:#f6f8fa;padding:8px 12px;font-size:13px">%s</pre>`, e(r.Sample))
+		}
+		if len(qs) > 0 {
+			fmt.Fprintf(&h, `<pre style="white-space:pre-wrap;font-family:inherit">%s</pre>`, e(strings.Join(qs, "\n")))
 		}
 		fmt.Fprintf(&h, "<p>%s</p>", e(answerLine))
 		if link != "" {

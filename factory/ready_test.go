@@ -127,3 +127,36 @@ func mustCard(t *testing.T, f *Factory, id string) Card {
 	}
 	return c
 }
+
+func TestReadyEmailShowsQuestionsAndLettersAnswerThem(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
+		labelWriting: ago(5 * 60e9)})
+	c.Title = "Buttons in example/desk get clearer labels"
+	f, p, m := mailFactory(t, c)
+	storeLog(t, f, p, "c1", "CHANGED: Buttons say Land.\n\nQUESTION: Which colour for the button?\n- Blue (recommended)\n- Red\n")
+	f.Tick()
+	sends := m.sends()
+	if len(sends) != 1 {
+		t.Fatalf("sends = %+v", sends)
+	}
+	text, html := sends[0].Args["text"].(string), sends[0].Args["html"].(string)
+	for _, want := range []string{"1. Which colour for the button?", "A. Blue (recommended)", "B. Red", "1A"} {
+		if !strings.Contains(text, want) || !strings.Contains(html, strings.ReplaceAll(want, "(", "(")) {
+			t.Errorf("email lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(sends[0].Args["subject"].(string), "example/desk") {
+		t.Errorf("subject keeps the repo slug: %v", sends[0].Args["subject"])
+	}
+	ask := readyAsk("")
+	ask.Questions = []Question{{Text: "Which colour for the button?", Options: []string{"Blue (recommended)", "Red"}}}
+	if got := parseAnswer("1b", ask); got.Action != "send" || !strings.Contains(got.Message, "→ Red") {
+		t.Errorf("1b -> %+v", got)
+	}
+	if got := parseAnswer("b", ask); got.Action != "send" || !strings.Contains(got.Message, "→ Red") {
+		t.Errorf("b -> %+v", got)
+	}
+	if got := parseAnswer("land", ask); got.Action != "approve" {
+		t.Errorf("land -> %+v", got)
+	}
+}

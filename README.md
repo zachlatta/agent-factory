@@ -106,9 +106,10 @@ The planner (the "Fellow") first picks a track:
   server and uploads nothing. The factory runs the repo's preview (below) and sends one email:
   subject "Ready to try: <title>", the three lines, the screenshots, a Preview button and the board
   link. The board item shows the same with Land, Change and Drop. Email replies: `land` or `land it`
-  lands it; the drop words drop it; anything else is a change request, which sends the card back to
-  building and code review and then to a new Ready for you (`factory.ready` counts them; each has its
-  own note, so its own email). The email waits for the preview to load or fail, at most 10 minutes
+  lands it; the drop words drop it; letters (`1A`, or `A` for one question) answer the builder's
+  questions, cut to the decision email's lengths, and go to it; anything else is a change request,
+  which sends the card back to building and code review and then to a new Ready for you
+  (`factory.ready` counts them; each has its own note, so its own email). The email waits for the preview to load or fail, at most 10 minutes
   after the builder was asked.
 - **Previews** (`factory/tryout.go`, `previews.json`). A repo declares one in `.factory.json`, read
   from `origin/main` only, so a card cannot change what runs on the host before it lands:

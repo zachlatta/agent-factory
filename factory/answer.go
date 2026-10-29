@@ -60,7 +60,7 @@ type answer struct{ Action, Message string }
 // parseAnswer applies the reply rule to Zach's reply for ask.
 func parseAnswer(text string, ask *Ask) answer {
 	if ask.Ready != nil {
-		return readyAnswer(text)
+		return readyAnswer(text, ask.Questions)
 	}
 	clean := cleanReply(text)
 	if clean == "" {
