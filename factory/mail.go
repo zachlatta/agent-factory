@@ -310,20 +310,28 @@ func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
 // replyWord is one word Zach can answer with by email and what it does.
 type replyWord struct{ Word, Does string }
 
-// replyWords lists the one-word email answers for ask, matching parseAnswer.
+// replyWords lists the one-word email answers for ask, matching parseAnswer: only words for buttons
+// the ask has (its Choices, the same as on the board), so no word is offered without its button. Any
+// other reply is the ask's text choice (Change, No or his Answer).
 func replyWords(ask *Ask) []replyWord {
 	var out []replyWord
-	if yes := actionFor(ask, ask.Yes); yes != nil && (ask.Yes == "approve" || ask.Yes == "arbiter") {
-		does := strings.ToLower(yes.Label)
-		if len(ask.Questions) > 1 && ask.Yes == "approve" {
+	if ask.Ready != nil { // readyAnswer: only land and drop act there
+		return []replyWord{{"land", "land it"}, {"drop", "stop it"}}
+	}
+	if goCh := goChoice(ask); goCh != nil {
+		does := strings.ToLower(goCh.Label)
+		if x := actionFor(ask, goCh.action); x != nil {
+			does = strings.ToLower(x.Label)
+		}
+		if len(ask.Questions) > 1 && goCh.action == "approve" {
 			does = "take the recommended answers"
 		}
 		out = append(out, replyWord{"yes", does})
 	}
-	if actionFor(ask, "done") != nil {
+	if choiceByID(ask, "done") != nil {
 		out = append(out, replyWord{"done", "mark it done"})
 	}
-	if actionFor(ask, "close") != nil {
+	if dropOf(ask) != nil {
 		out = append(out, replyWord{"drop", "stop it"})
 	}
 	return out
@@ -336,6 +344,32 @@ func actionFor(ask *Ask, id string) *Action {
 		}
 	}
 	return nil
+}
+
+// withBoardFooter is args with the board link at the foot of its text and HTML bodies: the link that
+// opens card id, or the board for an email about no one card. A body that already carries that link
+// keeps it where it is. With no FACTORY_BOARD_URL, args is unchanged.
+func (f *Factory) withBoardFooter(id string, args map[string]any) map[string]any {
+	link := strings.TrimRight(f.cfg.BoardURL, "#")
+	if link == "" {
+		return args
+	}
+	if _, ok := f.card(id); ok {
+		link = f.cardLink(id)
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
+	}
+	if t, ok := args["text"].(string); ok && !strings.Contains(t, link) {
+		out["text"] = strings.TrimRight(t, "\n") + "\n\n--\nBoard: " + link + "\n"
+	}
+	if h, ok := args["html"].(string); ok && h != "" && !strings.Contains(h, html.EscapeString(link)) {
+		out["html"] = h + `<p style="margin-top:16px;padding-top:8px;border-top:1px solid #d1d9e0;color:#59636e;` +
+			`font-family:-apple-system,system-ui,sans-serif;font-size:13px"><a href="` + html.EscapeString(link) +
+			`" style="color:#0969da">Open the board</a></p>`
+	}
+	return out
 }
 
 // cardLink is the board link that opens card id, or "".
@@ -522,7 +556,7 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 		}
 		lead = append(lead, fmt.Sprintf("%d questions; I recommend %s.", len(qs), strings.Join(rec, " ")))
 		reply = append(reply, "Reply with letters like "+strings.Join(rec, " "))
-	case ask.Yes == "approve" || ask.Yes == "arbiter":
+	case goChoice(ask) != nil && (goChoice(ask).action == "approve" || goChoice(ask).action == "arbiter"):
 		lead = append(lead, "I recommend yes.")
 	}
 	for _, w := range words {

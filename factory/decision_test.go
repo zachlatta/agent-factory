@@ -6,82 +6,85 @@ import (
 	"testing"
 )
 
-func TestDecisionSubmission(t *testing.T) {
+// The board answers with one tap per choice, posting the same choice an email reply makes.
+func TestDecisionChoices(t *testing.T) {
 	page := boardPage(t)
 	i, j := strings.Index(page, "// decision: begin"), strings.Index(page, "// decision: end")
-	if i < 0 || j < i {
-		t.Fatal("missing decision implementation")
+	k, l := strings.Index(page, "// inbox: begin"), strings.Index(page, "// inbox: end")
+	if i < 0 || j < i || k < 0 || l < k {
+		t.Fatal("missing decision or inbox implementation")
 	}
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed")
 	}
 	script := `const assert=require('assert');
-let B={cards:[],repos:['example/repo']}, sent=[], notices=[], confirmations=0, acceptDrop=false;
-const nodes={}, $=id=>nodes[id], esc=s=>String(s??'').replaceAll('<','&lt;'), md=s=>s;
-const document={querySelector:()=>null}, post=async(a,b)=>sent.push([a,b]);
-const toast=m=>notices.push(m), refresh=()=>{}, releaseKeyboard=()=>{}, confirm=()=>{confirmations++;return acceptDrop};
-nodes.grid={dataset:{}};
-` + page[i:j] + `
+let B={cards:[],repos:['example/one','example/two']}, sent=[], notices=[], sel=null, renders=0, timers=[];
+const nodes={grid:{dataset:{}},inbox:{dataset:{}}}, $=id=>nodes[id], esc=s=>String(s??'').replaceAll('<','&lt;'), md=s=>s;
+const post=async(a,b)=>{sent.push([a,b]);return {}}, toast=m=>notices.push(m), refresh=()=>{}, releaseKeyboard=()=>{};
+const render=()=>{renders++}, fillAsk=()=>{}, setTimeout=(f)=>{timers.push(f);return timers.length}, clearTimeout=()=>{};
+const findCard=id=>B.cards.find(c=>c.id===id), repoTag=()=>'', clock=()=>'18:00', ago=()=>'now';
+` + page[i:j] + page[k:l] + `
 (async()=>{
-const c={id:'c1',ask:{request:{Base:'Original task'},title:'Approve?',why:'Gate',actions:[{id:'approve',label:'Approve plan'},{id:'reply',label:'Changes'},{id:'close',label:'Drop it'}],questions:[{text:'Store?',options:['Cache','Disk']},{text:'Color?',options:['Blue','Green']} ]}};
-B.cards=[c]; nodes['r-c1']={value:''};
-let html=askHtml(c); assert(html.includes('Original task'));assert(html.includes('Needs your input'));assert(!html.includes('askYesNo'));assert(!html.includes('open>'));
-await askSubmit('c1');assert.equal(sent.length,0);
-askPicks.c1={0:0,1:'o'};nodes['o-c1-1']={value:''};askActions.c1=0;
-await askSubmit('c1');assert.equal(sent.length,0);
-nodes['o-c1-1'].value='Purple';await askSubmit('c1');assert.equal(sent[0][0],'approve');assert(sent[0][1].message.includes('Purple'));
-askPicks.c1={};askActions.c1='other';nodes['r-c1'].value='Revise first';await askSubmit('c1');assert.equal(sent[1][0],'send');assert(sent[1][1].message.includes('Revise first'));
-askPicks.c1={};askActions.c1=2;await askSubmit('c1');assert.equal(confirmations,1);assert.equal(sent.length,2);
-acceptDrop=true;await askSubmit('c1');assert.equal(sent.at(-1)[0],'close');
-for(const action of ['recommend','rerun','stop','done']) {
- c.ask.actions=[{id:action,label:action}];c.ask.questions=[];delete askActions.c1;
- const before=sent.length;await askSubmit('c1');assert.equal(sent.length,before,'must choose '+action);
- assert(askHtml(c).includes('data-action="0"'));nodes['r-c1'].value='';askActions.c1=0;
- await askSubmit('c1');assert.equal(sent.at(-1)[0],action);
-}
-// Message-ignoring actions must never silently swallow complete or partial answers.
-for(const action of ['done','rerun','stop','close','pickrepo']) {
- c.ask.actions=[{id:action,label:action}];c.ask.questions=[{text:'Store?',options:['Postgres','SQLite']},{text:'Color?',options:['Blue','Green']}];
- askPicks.c1={0:0};askActions.c1=0;
- const before=sent.length;await askSubmit('c1');assert.equal(sent.length,before,'lost answers on '+action);
- askPicks.c1={0:0,1:1};await askSubmit('c1');assert.equal(sent.length,before,'lost complete answers on '+action);
- askPicks.c1={};nodes['r-c1'].value='Keep this instruction';await askSubmit('c1');assert.equal(sent.length,before,'lost draft on '+action);nodes['r-c1'].value='';
-}
-c.ask.actions=[{id:'done',label:'Mark done'},{id:'reply',label:'Send it on',primary:true,hint:'What remains?'}];
-askActions.c1=1;askPicks.c1={0:0};nodes['r-c1'].value='Finish the rest';
-await askSubmit('c1');assert.equal(sent.at(-1)[0],'send');assert(sent.at(-1)[1].message.includes('Postgres'));assert(sent.at(-1)[1].message.includes('Finish the rest'));
-askActions.c1=1;html=askHtml(c);assert(html.includes('Send it on (recommended)'));assert(html.includes('What remains?'));
-// Answer-only reply sends the completed choices without requiring extra prose.
-c.ask.questions=[{text:'Store?',options:['Postgres','SQLite']}];askPicks.c1={0:0};askActions.c1=1;nodes['r-c1'].value='';
-await askSubmit('c1');assert.equal(sent.at(-1)[0],'send');assert(sent.at(-1)[1].message.includes('Postgres'));
-// A card with only Done still has a way to send answers separately.
-c.ask.actions=[{id:'done',label:'Mark done'}];assert(decisionChoices(c.ask).some(([x])=>x.id==='reply'));
-c.ask.questions=[];nodes['r-c1'].value='';
-
-c.routing=true;c.ask.actions=[{id:'approve',label:'Repo',repo:'example/repo'},{id:'pickrepo',label:'Other repo'}];askActions.c1=0;await askSubmit('c1');assert.equal(sent.at(-1)[1].repo,'example/repo');askActions.c1=1;nodes['p-c1']={value:'example/repo'};await askSubmit('c1');assert.equal(sent.at(-1)[0],'approve');assert.equal(sent.at(-1)[1].repo,'example/repo');
-assert(allowedEvidenceSrc('/api/evidence/c1/before','c1'));for(const src of ['https://example.org/x.png','data:image/png;base64,x','file:///x.png','/api/evidence/other/before','/api/evidence/c1/before?x'])assert(!allowedEvidenceSrc(src,'c1'));
-c.ask.request=null;assert(askHtml(c).includes('Original task unavailable'));
-c.routing=false;c.ask.actions=[{id:'reply',label:'Reply'},{id:'done',label:'Mark done'}];c.ask.yes='say';c.ask.no='say';
-html=askHtml(c);assert(html.includes('>Yes</button>'));assert(html.includes('>No</button>'));assert(html.includes("askChoose('c1','yes')"));
-askActions.c1='yes';await askSubmit('c1');assert.equal(sent.at(-1)[0],'send');assert.equal(sent.at(-1)[1].message,'Yes.');
-askActions.c1='no';await askSubmit('c1');assert.equal(sent.at(-1)[1].message,'No.');
-// Handing a review that did not settle to the arbiter carries no answers: they must go through a reply.
-const settle={id:'settle',ask:{actions:[{id:'arbiter',label:'Let an agent decide'},{id:'reply',label:'Tell it what to do'},{id:'close',label:'Drop it'}],questions:[{text:'Store?',options:['Postgres','SQLite']},{text:'Color?',options:['Blue','Green']}]}};
-B.cards=[settle];nodes['r-settle']={value:''};askActions.settle=0;
-await askSubmit('settle');assert.equal(sent.at(-1)[0],'arbiter');assert.deepEqual(sent.at(-1)[1],{id:'settle'});
-for(const picks of [{0:0},{0:0,1:1}]) {
- askActions.settle=0;askPicks.settle=picks;const before=sent.length;
- await askSubmit('settle');assert.equal(sent.length,before,'the arbiter must not swallow answers');
-}
-askPicks.settle={};nodes['r-settle'].value='Preserve these instructions';
-const beforeDraft=sent.length;await askSubmit('settle');assert.equal(sent.length,beforeDraft);assert(notices.at(-1).includes('reply option'));
-nodes['r-settle'].value='';askActions.settle=1;askPicks.settle={0:0,1:1};
-await askSubmit('settle');assert.equal(sent.at(-1)[0],'send');assert(sent.at(-1)[1].message.includes('Postgres'));
-html=askHtml({id:'c2',ask:{request:{Base:'Unique task text'},overview:{overview:'Overview text'},actions:[],questions:[]}});assert.equal(html.split('Unique task text').length-1,1);assert(html.includes('<p class="gist">Overview text</p>'));
-
-})().catch(e=>{console.error(e);process.exit(1)});`
-	if out, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+const ready={id:'r1',title:'Phone board',ask:{kind:'ready',title:'Try it?',overview:{decision:'Ship the phone board?'},
+  choices:[{id:'land',label:'Land',primary:true},{id:'change',label:'Change',text:true,hint:'What should change?'},{id:'drop',label:'Drop'}]}};
+const dec={id:'d1',title:'Store',ask:{kind:'decision',title:'Approve?',questions:[{text:'Store?',options:['Postgres (recommended)','SQLite']}],
+  choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No',text:true},{id:'drop',label:'Drop'}]}};
+const two={id:'d2',title:'Two',ask:{kind:'decision',title:'Two?',questions:[{text:'A?',options:['x','y (recommended)']},{text:'B?',options:['p','q']}],
+  choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No',text:true}]}};
+const repo={id:'p1',title:'Pick',ask:{kind:'decision',title:'Which repo?',choices:[{id:'pick:example/one',label:'Start in example/one',repo:'example/one'},{id:'pick',label:'Other repo…',text:true},{id:'drop',label:'Drop'}]}};
+B.cards=[ready,dec,two,repo];
+// one tap lands: no Submit
+let h=choicesHtml(ready,'l'); assert(!h.includes('Submit')); assert(h.includes('>Land</button>'));
+await choose('r1','land','l'); assert.deepEqual(sent.at(-1),['choose',{id:'r1',choice:'land'}]);
+// Change opens a box; Send needs text
+await choose('r1','change','l'); assert.equal(sent.length,1); assert(choicesHtml(ready,'l').includes('id="say-l-r1"'));
+nodes['say-l-r1']={value:''}; await choose('r1','change','l',true); assert.equal(sent.length,1); assert.match(notices.at(-1),/Write what should change/);
+nodes['say-l-r1']={value:'Make it blue'}; await choose('r1','change','l',true); assert.deepEqual(sent.at(-1),['choose',{id:'r1',choice:'change',message:'Make it blue'}]);
+// Drop needs a second tap in place, never a browser dialog
+await choose('r1','drop','l'); assert.equal(sent.length,2); assert(choicesHtml(ready,'l').includes('Tap again to drop'));
+await choose('r1','drop','l'); assert.deepEqual(sent.at(-1),['choose',{id:'r1',choice:'drop'}]);
+// an armed Drop disarms on its own
+await choose('r1','drop','l'); timers.at(-1)(); assert(!choicesHtml(ready,'l').includes('Tap again'));
+// one question: the recommended option is picked; tapping another answers Yes with it
+assert(questionsHtml(dec,'l').includes('class="opt on"'));
+await askPick('d1',0,1,'l'); assert.equal(sent.at(-1)[1].choice,'yes'); assert.match(sent.at(-1)[1].message,/Store\?\n   → SQLite/);
+// Yes alone sends the recommended answer
+await choose('d1','yes','l'); assert.match(sent.at(-1)[1].message,/→ Postgres/);
+// two questions: taps pick, Yes sends both
+const before=sent.length; askPick('d2',1,1,'l'); assert.equal(sent.length,before);
+await choose('d2','yes','l'); assert.match(sent.at(-1)[1].message,/A\?\n   → y \(recommended\)\n2\. B\?\n   → q/);
+// No on an open question may go empty; No on a plan needs words
+nodes['say-l-d1']={value:'',focus(){}}; const n0=sent.length; await choose('d1','no','l'); await choose('d1','no','l',true); assert.equal(sent.length,n0); assert.match(notices.at(-1),/Write what should change/);
+await choose('d2','no','l'); nodes['say-l-d2']={value:'Do q instead'}; await choose('d2','no','l',true); assert.equal(sent.at(-1)[1].choice,'no'); assert.match(sent.at(-1)[1].message,/Do q instead/);
+// an open question has no Yes or No: tapping an option answers it, Answer opens a box, empty is refused
+const q={id:'q1',title:'Ask',ask:{kind:'question',title:'Waiting on you: question',questions:[{text:'Which port?',options:['8080 (recommended)','9090']}],
+  choices:[{id:'answer',label:'Answer',primary:true,text:true},{id:'drop',label:'Drop'}]}};
+const q0={id:'q0',title:'Ask',ask:{kind:'question',title:'Waiting on you: question',choices:q.ask.choices}};
+B.cards.push(q,q0); assert(!choicesHtml(q,'l').includes('>Yes<')); assert(!choicesHtml(q,'l').includes('>No<'));
+await askPick('q1',0,1,'l'); assert.equal(sent.at(-1)[1].choice,'answer'); assert.match(sent.at(-1)[1].message,/Which port\?\n   → 9090/);
+await choose('q0','answer','l'); assert(choicesHtml(q0,'l').includes('id="say-l-q0"'));
+nodes['say-l-q0']={value:''}; const nq=sent.length; await choose('q0','answer','l',true); assert.equal(sent.length,nq); assert.match(notices.at(-1),/Write your answer/);
+nodes['say-l-q0']={value:'Use the staging host'}; await choose('q0','answer','l',true); assert.deepEqual(sent.at(-1),['choose',{id:'q0',choice:'answer',message:'Use the staging host'}]);
+// a repo: one tap starts it there; Other opens a picker
+await choose('p1','pick:example/one','l'); assert.deepEqual(sent.at(-1),['choose',{id:'p1',choice:'pick:example/one'}]);
+await choose('p1','pick','l'); assert(choicesHtml(repo,'l').includes('id="repo-l-p1"'));
+nodes['repo-l-p1']={value:'example/two'}; nodes['say-l-p1']={value:''}; await choose('p1','pick','l',true);
+assert.equal(sent.at(-1)[1].repo,'example/two');
+// the list: For you first, then working (stuck first), shipped today, no answer; routine behind its filter
+const S={forYou:[{id:'r1',title:'Phone board',state:'Ship the phone board?'}],working:[{id:'w',title:'Retries',state:'building'}],
+  stuck:[{id:'s',title:'Hung',state:'no activity for 40 min'}],shipped:[{id:'x',title:'Done thing',state:'shipped',at:'2026-10-27T15:00:00Z'}],
+  noAnswer:[{title:'Order batteries',state:'no answer yet'}],routine:[{id:'q',title:'Hourly feed',state:'done'}]};
+const out=inboxHtml(S,''); const o=t=>out.html.indexOf(t);
+assert.equal(out.forYou,1); assert(o('For you')<o('Ship the phone board?')); assert(o('Ship the phone board?')<o('No answer yet'));
+assert(o('No answer yet')<o('Working on it')); assert(o('Hung')<o('Retries')); assert(o('Retries')<o('Shipped today'));
+assert(out.html.includes('Routine runs (1)')); assert(!out.html.includes('Hourly feed'));
+showRoutine=true; assert(inboxHtml(S,'').html.includes('Hourly feed'));
+assert(inboxHtml(S,'retries').html.includes('Retries')); assert(!inboxHtml(S,'retries').html.includes('Hung'));
+console.log('choices passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }

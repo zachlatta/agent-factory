@@ -53,7 +53,6 @@ func TestBoardPageSafeArea(t *testing.T) {
 		{"aside .bd", "safe-area-inset-bottom"},
 		{"aside .hd", "safe-area-inset-top"},
 		{"header", "safe-area-inset-top"},
-		{".tabs", "safe-area-inset-top"},
 	} {
 		rules := cssRules(page, c.sel)
 		if len(rules) == 0 {
@@ -70,19 +69,37 @@ func TestBoardPageSafeArea(t *testing.T) {
 	}
 }
 
-func TestBoardPageNeedsZachTabPinned(t *testing.T) {
+// On the phone the board is one column: the For you list, no stage tabs, no sideways scroll and no
+// activity ticker; a card's ids, branch and logs sit under Details.
+func TestBoardPageInboxOnPhone(t *testing.T) {
 	page := boardPage(t)
-	// a square sticky wrapper, so scrolled tabs never show around the pill's rounded ends
-	rules := cssRules(page, ".tabs .pin")
-	if len(rules) == 0 || !strings.Contains(rules[0], "position:sticky") || !strings.Contains(rules[0], "left:0") || !strings.Contains(rules[0], "background:#fff") {
-		t.Errorf("Needs Zach tab is not pinned at the left: %q", rules)
+	if strings.Contains(page, `class="tabs"`) || strings.Contains(page, "renderPhone") {
+		t.Error("the phone still has stage tabs")
 	}
-	// on the phone the Needs Zach tab is rendered first, inside the pin
-	if !strings.Contains(page, "[...stages.filter(s=>s[0]==='zach'), ...stages.filter(s=>s[0]!=='zach')]") {
-		t.Error("renderPhone does not put Needs Zach first")
+	phone := regexp.MustCompile(`(?s)@media \(max-width:760px\)\{(.*?)\n\}`).FindStringSubmatch(page)
+	if phone == nil {
+		t.Fatal("no phone media block")
 	}
-	if !strings.Contains(page, `<span class="pin">`) {
-		t.Error("renderPhone does not wrap Needs Zach in the pin")
+	hidden := regexp.MustCompile(`([^{}]+)\{display:none\}`).FindAllStringSubmatch(phone[1], -1)
+	ticker := false
+	for _, h := range hidden {
+		ticker = ticker || strings.Contains(h[1], "#activity")
+	}
+	if !ticker {
+		t.Error("the activity ticker shows on the phone")
+	}
+	if !strings.Contains(phone[1], "overflow-x:hidden") {
+		t.Error("the phone page can scroll sideways")
+	}
+	if !strings.Contains(page, "const inbox = phone.matches || view==='inbox';") {
+		t.Error("the phone does not always show the For you list")
+	}
+	d := strings.Index(page, `<details id="pDetails">`)
+	if d < 0 || strings.Index(page, `id="pLogs"`) < d || strings.Index(page, `id="pKv"`) < d || strings.Index(page, `id="pAsk"`) > d {
+		t.Error("card detail must start with the ask and fold ids and logs under Details")
+	}
+	if strings.Contains(page, "confirm('Drop this card?") {
+		t.Error("Drop still uses a browser dialog")
 	}
 }
 

@@ -169,7 +169,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				c.Flags = append(c.Flags, "waiting on permission")
 			}
 			if c.Labelled {
-				c.Stage = "zach" // shown only, like a stall: nobody else answers the prompt
+				c.Stage = "zach" // shown only, like a stall, until the factory refuses the prompt (denyPrompts)
 			}
 		}
 		if a.Status == "running" && idle > stallMinutes*time.Minute && !subagentActive(agents, a.ID, now) {

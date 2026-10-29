@@ -63,7 +63,7 @@ func TestAskFor(t *testing.T) {
 		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}},
 			"Finished: read the result", "builder", "done,reply"},
 		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}},
-			"Waiting on you: permission", "builder", "reply,done"},
+			"Waiting on you: permission", "builder", "reply,close"},
 		{"stopped card stuck in its column", card("c", map[string]string{labelStage: "landing", labelStuck: stuckStopped}),
 			"Stuck: stopped with nothing queued", "builder", "rerun,reply,close"},
 		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),

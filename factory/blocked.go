@@ -90,9 +90,9 @@ const permitEvery = 15 * time.Second
 // it waits on permission. A failed read leaves Pending empty: the stall checks still catch a
 // blocked agent, later.
 func (f *Factory) addPending(agents []Agent) {
-	prev := map[string]string{}
+	prev, prevIDs := map[string]string{}, map[string][]string{}
 	for _, a := range f.agents() {
-		prev[a.ID] = a.Pending
+		prev[a.ID], prevIDs[a.ID] = a.Pending, a.PendingIDs
 	}
 	running, flagged := false, false
 	for _, a := range agents {
@@ -110,12 +110,12 @@ func (f *Factory) addPending(agents []Agent) {
 	f.mu.Unlock()
 	if !due && !flagged {
 		for i := range agents {
-			agents[i].Pending = prev[agents[i].ID]
+			agents[i].Pending, agents[i].PendingIDs = prev[agents[i].ID], prevIDs[agents[i].ID]
 		}
 		return
 	}
 	out, err := f.paseo("permit", "ls", "--json")
-	var perms []struct{ AgentID, Name, Description string }
+	var perms []struct{ ID, AgentID, Name, Description string }
 	if err == nil {
 		err = json.Unmarshal([]byte(out), &perms)
 	}
@@ -126,8 +126,9 @@ func (f *Factory) addPending(agents []Agent) {
 	f.mu.Lock()
 	f.permitAt = now
 	f.mu.Unlock()
-	by := map[string]string{}
+	by, ids := map[string]string{}, map[string][]string{}
 	for _, p := range perms {
+		ids[p.AgentID] = append(ids[p.AgentID], p.ID)
 		if by[p.AgentID] != "" {
 			continue
 		}
@@ -138,7 +139,68 @@ func (f *Factory) addPending(agents []Agent) {
 		by[p.AgentID] = trunc(s, 300)
 	}
 	for i := range agents {
-		agents[i].Pending = by[agents[i].ID]
+		agents[i].Pending, agents[i].PendingIDs = by[agents[i].ID], ids[agents[i].ID]
+	}
+}
+
+// denyRule is what the factory tells an agent when it refuses its permission prompt.
+const denyRule = "The factory answers every permission prompt with no, and nobody else will answer it. " +
+	"Write rm only with literal absolute paths (no glob, variable, substitution or ~, and no cd earlier in the same " +
+	"command), never combine cd and git in one command (use git -C), and keep your work in your worktree. " +
+	"Do this step another way, or stop and say in your summary what you need."
+
+// denyPrompts refuses every permission prompt of the factory's own agents (cards, reviewers, Scouts,
+// pickers and their sub-agents), once per prompt, so none waits for a person. It never allows a
+// prompt and never answers one of an agent the factory did not start. Dry and read-only runs only
+// read.
+func (f *Factory) denyPrompts(agents []Agent) {
+	if f.passive() {
+		return
+	}
+	managed, live := quietManaged(agents), map[string]bool{}
+	defer func() { // forget prompts that are gone
+		f.mu.Lock()
+		for k := range f.denied {
+			if !live[k] {
+				delete(f.denied, k)
+			}
+		}
+		f.mu.Unlock()
+	}()
+	for _, a := range agents {
+		if !managed[a.ID] || a.archived() || a.Status != "running" || a.Pending == "" {
+			continue
+		}
+		ids := a.PendingIDs
+		if len(ids) == 0 {
+			ids = []string{""} // an older Paseo without prompt ids: refuse all of the agent's
+		}
+		for _, id := range ids {
+			key := a.ID + "/" + id
+			if id == "" {
+				key += a.Pending
+			}
+			live[key] = true
+			f.mu.Lock()
+			done := f.denied[key]
+			f.denied[key] = true
+			f.mu.Unlock()
+			if done {
+				continue
+			}
+			args := []string{"permit", "deny", a.ID, id, "--message", denyRule}
+			if id == "" {
+				args = []string{"permit", "deny", a.ID, "--all", "--message", denyRule}
+			}
+			if _, err := f.paseo(args...); err != nil {
+				f.mu.Lock()
+				delete(f.denied, key) // try again next pass
+				f.mu.Unlock()
+				f.logf("%s: refusing its permission prompt: %v", short(a.ID), err)
+				continue
+			}
+			f.logf("%s: refused its permission prompt (%s)", short(a.ID), trunc(a.Pending, 120))
+		}
 	}
 }
 

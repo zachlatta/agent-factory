@@ -110,44 +110,12 @@ dialog h3{margin:0 0 8px}
 #activity.open{max-height:calc(40vh + env(safe-area-inset-bottom));overflow:auto}
 #toast{position:fixed;left:50%;bottom:calc(34px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1f2328;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;display:none;z-index:20}
 .help{font-size:12px;color:var(--mute);margin:4px 0 10px}
-/* Needs Zach: what each card asks of him */
+/* Needs Zach in the columns view: the question and its choices (the same component as For you) */
 .ask{margin-top:8px;border-top:1px solid #f0e6c0;padding-top:8px;cursor:default}
 .ask .q{font-weight:700;font-size:14px;color:#7d4e00}
-.ask .why{font-size:12px;color:var(--mute);margin:2px 0 6px}
-.ask .from{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;margin-top:6px}
-.ask .detail{font-size:13px;line-height:1.45;background:#fbfaf5;border:1px solid #eee6cc;border-radius:6px;padding:6px 9px;max-height:11em;overflow:hidden;position:relative}
-.ask .detail.full{max-height:none}
-.ask .detail:not(.full)::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2.5em;background:linear-gradient(transparent,#fbfaf5)}
-.ask .detail p{margin:.3em 0}.ask .detail ul,.ask .detail ol{margin:.3em 0;padding-left:1.3em}
-.ask .detail code{font-size:12px;background:#f0eee6;padding:0 3px;border-radius:3px}
-.ask .detail pre{white-space:pre-wrap;font-size:12px}
-.ask .detail.empty{color:var(--mute);font-style:italic}
-/* the agent's overview: the decision, the gist, what it needs from Zach (ask.go Overview) */
-.ask .ov .dec{font-weight:700;font-size:15px;color:#7d4e00}
-.ask .ov .gist{font-size:13px;line-height:1.45;margin:3px 0 6px}
-.ask .ov .needs{font-size:13px;line-height:1.45;background:#fff8c5;border-left:3px solid #d4a72c;border-radius:4px;padding:5px 9px;margin-bottom:6px}
-.ask .ov .gist,.ask .ov .needs{white-space:pre-wrap}
-.ask .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.ask .btns button{padding:7px 12px}
-.ask textarea{margin-top:6px;min-height:64px}
-.ask .qs{margin-top:8px}.ask .qq{margin-top:8px}
-.ask .qt{font-weight:600;font-size:13px}
-.ask .opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
-.ask .opt{padding:7px 11px;border-radius:16px;text-align:left}
-.ask .opt.on{background:var(--blue);border-color:var(--blue);color:#fff}
-.ask input.other{width:100%;margin-top:6px;box-sizing:border-box}
-.ask .needs{font-size:13px;white-space:pre-wrap;margin:5px 0}
-.ask .request{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
-.ask .request summary{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
-.ask .task{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.ask .task.expanded{display:block}
-.ask .report{margin-top:10px;font-size:12px}.ask summary{cursor:pointer}
-.ask .ready ul{margin:6px 0;padding-left:20px}.ask .ready pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:240px;overflow:auto}
-.ask .ready .preview{display:inline-block;margin:6px 0;padding:10px 18px;border-radius:6px;background:#0969da;color:#fff;font-weight:600;text-decoration:none}
-.ask .ready .wait{font-size:13px;color:var(--mute);margin:6px 0}
-.ask .evidence{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.ask figure{margin:0;flex:1 1 120px;min-width:0}.ask figcaption{font-size:12px;font-weight:600}
-.ask img{max-width:100%;height:auto}.ask .unavailable{font-size:12px;color:var(--mute)}
+.ready ul{margin:6px 0;padding-left:20px}.ready pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:240px;overflow:auto}
+.ready .preview{display:inline-block;margin:6px 0;padding:10px 18px;border-radius:6px;background:#0969da;color:#fff;font-weight:600;text-decoration:none}
+.ready .wait{font-size:13px;color:var(--mute);margin:6px 0}
 .zachc .card{border-color:#e7d38a}
 /* Ideas: what each one proposes, in plain words */
 .card .sum{font-size:12.5px;line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
@@ -172,26 +140,54 @@ dialog h3{margin:0 0 8px}
 .banner div+div{margin-top:4px}
 .banner details{color:var(--ink);margin-top:4px}
 .banner pre{white-space:pre-wrap;font-size:11.5px;max-height:14em;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin:4px 0 0}
-body.stale .grid{opacity:.45}
-/* phone: one column at a time, picked from the stage tabs */
-.tabs{display:none}
+body.stale .grid,body.stale #inbox{opacity:.45}
+/* For you board (sections.go): one column at every width, the default view */
+#inbox{max-width:720px;margin:0 auto}
+body.inboxv #grid,body.inboxv .colctl,body.inboxv #activity,body:not(.inboxv) #inbox{display:none}
+#menuBtn{display:none}
+.views{display:inline-flex}.views button{border-radius:0}.views button:first-child{border-radius:6px 0 0 6px}.views button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+.views button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.sec{display:flex;justify-content:space-between;align-items:baseline;margin:18px 2px 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
+.sec:first-child{margin-top:4px}
+.none{color:var(--mute);font-size:13px;padding:6px 2px 10px}
+.fy{background:#fff;border:1px solid #e7d38a;border-radius:10px;padding:12px;margin-bottom:10px;overflow-wrap:anywhere}
+.fy .ft{font-size:12px;color:var(--mute)}.fy .ft .repo{color:var(--ink);font-weight:600}
+.fq{font-size:16px;font-weight:700;line-height:1.35;margin:3px 0 6px;overflow-wrap:anywhere}
+.choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.choices button{flex:1 1 0;min-width:84px;padding:10px 12px;font-weight:600;border-radius:8px}
+.choices button.drop{color:var(--red)}
+.choices button.on{outline:2px solid var(--blue)}
+.choices button.confirm{background:var(--red);border-color:var(--red);color:#fff}
+.say{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:flex-end}.say textarea{flex:1 1 200px;min-height:56px;margin:0}.say select{flex:1 1 100%}
+.say button{padding:10px 14px}
+button.link{border:0;background:none;color:var(--blue);padding:8px 0 0;font-size:13px}
+.evidence{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.evidence figure{margin:0;flex:1 1 120px;min-width:0}.evidence figcaption{font-size:12px;font-weight:600}
+.evidence img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px}.evidence .unavailable{font-size:12px;color:var(--mute)}
+.qq{margin-top:8px}.qt{font-weight:600;font-size:13px}
+.opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.opt{padding:7px 11px;border-radius:16px;text-align:left}
+.opt.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.line{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer;overflow-wrap:anywhere}
+.line .lt{flex:1 1 200px;min-width:0}.line .ls{color:var(--mute);font-size:12.5px}
+.line.stuck .ls{color:var(--red)}.line:not([data-id]){cursor:default}
+button.filter{margin-top:16px;border-radius:99px;font-size:12.5px}button.filter.on{background:var(--ink);color:#fff}
+#panel h4{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;margin:14px 0 4px}
+#panel h4:first-child{margin-top:0}
+#panel .gist{font-size:13.5px;white-space:pre-wrap;margin-bottom:4px}
+#panel .request{font-size:13.5px;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#panel .request.expanded{display:block}
+#pDetails{margin-top:16px;border-top:1px solid var(--line);padding-top:8px}#pDetails>summary{cursor:pointer;font-weight:600;padding:6px 0}
+.report{margin-top:10px;font-size:12.5px}.report summary{cursor:pointer}
+.report .detail{font-size:13px;line-height:1.45;background:#fbfaf5;border:1px solid #eee6cc;border-radius:6px;padding:6px 9px;margin-top:6px;overflow-wrap:anywhere}
+.report .detail pre{white-space:pre-wrap;font-size:12px}
 @media (max-width:760px){
   header{padding:calc(8px + env(safe-area-inset-top)) 10px 8px;gap:6px}
-  header .counts,#group,#host,label.sub,#errors,#updated,header>span[style]{display:none}
+  header .counts,#group,#host,label.sub,#errors,#updated,header>span[style],#views,#q,#newBtn,header>a,#fleetBtn,#activity{display:none}
+  header.menu #q,header.menu #newBtn,header.menu>a,header.menu #fleetBtn{display:inline-flex}
+  header.menu #q{flex:1 1 100%;order:9;width:auto;min-width:0}
+  #menuBtn{display:inline-block;padding:5px 11px}
   h1{font-size:16px;margin:0}
-  #q{flex:1;width:auto;min-width:0}
-  #newBtn{padding:5px 10px}
-  .tabs{display:flex;gap:6px;overflow-x:auto;padding:8px 10px 8px 0;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:calc(51px + env(safe-area-inset-top));z-index:4;scrollbar-width:none}
-  .tabs button{flex:none;border-radius:99px;font-size:13px;padding:5px 11px;white-space:nowrap}
-  .tabs .pin{position:sticky;left:0;z-index:1;flex:none;display:flex;padding:0 6px 0 10px;margin-right:-6px;background:#fff;box-shadow:6px 0 6px -6px rgba(0,0,0,.25)}
-  .tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-  .tabs button.zach:not(.on){background:#fff8c5}
-  main{padding:8px 10px calc(60px + env(safe-area-inset-bottom))}
-  .grid{display:block;min-width:0}
-  .plane{font-weight:600;font-size:12px;color:var(--mute);margin:12px 2px 6px;text-transform:uppercase;letter-spacing:.03em}
-  .card{padding:10px 11px;margin-bottom:8px}
-  .card .t{font-size:14.5px}
-  .card .m{font-size:12.5px}
+  main{padding:8px 10px calc(24px + env(safe-area-inset-bottom));overflow-x:hidden}
   .empty{color:var(--mute);text-align:center;padding:40px 10px}
   aside{width:100%}
   aside .x{font-size:28px;top:6px}
@@ -219,6 +215,8 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
 <body>
 <header>
   <h1>Factory</h1>
+  <span class="pill zach" id="forYouN"></span>
+  <span class="views" id="views"><button data-v="inbox">For you</button><button data-v="columns">All columns</button></span>
   <a href="/usage">Usage</a>
   <button id="fleetBtn" class="fleet" aria-expanded="false" aria-controls="fleetPop" aria-label="Host load" title="Host load"><svg id="fleetIcon" height="16" width="14" viewBox="0 0 4 16" aria-hidden="true"></svg></button>
   <span class="sub" id="updated">loading…</span>
@@ -226,30 +224,34 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <div class="counts" id="counts"></div>
   <span style="flex:1"></span>
   <input type="search" id="q" placeholder="Filter cards">
-  <select id="group"><option value="repo">Lanes: where it lands</option><option value="host">Lanes: host</option><option value="source">Lanes: source</option><option value="none">One board</option></select>
-  <select id="host"><option value="">All hosts</option></select>
-  <label class="sub"><input type="checkbox" id="showLanded"> all done</label>
-  <label class="sub"><input type="checkbox" id="showKids"> sub-agents</label>
+  <select id="group" class="colctl"><option value="repo">Lanes: where it lands</option><option value="host">Lanes: host</option><option value="source">Lanes: source</option><option value="none">One board</option></select>
+  <select id="host" class="colctl"><option value="">All hosts</option></select>
+  <label class="sub colctl"><input type="checkbox" id="showLanded"> all done</label>
+  <label class="sub colctl"><input type="checkbox" id="showKids"> sub-agents</label>
   <button class="primary" id="newBtn">+ New card</button>
+  <button id="menuBtn" aria-label="Menu" aria-expanded="false">☰</button>
 </header>
 <div id="fleetPop" role="dialog" aria-label="Host load" hidden></div>
 <script src="/host-metrics.js" defer></script>
 <div class="banner" id="banner" hidden></div>
-<nav class="tabs" id="tabs"></nav>
 <main>
   <section id="newStarting" class="starting-card" role="status" aria-live="polite" hidden>
     <strong id="newStartingTitle"></strong><div id="newStartingText"></div>
   </section>
+  <div id="inbox"></div>
   <div class="grid" id="grid"></div>
 </main>
 
 <aside id="panel">
   <button class="x" onclick="closePanel()">×</button>
-  <div class="hd"><h2 id="pTitle"></h2><div class="sub" id="pSub"></div><div class="stagebar" id="pBar"></div></div>
+  <div class="hd"><h2 id="pTitle"></h2><div class="sub" id="pState"></div></div>
   <div class="bd">
+    <div id="pAsk"></div>
+    <div class="idea" id="pIdea"></div>
+    <details id="pDetails"><summary>Details</summary>
+    <div class="sub" id="pSub"></div><div class="stagebar" id="pBar"></div>
     <div id="pFlags"></div>
     <div class="kv" id="pKv"></div>
-    <div class="idea" id="pIdea"></div>
     <div class="acts" id="pActs"></div>
     <textarea id="pMsg" placeholder="Send a message to this agent (it resumes the session)"></textarea>
     <div class="acts"><button id="pSend">Send message</button>
@@ -258,6 +260,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
     <div id="pKids"></div>
     <h4 style="margin:14px 0 6px" id="pLogsHd">Latest messages</h4>
     <pre class="logs" id="pLogs">…</pre>
+    </details>
   </div>
 </aside>
 
@@ -461,7 +464,8 @@ async function load(){
   const hs=$('host'); if(hs.options.length===1) B.hosts.forEach(h=>hs.add(new Option(h,h)));
   const nr=$('nRepo'); if(!nr.options.length){ nr.add(new Option('Auto: best match (recommended)','auto')); B.repos.forEach(r=>nr.add(new Option(r,r))); }
   $('activity').innerHTML = (B.log||[]).slice().reverse().map(esc).join('<br>') || 'No factory activity yet.';
-  if(!askOpen.size && !(document.activeElement && document.activeElement.tagName==='TEXTAREA' && $('grid').contains(document.activeElement))) render();
+  const ae=document.activeElement;
+  if(!askOpen.size && !(ae && ae.tagName==='TEXTAREA' && ($('grid').contains(ae)||$('inbox').contains(ae)))) render();
   if(sel) fillPanel(findCard(sel), false);
   openFromHash();
 }
@@ -498,36 +502,56 @@ function visible(){
 function laneKey(c){ const g=$('group').value; return g==='none'?'All agents':g==='host'?c.host:g==='source'?c.source:c.repo; }
 
 const phone = matchMedia('(max-width:760px)');
-let tab = null;
-function renderPhone(cards){
-  const stages = B.stages, counts = {};
-  cards.forEach(c=>counts[c.stage]=(counts[c.stage]||0)+1);
-  if(!tab) tab = counts.zach ? 'zach' : 'building';
-  // Needs Zach first, so it is in view without scrolling the strip
-  const order = [...stages.filter(s=>s[0]==='zach'), ...stages.filter(s=>s[0]!=='zach')];
-  $('tabs').innerHTML = order.map(s=>{ const b = `<button class="${s[0]===tab?'on':''} ${s[0]==='zach'?'zach':''}" data-s="${s[0]}">${esc(s[1])} ${counts[s[0]]||0}</button>`; return s[0]==='zach' ? `<span class="pin">${b}</span>` : b; }).join('');
-  $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ tab=b.dataset.s; render(); scrollTo(0,0); });
-  const on = $('tabs').querySelector('.on');
-  if(on && on.dataset.s !== renderPhone.shown){ renderPhone.shown = on.dataset.s; on.scrollIntoView({inline:'center', block:'nearest'}); }
-  const cs = cards.filter(c=>c.stage===tab).sort((a,b)=>(b.lastActivityAt||'').localeCompare(a.lastActivityAt||''));
-  const lanes = {}; cs.forEach(c=>(lanes[laneKey(c)] ||= []).push(c));
-  const st = stages.find(s=>s[0]===tab);
-  let h = `<div class="help">${esc(st?st[2]:'')}</div>`;
-  Object.entries(lanes).sort((a,b)=>b[1].length-a[1].length).forEach(([k,lc],i)=>{
-    const cap = tab==='landed' && !open_.has('p'+i+tab) ? 5 : 1e9;
-    h += `<div class="plane">${esc(LANE_NAMES[k]||k)} · ${lc.length}</div>` + lc.slice(0,cap).map(cardHtml).join('')
-      + (lc.length>cap ? `<div class="more" onclick="open_.add('p${i}${tab}');render()">+${lc.length-cap} more</div>` : '');
-  });
-  if(!cs.length) h += '<div class="empty">Nothing here.</div>';
-  const g=$('grid'); if(g.dataset.html === h) return; // unchanged: a refresh moves nothing under a tap
-  g.dataset.html = h; g.innerHTML = h;
-  g.querySelectorAll('.card').forEach(el=>{ el.onclick=()=>openPanel(el.dataset.id); el.draggable=false; });
+// inbox: begin
+// The For you board (sections.go, the default view): what waits on Zach first, each with its question,
+// Preview and choices; then what is working (stuck first), what shipped today and requests with no
+// answer. Routine runs show only behind their filter. One column at every width; the list never
+// fetches transcripts or logs (opening a card does). The phone always shows it.
+let showRoutine = false;
+const VIEW_KEY = 'factory.view';
+let view = (()=>{ try{ return localStorage.getItem(VIEW_KEY)==='columns' ? 'columns' : 'inbox'; }catch(e){ return 'inbox'; } })();
+function setView(v){ view = v; try{ localStorage.setItem(VIEW_KEY, v); }catch(e){} render(); }
+function secHtml(title, n){ return `<h2 class="sec">${esc(title)} <span>${n}</span></h2>`; }
+function lineHtml(l, cls){
+  const when = cls==='shipped' ? (l.at ? clock(l.at) : '') : ago(l.at);
+  return `<div class="line ${cls||''}"${l.id?` data-id="${esc(l.id)}"`:''}><span class="lt">${esc(l.title)}</span><span class="ls">${esc([l.state, when].filter(Boolean).join(' · '))}</span></div>`;
 }
+function forYouHtml(c){
+  const repo = repoTag(c);
+  return `<div class="fy" data-id="${c.id}"><div class="ft">${repo}${repo?' · ':''}${esc(c.title)}</div>
+    <div class="fq">${esc(askQuestion(c.ask))}</div>${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
+    <button class="link" onclick="openPanel('${c.id}')">Details</button></div>`;
+}
+function inboxHtml(S, q){
+  S = Object.assign({forYou:[],working:[],stuck:[],shipped:[],noAnswer:[],routine:[]}, S||{});
+  const f = ls => ls.filter(l => !q || (l.title+' '+l.state).toLowerCase().includes(q));
+  const fy = f(S.forYou).map(l=>findCard(l.id)).filter(c=>c&&c.ask);
+  const work = f(S.stuck).map(l=>lineHtml(l,'stuck')).concat(f(S.working).map(l=>lineHtml(l)));
+  let h = secHtml('For you', fy.length) + (fy.map(forYouHtml).join('') || '<div class="none">Nothing waits on you.</div>');
+  if(S.noAnswer.length) h += secHtml('No answer yet', f(S.noAnswer).length) + f(S.noAnswer).map(l=>lineHtml(l,'stuck')).join('');
+  h += secHtml('Working on it', work.length) + (work.join('') || '<div class="none">Nothing in progress.</div>');
+  h += secHtml('Shipped today', f(S.shipped).length) + (f(S.shipped).map(l=>lineHtml(l,'shipped')).join('') || '<div class="none">Nothing yet today.</div>');
+  h += `<button class="filter ${showRoutine?'on':''}" onclick="showRoutine=!showRoutine;render()">Routine runs (${S.routine.length})</button>`
+    + (showRoutine ? f(S.routine).map(l=>lineHtml(l)).join('') : '');
+  return {html: h, forYou: fy.length};
+}
+function renderInbox(){
+  const r = inboxHtml(B.sections, $('q').value.toLowerCase()), box = $('inbox');
+  if(box.dataset.html === r.html) return; // unchanged: a refresh moves nothing under a tap
+  box.dataset.html = r.html; box.innerHTML = r.html;
+  box.querySelectorAll('.line[data-id]').forEach(el=>el.onclick=()=>openPanel(el.dataset.id));
+}
+// inbox: end
 
 function render(){
   if(loadErr && !B.updated) return; // keep load()'s "can't reach" message in #grid
-  if(phone.matches) return renderPhone(visible());
-  $('tabs').innerHTML = '';
+  const n = ((B.sections||{}).forYou||[]).length;
+  $('forYouN').textContent = n ? n+' for you' : 'nothing for you';
+  const inbox = phone.matches || view==='inbox';
+  document.body.classList.toggle('inboxv', inbox);
+  $('views').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v===(inbox?'inbox':'columns')));
+  if(inbox){ $('grid').innerHTML=''; delete $('grid').dataset.html; return renderInbox(); }
+  $('inbox').innerHTML=''; delete $('inbox').dataset.html;
   const cards = visible(), stages = B.stages;
   const counts = {}; cards.forEach(c=>counts[c.stage]=(counts[c.stage]||0)+1);
   $('counts').innerHTML = stages.filter(s=>s[0]!=='landed').map(s=>`<span class="pill ${s[0]==='zach'?'zach':''}">${s[1]} <b>${counts[s[0]]||0}</b></span>`).join('') + `<span class="pill">Done 12h <b>${counts.landed||0}</b></span>`;
@@ -664,13 +688,18 @@ function cardHtml(c){
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
     <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
-    ${c.ask?askHtml(c):''}
+    ${c.ask?`<div class="ask" onclick="event.stopPropagation()"><div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
   </div>`;
 }
 
 const md = s => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(s||'', {gfm:true})) : `<pre>${esc(s)}</pre>`;
 // decision: begin
-const askOpen = new Set(), askPicks = {}, askActions = {};
+// One way to answer (choose.go): each ask has fixed choices (Land / Change / Drop for finished work,
+// Yes / No / Drop for decisions, a problem's own action). A tap answers at once: Drop asks for a second
+// tap in place, and a choice with a text box (Change, No, another repo) opens it with Send. Question
+// options start on the recommended one; with a single question and a Yes or Land, tapping an option
+// answers with it. The board posts the choice (POST /api/choose), the same answer an email reply makes.
+const askOpen = new Set(), askPicks = {}, askSay = {}, askDraft = {}, dropArm = {};
 const evidencePath = (id, slot) => '/api/evidence/'+encodeURIComponent(id)+'/'+slot;
 function allowedEvidenceSrc(src, id){ return ['before','after'].some(slot=>src===evidencePath(id,slot)); }
 function askMarkdown(text, id){
@@ -681,18 +710,14 @@ function askMarkdown(text, id){
   });
   return template.innerHTML;
 }
-function decisionChoices(a){
-  const choices=a.actions.map((x,i)=>[x,i]);
-  if((a.questions||[]).length&&!a.actions.some(x=>x.id==='reply')) choices.unshift([{id:'reply',label:'Send answers',hint:'Anything else? (optional)'},'answers']);
-  if(!(a.questions||[]).length && a.yes==='say' && a.no==='say') {
-    choices.unshift([{id:'send',label:'Yes',message:'Yes.'},'yes'],[{id:'send',label:'No',message:'No.'},'no']);
-  }
-  return choices;
-}
-function askExpandTask(id,button){
-  const open=$('task-'+id).classList.toggle('expanded');
-  button.textContent=open?'Show less':'Show full task';
-  if(open)askOpen.add(id);else if(!askPicks[id]&&askActions[id]===undefined)askOpen.delete(id);
+const recommended = q => q.options.findIndex(o=>/\(recommended\)/i.test(o));
+function pickOf(c, qi){ const p=(askPicks[c.id]||{})[qi]; return p===undefined ? recommended(c.ask.questions[qi]) : p; }
+// question is the ask's one-line question: the agent's DECISION line, else the ask's title
+function askQuestion(a){ return (a.overview&&a.overview.decision) || a.title; }
+function evidenceHtml(c){
+  const a=c.ask||{}, ev=['before','after'].filter(slot=>(a.evidence||{})[slot]).map(slot=>`<figure><figcaption>${slot==='before'?'Before':'After'}</figcaption>
+    <a href="${evidencePath(c.id,slot)}" target="_blank" rel="noopener"><img src="${evidencePath(c.id,slot)}" alt="${slot==='before'?'Before':'After'} screenshot" onerror="this.closest('figure').querySelector('.unavailable').hidden=false;this.parentNode.hidden=true"></a><div class="unavailable" hidden>Image unavailable</div></figure>`).join('');
+  return (a.ready ? readyHtml(a.ready) : '') + (ev ? `<div class="evidence">${ev}</div>` : '');
 }
 /* Ready for you (ready.go): what changed and the factory-run preview */
 function readyHtml(r){
@@ -702,87 +727,60 @@ function readyHtml(r){
     ${link||(wait?`<div class="wait">${esc(wait)}</div>`:'')}${r.state==='failed'&&r.log?`<details><summary>Preview log</summary><pre>${esc(r.log)}</pre></details>`:''}
     ${r.sample?`<details open><summary>Sample output</summary><pre>${esc(r.sample)}</pre></details>`:''}</div>`;
 }
-function askHtml(c){
-  const a=c.ask, qs=a.questions||[], ov=a.overview||{}, picks=askPicks[c.id]||{}, req=a.request||{};
-  const request=req.Base ? `<div class="request task" id="task-${c.id}">${esc(req.Base)}</div>${req.Base.length>180||req.Base.split('\n').length>3?`<button class="more" onclick="askExpandTask('${c.id}',this)">Show full task</button>`:''}`
-    : `Original task unavailable. <a href="t/${c.id}">Open transcript</a>`;
-  const followups=(req.FollowUps||[]).map(f=>`<details class="request"><summary>Later instructions${f.Date?' · '+esc(f.Date):''}</summary><div>${esc(f.Text)}</div></details>`).join('');
-  const evidence=['before','after'].filter(slot=>(a.evidence||{})[slot]).map(slot=>`<figure><figcaption>${slot==='before'?'Before':'After'}</figcaption>
-    <a href="${evidencePath(c.id,slot)}" target="_blank" rel="noopener"><img src="${evidencePath(c.id,slot)}" alt="${slot==='before'?'Before':'After'} screenshot" onerror="this.closest('figure').querySelector('.unavailable').hidden=false;this.parentNode.hidden=true"></a><div class="unavailable" hidden>Image unavailable</div></figure>`).join('');
-  const quiz=qs.map((q,qi)=>`<div class="qq"><div class="qt">${esc(q.text)}</div><div class="opts">${q.options.map((o,oi)=>`<button class="opt ${picks[qi]===oi?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},${oi})">${esc(o)}</button>`).join('')}
-    <button class="opt ${picks[qi]==='o'?'on':''}" data-q="${qi}" onclick="askPick('${c.id}',${qi},'o')">Other…</button></div>
-    <input class="other" id="o-${c.id}-${qi}" aria-label="Other answer: ${esc(q.text)}" placeholder="Your own answer" style="display:${picks[qi]==='o'?'block':'none'}" oninput="askOpen.add('${c.id}')"></div>`).join('');
-  const choices=decisionChoices(a);
-  const selected=askActions[c.id];
-  const chosen=choices.find(([,i])=>i===selected)?.[0];
-  const actionChoices=choices.map(([x,i])=>`<button class="opt ${selected===i?'on':''}" data-action="${i}" onclick="askChoose('${c.id}',${typeof i==='string'?"'"+i+"'":i})">${esc(x.label)}${x.primary&&!a.ready?' (recommended)':''}</button>`).join('');
-  const other=selected==='other', writing=other||chosen?.id==='reply';
-  const hint=chosen?.id==='reply'?(chosen.hint||'Message to the agent'):'What should the agent do?';
-  return `<div class="ask" onclick="event.stopPropagation()"><div class="from">Original task</div>${request}${followups}
-    <div class="from">Needs your input</div><div class="q">${esc(ov.decision||a.title)}</div><div class="needs">${esc(ov.needs||a.why)}</div>
-    ${a.ready?readyHtml(a.ready):''}${evidence?`<div class="evidence">${evidence}</div>`:''}${quiz}
-    <div class="qq"><div class="opts actions">${actionChoices}<button class="opt ${other?'on':''}" data-action="other" onclick="askChoose('${c.id}','other')">Other…</button></div></div>
-    <textarea id="r-${c.id}" aria-label="${other?'Other instructions':'Reply instructions'}" placeholder="${esc(hint)}" style="display:${writing?'block':'none'}" oninput="askOpen.add('${c.id}')"></textarea>
-    ${c.routing?`<select id="p-${c.id}" aria-label="Other repo" style="display:${selected===a.actions.findIndex(x=>x.id==='pickrepo')?'block':'none'}">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}
-    <div class="btns"><button class="primary" onclick="askSubmit('${c.id}')">Submit</button></div>
-    <details class="report" ontoggle="if(this.open)askOpen.add('${c.id}');else if(!askPicks['${c.id}']&&askActions['${c.id}']===undefined)askOpen.delete('${c.id}')"><summary>Full details</summary><div class="detail full">${ov.overview?`<p class="gist">${esc(ov.overview)}</p>`:''}${(a.report||a.detail)?askMarkdown(a.report||a.detail,c.id):''}</div><div class="why">${esc(a.title)} · ${esc(a.why)}</div><a href="t/${c.id}">Transcript</a></details></div>`;
+function questionsHtml(c, where){
+  const qs=(c.ask&&c.ask.questions)||[];
+  return qs.map((q,qi)=>`<div class="qq"><div class="qt">${esc(q.text)}</div><div class="opts">${q.options.map((o,oi)=>
+    `<button class="opt ${pickOf(c,qi)===oi?'on':''}" onclick="askPick('${c.id}',${qi},${oi},'${where}')">${esc(o)}</button>`).join('')}</div></div>`).join('');
 }
-function askPick(id, qi, oi){
-  const p=askPicks[id]=askPicks[id]||{};p[qi]=oi;askOpen.add(id);
-  const card=document.querySelector(`.card[data-id="${id}"]`);if(!card)return;
-  card.querySelectorAll(`.opt[data-q="${qi}"]`).forEach((b,k)=>b.classList.toggle('on',k===(oi==='o'?b.parentNode.children.length-1:oi)));
-  const o=$('o-'+id+'-'+qi);o.style.display=oi==='o'?'block':'none';if(oi==='o')o.focus();
+function choicesHtml(c, where){
+  const a=c.ask, say=askSay[c.id], ch=(a.choices||[]).find(x=>x.id===say);
+  const btns=(a.choices||[]).map(x=>{
+    const armed=x.id==='drop'&&dropArm[c.id];
+    const cls=[x.primary&&a.kind!=='problem'?'primary':'', x.id==='drop'?'drop':'', armed?'confirm':'', say===x.id?'on':''].join(' ');
+    return `<button class="${cls}" data-choice="${esc(x.id)}" onclick="choose('${c.id}','${esc(x.id)}','${where}')">${esc(armed?'Tap again to drop':x.label)}</button>`;
+  }).join('');
+  const box=ch ? `<div class="say">${ch.id==='pick'?`<select id="repo-${where}-${c.id}" aria-label="Repo">${(B.repos||[]).map(r=>`<option>${esc(r)}</option>`).join('')}</select>`:''}
+    <textarea id="say-${where}-${c.id}" aria-label="${esc(ch.label)}" placeholder="${esc(ch.hint||'')}" oninput="askDraft['${c.id}']=this.value;askOpen.add('${c.id}')">${esc(askDraft[c.id]||'')}</textarea>
+    <button class="primary" onclick="choose('${c.id}','${esc(ch.id)}','${where}',true)">Send</button></div>` : '';
+  return `<div class="choices">${btns}</div>${box}`;
 }
-function askChoose(id, choice){
-  askActions[id]=choice;askOpen.add(id);
-  const card=document.querySelector(`.card[data-id="${id}"]`);if(!card)return;
-  card.querySelectorAll('[data-action]').forEach(b=>b.classList.toggle('on',b.dataset.action===String(choice)));
-  const c=B.cards.find(x=>x.id===id),x=decisionChoices(c.ask).find(([,i])=>i===choice)?.[0],repo=$('p-'+id);
-  const t=$('r-'+id),writing=choice==='other'||x?.id==='reply';
-  t.style.display=writing?'block':'none';
-  t.placeholder=x?.id==='reply'?(x.hint||'Message to the agent'):'What should the agent do?';
-  t.setAttribute('aria-label',choice==='other'?'Other instructions':'Reply instructions');
-  if(writing)t.focus();
-  if(repo)repo.style.display=x?.id==='pickrepo'?'block':'none';
+function askPick(id, qi, oi, where){
+  const c=findCard(id); if(!c) return;
+  (askPicks[id]=askPicks[id]||{})[qi]=oi;
+  const go=(c.ask.choices||[]).find(x=>x.id==='yes'||x.id==='land'||x.id==='answer');
+  if(c.ask.questions.length===1 && go && !askSay[id]) return choose(id, go.id, where, go.id==='answer');
+  askOpen.add(id); rerenderAsk(id);
 }
-function decisionAnswers(c,required=true){
-  const p=askPicks[c.id]||{},out=[];
-  for(const [qi,q] of (c.ask.questions||[]).entries()){
-    const ans=p[qi]==='o'?($('o-'+c.id+'-'+qi)?.value||'').trim():q.options[p[qi]];
-    if(!ans){if(required)return null;continue;}
-    out.push(`${qi+1}. ${q.text}\n   → ${ans}`);
+// decisionAnswers is the picked answers in the words an email reply's letters expand to
+function decisionAnswers(c){
+  const out=[];
+  for(const [qi,q] of ((c.ask&&c.ask.questions)||[]).entries()){
+    const p=pickOf(c,qi); if(p<0||p===undefined) continue;
+    out.push(`${qi+1}. ${q.text}\n   → ${q.options[p]}`);
   }
   return out.length?"Zach's answers:\n"+out.join('\n'):'';
 }
-function askSent(id){releaseKeyboard();askOpen.delete(id);delete $('grid').dataset.html;}
-function askDone(id,msg){const t=$('r-'+id);if(t)t.value='';askSent(id);delete askPicks[id];delete askActions[id];toast(msg);refresh();}
-async function askSubmit(id){
-  const c=B.cards.find(x=>x.id===id),a=c.ask,choice=askActions[id];
-  if(choice===undefined){toast('Choose what happens next');return;}
-  const x=decisionChoices(a).find(([,i])=>i===choice)?.[0];
-  const text=($('r-'+id)?.value||'').trim(),partial=decisionAnswers(c,false);
-  const body={id};
-  if(choice==='other'||x?.id==='reply'){
-    if(!text&&!partial){toast('Write your instructions or answer the questions first');return;}
-    if(!text&&decisionAnswers(c)===null){toast('Answer each question first');return;}
-    body.message=(partial?partial+(text?'\n\n':''):'')+text;
-    await post('send',body);askDone(id,'Instructions sent');return;
+async function choose(id, cid, where, send){
+  const c=findCard(id); if(!c||!c.ask) return;
+  const ch=(c.ask.choices||[]).find(x=>x.id===cid); if(!ch) return;
+  if(ch.text && !send){ askSay[id]=askSay[id]===cid?undefined:cid; askOpen.add(id); rerenderAsk(id);
+    const t=$('say-'+where+'-'+id); if(t) t.focus(); return; }
+  if(cid==='drop' && !dropArm[id]){
+    dropArm[id]=setTimeout(()=>{ delete dropArm[id]; if(!askSay[id]) askOpen.delete(id); rerenderAsk(id); }, 4000);
+    askOpen.add(id); rerenderAsk(id); return;
   }
-  if(!x)return;
-  const acceptsAnswers=x.id==='send'||(x.id==='approve'&&!c.routing&&!x.repo);
-  if(!acceptsAnswers&&(partial||text)){
-    toast('Choose a reply option to send your answers and instructions first');return;
-  }
-  if(acceptsAnswers){
-    const answers=decisionAnswers(c);if(answers===null){toast('Answer each question first');return;}
-    if(answers||text)body.message=[answers,text].filter(Boolean).join('\n\n');
-  }
-  if(x.message)body.message=[x.message,body.message].filter(Boolean).join('\n\n');
-  if(x.id==='close'&&!confirm('Drop this card? The agent is archived.'))return;
-  if(x.repo)body.repo=x.repo;
-  if(x.id==='pickrepo')body.repo=$('p-'+id).value;
-  await post(x.id==='pickrepo'?'approve':x.id,body);askDone(id,x.label+': done');
+  const text=((($('say-'+where+'-'+id)||{}).value)??askDraft[id]??'').trim(), answers=decisionAnswers(c);
+  const answered=cid==='answer' && answers;
+  if(ch.text && cid!=='pick' && !text && !answered){ toast(cid==='answer'?'Write your answer first':'Write what should change first'); return; }
+  const body={id, choice:cid};
+  if(!['drop','done','rerun','resume','stop'].includes(cid)){ const m=[answers,text].filter(Boolean).join('\n\n'); if(m) body.message=m; }
+  if(cid==='pick') body.repo=($('repo-'+where+'-'+id)||{}).value;
+  try{ await post('choose', body); }catch(e){ return; }
+  askDone(id, ch.label+': sent');
 }
+function askDone(id,msg){ clearTimeout(dropArm[id]); delete dropArm[id]; delete askSay[id]; delete askPicks[id]; delete askDraft[id]; askOpen.delete(id); releaseKeyboard(); toast(msg); refresh(); }
+// rerenderAsk redraws the views showing card id's ask (the list and the open card) right away
+function rerenderAsk(id){ delete $('grid').dataset.html; delete $('inbox').dataset.html; render(); if(sel===id) fillAsk(findCard(id)); }
 // decision: end
 
 // A pressed button shows at once that it is working: its card's (or panel's or dialog's) buttons
@@ -790,12 +788,12 @@ async function askSubmit(id){
 // before the button's own handler, which calls post in the same tick.
 let pressed = null;
 document.addEventListener('click', e=>{ pressed = e.target.closest && e.target.closest('button'); setTimeout(()=>{ pressed=null; }); }, true);
-const busyText = {approve:'Approving…', arbiter:'Handing over…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
+const busyText = {choose:'Sending…', approve:'Approving…', arbiter:'Handing over…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
   stop:'Stopping…', rerun:'Re-running…', review:'Starting review…', stage:'Moving…', new:'Starting…', scout:'Starting…'};
 let afterLoad = [];
 function busy(btn, action){
   if(!btn || !btn.isConnected) return ()=>{};
-  const box = btn.closest('.card, #panel, dialog') || btn.parentNode;
+  const box = btn.closest('.card, .fy, #panel, dialog') || btn.parentNode;
   const btns = [...box.querySelectorAll('button:not(.x)')].filter(b=>!b.disabled), text = btn.textContent;
   btns.forEach(b=>b.disabled=true); btn.classList.add('busy'); btn.textContent = busyText[action]||'Working…';
   return ()=>{ btns.forEach(b=>b.disabled=false); btn.classList.remove('busy'); btn.textContent = text; };
@@ -827,6 +825,9 @@ function fillPanel(c, fresh){
   if(!c){ closePanel(); return; }
   $('panel').classList.add('open');
   $('pTitle').textContent = c.title;
+  $('pState').textContent = [repoLabel(c.repo), c.ask ? '' : stateOf(c)].filter(Boolean).join(' · ');
+  if(fresh || !askOpen.has(c.id)) fillAsk(c);
+  if(fresh) $('pDetails').open = c.id.startsWith('idea-');
   $('pOpen').href = 't/' + c.id;
   $('pSub').textContent = `${c.short} · ${c.host} · ${c.source} · ${c.status}${c.archivedAt?' (archived)':''}`;
   const idx = B.stages.findIndex(s=>s[0]===c.stage);
@@ -882,9 +883,45 @@ function fillPanel(c, fresh){
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   const mv=$('pMove'); mv.innerHTML = B.stages.map(s=>`<option value="${s[0]}" ${s[0]===c.stage?'selected':''}>${s[1]}</option>`).join('');
-  if(fresh){ $('pMsg').value=''; $('pLogs').textContent='loading…';
-    fetch('api/logs/'+c.id).then(r=>r.json()).then(j=>{ if(sel===c.id) $('pLogs').textContent = (j.text||j.error||'').trim().split('\n').slice(-120).join('\n') || '(no text yet)'; $('pLogs').scrollTop=1e9; }); }
+  if(fresh && !isIdea){ $('pMsg').value=''; $('pLogs').textContent='loading…';
+    // opening a card reads its session file once: Zach's request on top, the latest messages under Details
+    fetch('api/logs/'+c.id).then(r=>r.json()).then(j=>{ reqs[c.id] = j.request||{};
+      if(sel!==c.id) return;
+      $('pLogs').textContent = (j.text||j.error||'').trim().split('\n').slice(-120).join('\n') || '(no text yet)'; $('pLogs').scrollTop=1e9;
+      if(!askOpen.has(c.id)) fillAsk(findCard(c.id)); }).catch(()=>{ reqs[c.id] = reqs[c.id]||{}; }); }
 }
+// panelTop: begin
+// The card opens with Zach's own ask, what it needs from him (or what is happening), the preview and
+// its choices; ids, branch, logs and the operator buttons are folded under Details.
+const reqs = {}, taskOpen = new Set();
+function stateOf(c){
+  const S = B.sections||{};
+  for(const k of ['forYou','stuck','working','shipped','noAnswer','routine']){
+    const l = (S[k]||[]).find(x=>x.id===c.id); if(l) return l.state;
+  }
+  const st = (B.stages||[]).find(s=>s[0]===c.stage); return st ? st[1] : '';
+}
+function fillAsk(c){
+  if(!c){ return; }
+  if(c.id.startsWith('idea-')){ $('pAsk').innerHTML=''; return; }
+  const a = c.ask, req = (a&&a.request&&a.request.Base) ? a.request : (reqs[c.id]||null);
+  let h = '<h4>Your ask</h4>';
+  if(req && req.Base){
+    const open = taskOpen.has(c.id);
+    h += `<div class="request ${open?'expanded':''}">${esc(req.Base)}</div>`
+      + (req.Base.length>200||req.Base.split('\n').length>4 ? `<button class="more" onclick="taskOpen.has('${c.id}')?taskOpen.delete('${c.id}'):taskOpen.add('${c.id}');fillAsk(findCard('${c.id}'))">${open?'Show less':'Show all'}</button>` : '')
+      + (req.FollowUps||[]).slice(-1).map(f=>`<div class="sub">Later: ${esc(f.Text)}</div>`).join('');
+  } else h += req ? `<div class="sub">Not available. <a href="t/${c.id}">Open the conversation</a></div>` : '<div class="sub">loading…</div>';
+  if(a){
+    const ov = a.overview||{};
+    h += `<h4>${a.kind==='problem'?'What happened':'What it needs from you'}</h4><div class="fq">${esc(askQuestion(a))}</div>`
+      + (ov.overview ? `<div class="gist">${esc(ov.overview)}</div>` : `<div class="sub">${esc(a.why)}</div>`)
+      + evidenceHtml(c) + questionsHtml(c,'p') + choicesHtml(c,'p')
+      + ((a.report||a.detail) ? `<details class="report"><summary>Full report</summary><div class="detail">${askMarkdown(a.report||a.detail, c.id)}</div></details>` : '');
+  } else h += `<h4>Now</h4><div>${esc(stateOf(c))}</div>`;
+  $('pAsk').innerHTML = h;
+}
+// panelTop: end
 // ideaHtml: an idea as Zach reviews it: what it proposes, why, how to tell it worked, what happens next,
 // and the builder's technical brief (fetched on open, folded).
 const briefs = {}, briefFull = new Set();
@@ -987,6 +1024,8 @@ $('nAgent').onchange = ()=>{ $('nAgent').dataset.picked = '1'; const v = $('nAge
 $('group').addEventListener('input', ()=>saveLaneGroup(laneStorage(), $('group').value, laneGroupOptions));
 phone.addEventListener('change', render);
 $('activity').onclick=()=>$('activity').classList.toggle('open');
+$('views').querySelectorAll('button').forEach(b=>b.onclick=()=>setView(b.dataset.v));
+$('menuBtn').onclick=()=>{ const o=document.querySelector('header').classList.toggle('menu'); $('menuBtn').setAttribute('aria-expanded', o); };
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closePanel(); });
 // The board renders at once; agents and lanes fill in when they arrive (lane names and
 // agent labels have fallbacks until then). Deferred CDN scripts have run by

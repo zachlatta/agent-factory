@@ -73,7 +73,7 @@ func readyAsk(why string) *Ask {
 	if why != "" {
 		w += " It comes to you because " + why + "."
 	}
-	return &Ask{Title: readyTitle, From: "builder",
+	return &Ask{Kind: askReady, Title: readyTitle, From: "builder",
 		Why:     w + " Try the preview, then land it, ask for a change, or drop it.",
 		Actions: []Action{primary("approve", "Land"), reply("Change", "What should change?"), act("close", "Drop")},
 		Ready:   &Ready{}}
@@ -119,8 +119,8 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 // landWords land a card at Ready for you; dropWords drop it; any other reply is a change request.
 var landWords = []string{"land", "land it"}
 
-// readyAnswer applies the Ready for you reply rule. Letters answer the builder's questions (qs) and go to
-// it like any change request.
+// readyAnswer applies the Ready for you reply rule to its Land / Change / Drop buttons. Letters answer
+// the builder's questions (qs) and go to it through Change, like any change request.
 func readyAnswer(text string, qs []Question) answer {
 	clean := cleanReply(text)
 	if len(qs) == 1 && loneLetter.MatchString(clean) {
@@ -130,15 +130,15 @@ func readyAnswer(text string, qs []Question) answer {
 	case clean == "":
 		return answer{}
 	case slices.Contains(landWords, clean):
-		return answer{Action: "approve"}
+		return answer{Choice: "land"}
 	case slices.Contains(dropWords, clean):
-		return answer{Action: "close"}
+		return answer{Choice: "drop"}
 	case letterReply.MatchString(clean):
 		if expanded, ok := expandLetters(clean, qs); ok {
-			return answer{Action: "send", Message: "Zach's answers:\n" + expanded}
+			return answer{Choice: "change", Message: "Zach's answers:\n" + expanded}
 		}
 	}
-	return answer{Action: "send", Message: replyText(text)}
+	return answer{Choice: "change", Message: replyText(text)}
 }
 
 // previewWaitText is what the email and board say when there is no preview link.

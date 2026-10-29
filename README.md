@@ -228,8 +228,8 @@ The planner (the "Fellow") first picks a track:
     replacement; then the card is marked `stuck=review could not finish` in its review column. The
     stand-in's and the gate arbiter's tries count on `factory.reviewer-retries` too, so the cap holds
     even when a gone arbiter has left the agent list. If a
-    superseded reviewer finishes first, its verdict still moves the card on. The factory never
-    answers permission prompts; agents are told how to write `rm` so Claude Code does not ask.
+    superseded reviewer finishes first, its verdict still moves the card on. The prompt itself is
+    refused by the factory (below), so a reviewer usually carries on without being replaced.
   - A card that stops with nothing queued (for 2 minutes in plan, building or landing) is nudged once
     with what its step is missing. If it stops again, its step re-runs (a review, or the land prompt
     with its scan). The third time it is marked `stuck=stopped with nothing queued`. Moving to another
@@ -259,6 +259,11 @@ The planner (the "Fellow") first picks a track:
   card, which the send wakes. Messages within a stage stay in the session: Zach's replies, steers,
   nudges, and summary, brief or preview requests. Stage swaps do not use up the card's one model
   hand-off (`factory.model-handoff` marks that). `FACTORY_STAGE_HANDOFF=off` turns the swaps off.
+- Permission prompts: the factory answers every prompt of its own agents (cards, reviewers, Scouts,
+  pickers and their sub-agents) with no, once per prompt, telling the agent how to do the step
+  without one (`rm` only with literal absolute paths, `git -C` instead of `cd`, work in the
+  worktree) or to say in its summary what it needs (`factory/blocked.go`). It never allows a prompt,
+  never answers one of an agent it did not start, and never in a dry or read-only run.
 - A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
   the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
   or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
@@ -526,22 +531,56 @@ An email dispatcher (not in this repo) can start agents as cards with labels
 report back in their email thread when they land, in plain words (see Needs Zach email). They
 never email that work started, stalled or failed: the board shows that.
 
-### Needs Zach overview
+### For you board
 
-Needs Zach cards show the original request, later instructions, the decision needed, optional
-before/after images, and choices with Other. The full agent report and operational explanation
-are folded into details. Missing original requests are labeled unavailable, with a transcript link.
+The board opens on one column, at every width (`factory/sections.go`, the `sections` of
+`/api/board`), in this order:
+
+- **For you**: the Needs Zach cards whose ask is not board-only (`Ask.BoardOnly`, the same rule that
+  decides what is emailed): finished work to try, a decision, or an agent's question. Each shows its
+  question (the agent's `DECISION:` line, else the ask's title); on Ready for you, what changed and
+  the factory-run Preview button (or why there is none yet); its before/after images; and its buttons.
+- **No answer yet**: email and voice requests that ended with no reply, and requests other parts of
+  the factory add (`AddNoAnswer`).
+- **Working on it**: one plain line per card ("planning", "being reviewed", "waiting on <title>"),
+  stuck ones first: board-only waits (the factory's own trouble, finished or hand-moved cards),
+  stalls and errors.
+- **Shipped today**: cards that reached Done today (Zach's time zone) with a landing or a reply;
+  dropped cards are left out. Each pass records them in `digest.json`, so they stay listed all day
+  after Done cards leave the board (12 hours).
+- **Routine runs (N)**: scheduled runs started today, shown only when the filter is on.
+
+The list never reads a session file or log. Opening a card reads them once: the card starts with
+Zach's own request, what it needs from him (or what is happening), the preview and the buttons;
+ids, branch, worktree, model, timeline, sub-agents, the operator buttons and the latest messages are
+folded under Details. On the phone the header is the title, the For you count and a menu (filter,
+New card, Usage); there are no stage tabs, no sideways scroll and no activity ticker (the For you
+view has none at any width). On a desktop, "All columns" shows the kanban, with the same buttons on
+each Needs Zach card.
+
+### Answers
+
+Every ask has one fixed set of buttons (`factory/choose.go`), the same on the board and by email:
+
+| Ask (`Ask.Kind`) | Buttons |
+| --- | --- |
+| Finished work (`ready`): Ready for you, a secret-scan stop | **Land** / **Change** / **Drop** |
+| Decision (`decision`): allow a build with side effects, check what was published without review | **Yes** / **No** / **Drop** |
+| Which repo (`decision`) | one button per repo, Other repo, **Change**, **Drop** |
+| An agent's open question (`question`) | its options, **Answer**, **Drop**: not a yes/no question, so no Yes or No |
+| Board-only (`problem`): stuck, errors, a review that did not settle, a close suggestion, work left | its own action (Re-run, Resume, Let an agent decide, Close it, Mark done) with Change and Drop, in the card's details |
+
+One tap answers. Drop takes a second tap in place. Change, No, Answer and Other repo open a text box
+with Send, and need words. Question options start on the recommended one; with one question, tapping
+an option answers with it (through Yes, Land or Answer); otherwise Yes or Land sends the picked
+answers. The board posts `POST /api/choose` (`id`, `choice`, `message`, `repo`), and an email reply is
+parsed into the same button (Needs Zach email below), so both do the same thing. Either one moves
+the card out of Needs Zach; the other surface then finds nothing waiting (the dispatcher gets 409)
+and does nothing.
 
 Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
-The decision and needs fields describe the concrete choice and its consequence; overview prose
-stays in details. Existing `QUESTION:` blocks provide up to four questions, with the recommendation
-first. Ordinary approval requires every question to be answered. Let an agent decide carries no
-answers and refuses filled answers or instructions: send them through a reply choice. Drop and
-Other do not require every question to be answered.
-Every action requires an explicit choice, including cards with only one action. Named reply choices
-keep their hints and recommendation. Send question answers through a reply choice; completion, retry,
-stop and drop refuse to discard filled answers or instructions. Select the action and press Submit once; Other sends typed
-instructions without approving. Drop still asks for confirmation.
+The decision line is the question shown; the overview is shown under it in the card; the full report
+is folded. Existing `QUESTION:` blocks provide up to four questions, with the recommendation first.
 
 For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`
 folder, excluded from Git before saving. Never commit or force-add evidence. After the overview
@@ -563,6 +602,22 @@ formats and oversized images; it disables caching and content sniffing. The card
 only from these generated routes, including inside report Markdown. No public image service or
 external image URL is used. Images become unavailable if their worktree or file is removed.
 
+### Daily digest
+
+At 6 PM in Zach's time zone the factory sends one email, the daily digest (`factory/digest.go`),
+to `FACTORY_DIGEST_TO` (default `FACTORY_ZACH_EMAIL`). It is the only status email: decisions are
+emailed as they come (below), and everything else waits for it.
+
+- It lists, from the same `Sections` the board shows, one line per card with its board link:
+  Waiting on you, Shipped today (with the time), In progress, Stuck, and No answer yet, then the
+  count of routine runs and the board link. The subject counts them ("Factory today: 2 shipped,
+  1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs and file names are cut.
+- The factory writes it itself from the board; no agent turn.
+- `digest.json` in the state directory keeps the day last sent, written before the send, so a
+  restart never sends a day twice, and a factory that was down at 6 PM still sends that evening.
+  A day with nothing to report sends nothing. A failed send is tried again after 5 minutes; one
+  that timed out (it may have gone out) is not. Dry and read-only runs never send.
+
 ### Needs Zach email
 
 Zach is emailed only for decisions, by the factory itself through the zrl-bot mailbox
@@ -578,7 +633,7 @@ is either emailed or board-only (`Ask.boardOnly`):
   duplicate verdict; and the checks after landing (work left, did it finish, an older landed diff).
   Errors, usage limits, failed reviewers, stopped cards, dropped dependencies and failed landings
   never reach Needs Zach at all (automatic recovery). These are problems for the factory and its
-  agents; the board shows them until a later digest lists them.
+  agents; the board shows them under Working on it, and the daily digest lists them.
 
 The email is the decision alone:
 
@@ -604,6 +659,9 @@ The email is the decision alone:
 - Cards that were waiting in Needs Zach for a reason automatic recovery now handles take the
   recovery path on their next pass.
 - `/api/health` reports the last mailbox check as `mail`; it never fails the health check.
+- Every factory email ends with the board link (the card's own when it is about one), added on the
+  one path all of them take (`sendMail`); a body that already carries the link keeps it in place.
+  Email cards are told to end their landing email with it too.
 
 Replies: the email dispatcher checks the sender, then posts his reply to
 `POST /api/answer` (`thread`, `message_id`, `text`; 404 when no card has the thread, 409 when none
@@ -613,16 +671,20 @@ acts:
 
 | Reply | Does |
 | --- | --- |
-| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | the ask's Yes button, when it is approve or let an agent decide; on an approve with questions, it also answers each with its recommended (first) option |
+| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | Yes; on an approve with questions, it takes the recommended (first) answers |
+| `no` | No |
 | `done`, `mark done`, `mark it done` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
-| `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is a change request) |
-| `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with the Yes button when it approves |
+| `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is Change) |
+| `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
 
-Anything else goes to the agent as his instructions, written as a follow-up email block. Each
-message is applied once (`factory.answered`). A reply that worked gets no email back (the board
-shows the new state); one that did nothing gets one line in the thread saying so, with the board
-link. An emailed approve of a public-repo landing still runs the secret scan first.
+Anything else is the ask's text choice (Change, No with his words, or his Answer to an open
+question), written as a follow-up email block. Each reply runs through the board's buttons
+(`choose.go`), so it does exactly what that button does, and a word is offered and acts only where
+its button exists; a reply with no button passes on as a follow-up. Each message is applied once
+(`factory.answered`). A reply that worked gets no email back (the board shows the new state); one
+that did nothing gets one line in the thread saying so, with the board link. An emailed approve of
+a public-repo landing still runs the secret scan first.
 
 #### Prompt blocks parsed from email cards
 
@@ -921,6 +983,7 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
+| `FACTORY_DIGEST_TO` | `-digest-to` | where the 6 PM daily digest goes (default `FACTORY_ZACH_EMAIL`; none: no digest) |
 | `FACTORY_PREVIEW_PORTS` | `-preview-ports` | `lo-hi` ports Ready for you previews run and are published on (default `7700-7799`) |
 | `FACTORY_PREVIEW_MAX` | `-preview-max` | previews running at once (default 8) |
 | `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |

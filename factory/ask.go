@@ -34,6 +34,13 @@ type Ask struct {
 	BoardOnly bool `json:"boardOnly,omitempty"`
 	// Ready is set on the Ready for you stop: what changed and the preview (ready.go).
 	Ready *Ready `json:"ready,omitempty"`
+	// Kind says which buttons answer it (choose.go): ready (finished work: Land / Change / Drop),
+	// decision (Yes / No / Drop), question (an agent's open question: its options or an Answer, and Drop)
+	// or problem (a board-only wait: its own action, in the card's details). Every ask that is not
+	// board-only is For you, and is ready, a decision or a question.
+	Kind string `json:"kind"`
+	// Choices are the answers, the same on the board (POST /api/choose) and by email (answer.go).
+	Choices []Choice `json:"choices"`
 }
 
 // Question is one multiple-choice question an agent asks Zach. He can also write his own answer.
@@ -65,6 +72,10 @@ func askFor(c Card, a Agent) *Ask {
 	}
 	ask.Yes, ask.No = yesNo(ask)
 	ask.BoardOnly = boardOnly(c, a, ask)
+	if ask.BoardOnly || ask.Kind == "" {
+		ask.Kind = askProblem
+	}
+	ask.Choices = choicesFor(ask)
 	return ask
 }
 
@@ -144,8 +155,8 @@ func baseAsk(c Card, a Agent) *Ask {
 	switch {
 	case a.Status == "running" && a.Pending != "":
 		return &Ask{Title: "Waiting on a permission prompt", From: "builder",
-			Why: "Claude Code asked for permission (" + a.Pending + "), which it does even in bypass mode, and the factory " +
-				"never answers prompts. Approve or deny it in Paseo, stop the agent, or send it a message.",
+			Why: "Claude Code asked for permission (" + a.Pending + "), which it does even in bypass mode. The factory " +
+				"refuses every prompt and tells the agent how to do the step without one; it carries on, or stops and says what it needs.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case a.Status == "running" && stalledFlag(c) == "":
 		// a builder writing its brief or plan summary for Zach (sent along with the move here)
@@ -165,20 +176,20 @@ func baseAsk(c Card, a Agent) *Ask {
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
 	case a.L(labelAwaiting) == "plan":
-		return &Ask{Title: "Allow this build?", From: "builder",
+		return &Ask{Kind: askDecision, Title: "Allow this build?", From: "builder",
 			Why: "Other agents reviewed the plan. Building it would change something outside its own copy of the code (or that was not ruled out), so nothing is built until you allow it. A code review still runs before it lands.",
 			Actions: []Action{primary("approve", "Allow & build"),
 				reply("Send back with changes", "What should change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
-		return &Ask{Title: "Private text found before publishing: fix it?", From: "builder",
+		return &Ask{Kind: askReady, Title: "Private text found before publishing: fix it?", From: "builder",
 			Why: "This repo is public. The factory's scan " + strings.TrimPrefix(note, "secret scan ") +
 				". Nothing was published. Ask the agent to remove it (rewrite its own unpushed commits), then approve to scan again.",
 			Actions: []Action{{ID: "reply", Label: "Tell it to fix", Primary: true, Hint: "e.g. remove it and rewrite your commits"}, act("approve", "Scan again & ship"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "public repo: finished without review"):
-		return &Ask{Title: "Published without review: check it?", From: "builder",
+		return &Ask{Kind: askDecision, Title: "Published without review: check it?", From: "builder",
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
-			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
+			Actions: []Action{primary("done", "Checked, mark done"), reply("Reply", "Message to the agent")}}
 	case isFinishedNote(note):
 		// Ready for you, the finished-work stop (ready.go)
 		return readyAsk(a.L(labelAskWhy))
@@ -222,9 +233,9 @@ func baseAsk(c Card, a Agent) *Ask {
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
 	case a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished":
-		return &Ask{Title: "Waiting on you: " + a.AttentionReason, From: "builder",
-			Why:     "The agent stopped and is waiting for you. Open the transcript to see the prompt, or reply.",
-			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
+		return &Ask{Kind: askQuestion, Title: "Waiting on you: " + a.AttentionReason, From: "builder",
+			Why:     "The agent stopped and is waiting for your answer. Its question is below.",
+			Actions: []Action{{ID: "reply", Label: "Answer", Primary: true, Hint: "Your answer"}, act("close", "Drop it")}}
 	}
 	return &Ask{Title: finishedTitle, From: "builder",
 		Why:     "The agent finished and you haven't looked at it yet. Its final answer is below.",
@@ -233,7 +244,7 @@ func baseAsk(c Card, a Agent) *Ask {
 
 // repoAsk is the question for a repo picker in Needs Zach: which repo the card starts in.
 func repoAsk(note, candidates string) *Ask {
-	ask := &Ask{Title: repoTitle, From: "builder",
+	ask := &Ask{Kind: askDecision, Title: repoTitle, From: "builder",
 		Why: "The factory could not tell which repo this belongs in. Pick one and the card starts planning there. The picker's reasoning is below."}
 	switch note {
 	case "routing failed":

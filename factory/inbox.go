@@ -43,8 +43,12 @@ func (f *Factory) landMsgFor(a Agent) string {
 	if t == "" || a.L(labelWorkLeftRounds) != "" {
 		return msg + remainingRule
 	}
+	link := ""
+	if l := f.cardLink(a.ID); l != "" {
+		link = " End that email with the board link " + l + "."
+	}
 	return msg + " Then tell Zach by email what changed and anything he must do (" + emailHow(t) +
-		"; " + strings.Join(strings.Fields(plainEmailRule), " ") + "), and archive the thread (modify_thread_labels, remove INBOX)." + remainingRule
+		"; " + strings.Join(strings.Fields(plainEmailRule), " ") + "), and archive the thread (modify_thread_labels, remove INBOX)." + link + remainingRule
 }
 
 // newCardEmailNote is added to a board card's prompt when it was started from an email thread.

@@ -19,12 +19,12 @@ func TestParseEvidence(t *testing.T) {
 		name, in, want string
 		evidence       Evidence
 	}{
-		{"header", overview + "BEFORE: before.png\nAFTER: after.jpg\n\nReport.", overview + "Report.", Evidence{"before.png", "after.jpg"}},
+		{"header", overview + "BEFORE: before.png\nAFTER: after.jpg\n\nReport.", overview + "Report.", Evidence{Before: "before.png", After: "after.jpg"}},
 		{"text change", overview + "BEFORE: Needs review\nAFTER: Waiting on you\nend", overview + "BEFORE: Needs review\nAFTER: Waiting on you\nend", Evidence{}},
 		{"later report", overview + "Report.\nBEFORE: before.png\nAFTER: after.jpg", overview + "Report.\nBEFORE: before.png\nAFTER: after.jpg", Evidence{}},
 		{"copy report", "Copy change:\nBEFORE: Old wording\nAFTER: New wording\nend", "Copy change:\nBEFORE: Old wording\nAFTER: New wording\nend", Evidence{}},
 		{"no overview", "BEFORE: before.png\nAFTER: after.jpg", "BEFORE: before.png\nAFTER: after.jpg", Evidence{}},
-		{"invalid then valid", overview + "BEFORE: ../secret.png\nBEFORE: before.png\nAFTER: after.jpg\n\nReport.", overview + "BEFORE: ../secret.png\n\nReport.", Evidence{"before.png", "after.jpg"}},
+		{"invalid then valid", overview + "BEFORE: ../secret.png\nBEFORE: before.png\nAFTER: after.jpg\n\nReport.", overview + "BEFORE: ../secret.png\n\nReport.", Evidence{Before: "before.png", After: "after.jpg"}},
 	} {
 		rest, ev := parseEvidence(tc.in)
 		if rest != tc.want || ev != tc.evidence {

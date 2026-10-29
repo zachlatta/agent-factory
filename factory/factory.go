@@ -45,6 +45,7 @@ type Config struct {
 	PrivateRules string   // file of private scan patterns (hostnames and the like), never in a repo
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
 	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't
+	DigestTo     string   // where the daily digest goes (digest.go); "" = ZachEmail
 	MetricHosts  []string // SSH aliases whose load the board shows besides this host (hostfleet.go)
 	PreviewPorts string   // "lo-hi": the ports previews run and are published on (tryout.go)
 	PreviewMax   int      // previews running at once
@@ -178,6 +179,11 @@ type Factory struct {
 	pv       previews                 // running previews
 	runner   PreviewRunner            // host work of previews; nil runs none
 	GoEnv    func() map[string]string // the host's Go cache paths, for previews
+
+	noAnswer    []NoAnswerSource // unanswered requests that are not cards (sections.go AddNoAnswer)
+	denied      map[string]bool  // permission prompts the factory already answered (blocked.go denyPrompts)
+	digestRetry time.Time        // a failed daily digest is not tried again before this (digest.go)
+	digestMu    sync.Mutex       // digest.json writes (digest.go)
 }
 
 const archiveMarkTTL = 10 * time.Minute
@@ -194,7 +200,7 @@ func New(cfg Config, p Paseo) *Factory {
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
 		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, mailRetry: map[string]time.Time{},
-		once: map[string]string{}}
+		once: map[string]string{}, denied: map[string]bool{}}
 	if cfg.DryRun {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}
 		f.Git, f.GitOut = f.dryRunGit(runGit, runGitOut)

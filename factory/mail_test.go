@@ -585,3 +585,31 @@ func TestEmailIncludesInlineEvidenceWithFallback(t *testing.T) {
 		t.Errorf("fallback send did not mark card told: %v", p2.labels("c2"))
 	}
 }
+
+// Every factory email ends with the board link, on the one path all of them take (sendMail).
+func TestEveryEmailHasTheBoardLink(t *testing.T) {
+	f, _, m := mailFactory(t, planWaiting("c1"))
+	ctx := context.Background()
+	if _, err := f.sendMail(ctx, "c1", "reply_to_message", map[string]any{"message_id": "m1", "text": "Done.", "html": "<p>Done.</p>"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sendMail(ctx, "", "send_email", map[string]any{"text": "Today", "html": "<p>Today</p>"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sendMail(ctx, "c1", "reply_to_message", map[string]any{"text": "See https://board.example/#c1 now"}); err != nil {
+		t.Fatal(err)
+	}
+	s := m.sends()
+	if len(s) != 3 {
+		t.Fatalf("sends = %+v", s)
+	}
+	for i, want := range []string{"https://board.example/#c1", "https://board.example/", "https://board.example/#c1"} {
+		text := s[i].Args["text"].(string)
+		if !strings.Contains(text, want) || strings.Count(text, "board.example") != 1 {
+			t.Errorf("email %d text = %q, want one link %s", i, text, want)
+		}
+		if h, ok := s[i].Args["html"].(string); ok && !strings.Contains(h, `href="`+want+`"`) {
+			t.Errorf("email %d html = %q", i, h)
+		}
+	}
+}

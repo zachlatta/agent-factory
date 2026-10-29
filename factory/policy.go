@@ -1060,6 +1060,7 @@ func (f *Factory) Tick() {
 		f.logf("quiet labeling: %v", err)
 	}
 	f.reconcileTimings()
+	f.denyPrompts(f.agents())
 	now := f.Now()
 	p := f.beginPass()
 	defer f.endPass()
@@ -1093,6 +1094,8 @@ func (f *Factory) Tick() {
 	f.tickPreviews(now)
 	f.checkReplies(now)
 	f.probeMail()
+	f.recordShipped()
+	f.tickDigest()
 }
 
 // actedGrace: a card counts as having acted only this long after its last move (see tickAgent).

@@ -17,16 +17,16 @@ func TestParseChanged(t *testing.T) {
 
 func TestReadyReplyWords(t *testing.T) {
 	for text, want := range map[string]answer{
-		"Land":                          {Action: "approve"},
-		"land it.":                      {Action: "approve"},
-		"drop":                          {Action: "close"},
-		"Drop it":                       {Action: "close"},
-		"close":                         {Action: "close"},
-		"cancel":                        {Action: "close"},
-		"ok":                            {Action: "send", Message: "ok"},
-		"yes":                           {Action: "send", Message: "yes"},
-		"make the button blue":          {Action: "send", Message: "make the button blue"},
-		"land\n\nOn Mon someone wrote:": {Action: "approve"},
+		"Land":                          {Choice: "land"},
+		"land it.":                      {Choice: "land"},
+		"drop":                          {Choice: "drop"},
+		"Drop it":                       {Choice: "drop"},
+		"close":                         {Choice: "drop"},
+		"cancel":                        {Choice: "drop"},
+		"ok":                            {Choice: "change", Message: "ok"},
+		"yes":                           {Choice: "change", Message: "yes"},
+		"make the button blue":          {Choice: "change", Message: "make the button blue"},
+		"land\n\nOn Mon someone wrote:": {Choice: "land"},
 	} {
 		if got := parseAnswer(text, readyAsk("")); got != want {
 			t.Errorf("%q -> %+v, want %+v", text, got, want)

@@ -26,6 +26,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		return f.startLandReview(b)
 	case "answer":
 		return f.answerByEmail(b)
+	case "choose":
+		b.Via = "" // the board's answer; email answers come through answer
+		return f.choose(b)
 	}
 	if strings.HasPrefix(b.ID, "idea-") {
 		switch action {

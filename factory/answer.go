@@ -54,10 +54,13 @@ func cleanReply(text string) string {
 	return strings.TrimRight(strings.ToLower(spaces.ReplaceAllString(replyText(text), " ")), ".! ")
 }
 
-// answer is what an email reply does: an Act action and its message. Action "" does nothing.
-type answer struct{ Action, Message string }
+// answer is what an email reply does: one of the ask's Choices (choose.go), the same buttons the
+// board shows, and its message. Choice "" does nothing.
+type answer struct{ Choice, Message string }
 
-// parseAnswer applies the reply rule to Zach's reply for ask.
+// parseAnswer applies the reply rule to Zach's reply for ask. A reply word acts only where the ask
+// has the button it stands for (replyWords lists the same ones); anything else is the ask's text
+// choice (Change, No, or his Answer).
 func parseAnswer(text string, ask *Ask) answer {
 	if ask.Ready != nil {
 		return readyAnswer(text, ask.Questions)
@@ -66,32 +69,37 @@ func parseAnswer(text string, ask *Ask) answer {
 	if clean == "" {
 		return answer{}
 	}
-	yesActs := ask.Yes == "approve" || ask.Yes == "arbiter"
 	if len(ask.Questions) == 1 && loneLetter.MatchString(clean) {
 		clean = "1" + clean // one question: its letter alone answers it
 	}
+	goCh, textCh, dropCh := goChoice(ask), textChoice(ask), dropOf(ask)
 	switch {
-	case slices.Contains(approveWords, clean) && yesActs && actionFor(ask, ask.Yes) != nil:
+	case slices.Contains(approveWords, clean) && goCh != nil:
 		// on an approve, yes takes the recommended (first) option of every question, as the email says
-		if ask.Yes == "approve" && len(ask.Questions) > 0 {
-			return answer{Action: "approve", Message: recommendedAnswers(ask.Questions)}
+		if goCh.action == "approve" && len(ask.Questions) > 0 {
+			return answer{Choice: goCh.ID, Message: recommendedAnswers(ask.Questions)}
 		}
-		return answer{Action: ask.Yes}
-	case slices.Contains(doneWords, clean) && actionFor(ask, "done") != nil:
-		return answer{Action: "done"}
-	case slices.Contains(dropWords, clean) && actionFor(ask, "close") != nil:
-		return answer{Action: "close"}
+		return answer{Choice: goCh.ID}
+	case clean == "no" && choiceByID(ask, "no") != nil:
+		return answer{Choice: "no", Message: "No."}
+	case slices.Contains(doneWords, clean) && choiceByID(ask, "done") != nil:
+		return answer{Choice: "done"}
+	case slices.Contains(dropWords, clean) && dropCh != nil:
+		return answer{Choice: dropCh.ID}
 	case letterReply.MatchString(clean):
 		if expanded, ok := expandLetters(clean, ask.Questions); ok {
-			// approve carries answers; arbiter does not, so on a review that did not settle they go to
-			// the agent, as the board sends them
-			if ask.Yes == "approve" && actionFor(ask, "approve") != nil {
-				return answer{Action: "approve", Message: expanded}
+			if goCh != nil && goCh.action == "approve" {
+				return answer{Choice: goCh.ID, Message: expanded}
 			}
-			return answer{Action: "send", Message: "Zach's answers:\n" + expanded}
+			if textCh != nil {
+				return answer{Choice: textCh.ID, Message: "Zach's answers:\n" + expanded}
+			}
 		}
 	}
-	return answer{Action: "send", Message: replyText(text)}
+	if textCh == nil {
+		return answer{}
+	}
+	return answer{Choice: textCh.ID, Message: replyText(text)}
 }
 
 // recommendedAnswers is every question answered with its first (recommended) option.
@@ -170,22 +178,26 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	}
 	_, ask.Questions, _ = f.askDetail(c, ask)
 	ans := parseAnswer(b.Text, ask)
-	if ans.Action == "" {
+	if ans.Choice == "" && strings.TrimSpace(replyText(b.Text)) == "" {
 		return map[string]string{"card": a.ID, "action": "none"}, nil
+	}
+	ch := choiceByID(ask, ans.Choice)
+	if ch == nil {
+		return nil, ErrNotWaiting // no button for it: the dispatcher passes the reply on as a follow-up
 	}
 	// answered first: a repeated POST of this message does nothing
 	if err := f.setLabels(a.ID, map[string]string{labelAnswered: b.MessageID}); err != nil {
 		return nil, err
 	}
-	_, err = f.Act(ans.Action, Body{ID: a.ID, Message: ans.Message, Via: "email"})
+	_, err = f.runChoice(a.ID, *ch, Body{Message: ans.Message, Via: "email"})
 	if err != nil {
 		// his answer did nothing: say so once, plainly; a reply that worked gets no echo
-		f.logf("%s email answer %s failed: %v", short(a.ID), ans.Action, err)
+		f.logf("%s email answer %s failed: %v", short(a.ID), ch.ID, err)
 		f.answerFailed(a, b.MessageID)
 		return nil, err
 	}
-	f.logf("%s answered by email: %s", short(a.ID), ans.Action)
-	return map[string]string{"card": a.ID, "action": ans.Action}, nil
+	f.logf("%s answered by email: %s", short(a.ID), ch.ID)
+	return map[string]string{"card": a.ID, "action": ch.action}, nil
 }
 
 // answerFailed replies in the thread to Zach's answer that it did not go through, with the board

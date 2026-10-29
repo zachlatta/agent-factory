@@ -14,57 +14,107 @@ import (
 func TestParseAnswer(t *testing.T) {
 	qs := []Question{{Text: "Which store?", Options: []string{"Postgres", "SQLite"}},
 		{Text: "When?", Options: []string{"Now", "Later"}}}
-	plan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Allow & build"),
-		reply("Send back", ""), act("close", "Drop it")}, Questions: qs}
-	onePlan := &Ask{Yes: "approve", Actions: []Action{primary("approve", "Allow & build"),
-		reply("Send back", ""), act("close", "Drop it")}, Questions: qs[:1]}
-	brief := settleAsk()
-	brief.Yes = "arbiter"
-	briefQs := &Ask{Yes: "arbiter", Actions: brief.Actions, Questions: qs}
-	rerun := &Ask{Actions: []Action{primary("rerun", "Re-run"), reply("Reply", "")}}
-	landedLeft := &Ask{Yes: "say", No: "say", Actions: []Action{reply("Send it on", ""), act("done", "Mark done")}}
+	mk := func(a *Ask) *Ask { a.Yes, a.No = yesNo(a); a.Choices = choicesFor(a); return a }
+	plan := mk(&Ask{Kind: askDecision, Actions: []Action{primary("approve", "Allow & build"),
+		reply("Send back", ""), act("close", "Drop it")}, Questions: qs})
+	onePlan := mk(&Ask{Kind: askDecision, Actions: []Action{primary("approve", "Allow & build"),
+		reply("Send back", ""), act("close", "Drop it")}, Questions: qs[:1]})
+	settle := settleAsk()
+	settle.Kind = askProblem
+	settle = mk(settle)
+	rerun := mk(&Ask{Kind: askProblem, Actions: []Action{primary("rerun", "Re-run"), reply("Reply", "")}})
+	landedLeft := mk(&Ask{Kind: askProblem, Actions: []Action{reply("Send it on", ""), act("done", "Mark done")}})
+	open := mk(&Ask{Kind: askQuestion, Actions: []Action{{ID: "reply", Label: "Answer", Primary: true}, act("close", "Drop it")}})
+	openQs := mk(&Ask{Kind: askQuestion, Actions: open.Actions, Questions: qs[:1]})
 	for _, tc := range []struct {
 		ask        *Ask
 		text, want string
 		msg        string // substring of the message, if any
 	}{
-		{plan, "Approve.", "approve", ""},
-		{plan, "LGTM!", "approve", ""},
-		{plan, "  go   ahead ", "approve", ""},
-		{brief, "yes", "arbiter", ""},
-		{rerun, "yes", "send", "yes"},
-		{plan, "drop it", "close", ""},
-		{rerun, "drop", "send", "drop"},
+		{plan, "Approve.", "yes", ""},
+		{plan, "LGTM!", "yes", ""},
+		{plan, "  go   ahead ", "yes", "1. Which store?\n   → Postgres"},
+		{plan, "no", "no", "No."},
+		{settle, "yes", "change", "yes"}, // no Yes button on a review that did not settle (it is board-only)
+		{rerun, "yes", "change", "yes"},
+		{plan, "drop it", "drop", ""},
+		{rerun, "drop", "change", "drop"},
 		{landedLeft, "done", "done", ""},
 		{landedLeft, "Mark done!", "done", ""},
 		{landedLeft, "mark it done", "done", ""},
-		{plan, "done", "send", "done"},
-		{plan, "ok, but drop step 3", "send", "ok, but drop step 3"},
-		{plan, "yes to 1A, no to 2", "send", "yes to 1A"},
-		{plan, "Please drop the second point and build", "send", "drop the second point"},
-		{plan, "1B 2A", "approve", "Which store?\n   → SQLite"},
-		{plan, "1b, 2b", "approve", "When?\n   → Later"},
-		{brief, "1A", "send", "1A"},                                              // no questions on the brief
-		{briefQs, "1B", "send", "Zach's answers:\n1. Which store?\n   → SQLite"}, // the arbiter would drop the choice
-		{briefQs, "yes", "arbiter", ""},
-		{plan, "yes", "approve", "1. Which store?\n   → Postgres\n2. When?\n   → Now"}, // yes takes the recommendations
-		{onePlan, "B", "approve", "Which store?\n   → SQLite"},                         // one question: a letter alone
-		{onePlan, "a.", "approve", "→ Postgres"},
-		{plan, "B", "send", "B"}, // two questions: a lone letter is not an answer
-		{onePlan, "G", "send", "G"},
-		{plan, "3C", "send", "3C"},
-		{plan, "wait\n\n> approve", "send", "wait"},
-		{plan, "approve\n\nOn Sun, Oct 25, 2026 at 7:42 PM zrl bot wrote:\n> Needs you", "approve", ""},
-		{plan, "approve\n-- \nZach", "approve", ""},
-		{plan, "Approve\n\nSent from my iPhone", "approve", ""},
+		{open, "done", "answer", "done"}, // an open question has only Answer and Drop
+		{open, "yes", "answer", "yes"},   // not a yes/no question: his yes is his answer
+		{open, "drop", "drop", ""},
+		{openQs, "B", "answer", "Which store?\n   → SQLite"}, // its options answer through Answer
+		{plan, "done", "no", "done"},
+		{plan, "ok, but drop step 3", "no", "ok, but drop step 3"},
+		{plan, "yes to 1A, no to 2", "no", "yes to 1A"},
+		{plan, "Please drop the second point and build", "no", "drop the second point"},
+		{plan, "1B 2A", "yes", "Which store?\n   → SQLite"},
+		{plan, "1b, 2b", "yes", "When?\n   → Later"},
+		{plan, "yes", "yes", "1. Which store?\n   → Postgres\n2. When?\n   → Now"}, // yes takes the recommendations
+		{onePlan, "B", "yes", "Which store?\n   → SQLite"},                         // one question: a letter alone
+		{onePlan, "a.", "yes", "→ Postgres"},
+		{plan, "B", "no", "B"}, // two questions: a lone letter is not an answer
+		{onePlan, "G", "no", "G"},
+		{plan, "3C", "no", "3C"},
+		{plan, "wait\n\n> approve", "no", "wait"},
+		{plan, "approve\n\nOn Sun, Oct 25, 2026 at 7:42 PM zrl bot wrote:\n> Needs you", "yes", ""},
+		{plan, "approve\n-- \nZach", "yes", ""},
+		{plan, "Approve\n\nSent from my iPhone", "yes", ""},
 		{plan, "  \n> approve", "", ""},
 	} {
 		got := parseAnswer(tc.text, tc.ask)
-		if got.Action != tc.want || !strings.Contains(got.Message, tc.msg) {
+		if got.Choice != tc.want || !strings.Contains(got.Message, tc.msg) {
 			t.Errorf("parseAnswer(%q) = %+v, want %s with %q", tc.text, got, tc.want, tc.msg)
 		}
-		if got.Action == "send" && strings.Contains(got.Message, ">") {
+		if strings.Contains(got.Message, ">") {
 			t.Errorf("parseAnswer(%q) kept quoted text: %q", tc.text, got.Message)
+		}
+	}
+}
+
+// Every reply word an email offers is a button the ask has, for every kind of ask: the word parses
+// into one of the ask's choices, and no word is offered without its button.
+func TestReplyWordsAreButtons(t *testing.T) {
+	agents := map[string]Agent{
+		"plan":    card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "x"}),
+		"preview": card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)}),
+		"brief":   card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached", labelVerdict: "code changes"}),
+		"close":   card("c1", map[string]string{labelStage: "zach", labelVerdict: "close"}),
+		"stuck":   card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}),
+		"left":    card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"}),
+		"repo":    card("c1", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelCandidates: "a/one b/two"}),
+		"dep":     card("c1", map[string]string{labelStage: "zach", labelNote: depAskNote("abc1234", depMissing)}),
+	}
+	open := card("c1", map[string]string{})
+	open.RequiresAttention, open.AttentionReason = true, "question"
+	agents["open"] = open
+	for name, a := range agents {
+		ask := askFor(Card{ID: "c1", Stage: "zach"}, a)
+		ask.Questions = []Question{{Text: "Q?", Options: []string{"x", "y"}}}
+		for _, w := range replyWords(ask) {
+			text := w.Word
+			if text == "1A 2B" {
+				text = "1A"
+			}
+			got := parseAnswer(text, ask)
+			if choiceByID(ask, got.Choice) == nil {
+				t.Errorf("%s: reply %q offered (%s) but parses to no button: %+v", name, w.Word, w.Does, got)
+			}
+		}
+		for _, word := range []string{"approve", "no", "done", "drop", "free text"} {
+			got := parseAnswer(word, ask)
+			if got.Choice != "" && choiceByID(ask, got.Choice) == nil {
+				t.Errorf("%s: %q parses to %q, which is not a button", name, word, got.Choice)
+			}
+		}
+		if choiceByID(ask, "done") == nil {
+			for _, w := range replyWords(ask) {
+				if w.Word == "done" {
+					t.Errorf("%s: offers done without a Mark done button", name)
+				}
+			}
 		}
 	}
 }

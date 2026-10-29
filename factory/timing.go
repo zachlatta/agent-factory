@@ -554,7 +554,7 @@ func (t CardTiming) inbox() bool { return t.Source == "email" || t.Source == "vo
 // sendMail sends one email for card id through the mailbox and records it as the factory's own, so
 // the reply check never takes it for the reply to Zach. Every factory email goes through here.
 func (f *Factory) sendMail(ctx context.Context, id, tool string, args map[string]any) (json.RawMessage, error) {
-	out, err := f.Mail.Call(ctx, tool, args)
+	out, err := f.Mail.Call(ctx, tool, f.withBoardFooter(id, args))
 	if err != nil {
 		return out, err
 	}
@@ -567,7 +567,9 @@ func (f *Factory) sendMail(ctx context.Context, id, tool string, args map[string
 	if m.ID == "" {
 		m.ID = res.MessageID
 	}
-	f.timings.update(id, func(t *CardTiming) { t.Mails = append(t.Mails, m) })
+	if id != "" { // the daily digest is about no one card
+		f.timings.update(id, func(t *CardTiming) { t.Mails = append(t.Mails, m) })
+	}
 	return out, nil
 }
 

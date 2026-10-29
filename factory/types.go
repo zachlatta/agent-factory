@@ -38,7 +38,8 @@ type Agent struct {
 	RequiresAttention bool
 	AttentionReason   string
 	LastError         string
-	Pending           string // the permission prompt it waits on (`paseo permit ls`), "" for none
+	Pending           string   // the permission prompt it waits on (`paseo permit ls`), "" for none
+	PendingIDs        []string // the ids of its pending prompts, which the factory refuses (denyPrompts)
 }
 
 // L returns the agent's factory.<k> label.
@@ -185,6 +186,7 @@ type Body struct {
 	Thread      string       `json:"thread"`     // new card: zrl-bot Gmail thread to report in; answer: the reply's thread
 	MessageID   string       `json:"message_id"` // answer: Zach's reply
 	Text        string       `json:"text"`       // answer: the reply's text
+	Choice      string       `json:"choice"`     // choose: the answer's Choice id (choose.go)
 	Via         string       `json:"-"`          // "email": an answer by email (answer.go), not the board
 }
 

@@ -115,7 +115,7 @@ func (f *Factory) handleBoard(w http.ResponseWriter, r *http.Request) {
 	if cards == nil {
 		cards = []Card{}
 	}
-	writeJSON(w, 200, map[string]any{"cards": cards, "updated": iso(updated), "errors": errs, "stages": Stages,
+	writeJSON(w, 200, map[string]any{"cards": cards, "sections": f.sections(), "updated": iso(updated), "errors": errs, "stages": Stages,
 		"hosts": []string{f.cfg.Host}, "log": log, "repos": f.Repos(), "tiers": TierHelp,
 		"caps": map[string]int{"ideaWip": f.cfg.IdeaWIP, "ideaDaily": f.cfg.IdeaDaily, "rework": f.cfg.ReworkCap}})
 }
@@ -329,7 +329,7 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if len(parts) > 0 {
-				writeJSON(w, 200, map[string]string{"text": strings.Join(parts, "\n")})
+				writeJSON(w, 200, map[string]any{"text": strings.Join(parts, "\n"), "request": f.cardRequest(a)})
 				return
 			}
 			if lastErr != nil {
@@ -343,12 +343,13 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]string{"text": text})
+	// the card's own request, so its detail opens with Zach's words (opening a card only, never the list)
+	writeJSON(w, 200, map[string]any{"text": text, "request": f.cardRequest(a)})
 }
 
 var actions = map[string]bool{"new": true, "idea": true, "scout": true, "stage": true, "review": true, "send": true,
 	"approve": true, "arbiter": true, "rerun": true, "resume": true, "stop": true, "archive": true, "done": true, "close": true,
-	"land-review": true, "answer": true}
+	"land-review": true, "answer": true, "choose": true}
 
 func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 	// a custom header blocks cross-site form posts (browsers can't add one without CORS)

@@ -249,3 +249,45 @@ func TestPromptsCarryRmRule(t *testing.T) {
 		}
 	}
 }
+
+// The factory answers its own agents' permission prompts with no, once per prompt, with the rule that
+// avoids them; it never allows one, and never touches agents it did not start.
+func TestFactoryDeniesItsAgentsPermissionPrompts(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "building"})
+	c.Status, c.Pending, c.PendingIDs = "running", "Bash: rm -rf x", []string{"q1"}
+	sub := Agent{ID: "s1", Status: "running", Pending: "Edit: y", PendingIDs: []string{"q2"},
+		Labels: map[string]string{parentAgentLabel: "c1"}, CreatedAt: t0, LastActivityAt: t0}
+	mine := Agent{ID: "u1", Status: "running", Pending: "Bash: z", PendingIDs: []string{"q3"}, Labels: map[string]string{},
+		CreatedAt: t0, LastActivityAt: t0}
+	f, p := newTestFactory(t, c, sub, mine)
+	f.Tick()
+	f.Tick()
+	var denies [][]string
+	for _, call := range p.calls {
+		if len(call) > 1 && call[0] == "permit" && call[1] != "ls" {
+			denies = append(denies, call)
+		}
+	}
+	if len(denies) != 2 {
+		t.Fatalf("permit calls = %v, want one deny each for c1 and s1", denies)
+	}
+	for _, d := range denies {
+		if d[1] != "deny" || (d[2] != "c1" && d[2] != "s1") || argAfter(d, "--message") != denyRule {
+			t.Errorf("call = %v", d)
+		}
+	}
+	if !strings.Contains(denyRule, "literal absolute paths") {
+		t.Error("the refusal must say how to avoid the prompt")
+	}
+}
+
+func TestDryRunNeverAnswersPrompts(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "building"})
+	c.Status, c.Pending, c.PendingIDs = "running", "Bash: rm x", []string{"q1"}
+	f, p := newTestFactory(t, c)
+	f.cfg.DryRun = true
+	f.denyPrompts(f.agents())
+	if p.countCalls("permit", "deny") != 0 {
+		t.Error("a dry run answered a prompt")
+	}
+}
