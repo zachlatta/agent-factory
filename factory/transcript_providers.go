@@ -106,7 +106,7 @@ func dataImage(url string) Image {
 	return Image{Kind: "image", Media: head, Data: data}
 }
 
-var codexSystem = regexp.MustCompile(`^\s*(# AGENTS\.md instructions|<environment_context>|<user_instructions>|<system_instructions>|<turn_aborted>|<user_shell_command>)`)
+var codexSystem = regexp.MustCompile(`^\s*(# AGENTS\.md instructions|<environment_context>|<user_instructions>|<system_instructions>|<permissions instructions>|<collaboration_mode>|<codex_internal_context|<turn_aborted>|<user_shell_command>)`)
 
 // codexPath is the Codex rollout file, ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl (or
 // archived_sessions/), or "" when there is none.

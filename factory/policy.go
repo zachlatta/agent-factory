@@ -1725,3 +1725,193 @@ func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
 }
+
+const appDoneNote = "finished in Paseo"
+
+type appDeliveryKey struct {
+	id     string
+	last   string
+	status string
+	reason string
+	req    bool
+	cwd    string
+}
+
+type appDeliveryEntry struct {
+	key  appDeliveryKey
+	done bool
+	note string
+}
+
+// appDelivered reports whether a Paseo-started (app) card that would otherwise sit in Needs Zach
+// has already delivered its result: either it finished cleanly with a final report (not a question
+// or decision), or it errored after sending its reply email or landing its work on origin/main.
+func (f *Factory) appDelivered(a Agent, fetch bool) (bool, string) {
+	if !isAppCard(a) || a.L(labelStage) != "" || a.archived() || a.Status == "running" || a.Pending != "" {
+		return false, ""
+	}
+	key := appDeliveryKey{
+		id:     a.ID,
+		last:   iso(a.LastActivityAt),
+		status: a.Status,
+		reason: a.AttentionReason,
+		req:    a.RequiresAttention,
+		cwd:    a.Cwd,
+	}
+	f.mu.Lock()
+	if e, ok := f.appDeliveries[a.ID]; ok && (e.key == key || !fetch) {
+		f.mu.Unlock()
+		return e.done, e.note
+	}
+	f.mu.Unlock()
+	if !fetch {
+		return false, ""
+	}
+	done, note, ok := f.checkAppDelivered(a)
+	if ok {
+		f.mu.Lock()
+		if f.appDeliveries == nil {
+			f.appDeliveries = map[string]appDeliveryEntry{}
+		}
+		f.appDeliveries[a.ID] = appDeliveryEntry{key: key, done: done, note: note}
+		f.mu.Unlock()
+	}
+	return done, note
+}
+
+func (f *Factory) checkAppDelivered(a Agent) (done bool, note string, cacheable bool) {
+	switch {
+	case a.Status == "idle" && a.AttentionReason != "error":
+		if a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished" {
+			return false, "", true
+		}
+		reply, err := storedReplyOne(f.cfg.Home, a)
+		if err != nil {
+			return false, "", false
+		}
+		if strings.TrimSpace(reply) != "" && !replyAsksQuestion(reply) {
+			return true, appDoneNote, true
+		}
+		return false, "", true
+	case a.Status == "error" || a.AttentionReason == "error":
+		evs, err := storedEvents(f.cfg.Home, a)
+		if err == nil && sentReplyEmail(evs) {
+			return true, appDoneNote, true
+		}
+		if f.appWorkLanded(a) {
+			return true, appDoneNote, true
+		}
+		return false, "", err == nil
+	}
+	return false, "", true
+}
+
+// replyAsksQuestion reports whether an assistant's final message is asking for an answer or decision
+// rather than reporting a completed result.
+func replyAsksQuestion(reply string) bool {
+	rest, qs := ParseQuestions(reply)
+	if len(qs) > 0 {
+		return true
+	}
+	if _, ov := ParseOverview(rest); ov != nil {
+		var tmp Ask
+		tmp.Overview = ov
+		cleanOverview(&tmp)
+		if tmp.Overview != nil && tmp.Overview.Decision != "" {
+			return true
+		}
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(rest), "\n") {
+		if t := strings.TrimSpace(l); t != "" {
+			lines = append(lines, t)
+		}
+	}
+	if len(lines) == 0 {
+		return false
+	}
+	idx := len(lines) - 1
+	for idx > 0 && optionLine.MatchString(lines[idx]) {
+		idx--
+	}
+	last := strings.TrimRight(lines[idx], " \t*_\"'`)>]")
+	return strings.HasSuffix(last, "?")
+}
+
+var (
+	pdwEmailSendRe  = regexp.MustCompile(`(?m)(?:^|[;&\n]+)\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*pdw\s+call\s+[A-Za-z0-9_]+__(?:send_email|reply_to_message|reply_email)\b([^\n;&|]*)`)
+	pdwHelpFlagRe   = regexp.MustCompile(`(?:^|\s)(?:--help|-h)(?:\s|$)`)
+	pdwDataFlagRe   = regexp.MustCompile(`(?:^|\s)(?:--data(?:\s|=)|-d(?:\s|=))`)
+	failedExitRe    = regexp.MustCompile(`(?i)(?:command exited with code|exit code:|exited with code|exit status)\s+[1-9][0-9]*`)
+	failedIsErrorRe = regexp.MustCompile(`"(?:isError|is_error)"\s*:\s*true\b`)
+)
+
+func isEmailSendTool(name string) bool {
+	name = strings.TrimSpace(name)
+	for _, suffix := range []string{"send_email", "reply_to_message", "reply_email"} {
+		if name == suffix || strings.HasSuffix(name, "__"+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPdwEmailSendCmd(cmd string) bool {
+	for _, m := range pdwEmailSendRe.FindAllStringSubmatch(cmd, -1) {
+		args := m[1]
+		if !pdwHelpFlagRe.MatchString(args) && pdwDataFlagRe.MatchString(args) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFailedToolResult(text string) bool {
+	t := strings.TrimSpace(text)
+	if strings.HasPrefix(t, "Error:") || strings.HasPrefix(t, "error:") || strings.HasPrefix(t, "Usage: pdw") {
+		return true
+	}
+	return failedExitRe.MatchString(t) || failedIsErrorRe.MatchString(t)
+}
+
+func sentReplyEmail(evs []Event) bool {
+	results := map[string]Event{}
+	for _, e := range evs {
+		if e.Kind == "result" && e.ID != "" {
+			results[e.ID] = e
+		}
+	}
+	for _, e := range evs {
+		if e.Kind != "tool" || e.ID == "" {
+			continue
+		}
+		if e.Name == "Bash" {
+			if !isPdwEmailSendCmd(str(e.Input, "command")) {
+				continue
+			}
+		} else if (!isEmailSendTool(e.Name) && !isEmailSendTool(e.Native)) || len(e.Input) == 0 {
+			continue
+		}
+		res, ok := results[e.ID]
+		if !ok || res.Error || strings.TrimSpace(res.Text) == "" || isFailedToolResult(res.Text) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (f *Factory) appWorkLanded(a Agent) bool {
+	if a.Cwd == "" || a.CreatedAt.IsZero() {
+		return false
+	}
+	if base := a.L(labelBase); base != "" {
+		if ok, _ := f.landedOnMain(a.Cwd, base); ok {
+			return true
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	at, hasOwn, err := f.ownLandingTime(ctx, a.Cwd, a.CreatedAt)
+	return err == nil && hasOwn && !at.IsZero()
+}

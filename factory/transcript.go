@@ -715,6 +715,19 @@ func image(b map[string]any) Image {
 	return Image{Kind: "image", Media: media, Data: data}
 }
 
+var commandPromptRe = regexp.MustCompile(`(?s)^\s*(?:<command-(?:name|message)>.*?</command-(?:name|message)>\s*)+<command-args>(.*?)</command-args>\s*$`)
+
+// unwrapCommandPrompt extracts the user's prompt from a Claude slash-command wrapper
+// (<command-name>/goal</command-name> ... <command-args>...</command-args>) when non-empty.
+func unwrapCommandPrompt(t string) (string, bool) {
+	m := commandPromptRe.FindStringSubmatch(t)
+	if m == nil {
+		return "", false
+	}
+	args := strings.TrimSpace(m[1])
+	return args, args != ""
+}
+
 func event(typ string, meta bool, b map[string]any) (Event, bool) {
 	switch str(b, "type") {
 	case "text":
@@ -722,8 +735,13 @@ func event(typ string, meta bool, b map[string]any) (Event, bool) {
 		if strings.TrimSpace(t) == "" || (typ == "user" && meta) {
 			return Event{}, false
 		}
-		if typ == "user" && systemText.MatchString(t) {
-			return Event{Kind: "system", Text: capText(t)}, true
+		if typ == "user" {
+			if args, ok := unwrapCommandPrompt(t); ok {
+				return Event{Kind: "user", Text: args}, true
+			}
+			if systemText.MatchString(t) {
+				return Event{Kind: "system", Text: capText(t)}, true
+			}
 		}
 		return Event{Kind: typ, Text: t}, true
 	case "thinking":

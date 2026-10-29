@@ -362,6 +362,13 @@ func (r CardRequest) brief() (string, []string) {
 	return out, fus
 }
 
+// isAppCard reports whether a is a top-level Paseo-started session (source "app"), not a factory
+// worker, reviewer, arbiter, scout, routing helper or anchor.
+func isAppCard(a Agent) bool {
+	return source(a) == "app" && a.L(labelRole) == "" && a.L(labelRouting) == "" &&
+		!boardAnchor(a) && (a.L(labelStage) == "" || a.L(labelSource) == "app")
+}
+
 // peerRequest is one card's request read from its session file so far.
 type peerRequest struct {
 	mu     sync.Mutex
@@ -370,6 +377,7 @@ type peerRequest struct {
 	size   int64
 	mtime  time.Time
 	based  bool // the first user message has been seen
+	app    bool // whether the agent was read as an app card
 	req    CardRequest
 }
 
@@ -422,8 +430,12 @@ func (f *Factory) agentRequest(a Agent) CardRequest {
 	pc.mu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	app := isAppCard(a)
+	if e.app != app {
+		e.offset, e.size, e.mtime, e.based, e.app, e.req = 0, 0, time.Time{}, false, app, CardRequest{}
+	}
 	if a.Provider != "claude" {
-		e.readOnce(f.cfg.Home, a)
+		e.readOnce(f.cfg.Home, a, app)
 		return e.copy()
 	}
 	id := nativeSessionID(a.SessionID)
@@ -434,7 +446,7 @@ func (f *Factory) agentRequest(a Agent) CardRequest {
 		e.path = claudePath(f.cfg.Home, a.Cwd, id)
 	}
 	if e.path != "" {
-		e.update(&pc.bytesRead)
+		e.update(&pc.bytesRead, app)
 	}
 	return e.copy()
 }
@@ -446,7 +458,7 @@ func (e *peerRequest) copy() CardRequest {
 }
 
 // readOnce reads a non-Claude session whole, re-reading only when the file's size or mtime changes.
-func (e *peerRequest) readOnce(home string, a Agent) {
+func (e *peerRequest) readOnce(home string, a Agent, app bool) {
 	if e.path != "" {
 		if st, err := os.Stat(e.path); err == nil && st.Size() == e.size && st.ModTime().Equal(e.mtime) {
 			return
@@ -458,7 +470,7 @@ func (e *peerRequest) readOnce(home string, a Agent) {
 	}
 	e.based, e.req = false, CardRequest{}
 	for _, ev := range res.Events {
-		e.take(ev)
+		e.take(ev, app)
 	}
 	if res.Path != "" {
 		if st, err := os.Stat(res.Path); err == nil {
@@ -468,7 +480,7 @@ func (e *peerRequest) readOnce(home string, a Agent) {
 }
 
 // update reads the lines added to the session file since the last call.
-func (e *peerRequest) update(read *atomic.Int64) {
+func (e *peerRequest) update(read *atomic.Int64, app bool) {
 	st, err := os.Stat(e.path)
 	if err != nil {
 		return
@@ -502,10 +514,10 @@ func (e *peerRequest) update(read *atomic.Int64) {
 			continue
 		}
 		for _, ev := range claudeLineEvents(n, line) {
-			e.take(ev)
+			e.take(ev, app)
 		}
 		if text, ok := queuedPrompt(line); ok {
-			e.take(Event{Kind: "user", Text: text})
+			e.take(Event{Kind: "user", Text: text}, app)
 		}
 	}
 	e.size, e.mtime = st.Size(), st.ModTime()
@@ -513,13 +525,16 @@ func (e *peerRequest) update(read *atomic.Int64) {
 
 // take adds one transcript event: the first user message gives the request, later ones the
 // follow-ups. Only user messages count, never tool results.
-func (e *peerRequest) take(ev Event) {
+func (e *peerRequest) take(ev Event, app bool) {
 	if ev.Kind != "user" || strings.TrimSpace(ev.Text) == "" {
 		return
 	}
 	if !e.based {
 		e.based = true
 		e.req.Base = requestOf(ev.Text)
+		if e.req.Base == "" && app {
+			e.req.Base = strings.TrimSpace(ev.Text)
+		}
 		e.req.Read = true
 		e.req.AskedKind, e.req.Asked = askedOf(ev.Text)
 	}

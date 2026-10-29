@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Fixtures for the prompt blocks in README "Prompt blocks parsed from email cards". All fake.
@@ -294,4 +295,76 @@ func TestReviewerGetsTheCardsFollowUps(t *testing.T) {
 	if pr := runs[0][len(runs[0])-1]; !strings.Contains(pr, "Paint the shed blue,") || !strings.Contains(pr, "Make it green instead.") {
 		t.Errorf("reviewer prompt lacks the request and follow-up:\n%s", pr)
 	}
+}
+
+func TestAppCardRequestFromFirstUserPrompt(t *testing.T) {
+	t.Run("plain claude prompt", func(t *testing.T) {
+		a := Agent{ID: "app1", Host: "host1", Title: "Warehouse fix", Cwd: "/w/app1", Repo: "example/desk",
+			Provider: "claude", SessionID: "sess-app1", Status: "idle", RequiresAttention: true, AttentionReason: "permission",
+			CreatedAt: t0.Add(-time.Hour), LastActivityAt: t0.Add(-time.Minute), Labels: map[string]string{}}
+		f, _ := newTestFactory(t, a)
+		writeSession(t, f.cfg.Home, a.Cwd, a.SessionID,
+			sessionLine("Fix the warehouse table and verify the row count.", false))
+		f.SetAgents([]Agent{a})
+		want := "Fix the warehouse table and verify the row count."
+		if got := f.cardRequest(a).Base; got != want {
+			t.Fatalf("cardRequest.Base = %q, want %q", got, want)
+		}
+		c := f.cards[0]
+		if c.Request == nil || c.Request.Base != want {
+			t.Fatalf("card.Request = %+v, want %q", c.Request, want)
+		}
+		if c.Ask == nil || c.Ask.Request == nil || c.Ask.Request.Base != want {
+			t.Fatalf("card.Ask.Request = %+v, want %q", c.Ask, want)
+		}
+		if p := f.Peers("", "example/desk"); len(p.InFlight) != 1 || p.InFlight[0].Request != want {
+			t.Fatalf("peers = %+v, want request %q", p.InFlight, want)
+		}
+	})
+
+	t.Run("claude slash command prompt", func(t *testing.T) {
+		a := Agent{ID: "app2", Host: "host1", Title: "Usage contracts", Cwd: "/w/app2", Repo: "example/desk",
+			Provider: "claude", SessionID: "sess-app2", Status: "running",
+			CreatedAt: t0.Add(-time.Hour), LastActivityAt: t0.Add(-time.Minute), Labels: map[string]string{}}
+		f, _ := newTestFactory(t, a)
+		slashGoal := "<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>investigate the /usage page and write up its contracts</command-args>"
+		emptyCmd := "<command-message>compact</command-message>\n<command-name>/compact</command-name>\n<command-args></command-args>"
+		writeSession(t, f.cfg.Home, a.Cwd, a.SessionID,
+			sessionLine(emptyCmd, false),
+			sessionLine(slashGoal, false))
+		want := "investigate the /usage page and write up its contracts"
+		if got := f.cardRequest(a).Base; got != want {
+			t.Fatalf("cardRequest.Base = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("codex goal preamble skipped", func(t *testing.T) {
+		a := Agent{ID: "app3", Host: "host1", Title: "Android spec", Cwd: "/w/app3", Repo: "example/desk",
+			Provider: "codex", SessionID: "sess-app3", Status: "running",
+			CreatedAt: t0.Add(-time.Hour), LastActivityAt: t0.Add(-time.Minute), Labels: map[string]string{}}
+		f, _ := newTestFactory(t, a)
+		lines := []string{
+			`{"timestamp":"t0","type":"session_meta","payload":{"id":"sess-app3"}}`,
+			`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /w\n\nbe good"}]}}`,
+			`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/w/app3</cwd>\n</environment_context>"}]}}`,
+			`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<permissions instructions>\nFilesystem sandboxing\n</permissions instructions>"}]}}`,
+			`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<collaboration_mode># Collaboration Mode: Default\n</collaboration_mode>"}]}}`,
+			`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">\nGoal mode active.\n</codex_internal_context>"}]}}`,
+			`{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Write the release spec and cut the build"}]}}`,
+		}
+		writeFile(t, f.cfg.Home+"/.codex/sessions/2026/01/02/rollout-2026-01-02T00-00-00-sess-app3.jsonl", strings.Join(lines, "\n")+"\n")
+		want := "Write the release spec and cut the build"
+		if got := f.cardRequest(a).Base; got != want {
+			t.Fatalf("cardRequest.Base = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("factory card without template block stays empty", func(t *testing.T) {
+		a := reqCard("b1", "board")
+		f, _ := newTestFactory(t, a)
+		writeSession(t, f.cfg.Home, a.Cwd, a.SessionID, sessionLine("unstructured prompt", false))
+		if got := f.cardRequest(a).Base; got != "" {
+			t.Fatalf("board card Base = %q, want empty", got)
+		}
+	})
 }

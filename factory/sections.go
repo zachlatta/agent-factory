@@ -139,7 +139,11 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 func finishedLine(c Card, done time.Time) (SectionLine, bool) {
 	line := SectionLine{ID: c.ID, Title: c.Title, At: done.Format(time.RFC3339)}
 	switch {
-	case dropped(c) || c.Timing == nil:
+	case dropped(c):
+		return line, false
+	case c.Note == appDoneNote:
+		line.State = "shipped"
+	case c.Timing == nil:
 		return line, false
 	case c.Timing.LandedAt != "":
 		line.State = "shipped"
@@ -184,7 +188,8 @@ func sameDay(t, now time.Time, loc *time.Location) bool {
 	return y1 == y2 && m1 == m2 && d1 == d2
 }
 
-// doneAt is when card c reached Done: the start of its last Done stay, else its archive time.
+// doneAt is when card c reached Done: the start of its last Done stay, else its archive time (or last
+// activity for an unarchived Paseo-started card that finished on its own).
 func doneAt(c Card) time.Time {
 	if c.Timing != nil {
 		for i := len(c.Timing.Stages) - 1; i >= 0; i-- {
@@ -192,6 +197,9 @@ func doneAt(c Card) time.Time {
 				return parseTime(c.Timing.Stages[i].Start)
 			}
 		}
+	}
+	if c.ArchivedAt == "" && c.Note == appDoneNote {
+		return parseTime(c.LastActivityAt)
 	}
 	return parseTime(c.ArchivedAt)
 }

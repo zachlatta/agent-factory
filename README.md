@@ -657,9 +657,16 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
 - **Working on it**: one plain line per card ("planning", "being reviewed", "waiting on <title>"),
   stuck ones first: board-only waits (the factory's own trouble, finished or hand-moved cards),
   stalls and errors.
-- **Shipped today**: cards that reached Done today (Zach's time zone) with a landing or a reply;
+- **Shipped today**: cards that reached Done today (Zach's time zone) with a landing or a reply, plus
+  Paseo-started (`app`) cards that finished on their own (`finished in Paseo`);
   dropped cards are left out. Each pass records finished cards in `digest.json`, so they stay
   listed all day after Done cards leave the board (12 hours).
+  When a Paseo-started (`app`) agent is idle after a final assistant report (not asking a question or
+  decision), or errored after sending a reply email or landing its work on `origin/main`, the board
+  moves the card to Done (`finished in Paseo`) instead of Stuck or For you without writing
+  `factory.stage=landed` to Paseo (so personal sessions are not reaped after 5 minutes and return to
+  Building if resumed); a real error with no delivered result stays in For you as
+  "Waiting on you: error".
 - **Routine runs (N)**: scheduled runs started today, shown only when the filter is on.
 
 The list never reads a session file or log. Opening a card reads them once: the card starts with
@@ -875,7 +882,9 @@ Change both or neither. The first prompt is the board's, with the request under 
 Each line must be whole (from the start of a line, nothing after it), the date must parse, and a
 block without its end line is ignored, so text that only quotes this format is not a follow-up.
 Only user messages count, not tool output. An email card with no `Zach's email:` block (older
-cards, or an empty body) uses its `- Subject:` line. A follow-up overrides the first request where
+cards, or an empty body) uses its `- Subject:` line. A Paseo-started (`app`) card with no factory
+prompt block uses the agent's first user prompt as its request (unwrapping Claude slash-command
+`<command-args>` and skipping Codex system preamble messages). A follow-up overrides the first request where
 they conflict. Only Claude session files are read again as they grow.
 
 The factory writes one block of its own, not part of the dispatcher's contract: a closed duplicate's
@@ -912,8 +921,8 @@ records its times in `timings.json` in the state directory, so a restart keeps t
   when it set one, else when the factory saw it (within one poll).
 - **Reviews**: each round's start (the reviewer's creation), end (its verdict applied) and verdict.
 - **Landed**: the last verified commit time from the card's own linked-worktree commits made
-  after Asked. The commit must be on the card's branch and main; a rebased version must match
-  the original patch. Errands that commit nothing have no landing time. Failed Git reads never
+  after Asked. The commit must be on the card's branch and main; a rebased or squash-merged version
+  must match the original patch. Errands that commit nothing have no landing time. Failed Git reads never
   substitute the clock or another card's commit.
 - **Replied** (email and voice cards): 5 minutes after Done, one read of the card's thread takes
   the last message the mailbox sent after he asked and by Done plus 5 minutes. The factory's own

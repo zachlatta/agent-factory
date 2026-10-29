@@ -51,6 +51,9 @@ func Derive(a Agent) string {
 	if a.RequiresAttention {
 		reason = a.AttentionReason
 	}
+	if reason == "" && a.Status == "error" && isAppCard(a) {
+		reason = "error"
+	}
 	if reason != "" && reason != "finished" {
 		return "zach"
 	}

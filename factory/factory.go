@@ -135,8 +135,9 @@ type Factory struct {
 	boardSeq  uint64 // the read behind list and cards; the board never moves to an older one
 	errs      map[string]string
 	log       []string
-	details   map[string]detailEntry // Needs Zach card id -> fetched Ask detail
-	routing   map[string]bool        // pickers whose card is being started now (route.go)
+	details       map[string]detailEntry      // Needs Zach card id -> fetched Ask detail
+	appDeliveries map[string]appDeliveryEntry // app card id -> cached delivery check (policy.go)
+	routing       map[string]bool             // pickers whose card is being started now (route.go)
 	mailRetry map[string]time.Time   // card id -> no Needs Zach email before this (a send failed)
 	mailProbe mailProbe              // last mailbox check, for /api/health
 	once      map[string]string      // log lines written once (noteOnce)
@@ -233,6 +234,32 @@ func (f *Factory) nextRead() uint64 {
 func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 	agents = applyLineageLabels(f.withArchiveMarks(agents))
 	cards := BuildBoard(agents, f.ideas.List(), f.Now())
+	byID := map[string]Agent{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	for i := range cards {
+		a, ok := byID[cards[i].ID]
+		if !ok || !isAppCard(a) {
+			continue
+		}
+		if fetch {
+			if req := f.cardRequest(a); req.Base != "" || len(req.FollowUps) > 0 {
+				cards[i].Request = &req
+			}
+		}
+		if cards[i].Stage == "zach" {
+			if done, why := f.appDelivered(a, fetch); done {
+				cards[i].Stage, cards[i].Ask, cards[i].Unread, cards[i].Note = "landed", nil, false, why
+				cards[i].Flags = slices.DeleteFunc(cards[i].Flags, func(fl string) bool {
+					return fl == "error" || strings.HasPrefix(fl, "needs attention")
+				})
+				if !a.archived() && !slices.Contains(cards[i].Flags, "not archived") {
+					cards[i].Flags = append(cards[i].Flags, "not archived")
+				}
+			}
+		}
+	}
 	f.fillAsks(cards, agents, fetch)
 	for _, c := range cards {
 		if c.Ask != nil {

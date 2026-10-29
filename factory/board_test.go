@@ -1,8 +1,10 @@
 package factory
 
 import (
+	"encoding/json"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +22,7 @@ func TestDerive(t *testing.T) {
 		{"unread finish", Agent{Status: "idle", RequiresAttention: true, AttentionReason: "finished"}, "zach"},
 		{"seen and idle", Agent{Status: "idle"}, "landed"},
 		{"permission wait", Agent{Status: "idle", RequiresAttention: true, AttentionReason: "permission"}, "zach"},
+		{"app error without attention flag", Agent{Status: "error"}, "zach"},
 		{"closed session", Agent{Status: "closed", RequiresAttention: true, AttentionReason: "finished"}, "landed"},
 		{"email agent answered by email", Agent{Status: "idle", RequiresAttention: true, AttentionReason: "finished",
 			Labels: map[string]string{"source": "mail-bot"}}, "landed"},
@@ -187,5 +190,243 @@ func TestBuildBoardUnread(t *testing.T) {
 	perm.RequiresAttention, perm.AttentionReason = true, "permission"
 	if c := BuildBoard([]Agent{perm}, nil, t0)[0]; c.Unread || !slices.Contains(c.Flags, "needs attention: permission") {
 		t.Errorf("permission card = %+v", c)
+	}
+}
+
+func newAppAgent(id string) Agent {
+	a := card(id, nil)
+	a.RequiresAttention, a.AttentionReason = true, "finished"
+	return a
+}
+
+func TestAppCardFinishedWithReportMovesToDone(t *testing.T) {
+	a := newAppAgent("app-done")
+	f, p := newTestFactory(t, a)
+	storeLog(t, f, p, a.ID, "[User] Backfill the warehouse events table\n[Assistant] Backfilled 42 rows and verified the counts.")
+	f.SetAgents([]Agent{a})
+
+	c := f.cards[0]
+	if c.Stage != "landed" || c.Note != "finished in Paseo" || c.Ask != nil || c.Unread {
+		t.Fatalf("card = %+v, want landed with finished in Paseo and no ask", c)
+	}
+	if c.Request == nil || c.Request.Base != "Backfill the warehouse events table" {
+		t.Fatalf("card.Request = %+v, want user prompt", c.Request)
+	}
+	if !slices.Contains(c.Flags, "not archived") || slices.ContainsFunc(c.Flags, func(s string) bool { return strings.HasPrefix(s, "needs attention") }) {
+		t.Fatalf("card.Flags = %v", c.Flags)
+	}
+	if got := p.labels(a.ID)[labelStage]; got != "" {
+		t.Fatalf("factory.stage written to Paseo = %q, want empty", got)
+	}
+
+	s := f.sections()
+	if got := sectionIDs(s.Shipped); !slices.Equal(got, []string{a.ID}) || s.Shipped[0].State != "shipped" {
+		t.Fatalf("shipped = %+v, want [%s] as shipped", s.Shipped, a.ID)
+	}
+	if len(s.ForYou) != 0 || len(s.Stuck) != 0 {
+		t.Fatalf("forYou = %+v, stuck = %+v, want both empty", s.ForYou, s.Stuck)
+	}
+	if got := sectionIDs(Finished(f.cards)); !slices.Equal(got, []string{a.ID}) {
+		t.Fatalf("Finished = %v, want [%s]", got, a.ID)
+	}
+
+	// Personal Paseo sessions are never auto-archived by the factory reaper.
+	f.reap(t0.Add(10 * time.Minute))
+	if p.called("archive", a.ID) {
+		t.Fatal("reap archived a personal Paseo session")
+	}
+
+	// If resumed in Paseo, the card returns to Building.
+	running := a
+	running.Status = "running"
+	f.SetAgents([]Agent{running})
+	if c := f.cards[0]; c.Stage != "building" {
+		t.Fatalf("resumed card stage = %q, want building", c.Stage)
+	}
+}
+
+func TestAppCardAskingQuestionStaysInForYou(t *testing.T) {
+	for name, reply := range map[string]string{
+		"structured question": "[User] Fix the deploy\n[Assistant] QUESTION: Which environment should I target?\n- staging\n- prod",
+		"overview decision":   "[User] Fix the deploy\n[Assistant] DECISION: Pick staging or prod\nOVERVIEW:\n- Two targets exist\nNEEDS FROM ZACH: Reply with the target.",
+		"trailing question":   "[User] Fix the deploy\n[Assistant] I checked both configs. Should I drop the legacy table?",
+		"question with list":  "[User] Fix the deploy\n[Assistant] Which table should I backfill?\n- events_v1\n- events_v2",
+		"mid-turn tool call":  "[User] Fix the deploy\n[Bash] ls",
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := newAppAgent("app-q")
+			f, p := newTestFactory(t, a)
+			storeLog(t, f, p, a.ID, reply)
+			f.SetAgents([]Agent{a})
+			c := f.cards[0]
+			if c.Stage != "zach" || c.Ask == nil {
+				t.Fatalf("%s: card = %+v, want stage zach with ask", name, c)
+			}
+		})
+	}
+
+	t.Run("overview with DECISION none moves to done", func(t *testing.T) {
+		a := newAppAgent("app-none")
+		f, p := newTestFactory(t, a)
+		storeLog(t, f, p, a.ID, "[User] Check the service\n[Assistant] DECISION: none\nOVERVIEW:\n- Service is healthy.\nNEEDS FROM ZACH: none")
+		f.SetAgents([]Agent{a})
+		if c := f.cards[0]; c.Stage != "landed" {
+			t.Fatalf("card stage = %q, want landed", c.Stage)
+		}
+	})
+}
+
+func writeToolSession(t *testing.T, home, id, toolName string, input map[string]any, resultText string, isErr bool) {
+	t.Helper()
+	u := sessionLine("Run the release check and email the result.", false)
+	tc, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []any{
+		map[string]any{"type": "tool_use", "id": "u1", "name": toolName, "input": input},
+	}}})
+	tr, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"content": []any{
+		map[string]any{"type": "tool_result", "tool_use_id": "u1", "content": resultText, "is_error": isErr},
+	}}})
+	writeFile(t, home+"/.claude/projects/-test/"+testSession(id)+".jsonl", string(u)+string(tc)+"\n"+string(tr)+"\n")
+}
+
+func TestAppCardErroredAfterReplyEmailMovesToDone(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		tool     string
+		input    map[string]any
+		res      string
+		isErr    bool
+		wantDone bool
+	}{
+		{
+			name:     "pdw send_email succeeded",
+			tool:     "Bash",
+			input:    map[string]any{"command": `pdw call zrl_bot_email_control__send_email --data '{"to":"a@b","subject":"s","body":"done"}'`},
+			res:      `{"id":"m1","threadId":"th1"}`,
+			wantDone: true,
+		},
+		{
+			name:     "pdw reply_to_message with env var and -d succeeded",
+			tool:     "Bash",
+			input:    map[string]any{"command": `FOO=1 pdw call gmail__reply_to_message -d '{"body":"done"}'`},
+			res:      `{"ok":true}`,
+			wantDone: true,
+		},
+		{
+			name:     "mcp send_email tool succeeded",
+			tool:     "mcp__zrl_bot_email_control__send_email",
+			input:    map[string]any{"to": "a@b", "subject": "s", "body": "done"},
+			res:      "sent",
+			wantDone: true,
+		},
+		{
+			name:     "grep for send_email is not a send",
+			tool:     "Bash",
+			input:    map[string]any{"command": `grep -rn send_email factory/`},
+			res:      `factory/inbox.go:10:send_email`,
+			wantDone: false,
+		},
+		{
+			name:     "pdw tools piped to grep is not a send",
+			tool:     "Bash",
+			input:    map[string]any{"command": `pdw tools | grep send_email`},
+			res:      `zrl_bot_email_control__send_email`,
+			wantDone: false,
+		},
+		{
+			name:     "pdw describe is not a send",
+			tool:     "Bash",
+			input:    map[string]any{"command": `pdw describe zrl_bot_email_control__send_email`},
+			res:      `{"name":"send_email"}`,
+			wantDone: false,
+		},
+		{
+			name:     "pdw call --help is not a send",
+			tool:     "Bash",
+			input:    map[string]any{"command": `pdw call zrl_bot_email_control__send_email --help`},
+			res:      `Usage: pdw call <tool> --data <json>`,
+			wantDone: false,
+		},
+		{
+			name:     "pdw send_email with tool error stays in ForYou",
+			tool:     "Bash",
+			input:    map[string]any{"command": `pdw call zrl_bot_email_control__send_email --data '{}'`},
+			res:      `missing recipient`,
+			isErr:    true,
+			wantDone: false,
+		},
+		{
+			name:     "pdw send_email with non-zero exit stays in ForYou",
+			tool:     "Bash",
+			input:    map[string]any{"command": `pdw call zrl_bot_email_control__send_email --data '{}'`},
+			res:      "Error: missing recipient\nCommand exited with code 1",
+			wantDone: false,
+		},
+	} {
+		for _, attn := range []bool{true, false} {
+			t.Run(tc.name+"/attn="+strconv.FormatBool(attn), func(t *testing.T) {
+				a := card("app-err", nil)
+				a.Status = "error"
+				if attn {
+					a.RequiresAttention, a.AttentionReason = true, "error"
+				}
+				f, _ := newTestFactory(t, a)
+				writeToolSession(t, f.cfg.Home, a.ID, tc.tool, tc.input, tc.res, tc.isErr)
+				f.SetAgents([]Agent{a})
+				c := f.cards[0]
+				s := f.sections()
+				if tc.wantDone {
+					if c.Stage != "landed" || !slices.Equal(sectionIDs(s.Shipped), []string{a.ID}) || len(s.ForYou) != 0 {
+						t.Fatalf("card = %+v, sections = %+v, want landed and shipped", c, s)
+					}
+				} else {
+					if c.Stage != "zach" || c.Ask == nil || c.Ask.Title != "Waiting on you: error" || !slices.Equal(sectionIDs(s.ForYou), []string{a.ID}) {
+						t.Fatalf("card = %+v, ask = %+v, forYou = %+v, want zach in ForYou with Waiting on you: error", c, c.Ask, s.ForYou)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAppCardErroredAfterLandingMovesToDone(t *testing.T) {
+	for _, mode := range []string{"direct land", "squash merge", "unlanded local commit", "no commit"} {
+		t.Run(mode, func(t *testing.T) {
+			r := newRepos(t)
+			f := realGitFactory(t)
+			asked := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
+			if mode == "direct land" || mode == "unlanded local commit" {
+				commitFile(t, r.wt, "spec.md", "release spec\n")
+			} else if mode == "squash merge" {
+				commitFile(t, r.wt, "spec.md", "release spec\n")
+				commitFile(t, r.wt, "release.sh", "#!/bin/sh\n")
+			}
+			if mode == "direct land" {
+				r.land(t)
+			} else if mode == "squash merge" {
+				gitRun(t, r.wt, "push", "-q", "origin", "HEAD:refs/heads/card")
+				gitRun(t, r.other, "fetch", "-q", "origin", "card")
+				gitRun(t, r.other, "merge", "-q", "--squash", "origin/card")
+				gitRun(t, r.other, "commit", "-q", "-m", "squash release")
+				gitRun(t, r.other, "push", "-q", "origin", "HEAD:main")
+				gitRun(t, r.wt, "fetch", "-q", "origin", "main")
+			}
+			a := card("app-land", nil)
+			a.Cwd, a.CreatedAt, a.Status = r.wt, asked, "error"
+			a.RequiresAttention, a.AttentionReason = true, "error"
+			storeLog(t, f, nil, a.ID, "[User] Ship the release\n[Assistant] Watching CI...")
+			f.SetAgents([]Agent{a})
+			c := f.cards[0]
+			s := f.sections()
+			wantDone := mode == "direct land" || mode == "squash merge"
+			if wantDone {
+				if c.Stage != "landed" || !slices.Equal(sectionIDs(s.Shipped), []string{a.ID}) || len(s.ForYou) != 0 {
+					t.Fatalf("%s: card = %+v, sections = %+v, want landed and shipped", mode, c, s)
+				}
+			} else {
+				if c.Stage != "zach" || c.Ask == nil || c.Ask.Title != "Waiting on you: error" || !slices.Equal(sectionIDs(s.ForYou), []string{a.ID}) {
+					t.Fatalf("%s: card = %+v, ask = %+v, forYou = %+v, want zach in ForYou", mode, c, c.Ask, s.ForYou)
+				}
+			}
+		})
 	}
 }

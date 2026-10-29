@@ -90,6 +90,7 @@ func (f *Factory) ownLandingTime(ctx context.Context, dir string, asked time.Tim
 		return f.Git(ctx, dir, "merge-base", "--is-ancestor", sha, "HEAD") == nil &&
 			f.Git(ctx, dir, "merge-base", "--is-ancestor", sha, "origin/main") == nil
 	}
+	ownOnHead := false
 	for _, e := range own {
 		made, eerr := commitTime(e.SHA)
 		if eerr != nil {
@@ -99,6 +100,9 @@ func (f *Factory) ownLandingTime(ctx context.Context, dir string, asked time.Tim
 			continue
 		}
 		hasOwn = true
+		if f.Git(ctx, dir, "merge-base", "--is-ancestor", e.SHA, "HEAD") == nil {
+			ownOnHead = true
+		}
 		if onBranch(e.SHA) {
 			if made.After(at) {
 				at = made.UTC()
@@ -129,6 +133,24 @@ func (f *Factory) ownLandingTime(ctx context.Context, dir string, asked time.Tim
 			}
 			if when.After(asked) && when.After(at) {
 				at = when.UTC()
+			}
+		}
+	}
+	if hasOwn && at.IsZero() && ownOnHead {
+		if baseOut, berr := f.GitOut(ctx, dir, "merge-base", "origin/main", "HEAD"); berr == nil {
+			base := strings.TrimSpace(baseOut)
+			if wantID, perr := f.rangePatchID(ctx, dir, base, "HEAD"); perr == nil && wantID != "" {
+				if mainOut, merr := f.GitOut(ctx, dir, "rev-list", "--no-merges", base+"..origin/main"); merr == nil {
+					for _, sha := range strings.Fields(mainOut) {
+						when, cerr := commitTime(sha)
+						if cerr != nil || !when.After(asked) {
+							continue
+						}
+						if other, oerr := f.patchID(ctx, dir, sha); oerr == nil && other == wantID && when.After(at) {
+							at = when.UTC()
+						}
+					}
+				}
 			}
 		}
 	}
@@ -228,8 +250,12 @@ func (f *Factory) landedAsReviewed(cwd, reviewed string) (bool, string) {
 // with diff flags pinned so repo or host git config cannot alter the diff format or shorten binary
 // blob hashes on the index line.
 func (f *Factory) patchID(ctx context.Context, cwd, c string) (string, error) {
+	return f.rangePatchID(ctx, cwd, c+"^", c)
+}
+
+func (f *Factory) rangePatchID(ctx context.Context, cwd, from, to string) (string, error) {
 	diff, err := f.GitOut(ctx, cwd, "diff", "--no-ext-diff", "--no-textconv", "--no-color",
-		"--full-index", "--src-prefix=a/", "--dst-prefix=b/", "-U0", c+"^", c)
+		"--full-index", "--src-prefix=a/", "--dst-prefix=b/", "-U0", from, to)
 	if err != nil {
 		return "", err
 	}

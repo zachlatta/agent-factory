@@ -13,7 +13,7 @@ import (
 )
 
 func TestLandingTimeBelongsToCard(t *testing.T) {
-	for _, mode := range []string{"no commit", "unrelated head", "old own commit", "own commit", "rebased", "unlanded", "missing reflog", "git failure"} {
+	for _, mode := range []string{"no commit", "unrelated head", "old own commit", "own commit", "rebased", "squash merged", "unlanded", "missing reflog", "git failure"} {
 		t.Run(mode, func(t *testing.T) {
 			r := newRepos(t)
 			f := realGitFactory(t)
@@ -24,11 +24,22 @@ func TestLandingTimeBelongsToCard(t *testing.T) {
 				asked = time.Now().Add(time.Minute)
 			} else if mode == "own commit" || mode == "rebased" || mode == "unlanded" {
 				commitFile(t, r.wt, "mine", "mine\n")
+			} else if mode == "squash merged" {
+				commitFile(t, r.wt, "mine1", "mine1\n")
+				commitFile(t, r.wt, "mine2", "mine2\n")
 			}
 			if mode == "unrelated head" || mode == "rebased" {
 				r.otherPushes(t, "other")
 			}
-			if mode != "unlanded" {
+			if mode == "squash merged" {
+				gitRun(t, r.wt, "push", "-q", "origin", "HEAD:refs/heads/card")
+				gitRun(t, r.other, "fetch", "-q", "origin", "card")
+				gitRun(t, r.other, "merge", "-q", "--squash", "origin/card")
+				gitRun(t, r.other, "commit", "-q", "-m", "squash card")
+				gitRun(t, r.other, "push", "-q", "origin", "HEAD:main")
+				gitRun(t, r.wt, "fetch", "-q", "origin", "main")
+				want = parseTime(gitRun(t, r.wt, "show", "-s", "--format=%cI", "origin/main"))
+			} else if mode != "unlanded" {
 				r.land(t)
 			}
 			if mode == "own commit" || mode == "rebased" {

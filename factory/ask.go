@@ -224,8 +224,12 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Label: "Moved here by hand", Title: handTitle, From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
-	case a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished":
-		return &Ask{Label: "The agent asked you", Kind: askQuestion, Title: "Waiting on you: " + a.AttentionReason, From: "builder",
+	case (a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished") || (a.Status == "error" && isAppCard(a)):
+		reason := a.AttentionReason
+		if reason == "" || reason == "finished" {
+			reason = "error"
+		}
+		return &Ask{Label: "The agent asked you", Kind: askQuestion, Title: "Waiting on you: " + reason, From: "builder",
 			Why:     "The agent stopped and is waiting for your answer. Its question is below.",
 			Actions: []Action{{ID: "reply", Label: "Answer", Primary: true, Hint: "Your answer"}, act("close", "Drop it")}}
 	}
