@@ -625,8 +625,10 @@ possibly sent); it never fails the health check.
   next one. Selection is by card, not by a time cutoff, so a card is listed exactly once and never
   dropped. Each pass records the board's finished cards in `digest.json`, and a digest marks the
   ones it lists (unmarked again if the send surely failed). The ledger keeps a line for a week, so
-  it outlives the card's time on the board and a failing digest catches up; the first digest ever
-  lists only that day's.
+  it outlives the card's time on the board and a failing digest catches up. The first digest ever
+  lists only that day's, and marks the ledger's earlier cards listed, so no later digest lists them.
+  A digest turned off (no address) and back on catches up on what finished while it was off, at
+  most a week of it.
 - The factory writes it itself from the board; no agent turn.
 - `digest.json` in the state directory keeps the day last sent, written before the send, so a
   restart never sends a day twice, and a factory that was down at 6 PM still sends that evening.

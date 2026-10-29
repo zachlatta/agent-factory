@@ -60,7 +60,7 @@ func primary(id, label string) Action {
 }
 func reply(label, hint string) Action { return Action{ID: "reply", Label: label, Hint: hint} }
 
-// askFor builds the Ask for a Needs Zach card, with its Yes/No meaning.
+// askFor builds the Ask for a Needs Zach card, with its buttons.
 func askFor(c Card, a Agent) *Ask {
 	ask := baseAsk(c, a)
 	if ask == nil {

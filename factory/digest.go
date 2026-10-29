@@ -194,8 +194,9 @@ func (f *Factory) digestSections(d digestFile, now time.Time) Sections {
 }
 
 // commitDigest records, before the send, that day's digest went out listing s: its lines are marked
-// listed (added to the ledger if a pass had not recorded them yet). It returns the undo for a send that
-// surely failed, which unmarks them for the retry.
+// listed (added to the ledger if a pass had not recorded them yet). The first digest ever also marks
+// the ledger's earlier lines it left out, so no later digest lists them. It returns the undo for a
+// send that surely failed, which unmarks them for the retry.
 func (f *Factory) commitDigest(day string, s Sections) (undo func() error, err error) {
 	f.digestMu.Lock()
 	defer f.digestMu.Unlock()
@@ -204,6 +205,10 @@ func (f *Factory) commitDigest(day string, s Sections) (undo func() error, err e
 		return nil, err
 	}
 	prevSent := d.Sent
+	if prevSent == "" {
+		s.Shipped = append(append([]SectionLine{}, s.Shipped...), unlisted(d.Shipped)...)
+		s.NoAnswer = append(append([]SectionLine{}, s.NoAnswer...), unlisted(d.NoAnswer)...)
+	}
 	d.Sent = day
 	d.Shipped = markListed(d.Shipped, s.Shipped, true)
 	d.NoAnswer = markListed(d.NoAnswer, s.NoAnswer, true)
@@ -222,6 +227,11 @@ func (f *Factory) commitDigest(day string, s Sections) (undo func() error, err e
 		cur.NoAnswer = markListed(cur.NoAnswer, s.NoAnswer, false)
 		return f.writeDigest(cur)
 	}, nil
+}
+
+// unlisted is the lines of ledger no digest has listed.
+func unlisted(ledger []ledgerLine) []SectionLine {
+	return lines(ledger, func(l ledgerLine) bool { return !l.Listed })
 }
 
 // markListed is ledger with the cards of ls marked listed (or not); a card of ls the ledger lacks is

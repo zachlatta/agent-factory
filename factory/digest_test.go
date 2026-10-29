@@ -476,3 +476,31 @@ func TestFirstDigestListsOnlyThatDay(t *testing.T) {
 		t.Errorf("first digest = %+v", d)
 	}
 }
+
+// A card that finished before the first digest ever is listed by no digest: not the first, which
+// lists only that day's, and not a later one.
+func TestEarlierCardsNeverReachALaterDigest(t *testing.T) {
+	f, m, now := digestFactory(t, 9, 0)
+	loc := f.cfg.Location
+	ts := now.Add(-48 * time.Hour).Format(time.RFC3339)
+	f.mu.Lock()
+	board := f.cards
+	f.cards = append(append([]Card{}, board...), Card{ID: "d1", Short: "d1", Title: "Older fix", Stage: "landed",
+		Source: "board", Timing: &TimingView{LandedAt: ts, Stages: []StageSpan{{Stage: "landed", Start: ts}}}})
+	f.mu.Unlock()
+	f.recordShipped()
+	*now = time.Date(2026, 10, 28, 18, 0, 0, 0, loc)
+	f.tickDigest()
+	*now = time.Date(2026, 10, 29, 18, 0, 0, 0, loc)
+	f.recordShipped()
+	f.tickDigest()
+	d := digests(m)
+	if len(d) != 2 {
+		t.Fatalf("digests = %d, want 2", len(d))
+	}
+	for i, s := range d {
+		if strings.Contains(s.Args["text"].(string), "Older fix") {
+			t.Errorf("digest %d lists a card from before the first digest:\n%s", i+1, s.Args["text"])
+		}
+	}
+}
