@@ -180,10 +180,11 @@ type Factory struct {
 	runner   PreviewRunner            // host work of previews; nil runs none
 	GoEnv    func() map[string]string // the host's Go cache paths, for previews
 
-	noAnswer    []NoAnswerSource // unanswered requests that are not cards (sections.go AddNoAnswer)
-	denied      map[string]bool  // permission prompts the factory already answered (blocked.go denyPrompts)
-	digestRetry time.Time        // a failed daily digest is not tried again before this (digest.go)
-	digestMu    sync.Mutex       // digest.json writes (digest.go)
+	noAnswer     []NoAnswerSource // unanswered requests that are not cards (sections.go AddNoAnswer)
+	denied       map[string]bool  // permission prompts the factory already answered (blocked.go denyPrompts)
+	digestRetry  time.Time        // a failed daily digest is not tried again before this (digest.go)
+	digestStatus string           // the daily digest's last state, for /api/health (digest.go)
+	digestMu     sync.Mutex       // digest.json writes (digest.go)
 }
 
 const archiveMarkTTL = 10 * time.Minute

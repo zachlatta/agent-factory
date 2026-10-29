@@ -19,6 +19,7 @@ func digestFactory(t *testing.T, h, m int) (*Factory, *fakeMail, *time.Time) {
 	stuck := card("c3", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
 	stuck.Title = "Nightly restore drill"
 	f, _, mail := mailFactory(t, ready, building, stuck)
+	f.cfg.DigestTo = testZach // opted in: an explicit address
 	loc, _ := time.LoadLocation("America/New_York")
 	f.cfg.Location = loc
 	now := time.Date(2026, 10, 28, h, m, 0, 0, loc)
@@ -140,7 +141,7 @@ func TestDigestShippedToday(t *testing.T) {
 func TestDigestSkipsAnEmptyDay(t *testing.T) {
 	f, p := newTestFactory(t)
 	m := &fakeMail{threads: map[string][]threadMsg{}, errs: map[string]error{}}
-	f.Mail, f.cfg.ZachEmail = m, testZach
+	f.Mail, f.cfg.ZachEmail, f.cfg.DigestTo = m, testZach, testZach
 	loc, _ := time.LoadLocation("America/New_York")
 	f.cfg.Location = loc
 	f.Now = func() time.Time { return time.Date(2026, 10, 28, 18, 5, 0, 0, loc) }
@@ -222,5 +223,50 @@ func TestDigestKeepsShippedCardsThatLeftTheBoard(t *testing.T) {
 	f.recordShipped()
 	if got := f.sections().Shipped; len(got) != 0 {
 		t.Errorf("yesterday's shipped cards are still listed: %+v", got)
+	}
+}
+
+// The digest is opt-in: with no FACTORY_DIGEST_TO it never sends, not even to Zach's usual address,
+// and records nothing, so setting the address later that evening still sends that day's digest once.
+func TestDigestNeedsAnExplicitAddress(t *testing.T) {
+	f, m, now := digestFactory(t, 20, 0)
+	f.cfg.DigestTo = ""
+	f.tickDigest()
+	if n := len(digests(m)); n != 0 {
+		t.Fatalf("sent %d with no digest address", n)
+	}
+	if d, _ := f.digestState(); d != "" {
+		t.Errorf("an unsent day was recorded: %q", d)
+	}
+	if !strings.HasPrefix(f.digestStatus, "off") {
+		t.Errorf("status = %q, want off", f.digestStatus)
+	}
+	// the operator sets the address that evening: it catches up once, and a restart does not repeat it
+	f.cfg.DigestTo = testZach
+	*now = now.Add(time.Hour)
+	f.tickDigest()
+	g := New(f.cfg, f.p)
+	g.Mail, g.Now = m, f.Now
+	g.SetAgents(f.agents())
+	g.tickDigest()
+	if n := len(digests(m)); n != 1 {
+		t.Errorf("sent %d after opting in, want 1", n)
+	}
+}
+
+// A send that timed out may have gone out: the day stays recorded, so it is never sent twice.
+func TestDigestAmbiguousSendIsNotRepeated(t *testing.T) {
+	f, m, now := digestFactory(t, 18, 0)
+	m.errs["send_email"] = ErrMailMaybeSent
+	f.tickDigest()
+	tried := len(digests(m))
+	delete(m.errs, "send_email")
+	*now = now.Add(time.Hour)
+	f.tickDigest()
+	if n := len(digests(m)); n != tried {
+		t.Errorf("a possibly sent digest was sent again: %d more", n-tried)
+	}
+	if d, _ := f.digestState(); d != "2026-10-28" {
+		t.Errorf("state = %q", d)
 	}
 }

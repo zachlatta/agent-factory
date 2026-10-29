@@ -51,7 +51,7 @@ func main() {
 	lanes := flag.String("lanes", os.Getenv("FACTORY_LANES"), "JSON file of board lane names per repo (env FACTORY_LANES; default ~/.config/agent-factory/lanes.json)")
 	private := flag.String("private-rules", os.Getenv("FACTORY_PRIVATE_RULES"), "file of private scan patterns (env FACTORY_PRIVATE_RULES; default ~/.config/agent-factory/denylist)")
 	zachEmail := flag.String("zach-email", os.Getenv("FACTORY_ZACH_EMAIL"), "address cards with no email thread email Zach at (env FACTORY_ZACH_EMAIL)")
-	digestTo := flag.String("digest-to", os.Getenv("FACTORY_DIGEST_TO"), "address the 6 PM daily digest goes to (env FACTORY_DIGEST_TO; default -zach-email)")
+	digestTo := flag.String("digest-to", os.Getenv("FACTORY_DIGEST_TO"), "address the 6 PM daily digest goes to (env FACTORY_DIGEST_TO; none: no digest, never -zach-email); set it only after that mailbox's digest-only filter is verified active")
 	metricHosts := flag.String("metric-hosts", os.Getenv("FACTORY_METRIC_HOSTS"), "comma-separated SSH aliases whose load the board shows besides this host (env FACTORY_METRIC_HOSTS)")
 	idleTTL := flag.Duration("idle-ttl", envDuration("FACTORY_IDLE_TTL"), "park a Needs Zach card idle this long (env FACTORY_IDLE_TTL; default 3h)")
 	idleCap := flag.Int("idle-cap", envInt("FACTORY_IDLE_CAP"), "park the longest idle Needs Zach cards while more factory agents than this are idle (env FACTORY_IDLE_CAP; default 10)")

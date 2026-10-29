@@ -12,13 +12,16 @@ import (
 	"time"
 )
 
-// The daily digest: one email at digestHour in Config.Location, to Config.DigestTo (else ZachEmail),
+// The daily digest: one email at digestHour in Config.Location, to Config.DigestTo,
 // with what waits on Zach, what shipped today, what is in progress, what is stuck and which requests
 // got no answer, one line per card with its board link. It is built from the board's Sections
 // (sections.go) by the factory itself: no agent turn. digest.json in the state directory keeps the day
 // last sent, written before the send, so a restart never sends a day twice; a factory that was down at
 // digestHour still sends that evening. A day with nothing to report sends nothing. A failed send is
 // tried again after mailRetryAfter; one that may have gone out is not. Dry and read-only runs never send.
+// It is opt-in: with no DigestTo it is off and never falls back to ZachEmail. The operator sets
+// DigestTo only after the recipient mailbox's digest-only filter is verified active (README), so the
+// first digest goes out that evening (catch-up) to a mailbox where it does not alert.
 // Done cards leave the board after Config.Window, so each pass also records the day's shipped cards in
 // digest.json (recordShipped); Sections lists them all day, and the digest has every one.
 
@@ -128,13 +131,21 @@ func mergeLines(a, b []SectionLine) []SectionLine {
 	return out
 }
 
+// setDigestStatus records the digest's last state for /api/health.
+func (f *Factory) setDigestStatus(s string) {
+	f.mu.Lock()
+	f.digestStatus = s
+	f.mu.Unlock()
+}
+
 // tickDigest sends today's digest once it is digestHour, unless it was sent already.
 func (f *Factory) tickDigest() {
 	to := f.cfg.DigestTo
 	if to == "" {
-		to = f.cfg.ZachEmail
+		f.setDigestStatus("off: no FACTORY_DIGEST_TO")
+		return
 	}
-	if f.passive() || f.Mail == nil || to == "" {
+	if f.passive() || f.Mail == nil {
 		return
 	}
 	now := f.Now().In(f.cfg.Location)
@@ -160,6 +171,7 @@ func (f *Factory) tickDigest() {
 		return
 	}
 	if !ok {
+		f.setDigestStatus("nothing to report " + day)
 		f.logf("daily digest: nothing to report today")
 		return
 	}
@@ -168,13 +180,16 @@ func (f *Factory) tickDigest() {
 	_, err = f.sendMail(ctx, "", "send_email", map[string]any{"to": []string{to}, "subject": e.Subject, "text": e.Text, "html": e.HTML})
 	switch {
 	case errors.Is(err, ErrMailMaybeSent):
+		f.setDigestStatus("possibly sent " + day + " (not resent)")
 		f.logf("daily digest possibly sent: %v", err)
 	case err != nil:
 		f.mu.Lock()
 		f.digestRetry = f.Now().Add(mailRetryAfter)
 		f.mu.Unlock()
+		f.setDigestStatus("send failed " + day + ", retrying")
 		f.logf("daily digest not sent: %v", errors.Join(err, f.setDigestState(prev)))
 	default:
+		f.setDigestStatus("sent " + day)
 		f.logf("daily digest sent: %s", e.Subject)
 	}
 }
