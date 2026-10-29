@@ -218,16 +218,25 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			if ch.Model == "" {
 				ch.Model = k.Provider
 			}
-			if ch.Blocked = blockedWhy(agents, k, now); ch.Blocked != "" {
+			retired := retiredReviewer(k) // its review no longer counts, even while it runs (retire.go)
+			if !retired {
+				ch.Blocked = blockedWhy(agents, k, now)
+			}
+			switch {
+			case retired:
+				if atoi(k.L(labelRetireTries)) >= retireMaxTries && !k.archived() && !slices.Contains(c.Flags, retireStuckFlag) {
+					c.Flags = append(c.Flags, retireStuckFlag)
+				}
+			case ch.Blocked != "":
 				ch.Permission = k.Pending
 				c.Flags = append(c.Flags, role+" "+ch.Blocked)
-			} else if role == "subagent" && running[k.ID] && !running[k.Labels["paseo.parent-agent-id"]] &&
-				!slices.Contains(c.Flags, subagentRunningFlag) {
+			case role == "subagent" && running[k.ID] && !running[k.Labels["paseo.parent-agent-id"]] &&
+				!slices.Contains(c.Flags, subagentRunningFlag):
 				// the agent that started it stopped: it should have archived it first (delegateRule)
 				c.Flags = append(c.Flags, subagentRunningFlag)
 			}
 			c.Children = append(c.Children, ch)
-			if role == "reviewer" && k.Status == "running" && !k.archived() {
+			if role == "reviewer" && !retired && k.Status == "running" && !k.archived() {
 				c.Reviewing = true
 			}
 		}

@@ -368,14 +368,16 @@ func (f *Factory) retireReviews(id string) error {
 			r.L(labelReviewKind) == "land" {
 			continue
 		}
-		if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
+		labels := retireLabels("superseded", f.Now())
+		if err := f.setLabels(r.ID, labels); err != nil {
 			return err
 		}
 		if r.archived() {
 			continue
 		}
-		if err := f.archiveAgent(r.ID); err != nil {
-			f.logf("reviewer %s superseded but not archived: %v", short(r.ID), err)
+		r = withRetireLabels(r, labels)
+		if err := f.archiveRetired(r); err != nil {
+			f.logf("reviewer %s superseded but not archived (the reap tries again): %v", short(r.ID), err)
 		}
 	}
 	return nil

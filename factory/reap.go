@@ -18,6 +18,9 @@ import (
 //     reply (board or email) wakes it (Factory.send). The factory never wakes it on its own.
 //   - Cards in other columns are not parked: the factory moves them on, or to Needs Zach, within
 //     minutes. Running agents and agents the factory did not start are never touched, only counted.
+//   - A retired reviewer that is still running (its stop or archive failed) is stopped and archived
+//     again, backing off between tries and giving up after a few (retire.go). It is the only running
+//     agent the reap touches.
 //   - At most reapPerTick archives per Tick, so a backlog cannot hold the loop.
 const (
 	defaultIdleTTL = 3 * time.Hour
@@ -91,6 +94,20 @@ func (f *Factory) reap(now time.Time) {
 		}
 		return true
 	}
+	retired := 0
+	// a retired reviewer whose stop or archive failed: stopped and archived again, backing off (retire.go)
+	retry := func(a Agent) {
+		if budget == 0 || retired == retirePerReap || f.stopping.Load() || !f.retireDue(a, now) || f.inConversation(a) {
+			return
+		}
+		budget--
+		retired++
+		if err := f.archiveRetired(a); err != nil {
+			rep.Errors = append(rep.Errors, short(a.ID)+": "+err.Error())
+			return
+		}
+		rep.Archived = append(rep.Archived, short(a.ID))
+	}
 
 	var waiting []Agent // Needs Zach cards that could be parked
 	idleLive := 0
@@ -101,6 +118,10 @@ func (f *Factory) reap(now time.Time) {
 			if err := f.setLabels(a.ID, map[string]string{labelParked: ""}); err != nil {
 				rep.Errors = append(rep.Errors, short(a.ID)+": "+err.Error())
 			}
+		}
+		if retiredReviewer(a) && !a.archived() && !a.stopped() {
+			retry(a)
+			continue
 		}
 		if !factoryAgent(a) || !a.stopped() {
 			continue

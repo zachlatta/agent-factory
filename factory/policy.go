@@ -508,7 +508,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		defer g.mu.Unlock()
 		if !g.followUp.IsZero() && !rev.CreatedAt.After(g.followUp) {
 			// the card got a follow-up after this review started: the verdict does not cover it
-			if err := f.setLabels(rev.ID, map[string]string{labelApplied: "1", labelVerdict: "superseded"}); err != nil {
+			if err := f.setLabels(rev.ID, retireLabels("superseded", f.Now())); err != nil {
 				return err
 			}
 			f.logf("reviewer %s: %s had a follow-up since it started, verdict retired", short(rev.ID), short(target))
@@ -1414,14 +1414,14 @@ func unappliedStoppedReviewer(agents []Agent, id string) bool {
 }
 
 // blockedReviewerOf is card id's first reviewer that is errored, stalled or waiting on a permission
-// prompt (reviewerBlocked).
+// prompt (reviewerBlocked). A retired one is not: it was already replaced, and the reap archives it.
 func blockedReviewerOf(agents []Agent, id string, now time.Time) (Agent, bool) {
 	byID := make(map[string]Agent, len(agents))
 	for _, a := range agents {
 		byID[a.ID] = a
 	}
 	for _, r := range agents {
-		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && reviewerBlocked(agents, r, now) {
+		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && !retiredReviewer(r) && reviewerBlocked(agents, r, now) {
 			return r, true
 		}
 	}
@@ -1429,7 +1429,8 @@ func blockedReviewerOf(agents []Agent, id string, now time.Time) (Agent, bool) {
 }
 
 // reviewPending reports whether card id has a reviewer that will still produce a verdict: one that
-// is running, or stopped with its verdict not yet applied (ApplyVerdict picks it up). A reviewer
+// is running, or stopped with its verdict not yet applied (ApplyVerdict picks it up). A retired
+// reviewer (retiredReviewer) is not, even while it runs. A reviewer
 // archived without a verdict, or gone from the list (archived over Config.Window ago), is not, and
 // neither is one stuck on a permission prompt or stalled (reviewerBlocked): its card goes to Needs
 // Zach with a re-run, and a verdict it gives later is still applied.
@@ -1439,7 +1440,8 @@ func reviewPending(agents []Agent, id string, now time.Time) bool {
 		byID[a.ID] = a
 	}
 	for _, r := range agents {
-		if r.L(labelRole) != "reviewer" || !sameCard(byID, r.L(labelReviewOf), id) || r.archived() || reviewerBlocked(agents, r, now) {
+		if r.L(labelRole) != "reviewer" || !sameCard(byID, r.L(labelReviewOf), id) || r.archived() || retiredReviewer(r) ||
+			reviewerBlocked(agents, r, now) {
 			continue
 		}
 		if r.Status == "running" || r.L(labelApplied) == "" {

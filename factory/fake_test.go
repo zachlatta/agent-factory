@@ -24,8 +24,10 @@ type fakePaseo struct {
 	runs       int
 	archived   map[string]bool
 	status     map[string]string
-	busy       map[string]int // archive fails with "currently running" this many more times
-	runErr     error          // `paseo run` fails with this
+	busy       map[string]int  // archive fails with "currently running" this many more times
+	stuck      map[string]bool // a run record left "running" with no process: stop never settles it, and only archive --force archives it
+	forceErr   map[string]int  // archive --force fails this many more times
+	runErr     error           // `paseo run` fails with this
 	inspectErr error
 	providers  map[string]string // provider ls status by provider id; unset ones are "available"
 	fixed      map[string]bool   // providers a `provider diagnostic` turns available
@@ -116,8 +118,21 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 		}
 		return p.permits, nil
 	case "stop":
-		p.status[args[1]] = "idle"
+		if !p.stuck[args[1]] {
+			p.status[args[1]] = "idle"
+		}
 	case "archive":
+		if len(args) > 2 && args[2] == "--force" {
+			if p.forceErr[args[1]] > 0 {
+				p.forceErr[args[1]]--
+				return "", fmt.Errorf("paseo archive %s: Error: daemon unavailable", args[1])
+			}
+			p.archived[args[1]] = true
+			return "", nil
+		}
+		if p.stuck[args[1]] {
+			return "", fmt.Errorf("paseo archive %s: Error: Agent %s is currently running", args[1], args[1])
+		}
 		if p.busy[args[1]] > 0 {
 			p.busy[args[1]]--
 			return "", fmt.Errorf("paseo archive %s: Error: Agent %s is currently running", args[1], args[1])
@@ -260,7 +275,7 @@ var t0 = time.Date(2026, 10, 25, 20, 0, 0, 0, time.UTC)
 func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	t.Helper()
 	p := &fakePaseo{archived: map[string]bool{}, status: map[string]string{},
-		busy: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
+		busy: map[string]int{}, stuck: map[string]bool{}, forceErr: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
 		cwd: map[string]string{}, unknown: map[string]bool{}}
 	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: t.TempDir(), DefaultRepo: "example/desk"}, p)
 	f.Now = func() time.Time { return t0 }
@@ -320,8 +335,8 @@ func ago(d time.Duration) string { return t0.Add(-d).Format(time.RFC3339) }
 func reviewer(id, of, kind string) Agent {
 	return Agent{ID: id, Host: "host1", Title: "review", Status: "idle", CreatedAt: t0.Add(-5 * time.Minute),
 		Provider: "claude", SessionID: testSession(id),
-		LastActivityAt: t0.Add(-time.Minute),
-		Labels:         map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: of, labelPrefix + labelReviewKind: kind}}
+		LastActivityAt: t0.Add(-time.Minute), LastUserMessageAt: t0.Add(-5*time.Minute + 600*time.Millisecond), // its prompt
+		Labels: map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: of, labelPrefix + labelReviewKind: kind}}
 }
 
 // testSession is the Claude session id card and reviewer give agent id; storeLog writes its file.

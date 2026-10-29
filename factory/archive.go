@@ -65,6 +65,12 @@ func (f *Factory) archiveStoppedAgent(id string) error {
 	return err
 }
 func (f *Factory) archiveChecked(id string, allowStop bool) error {
+	return f.archiveWith(id, allowStop, false)
+}
+
+// archiveWith archives agent id. allowStop stops a running agent first; force (only for a retired
+// reviewer, retire.go) then archives it with --force when no stop settles it.
+func (f *Factory) archiveWith(id string, allowStop, force bool) error {
 	if a, ok := f.agentOK(id); ok {
 		if quietAnchor(a) {
 			return fmt.Errorf("quiet anchor cannot be archived by the factory")
@@ -93,25 +99,10 @@ func (f *Factory) archiveChecked(id string, allowStop bool) error {
 	}
 	_, err = f.paseo("archive", id)
 	if err != nil && allowStop && strings.Contains(err.Error(), "currently running") {
-		if _, err := f.paseo("stop", id); err != nil {
-			return err
-		}
-		for try := 1; try <= archiveTries; try++ {
-			state, err = f.inspectArchive(id)
-			if err != nil {
-				return err
-			}
-			if state.Status == "running" {
-				err = fmt.Errorf("agent %s is currently running", short(id))
-			} else {
-				_, err = f.paseo("archive", id)
-			}
-			if err == nil || !strings.Contains(err.Error(), "currently running") {
-				break
-			}
-			if try < archiveTries {
-				f.Sleep(time.Second)
-			}
+		err = f.stopThenArchive(id)
+		if err != nil && force {
+			f.logf("%s: stop did not settle it (%v); archiving with --force", short(id), err)
+			_, err = f.paseo("archive", id, "--force")
 		}
 	}
 	if err != nil {
@@ -128,4 +119,32 @@ func (f *Factory) archiveChecked(id string, allowStop bool) error {
 	}
 	f.markArchived(id)
 	return nil
+}
+
+// stopThenArchive stops running agent id and archives it once Paseo no longer reports it running,
+// trying archiveTries times a second apart.
+func (f *Factory) stopThenArchive(id string) error {
+	if _, err := f.paseo("stop", id); err != nil {
+		return err
+	}
+	var err error
+	for try := 1; try <= archiveTries; try++ {
+		var state archiveState
+		state, err = f.inspectArchive(id)
+		if err != nil {
+			return err
+		}
+		if state.Status == "running" {
+			err = fmt.Errorf("agent %s is currently running", short(id))
+		} else {
+			_, err = f.paseo("archive", id)
+		}
+		if err == nil || !strings.Contains(err.Error(), "currently running") {
+			break
+		}
+		if try < archiveTries {
+			f.Sleep(time.Second)
+		}
+	}
+	return err
 }

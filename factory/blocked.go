@@ -222,15 +222,17 @@ func (f *Factory) supersedeReviewers(id string) error {
 
 // retireReviewer records verdict on reviewer r (superseded, or "" for one given up on) and archives it.
 func (f *Factory) retireReviewer(r Agent, verdict string) error {
-	if err := f.setLabels(r.ID, map[string]string{labelApplied: "1", labelVerdict: verdict}); err != nil {
+	labels := retireLabels(verdict, f.Now())
+	if err := f.setLabels(r.ID, labels); err != nil {
 		return err
 	}
+	r = withRetireLabels(r, labels)
 	f.noteLens(r.ID, lensResult{done: true, verdict: verdict})
 	if r.archived() {
 		return nil
 	}
-	if err := f.archiveAgent(r.ID); err != nil {
-		f.logf("reviewer %s retired but not archived: %v", short(r.ID), err)
+	if err := f.archiveRetired(r); err != nil {
+		f.logf("reviewer %s retired but not archived (the reap tries again): %v", short(r.ID), err)
 	}
 	return nil
 }

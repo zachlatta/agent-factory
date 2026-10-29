@@ -152,8 +152,9 @@ type Factory struct {
 	// files show the archive (or archiveMarkTTL passes), so a Refresh that read an agent file before
 	// Paseo wrote the archive cannot make the card look live again.
 	archivedNow map[string]time.Time
-	parkedNow   map[string]string // agents the reap parked: their factory.parked value, applied like archivedNow
-	lastReap    *ReapReport       // the last reap that changed anything, for /api/health
+	parkedNow   map[string]string    // agents the reap parked: their factory.parked value, applied like archivedNow
+	lastReap    *ReapReport          // the last reap that changed anything, for /api/health
+	retireTries map[string]retireTry // retired reviewers' failed archive tries in this process (retire.go)
 
 	provMu     sync.Mutex
 	prov       providers // Paseo provider status, for the agent choices
@@ -203,7 +204,7 @@ func New(cfg Config, p Paseo) *Factory {
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
-		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, mailRetry: map[string]time.Time{},
+		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, retireTries: map[string]retireTry{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}, denied: map[string]bool{}}
 	if cfg.DryRun {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}

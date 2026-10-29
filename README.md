@@ -378,13 +378,27 @@ idle agents (`factory/reap.go`), at most 20 archives per Tick:
   parked.
 - Cards in other columns are not parked or counted against the cap: the factory moves them on,
   or to Needs Zach, within minutes. Running agents and agents the factory did not start (email
-  agents, schedules, your own sessions) are never touched, only counted.
+  agents, schedules, your own sessions) are never touched, only counted, except a retired reviewer.
+- A retired reviewer (its verdict applied as superseded, or given up on with none) no longer
+  counts as reviewing: the board does not mark its card Reviewing or blocked by it, and recovery
+  does not replace it again. It is stopped and archived when it is retired. A stop cannot settle a
+  run record left running after its process ended (a host or daemon restart mid-turn), so when a
+  stop does not settle it, it is archived with `--force`, which keeps its session. If that fails,
+  the reap tries again 2, 10 and 30 minutes, 1 hour and 3 hours after each failed try, at most 2
+  per reap. The count is stored on the reviewer (`factory.retire-tries`, `factory.retire-failed-at`),
+  so a restart keeps it. After 6 tries the reap stops and the card shows "retired reviewer could not
+  be archived". Retiring writes `factory.retired` with the time. A reviewer messaged after that is never
+  stopped, forced or retried, only archived once it stops. One retired by an older factory (no
+  marker) counts as untouched only when its session file has exactly one user message (its
+  prompt) and Paseo's last-message time is not later; that check's time is then stored as its
+  `factory.retired`. An unreadable session or unknown last-message time protects it.
+  Only retired reviewers are forced; nothing is deleted, and the card is not touched.
 
 Archive writes require a stable Paseo CLI version 0.13.0 or newer: earlier versions search only
 one page of agents, even for a full ID. `FACTORY_ARCHIVE_CLI` selects a separate executable for
 archive writes; other commands use the existing CLI on PATH. Factory checks the selected
 executable's version, reads each agent by full ID before archiving, and verifies its archive
-timestamp afterward. Automatic archives never stop a running agent. Each CLI call has a
+timestamp afterward. Automatic archives never stop a running agent, except a retired reviewer (above). Each CLI call has a
 90-second deadline, including paginated lookups; failures leave the agent unmarked for retry.
 Dry-run skips writes and simulates the local result.
 
