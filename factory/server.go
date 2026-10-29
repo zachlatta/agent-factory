@@ -389,6 +389,11 @@ func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := f.Act(action, b)
 	if err != nil {
+		if action == "approve" && strings.HasPrefix(b.ID, "idea-") {
+			if rerr := f.reload(); rerr != nil {
+				f.logf("board reload after %s failed: %v", action, rerr)
+			}
+		}
 		f.logf("action %s %s failed: %v", action, short(b.ID), err)
 		code := 400
 		switch {

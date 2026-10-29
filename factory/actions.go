@@ -572,7 +572,7 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		}
 		return f.startPicker(r)
 	}
-	repoDir := filepath.Join(f.cfg.Home, "dev", repo)
+	repoDir := f.repoDir(repo)
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
 		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))

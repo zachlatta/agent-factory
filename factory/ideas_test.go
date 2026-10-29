@@ -1,8 +1,15 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -242,6 +249,267 @@ func TestStartIdeaWithZachsChanges(t *testing.T) {
 			if k.ID == j.ID && k.Note != "" {
 				t.Errorf("message %q stored note %q", msg, k.Note)
 			}
+		}
+	}
+}
+
+func writeGitOrigin(t *testing.T, dir, url string) {
+	t.Helper()
+	gitDir := filepath.Join(dir, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[remote \"origin\"]\n\turl = " + url + "\n"
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepoDirResolvesOriginRemote(t *testing.T) {
+	f, p := newTestFactory(t)
+	// Default checkout path exists (even as a symlink): returned unchanged without resolving symlinks.
+	realDir := filepath.Join(t.TempDir(), "real-checkout")
+	writeGitOrigin(t, realDir, "https://github.com/example/desk.git")
+	defLink := filepath.Join(f.cfg.Home, "dev", "example/desk")
+	if err := os.MkdirAll(filepath.Dir(defLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realDir, defLink); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.repoDir("example/desk"); got != defLink {
+		t.Fatalf("default path with .git = %q, want %q unchanged", got, defLink)
+	}
+
+	// Checkout under a different folder name whose origin remote matches owner/repo.
+	widgetsDir := filepath.Join(f.cfg.Home, "dev", "acme/old-folder")
+	writeGitOrigin(t, widgetsDir, "https://github.com/acme/widgets.git")
+	otherCopy := filepath.Join(f.cfg.Home, "dev", "other/old-copy")
+	writeGitOrigin(t, otherCopy, "git@github.com:acme/widgets.git")
+	if got := f.repoDir("acme/widgets"); got != widgetsDir {
+		t.Fatalf("repoDir(acme/widgets) = %q, want %q", got, widgetsDir)
+	}
+
+	// Checkout under a different owner folder when no same-owner folder matches.
+	toolsDir := filepath.Join(f.cfg.Home, "dev", "acme/tools")
+	writeGitOrigin(t, toolsDir, "https://github.com/example/tools.git")
+	if got := f.repoDir("example/tools"); got != toolsDir {
+		t.Fatalf("repoDir(example/tools) = %q, want %q", got, toolsDir)
+	}
+
+	// Non-origin remotes must not match (a fork's upstream remote is not a checkout of upstream).
+	forkCfg := filepath.Join(toolsDir, ".git", "config")
+	if err := os.WriteFile(forkCfg, []byte("[remote \"origin\"]\n\turl = https://github.com/example/tools.git\n[remote \"upstream\"]\n\turl = https://github.com/acme/upstream-only.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantFallback := filepath.Join(f.cfg.Home, "dev", "acme/upstream-only")
+	if got := f.repoDir("acme/upstream-only"); got != wantFallback {
+		t.Fatalf("non-origin remote matched: got %q, want fallback %q", got, wantFallback)
+	}
+
+	// Starting an idea and a scout in the remote-named repo uses the resolved checkout path.
+	idea, err := f.addIdea(Body{Request: "Add widget index", Repo: "acme/widgets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("approve", Body{ID: idea.ID}); err != nil {
+		t.Fatal(err)
+	}
+	runs := p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(runs) != 1 || argAfter(runs[0], "--cwd") != widgetsDir {
+		t.Fatalf("idea run cwd = %q, want %q", argAfter(runs[0], "--cwd"), widgetsDir)
+	}
+	if _, err := f.Act("scout", Body{Repo: "acme/widgets"}); err != nil {
+		t.Fatal(err)
+	}
+	scouts := p.runsWithLabel(labelArg(labelRole, "scout"))
+	if len(scouts) != 1 || argAfter(scouts[0], "--cwd") != widgetsDir {
+		t.Fatalf("scout run cwd = %q, want %q", argAfter(scouts[0], "--cwd"), widgetsDir)
+	}
+
+	// Repo picker also accepts a known origin remote name.
+	pk := picker("pk-remote", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelNote: "pick a repo"})
+	f.SetAgents([]Agent{pk})
+	f.routes.put("pk-remote", Route{Request: "Fix widget cache", Title: "Fix widget cache"})
+	if _, err := f.Act("approve", Body{ID: "pk-remote", Repo: "acme/widgets"}); err != nil {
+		t.Fatalf("pickRepo with origin remote name: %v", err)
+	}
+}
+
+type failCwdPaseo struct {
+	*fakePaseo
+	badCwd string
+	err    error
+	runs   int
+}
+
+func (fp *failCwdPaseo) Run(ctx context.Context, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "run" && quietRunLabels(args)[labelPrefix+labelRole] != quietAnchorRole {
+		fp.runs++
+		if argAfter(args, "--cwd") == fp.badCwd {
+			return "", fp.err
+		}
+	}
+	return fp.fakePaseo.Run(ctx, args...)
+}
+
+func TestTickIdeasRecordsStartErrorAndMovesOn(t *testing.T) {
+	f, baseP := newTestFactory(t)
+	badCwd := filepath.Join(f.cfg.Home, "dev", "acme/missing")
+	longErr := "paseo run --provider: Error: Create worktree requires a git repository " + strings.Repeat("x", 350)
+	fp := &failCwdPaseo{fakePaseo: baseP, badCwd: badCwd, err: errors.New(longErr)}
+	f.p = fp
+
+	bad := addIdeaAt(t, f, t0.Add(-2*time.Hour), Body{Request: "fix missing repo", Title: "Broken idea", Repo: "acme/missing"})
+	good := addIdeaAt(t, f, t0.Add(-time.Hour), Body{Request: "fix desk", Title: "Healthy idea", Repo: "example/desk"})
+
+	// Tick 1: tries bad first, records truncated error + ErrorAt, and stops without trying good in the same tick.
+	f.Tick()
+	if fp.runs != 1 {
+		t.Fatalf("tick 1 run attempts = %d, want 1 (at most one start attempt per tick)", fp.runs)
+	}
+	ideas := f.ideas.List()
+	var gotBad, gotGood Idea
+	for _, i := range ideas {
+		switch i.ID {
+		case bad.ID:
+			gotBad = i
+		case good.ID:
+			gotGood = i
+		}
+	}
+	if gotBad.Status != "waiting" || gotBad.Error == "" || len([]rune(gotBad.Error)) > 300 || !gotBad.ErrorAt.Equal(t0) {
+		t.Fatalf("bad idea after tick 1 = %+v", gotBad)
+	}
+	if gotGood.Status != "waiting" {
+		t.Fatalf("good idea should still be waiting after tick 1, got %+v", gotGood)
+	}
+
+	// Tick 2 (15s later): skips bad during its 1-hour backoff and starts good.
+	now := t0.Add(15 * time.Second)
+	f.Now = func() time.Time { return now }
+	f.Tick()
+	if n := len(baseP.runsWithLabel(labelArg(labelOrigin, "idea"))); n != 1 {
+		t.Fatalf("tick 2 started %d ideas, want 1", n)
+	}
+	for _, i := range f.ideas.List() {
+		if i.ID == good.ID && i.Status != "started" {
+			t.Fatalf("good idea did not start on tick 2: %+v", i)
+		}
+	}
+
+	// Tick 3 (30s later): bad is still within 1-hour backoff, so no new run is attempted.
+	now = t0.Add(30 * time.Second)
+	runsBefore := fp.runs
+	f.Tick()
+	if fp.runs != runsBefore {
+		t.Fatalf("tick 3 retried failed idea before 1h backoff: runs = %d, want %d", fp.runs, runsBefore)
+	}
+
+	// After 1 hour, once the checkout exists, tickIdeas retries bad and clears Error and ErrorAt.
+	fp.badCwd = ""
+	now = t0.Add(61 * time.Minute)
+	f.Tick()
+	for _, i := range f.ideas.List() {
+		if i.ID == bad.ID {
+			if i.Status != "started" || i.Error != "" || !i.ErrorAt.IsZero() {
+				t.Fatalf("bad idea after 1h retry = %+v", i)
+			}
+		}
+	}
+}
+
+func TestFailedIdeaSurfacesOnBoardAndClearsOnManualRetry(t *testing.T) {
+	f, p := newTestFactory(t)
+	first := addIdeaAt(t, f, t0.Add(-2*time.Hour), Body{Request: "broken start", Title: "Broken start", Summary: "Fix sync"})
+	second := addIdeaAt(t, f, t0.Add(-time.Hour), Body{Request: "healthy start", Title: "Healthy start", Summary: "Speed up query"})
+	f.Refresh()
+
+	p.runErr = errors.New("paseo run --provider: Error: Create worktree requires a git repository")
+	req := httptest.NewRequest("POST", "/api/approve", strings.NewReader(`{"id":"`+first.ID+`"}`))
+	req.Header.Set("X-Factory", "1")
+	rec := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Fatalf("approve failed idea: code = %d, want 400", rec.Code)
+	}
+
+	// handleAction reloaded the board so GET /api/board immediately carries the error, queue, flag and Stuck entry.
+	rec = httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+	var board struct {
+		Cards    []Card   `json:"cards"`
+		Sections Sections `json:"sections"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
+		t.Fatal(err)
+	}
+	var c1, c2 Card
+	for _, c := range board.Cards {
+		switch c.ID {
+		case first.ID:
+			c1 = c
+		case second.ID:
+			c2 = c
+		}
+	}
+	if c1.Idea == nil || c1.Idea.Error == "" || c1.Idea.ErrorAt == "" || c1.Idea.Queue != 0 || !slices.Contains(c1.Flags, "start failed") {
+		t.Fatalf("failed idea card = %+v, idea = %+v", c1, c1.Idea)
+	}
+	if c2.Idea == nil || c2.Idea.Queue != 1 {
+		t.Fatalf("second idea queue = %+v, want 1", c2.Idea)
+	}
+	if len(board.Sections.Stuck) != 1 || board.Sections.Stuck[0].ID != first.ID ||
+		!strings.HasPrefix(board.Sections.Stuck[0].State, "could not start: ") {
+		t.Fatalf("sections.stuck = %+v", board.Sections.Stuck)
+	}
+
+	// Verify board.html renders the error on the card and in the idea panel.
+	page := boardPage(t)
+	node, err := exec.LookPath("node")
+	if err == nil {
+		cardFn := regexp.MustCompile(`(?s)function cardHtml\(c\)\{.*?\n\}`).FindString(page)
+		ideaStart := strings.Index(page, "// ideaHtml:")
+		ideaEnd := strings.Index(page, "async function act(")
+		if cardFn == "" || ideaStart < 0 || ideaEnd < ideaStart {
+			t.Fatal("missing cardHtml or ideaHtml in board.html")
+		}
+		c1JSON, _ := json.Marshal(c1)
+		script := `
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ago = () => '2 min ago', clock = () => '16:00', md = s => s, repoTag = () => 'desk', agentLabel = s => s;
+const latestReviews = () => [], cardKids = () => [], kidSummary = () => '', askKind = () => '', askQuestion = () => '', askTodo = () => '', evidenceHtml = () => '', questionsHtml = () => '', choicesHtml = () => '';
+const $ = () => ({checked:false});
+const B = {ideaCaps:{}, tiers:{}};
+let sel = null;
+` + cardFn + "\n" + page[ideaStart:ideaEnd] + `
+const c = ` + string(c1JSON) + `;
+console.log(JSON.stringify({card: cardHtml(c), panel: ideaHtml(c, true)}));
+`
+		out, err := exec.Command(node, "-e", script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("node: %v\n%s", err, out)
+		}
+		var rendered struct{ Card, Panel string }
+		if err := json.Unmarshal(out, &rendered); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rendered.Card, `<div class="err">`) || !strings.Contains(rendered.Card, "Create worktree requires a git repository") {
+			t.Errorf("cardHtml missing error:\n%s", rendered.Card)
+		}
+		if !strings.Contains(rendered.Panel, "Could not start:") || !strings.Contains(rendered.Panel, "moved on to other waiting ideas") {
+			t.Errorf("ideaHtml missing error explanation:\n%s", rendered.Panel)
+		}
+	}
+
+	// Manual retry once fixed clears the error and starts the card.
+	p.runErr = nil
+	if _, err := f.Act("approve", Body{ID: first.ID}); err != nil {
+		t.Fatalf("retry approve: %v", err)
+	}
+	for _, i := range f.ideas.List() {
+		if i.ID == first.ID && (i.Status != "started" || i.Error != "" || !i.ErrorAt.IsZero()) {
+			t.Fatalf("idea after manual retry = %+v", i)
 		}
 	}
 }

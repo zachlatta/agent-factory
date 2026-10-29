@@ -714,6 +714,7 @@ function cardHtml(c){
   return `<div class="card ${sel===c.id?'sel':''}" draggable="true" data-id="${c.id}">
     <div class="t"><span class="dot ${dot}"></span><span>${esc(c.title)}</span></div>
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
+    ${c.stage==='idea'&&c.idea&&c.idea.error?`<div class="err">${esc(c.idea.error)}</div>`:''}
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
     <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
@@ -978,15 +979,27 @@ function ideaStartText(c){
     : `Ideas in this repo never start on their own; use <b>Start now</b>.`;
   return auto + (B.ideaHold ? ` <b>${esc(B.ideaHold)}</b>; ideas start again once it has more.` : '');
 }
+function ideaRetryText(errorAt){
+  if(!errorAt) return 'Automatic retry runs after an hour.';
+  const due = Date.parse(errorAt) + 3600000;
+  return due > Date.now()
+    ? `Automatic retry after ${clock(new Date(due).toISOString())} (1 h after the failure).`
+    : 'Eligible for automatic retry after other waiting ideas.';
+}
 function ideaHtml(c, isIdea){
   const i = c.idea;
   const tier = c.tier ? `<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span> ${esc((B.tiers||{})[c.tier]||'')}`
     : 'No tier guess yet; the plan review sets it.';
   const brief = briefs[i.id];
-  const next = isIdea ? `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line for this repo':esc('number '+i.queue+' in line for this repo')}.
+  const next = isIdea ? (i.error
+    ? `<div class="next"><b>What happens next:</b> automatic start failed (${ago(i.errorAt||i.createdAt)}), so the factory moved on to other waiting ideas.
+      ${esc(ideaRetryText(i.errorAt))}
+      <b>Start now</b> retries it right away, or <b>Dismiss</b> removes it.</div>`
+    : `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line for this repo':esc('number '+i.queue+' in line for this repo')}.
       ${ideaStartText(c)}
-      Each one is then planned and reviewed like any card; this tier decides how much review it gets. <b>Start now</b> skips the line.</div>` : '';
+      Each one is then planned and reviewed like any card; this tier decides how much review it gets. <b>Start now</b> skips the line.</div>`) : '';
   return `${isIdea?'':'<h4>Started from this idea</h4>'}
+    ${isIdea&&i.error?`<div class="err">Could not start: ${esc(i.error)}</div>`:''}
     <h4>What it proposes</h4>
     ${i.summary?`<div class="lead">${esc(i.summary)}</div>`:'<div class="lead none">No summary (suggested before ideas had one). Read Why and the technical brief.</div>'}
     ${!isIdea&&i.note?`<h4>Your changes before starting</h4><div class="md">${mdIdea(i.note)}</div>`:''}
@@ -1003,7 +1016,9 @@ function ideaHtml(c, isIdea){
 }
 async function act(a, extra={}){
   const c = findCard(sel)||{};
-  const r = await post(a, {id:sel, ...extra});
+  let r;
+  try{ r = await post(a, {id:sel, ...extra}); }
+  catch(e){ if(c.id&&c.id.startsWith('idea-')) refresh(); throw e; }
   toast(r.queued?'Review queued: starts when the agent goes idle'
     : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Build allowed: agent is building':'Approved: agent is landing it')
     : a+' done');

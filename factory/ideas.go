@@ -142,6 +142,7 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 // note is Zach's own changes typed before starting; it follows the brief and overrides it.
 func (f *Factory) startIdea(id, by, agent, note, thinking string) (map[string]string, error) {
 	var res map[string]string
+	var startErr error
 	note = trunc(strings.TrimSpace(note), 4000)
 	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for n := range ideas {
@@ -167,15 +168,24 @@ func (f *Factory) startIdea(id, by, agent, note, thinking string) (map[string]st
 			}
 			r, err := f.newCard(Body{Request: req, Repo: i.Repo, Title: i.Title, Origin: "idea", Tier: i.Tier, Agent: agent, Thinking: thinking})
 			if err != nil {
-				return nil, err
+				i.Error, i.ErrorAt = trunc(strings.TrimSpace(err.Error()), 300), f.Now()
+				startErr = err
+				return ideas, nil
 			}
 			i.Status, i.Card, i.StartedAt, i.StartedBy, i.Note = "started", r["id"], f.Now(), by, note
+			i.Error, i.ErrorAt = "", time.Time{}
 			res = r
 			return ideas, nil
 		}
 		return nil, errors.New("idea not found")
 	})
-	return res, err
+	if err != nil {
+		return nil, err
+	}
+	if startErr != nil {
+		return nil, startErr
+	}
+	return res, nil
 }
 
 func (f *Factory) dismissIdea(id string) error {
@@ -228,15 +238,21 @@ func priorityRank(p string) int {
 	return ideaPriorities["normal"]
 }
 
-// ideaOrder sorts ideas in start order: by priority, then oldest first.
+// ideaOrder sorts ideas in start order: healthy ideas before ones that failed to start, then by
+// priority, then oldest first.
 func ideaOrder(ideas []Idea) {
 	sort.SliceStable(ideas, func(a, b int) bool {
+		if ea, eb := ideas[a].Error != "", ideas[b].Error != ""; ea != eb {
+			return !ea
+		}
 		if ra, rb := priorityRank(ideas[a].Priority), priorityRank(ideas[b].Priority); ra != rb {
 			return ra < rb
 		}
 		return ideas[a].CreatedAt.Before(ideas[b].CreatedAt)
 	})
 }
+
+const ideaRetryBackoff = time.Hour
 
 // ideaUsageFloor: no idea starts on its own while the agent it would use has this percentage or
 // less of its weekly usage left.
@@ -306,6 +322,15 @@ func (f *Factory) tickIdeas() error {
 	ideaOrder(waiting)
 	lanes := f.lanes()
 	for _, i := range waiting {
+		if i.Error != "" {
+			errAt := i.ErrorAt
+			if errAt.IsZero() {
+				errAt = i.CreatedAt
+			}
+			if now.Sub(errAt) < ideaRetryBackoff {
+				continue
+			}
+		}
 		caps := lanes[i.Repo].ideaCaps()
 		if inFlight[i.Repo] >= caps.InFlight || startedToday[i.Repo] >= caps.Daily {
 			continue
@@ -366,7 +391,7 @@ func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 		}
 		return f.startPicker(Route{Request: guidance, Title: truncWords("Scout: "+strings.SplitN(strings.TrimSpace(guidance), "\n", 2)[0], 70), Scout: true})
 	}
-	cwd := filepath.Join(f.cfg.Home, "dev", repo)
+	cwd := f.repoDir(repo)
 	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeChangeRule,
 		f.cfg.Port, repo), "<repo>", repo)
 	title := "Scout: ideas for " + repo

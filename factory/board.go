@@ -247,11 +247,18 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 	}
 	line := map[string]int{} // place in its repo's line
 	for _, i := range waiting {
-		line[i.Repo]++
+		q := 0
+		flags := []string{}
+		if i.Error == "" {
+			line[i.Repo]++
+			q = line[i.Repo]
+		} else {
+			flags = append(flags, "start failed")
+		}
 		out = append(out, Card{ID: i.ID, Short: i.ID, Host: "", Title: i.Title, Repo: i.Repo, Status: "waiting",
-			Source: "idea", Stage: "idea", Labelled: true, Flags: []string{}, Note: "from " + i.By, Tier: i.Tier,
+			Source: "idea", Stage: "idea", Labelled: true, Flags: flags, Note: "from " + i.By, Tier: i.Tier,
 			Origin: "idea", CreatedAt: iso(i.CreatedAt), LastActivityAt: iso(i.CreatedAt), Children: []Child{},
-			Idea: ideaView(i, line[i.Repo])})
+			Idea: ideaView(i, q)})
 	}
 	return out
 }
@@ -319,7 +326,8 @@ func unread(a Agent) bool {
 
 func ideaView(i Idea, queue int) *IdeaView {
 	return &IdeaView{ID: i.ID, Summary: i.Summary, Why: i.Why, DoneWhen: i.DoneWhen, By: i.By,
-		CreatedAt: iso(i.CreatedAt), Status: i.Status, Priority: cmp.Or(i.Priority, "normal"), Queue: queue, Agent: i.Agent, Thinking: i.Thinking, Note: i.Note}
+		CreatedAt: iso(i.CreatedAt), Status: i.Status, Priority: cmp.Or(i.Priority, "normal"), Queue: queue,
+		Agent: i.Agent, Thinking: i.Thinking, Note: i.Note, Error: i.Error, ErrorAt: iso(i.ErrorAt)}
 }
 
 func short(id string) string {

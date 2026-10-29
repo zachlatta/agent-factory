@@ -621,6 +621,50 @@ func (f *Factory) Repos() []string {
 	return out
 }
 
+// repoDir returns the local git checkout directory for repo (owner/name): ~/dev/<owner>/<name>
+// when its .git exists, else the checkout under ~/dev/*/* whose origin remote matches repo.
+func (f *Factory) repoDir(repo string) string {
+	def := filepath.Join(f.cfg.Home, "dev", repo)
+	if _, err := os.Stat(filepath.Join(def, ".git")); err == nil {
+		return def
+	}
+	owner, _, _ := strings.Cut(repo, "/")
+	dirs, _ := filepath.Glob(filepath.Join(f.cfg.Home, "dev", "*", "*", ".git"))
+	match := ""
+	for _, d := range dirs {
+		dir := filepath.Dir(d)
+		r := filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir)
+		if strings.Contains(r, "archive") || strings.Contains(r, "-wt-") {
+			continue
+		}
+		if !strings.EqualFold(originRepo(gitConfigPath(dir)), repo) {
+			continue
+		}
+		if strings.EqualFold(filepath.Base(filepath.Dir(dir)), owner) {
+			return dir
+		}
+		if match == "" {
+			match = dir
+		}
+	}
+	if match != "" {
+		return match
+	}
+	return def
+}
+
+// knownRepos lists Repos() plus each checkout's origin remote owner/repo when it differs from the folder path.
+func (f *Factory) knownRepos() []string {
+	out := f.Repos()
+	for _, r := range out {
+		orig := originRepo(gitConfigPath(filepath.Join(f.cfg.Home, "dev", r)))
+		if orig != "" && !slices.ContainsFunc(out, func(x string) bool { return strings.EqualFold(x, orig) }) {
+			out = append(out, orig)
+		}
+	}
+	return out
+}
+
 // runGit runs `git -C dir args...`; a failure carries git's stderr.
 func runGit(ctx context.Context, dir string, args ...string) error {
 	_, err := runGitOut(ctx, dir, args...)

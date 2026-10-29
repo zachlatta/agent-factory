@@ -578,6 +578,10 @@ Start or Dismiss any idea; otherwise the factory starts them on its own:
 - **Usage floor.** An auto-start runs on the auto-suggested agent (see Repo and agent per card). While
   that agent's plan has 20% or less of its 7-day window left, no idea starts on its own, the board's
   idea panel says why, and Start still works. Unknown usage does not hold.
+- **Start errors.** If an idea fails to start, the error and time are saved on the idea and shown on
+  its card, in the idea panel and under Stuck. That tick attempts no further starts; the next tick
+  moves on to healthy waiting ideas, and the failed idea is retried automatically after an hour (or
+  immediately with Start now).
 - **Schedules.** A Paseo schedule that files an idea sends `schedule` (its name, at most 80
   characters): the idea is stored with it, and `by` reads `schedule <name>`. Scheduled self-improve
   jobs that would change code file one batched idea per repo this way instead of committing, so
@@ -1171,7 +1175,8 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_ARCHIVE_CLI` | | separate Paseo executable for archive writes (default: `paseo` on PATH; stable version >= 0.13.0 required) |
 | `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks`, `tailscale` (previews) and `pdw` (logged in) |
 
-Cards can start in any checkout under `~/dev/<owner>/<repo>`.
+Cards can start in any checkout under `~/dev/<owner>/<repo>` (when that folder is missing, the
+factory finds the checkout under `~/dev/*/*` whose `origin` git remote matches `owner/repo`).
 
 ### Computer use for agents
 

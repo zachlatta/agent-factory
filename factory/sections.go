@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"cmp"
 	"sort"
 	"strings"
 	"time"
@@ -79,6 +80,10 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 	for _, c := range cards {
 		line := SectionLine{ID: c.ID, Title: c.Title, At: c.LastActivityAt}
 		switch {
+		case c.Stage == "idea" && c.Idea != nil && c.Idea.Error != "":
+			line.State = "could not start: " + c.Idea.Error
+			line.At = cmp.Or(c.Idea.ErrorAt, c.CreatedAt)
+			s.Stuck = append(s.Stuck, line)
 		case c.Stage == "idea" || c.Source == "scout":
 		case c.Tier == "routine" || c.Source == "schedule":
 			if sameDay(parseTime(c.CreatedAt), now, loc) {

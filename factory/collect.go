@@ -115,18 +115,22 @@ func repoOf(dir string) string {
 		return "(worktree removed)"
 	}
 	for d := dir; d != "/" && d != "."; d = filepath.Dir(d) {
-		cfg := filepath.Join(d, ".git", "config")
-		if b, err := os.ReadFile(filepath.Join(d, ".git")); err == nil {
-			// worktree: ".git" is a file pointing at <main>/.git/worktrees/<name>
-			if g, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: "); ok {
-				cfg = filepath.Join(filepath.Dir(filepath.Dir(g)), "config")
-			}
-		}
-		if r := originRepo(cfg); r != "" {
+		if r := originRepo(gitConfigPath(d)); r != "" {
 			return r
 		}
 	}
 	return ""
+}
+
+func gitConfigPath(dir string) string {
+	cfg := filepath.Join(dir, ".git", "config")
+	if b, err := os.ReadFile(filepath.Join(dir, ".git")); err == nil {
+		// worktree: ".git" is a file pointing at <main>/.git/worktrees/<name>
+		if g, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: "); ok {
+			cfg = filepath.Join(filepath.Dir(filepath.Dir(g)), "config")
+		}
+	}
+	return cfg
 }
 
 func originRepo(cfg string) string {

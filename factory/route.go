@@ -167,7 +167,7 @@ func (f *Factory) startPicker(r Route) (map[string]string, error) {
 	var list []string
 	for _, r := range f.Repos() {
 		line := "- " + r
-		if d := readmeLine(filepath.Join(dev, r)); d != "" {
+		if d := readmeLine(f.repoDir(r)); d != "" {
 			line += ": " + d
 		}
 		list = append(list, line)
@@ -206,7 +206,7 @@ func (f *Factory) routeFromReply(a Agent) error {
 	if err != nil {
 		return err
 	}
-	repo, cands := ParseRepo(text, f.Repos())
+	repo, cands := ParseRepo(text, f.knownRepos())
 	if repo != "" {
 		return f.startRouted(a, repo)
 	}
@@ -302,7 +302,7 @@ func (f *Factory) tickPicker(a Agent) error {
 
 // pickRepo is Zach's answer to a picker in Needs Zach (POST /api/approve with a repo).
 func (f *Factory) pickRepo(a Agent, repo string) error {
-	if repo == "" || !slices.Contains(f.Repos(), repo) {
+	if repo == "" || !slices.Contains(f.knownRepos(), repo) {
 		return errors.New("pick one of the repos")
 	}
 	if r := a.L(labelRouted); r != "" && a.L(labelNote) != "routing interrupted" {

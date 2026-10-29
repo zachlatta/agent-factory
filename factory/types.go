@@ -149,6 +149,8 @@ type Idea struct {
 	StartedAt time.Time `json:"startedAt,omitzero"`
 	StartedBy string    `json:"startedBy,omitempty"` // auto or zach
 	Note      string    `json:"note,omitempty"`      // Zach's changes typed when he started it
+	Error     string    `json:"error,omitempty"`     // last start failure; cleared once started
+	ErrorAt   time.Time `json:"errorAt,omitzero"`
 }
 
 // IdeaView is the reviewable part of an idea on a card. The request (the builder's brief) is left
@@ -166,6 +168,8 @@ type IdeaView struct {
 	Agent     string `json:"agent,omitempty"` // AgentChoice id it will be built with ("" = default)
 	Thinking  string `json:"thinking,omitempty"`
 	Note      string `json:"note,omitempty"` // started ideas: Zach's changes before starting
+	Error     string `json:"error,omitempty"`
+	ErrorAt   string `json:"errorAt,omitempty"`
 }
 
 // Body is the JSON body of every POST /api/<action>.
