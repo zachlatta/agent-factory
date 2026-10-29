@@ -32,7 +32,8 @@ UI check: this change touches the agent-factory board.
 - Use computer use for every changed interactive flow on fake data. Read the current
   openai-computer-use skill first. Start cmd/board-preview bound to this host's tailnet IP
   from ` + "`tailscale ip -4`" + ` so the remote browser can reach it. The layout preview
-  rejects mutations; use the README's documented dry run when testing action flows.
+  only simulates sample-card actions; use the README's documented dry run to verify real action flows.
+- Bind direct remote checks to the tailnet IP, never 0.0.0.0.
 - Phone layout is checked with the helper's exact viewport; computer use checks interaction.
   Screenshots alone do not verify an approval, Drop confirmation, or other interactive flow.
 - Blocking: a broken flow, broken layout at either width, or console errors caused by this change.

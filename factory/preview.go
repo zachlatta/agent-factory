@@ -4,16 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // PreviewHandler serves the real board and API with synthetic inputs. root must be an
-// empty directory owned by the caller. No pipeline loop runs and mutations are refused.
+// empty directory owned by the caller. No pipeline loop runs; supported actions change only the fabricated snapshot.
 // The caller removes root after closing the server.
 func PreviewHandler(root string) (http.Handler, error) {
 	entries, err := os.ReadDir(root)
@@ -89,12 +93,20 @@ func PreviewHandler(root string) (http.Handler, error) {
 	}
 	f.fleet = nil
 	f.SetAgents(agents)
+	f.log = []string{"PREVIEW: fabricated cards; actions only change this preview."}
+	var actionMu sync.Mutex
 	real := f.Handler()
 	// Keep host/process inspection routes out of the preview, including future routes
 	// until they are explicitly reviewed as safe. Allowed APIs use production handlers.
 	allowed := map[string]bool{"/": true, "/index.html": true, "/api/board": true,
 		"/api/agents": true, "/api/lanes": true, "/api/deploy": true, "/api/hosts": true, "/host-metrics.js": true}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			actionMu.Lock()
+			defer actionMu.Unlock()
+			previewAction(f, w, r)
+			return
+		}
 		safe := allowed[r.URL.Path]
 		for _, prefix := range []string{"/t/", "/api/logs/", "/api/transcript/"} {
 			if strings.HasPrefix(r.URL.Path, prefix) {
@@ -110,8 +122,64 @@ func PreviewHandler(root string) (http.Handler, error) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "preview: navigation only; mutations and host inspection are disabled"})
 			return
 		}
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			page, _ := web.ReadFile("web/board.html")
+			// Keep the real embedded board, with only its preview clock fixed.
+			clock := fmt.Sprintf("<title>Factory preview</title><script>Date.now=()=>%d;</script>", now.UnixMilli())
+			page = []byte(strings.Replace(string(page), "<title>Factory</title>", clock, 1))
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.Write(page)
+			return
+		}
 		real.ServeHTTP(w, r)
 	}), nil
+}
+
+// previewAction deliberately does not call Act: it cannot launch agents, run Git,
+// send messages, or approve a real card. ReadOnly stays enabled as a second guard.
+func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
+	action := strings.TrimPrefix(r.URL.Path, "/api/")
+	supported := map[string]bool{"approve": true, "send": true, "stage": true, "close": true, "archive": true, "done": true, "stop": true, "seen": true}
+	if !supported[action] || r.Header.Get("X-Factory") != "1" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "preview: only sample-card actions are simulated"})
+		return
+	}
+	var b Body
+	if json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&b) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid preview action"})
+		return
+	}
+	agents := slices.Clone(f.agents())
+	idx := slices.IndexFunc(agents, func(a Agent) bool { return a.ID == b.ID })
+	if idx < 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not a fabricated card"})
+		return
+	}
+	a := &agents[idx]
+	a.Labels = maps.Clone(a.Labels)
+	switch action {
+	case "approve":
+		a.Labels[labelPrefix+labelStage] = "building"
+		delete(a.Labels, labelPrefix+labelAwaiting)
+	case "stage":
+		if !validStage(b.Stage) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown stage"})
+			return
+		}
+		a.Labels[labelPrefix+labelStage] = b.Stage
+	case "close", "archive", "done":
+		a.ArchivedAt = f.Now()
+		a.Status = "closed"
+		a.Labels[labelPrefix+labelStage] = "landed"
+	case "stop":
+		a.Status = "idle"
+	case "seen":
+		a.Labels[labelPrefix+labelSeen] = strconv.FormatInt(f.Now().Unix(), 10)
+	}
+	f.SetAgents(agents)
+	f.logf("PREVIEW: simulated %s on a fabricated card; nothing runs", action)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "simulated": true})
 }
 
 const previewReply = `DECISION: Approve the board layout plan?

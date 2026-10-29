@@ -101,6 +101,21 @@ export async function capture(url, { stage = 'zach', card, out = join(root, '.fa
       const text = await page.locator('body').innerText();
       await writeFile(resolve(out, `${name}.txt`), text);
       results.push({ name, width, height, stage, card: card || null, file: `${name}.png` });
+      if (name === 'phone') {
+        const questionCard=board.cards.find(c=>c.stage===stage && c.ask?.questions?.length);
+        if(questionCard){
+          if(await page.locator('#panel.open').count()) await page.locator('#panel > .x').click();
+          const question=page.locator(`.card[data-id="${questionCard.id}"] .qq`).first();
+          await question.scrollIntoViewIfNeeded();
+          const visible=await question.locator('.opt').evaluateAll(options=>options.every(o=>{
+            const r=o.getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight;
+          }));
+          if(!visible) throw Error('Phone question choices do not fit the capture');
+          await page.screenshot({path:resolve(out,'phone-questions.png'),fullPage:false});
+          await writeFile(resolve(out,'phone-questions.txt'),await page.locator('body').innerText());
+          results.push({name:'phone-questions',width,height,stage,card:questionCard.id,file:'phone-questions.png'});
+        }
+      }
       await page.close();
     }
     await writeFile(resolve(out, 'capture.json'), JSON.stringify(results, null, 2) + '\n');

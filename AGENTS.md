@@ -56,10 +56,11 @@ Host settings (board URL, default repo, private scan patterns, PATH) live in
 - Follow README's Board layout checks. Use `npm run board:screenshot -- --stage=zach`
   for 1280x800 desktop and 390x844 phone captures on fake data; add
   `--card=preview-zach` for the card panel, or choose another fixture stage/card.
-- Inspect both PNGs and saved page text. Keep `.factory-evidence/`, `.factory-scratch/`
+- Inspect both PNGs, `phone-questions.png`, and saved page text. Keep `.factory-evidence/`, `.factory-scratch/`
   and `node_modules/` excluded from Git. Remove scratch before finishing.
 - Use the existing shared browser cache. If the helper reports a missing browser,
   report the setup needed; do not install host software during a card build.
 - Keep computer use for changed interactive flows. A layout screenshot does not prove
-  approval or Drop works. Use the fake navigation preview, or documented dry-run mode
-  for actions; never test mutations on the live service. Report incomplete checks.
+  approval or Drop works. The fake preview simulates sample-card actions; use documented dry-run mode
+  to verify real actions; never test mutations on the live service. Bind direct remote checks
+  to the tailnet IP, never `0.0.0.0`. Report incomplete checks.

@@ -125,7 +125,7 @@ func previewFactory(t *testing.T, spec string, agents ...Agent) (*Factory, *fake
 	return f, p, r
 }
 
-const runSpec = `{"preview": {"run": "go run ./cmd/board-preview -addr $HOST:$PORT", "path": "/x", "env": {"MODE": "fake", "HOME": "/evil"}}}`
+const runSpec = `{"preview": {"run": "go run ./cmd/board-preview -listen $HOST:$PORT", "path": "/x", "env": {"MODE": "fake", "HOME": "/evil"}}}`
 
 func readyCard(id string) Agent {
 	return card(id, map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1", labelWriting: ago(time.Minute)})

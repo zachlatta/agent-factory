@@ -251,7 +251,8 @@ The planner (the "Fellow") first picks a track:
   non-blocking feedback under "UI feedback:" for the builder's landing summary.
   For interactive action checks, build the binary in the worktree's `.factory-scratch/` and
   run `factory -dry-run -listen "$(tailscale ip -4):0"`. It reads real data but only logs writes;
-  stopping it with SIGINT or SIGTERM deletes its temporary state copy.
+  stopping it with SIGINT or SIGTERM deletes its temporary state copy. Bind direct remote checks
+  to the tailnet IP, never `0.0.0.0`.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
 - Every code approval, landing approval, landing retry and dependency release checks that HEAD
@@ -747,7 +748,8 @@ local ones and the factory's.
 Use the checked-in headless helper for this board's layout checks. It builds the current
 `cmd/board-preview`, serves the real embedded page and API with fake Paseo/session inputs,
 then captures **1280x800 desktop** and **390x844 phone** viewports. It never connects to the
-live board or reads real card/state files. No pipeline runs; preview mutations are rejected.
+live board or reads real card/state files. No pipeline runs. Supported buttons simulate changes to fabricated cards in memory; they never
+invoke the real action pipeline, start agents, run Git, send messages or write production data.
 
 First exclude local outputs, then install the pinned development dependency:
 
@@ -763,6 +765,8 @@ The helper uses Playwright's default shared browser cache. If Chromium is missin
 Provision a missing browser through the host's approved setup process, outside a card build.
 
 Inspect both `.factory-evidence/desktop.png` and `phone.png`, plus their `.txt` page text.
+For a stage with questions, `phone-questions.png` also captures the visible choices at 390x844,
+closing the panel and scrolling to the question so the choices are not hidden below the screen.
 Each run replaces those files and `capture.json`; copy useful captures to distinct names before
 another run. Evidence stays excluded from Git. `--out` chooses another excluded output folder.
 A missing stage/card, incomplete load, page error, or failed request fails the capture.
@@ -774,7 +778,7 @@ long text, and choices. Real API serialization and Ask/transcript parsing build 
 when a UI needs a new scenario, extend the synthetic inputs in `factory/preview.go`.
 Run `npm run test:board` for browser regression checks.
 
-For computer use, serve the same navigation preview on the host's tailnet IP:
+For computer use, serve the same fake-data preview on the host's tailnet IP:
 
 ```sh
 mkdir -p .factory-scratch
@@ -782,16 +786,28 @@ TMPDIR="$PWD/.factory-scratch" go build -o .factory-scratch/board-preview ./cmd/
 .factory-scratch/board-preview -listen "$(tailscale ip -4):0"
 ```
 
-The command prints its address. Append `/?stage=zach&card=preview-zach` to open a specific
+Bind direct remote checks to the tailnet IP, never `0.0.0.0`. The command refuses wildcard
+addresses. The command prints its address. Append `/?stage=zach&card=preview-zach` to open a specific
 stage and card. A valid stage sets the phone tab; desktop shows all columns. Query selections
 apply once after loading, so closing a card keeps it closed during polling. Existing `#<id>`
 links still work. Invalid query values keep the normal view without opening an unknown card.
 Stop the server when finished; it removes its own temporary fixture directory.
 
+The repo's `.factory.json` declares the same fake preview using the real `-listen` and `-scratch`
+options. The factory supplies an explicit loopback `$HOST:$PORT`, isolated `$HOME`, and a private
+preview link; its command refuses missing host/port values. Interactive buttons only change sample
+cards for that preview process, and restarting restores the fixtures. New cards and agent launches
+remain disabled. No real card or production service is used. The board's clock is frozen for these
+fixtures in the browser as well as the server.
+
+The factory trusts preview declarations from `origin/main`, so this declaration bootstraps with
+screenshots before it lands. After landing, subsequent real Ready for you cards use the declared
+live Preview. Verify that lifecycle on a later genuine Ready card; do not create a production card
+just to test it.
+
 **Keep computer use for changed interactive flows.** Screenshots verify layout, not approval,
 Drop confirmation, or other actions. Read the current computer-use skill, click through changed
-flows, read page text, and inspect screenshots. For action flows that the navigation preview
-rejects, build the current `cmd/factory` under `.factory-scratch/` and use the documented
+flows, read page text, and inspect screenshots. To verify actual action behavior beyond the preview simulation, build the current `cmd/factory` under `.factory-scratch/` and use the documented
 `-dry-run -listen "$(tailscale ip -4):0"` mode. That mode reads real data but only logs writes;
 never test against the live service. Close your tabs and stop your servers. Report failed or
 skipped checks explicitly. Remove `.factory-scratch/` before finishing.

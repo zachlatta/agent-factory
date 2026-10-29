@@ -26,6 +26,11 @@ func main() {
 }
 
 func run(address, scratch string) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil || net.ParseIP(host) == nil || net.ParseIP(host).IsUnspecified() {
+		return fmt.Errorf("preview requires an explicit IP address; wildcard binding is forbidden")
+	}
+
 	if err := os.MkdirAll(scratch, 0700); err != nil {
 		return err
 	}

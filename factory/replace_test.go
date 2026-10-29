@@ -172,6 +172,15 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	rev := reviewer("rev-old-1", oldID, "code")
 	waiter := card("33333333-3333-3333-3333-333333333333", map[string]string{labelStage: "landing", labelWaitsOn: short(oldID), labelHeld: short(oldID)})
 	f, p := newTestFactory(t)
+	// This test exercises replacement routing, with a readable harmless diff.
+	// Unreadable policy data must continue to ask rather than auto-land.
+	f.GitOut = gitStub(map[string]string{
+		"diff --no-renames --name-only origin/main...HEAD": "notes.txt\n",
+		"show origin/main:.factory.json":                   "{}",
+	})
+
+	fakeScan(f, nil, nil) // replacement routing uses a synthetic clean scan, never host credentials
+
 	writeAgentDisk := func(a Agent) {
 		dir := filepath.Join(f.cfg.Home, ".paseo/agents", a.Provider)
 		os.MkdirAll(dir, 0o755)
@@ -237,7 +246,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	}
 	storeLog(t, f, p, rev.ID, "Looks good.\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(rev); err != nil || p.labels(newID)[labelStage] != "landing" || len(p.sent(oldID)) > 0 {
-		t.Fatalf("ApplyVerdict err=%v stage=%q sentOld=%d", err, p.labels(newID)[labelStage], len(p.sent(oldID)))
+		t.Fatalf("ApplyVerdict err=%v labels=%v sentOld=%d", err, p.labels(newID), len(p.sent(oldID)))
 	}
 	tm, ok := f.timings.get(newID)
 	if !ok || len(tm.Sessions) < 2 {

@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -187,5 +188,18 @@ func TestBoardLayoutRuleIsRepoSpecific(t *testing.T) {
 	}
 	if !strings.Contains(newCardPrompt, "zachlatta/agent-factory") || !strings.Contains(newCardPrompt, "npm run board:screenshot") {
 		t.Fatal("builder lacks conditional board layout instructions")
+	}
+}
+
+func TestBoardInstructionsExplicitlyRejectWildcardBinding(t *testing.T) {
+	raw, err := os.ReadFile("../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "never `0.0.0.0`") {
+		t.Fatal("README must prohibit wildcard binding explicitly")
+	}
+	if !strings.Contains(boardLayoutRule, "never 0.0.0.0") {
+		t.Fatal("board review must prohibit wildcard binding explicitly")
 	}
 }

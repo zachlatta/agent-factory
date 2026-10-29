@@ -40,18 +40,24 @@ func newScheduleFixture(t *testing.T) scheduleFixture {
 	if err := os.WriteFile(output, []byte("result"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Tests run under worktree-local scratch. Give the workspace its own exact
+	// Git identity rather than claiming a nested directory has no Git ancestor.
+	retirementTestGit(t, workspace, "init", "-q", "-b", "main")
+	retirementTestGit(t, workspace, "-c", "user.name=Test", "-c", "user.email=test@users.noreply.github.com", "commit", "--allow-empty", "-m", "fixture")
+	common := retirementTestGit(t, workspace, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	head := retirementTestGit(t, workspace, "rev-parse", "HEAD")
 	now := time.Date(2020, 1, 2, 12, 0, 0, 0, time.UTC)
 	d := map[string]any{"version": 1, "schedulerId": "scheduler", "scheduleId": "schedule", "resultKind": "durable-output", "requirements": map[string]any{"outputs": []any{map[string]any{"name": "result", "path": output}}}}
-	i := map[string]any{"runId": "run", "agentId": "agent", "workspaceId": "workspace", "canonicalPath": workspace, "commonDir": nil, "branch": nil, "head": nil}
+	i := map[string]any{"runId": "run", "agentId": "agent", "workspaceId": "workspace", "canonicalPath": workspace, "commonDir": common, "branch": "main", "head": head}
 	o := map[string]any{"status": "succeeded", "startedAt": now.Add(-time.Minute).Format(time.RFC3339Nano), "endedAt": now.Add(-30 * time.Second).Format(time.RFC3339Nano), "interrupted": false, "canceled": false, "pendingPermission": false, "unresolved": false}
 	manifest := map[string]any{"outputs": []any{map[string]any{"name": "result", "sha256": scheduleHash([]byte("result"))}}}
-	// The fixed field shapes match the v1 producer, including null non-Git identity.
+	// The fixed field shapes match the v1 producer with an explicit Git identity.
 	r := map[string]any{"version": 1, "recordKind": "success", "schedulerId": "scheduler", "scheduleId": "schedule", "resultKind": "durable-output", "outcome": o, "declarationDigest": scheduleHash(scheduleCanonicalTest(t, d)), "manifestDigest": scheduleHash(scheduleCanonicalTest(t, manifest)), "verifiedAt": now.Add(-20 * time.Second).Format(time.RFC3339Nano), "retirementAuthorized": false, "evidence": map[string]any{"kind": "durable-output", "outputs": []any{map[string]any{"name": "result", "path": output, "sha256": scheduleHash([]byte("result")), "size": 6}}}}
 	for k, v := range i {
 		r[k] = v
 	}
 	receipt := scheduleJSON(r)
-	release := scheduleRelease{SchedulerID: "scheduler", ScheduleID: "schedule", RunID: "run", AgentID: "agent", WorkspaceID: "workspace", CanonicalPath: workspace, Generation: "generation", ReceiptDigest: scheduleHash(receipt), DeclarationProvenance: "approved-declaration", ReleasedAt: now.Add(-10 * time.Second), ExpiresAt: now.Add(time.Minute)}
+	release := scheduleRelease{SchedulerID: "scheduler", ScheduleID: "schedule", RunID: "run", AgentID: "agent", WorkspaceID: "workspace", CanonicalPath: workspace, CommonDir: common, Branch: "main", Head: head, Generation: "generation", ReceiptDigest: scheduleHash(receipt), DeclarationProvenance: "approved-declaration", ReleasedAt: now.Add(-10 * time.Second), ExpiresAt: now.Add(time.Minute)}
 	return scheduleFixture{scheduleRequest{receipt, scheduleJSON(d), scheduleJSON(o), scheduleJSON(i), scheduleJSON(manifest), release}, schedulePolicy{state, time.Minute}, now, workspace, output}
 }
 func scheduleCanonicalTest(t *testing.T, v any) []byte {
@@ -461,5 +467,19 @@ func TestScheduleDurableOutputInsideWorkspace(t *testing.T) {
 	// Hash, size, exact schema and declaration bindings all match the moved output.
 	if err := f.validate(); err == nil {
 		t.Fatal("disposable output accepted as durable")
+	}
+}
+
+func TestScheduleRejectsNullIdentityInsideGitCheckout(t *testing.T) {
+	f := newScheduleFixture(t)
+	nullGit := func(m map[string]any) { m["commonDir"] = nil; m["branch"] = nil; m["head"] = nil }
+	f.request.Identity = scheduleEdit(f.request.Identity, nullGit)
+	f.request.Receipt = scheduleEdit(f.request.Receipt, nullGit)
+	f.request.Release.CommonDir = ""
+	f.request.Release.Branch = ""
+	f.request.Release.Head = ""
+	f.request.Release.ReceiptDigest = scheduleHash(f.request.Receipt)
+	if err := f.validate(); err == nil {
+		t.Fatal("accepted non-Git identity inside a Git checkout")
 	}
 }
