@@ -24,6 +24,9 @@ import (
 
 const digestHour = 18 // 6 PM
 
+// digestSubject starts every digest's subject; a recipient-side mail filter matches on it (README).
+const digestSubject = "Factory today: "
+
 type digestFile struct {
 	Sent    string        `json:"sent"`              // the local day (2006-01-02) of the last digest
 	Day     string        `json:"day,omitempty"`     // the local day Shipped is for
@@ -256,5 +259,5 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 			`font-weight:600;padding:10px 18px;border-radius:6px">Open the board</a></p>`, e(board))
 	}
 	h.WriteString("</div>")
-	return email{Subject: "Factory today: " + strings.Join(counts, ", "), Text: t.String(), HTML: h.String()}, true
+	return email{Subject: digestSubject + strings.Join(counts, ", "), Text: t.String(), HTML: h.String()}, true
 }

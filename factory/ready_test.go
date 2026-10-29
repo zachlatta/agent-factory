@@ -150,13 +150,29 @@ func TestReadyEmailShowsQuestionsAndLettersAnswerThem(t *testing.T) {
 	}
 	ask := readyAsk("")
 	ask.Questions = []Question{{Text: "Which colour for the button?", Options: []string{"Blue (recommended)", "Red"}}}
-	if got := parseAnswer("1b", ask); got.Action != "send" || !strings.Contains(got.Message, "→ Red") {
+	if got := parseAnswer("1b", ask); got.Choice != "change" || !strings.Contains(got.Message, "→ Red") {
 		t.Errorf("1b -> %+v", got)
 	}
-	if got := parseAnswer("b", ask); got.Action != "send" || !strings.Contains(got.Message, "→ Red") {
+	if got := parseAnswer("b", ask); got.Choice != "change" || !strings.Contains(got.Message, "→ Red") {
 		t.Errorf("b -> %+v", got)
 	}
-	if got := parseAnswer("land", ask); got.Action != "approve" {
+	if got := parseAnswer("land", ask); got.Choice != "land" {
 		t.Errorf("land -> %+v", got)
+	}
+}
+
+// A Ready for you card with no preview link always says why, in one sentence the board and email share.
+func TestReadyWithoutPreviewSaysWhy(t *testing.T) {
+	for _, st := range []string{"", previewNone, previewSampled, previewStarting, previewQueued, previewFailed} {
+		r := &Ready{State: st}
+		if previewWaitText(r) == "" {
+			t.Errorf("state %q: no reason given for the missing preview", st)
+		}
+	}
+	f, _ := newTestFactory(t)
+	ask := readyAsk("")
+	f.fillReady(ask, "c1", "CHANGED: one thing")
+	if ask.Ready.Preview != "" || ask.Ready.Wait == "" {
+		t.Errorf("no preview record: %+v", ask.Ready)
 	}
 }

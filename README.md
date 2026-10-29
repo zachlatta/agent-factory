@@ -618,6 +618,20 @@ emailed as they come (below), and everything else waits for it.
   A day with nothing to report sends nothing. A failed send is tried again after 5 minutes; one
   that timed out (it may have gone out) is not. Dry and read-only runs never send.
 
+Quiet delivery (no phone alert) is set up on the recipient's side, never in the bot's mailbox: a
+filter in the bot's own mailbox does not change how a delivered copy alerts in another inbox.
+
+- `FACTORY_DIGEST_TO` must be one of the mailbox's allowed recipients exactly as listed
+  (`get_mailbox_info`); plus forms of an allowed address are refused. Changing that list is not
+  part of this setting.
+- In the recipient mailbox, one filter matches only the digest, from the bot's address with the
+  subject `"Factory today:"`, and labels it, marks it read and skips the inbox. Where that mailbox
+  is one of PDW's Gmail accounts it is a reviewed `gmail.create_filter` mutation; it touches no
+  other mail.
+- Silence is checked, not assumed: after the first digest, its message in the recipient mailbox
+  has the label and neither `INBOX` nor `UNREAD`, and the phone's notification log shows no mail
+  alert for its subject. If it alerted, the setting is reported, not left as done.
+
 ### Needs Zach email
 
 Zach is emailed only for decisions, by the factory itself through the zrl-bot mailbox

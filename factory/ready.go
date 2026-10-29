@@ -86,6 +86,7 @@ type Ready struct {
 	State   string   `json:"state,omitempty"`   // preview state (tryout.go): starting, ready, failed, queued, none
 	Log     string   `json:"log,omitempty"`     // the last lines of a failed preview's output
 	Sample  string   `json:"sample,omitempty"`  // a no-UI repo's sample output
+	Wait    string   `json:"wait,omitempty"`    // with no preview link: why (previewWaitText)
 }
 
 var changedLine = regexp.MustCompile(`(?m)^\s*(?:[-*]\s+)?\**CHANGED:\**\s*(.+?)\s*$`)
@@ -113,6 +114,9 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 		if p.State == previewReady {
 			ask.Ready.Preview = p.URL
 		}
+	}
+	if ask.Ready.Preview == "" {
+		ask.Ready.Wait = previewWaitText(ask.Ready)
 	}
 }
 
@@ -150,8 +154,14 @@ func previewWaitText(r *Ready) string {
 		return "Preview not started: too many running. It starts when one stops."
 	case previewStarting:
 		return "The preview is still starting."
+	case previewNone:
+		return "No live preview: this repo has no preview to run, so what changed and the screenshots show it."
+	case previewSampled:
+		return "No live preview: this change has nothing to click, so its sample output is below."
+	case previewReady:
+		return "The preview link is not ready yet."
 	}
-	return ""
+	return "No live preview: the factory has not started one for this change."
 }
 
 // readyEmail is the Ready for you email: what changed, screenshots, the Preview button, how to answer.

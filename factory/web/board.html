@@ -152,7 +152,8 @@ body.inboxv #grid,body.inboxv .colctl,body.inboxv #activity,body:not(.inboxv) #i
 .none{color:var(--mute);font-size:13px;padding:6px 2px 10px}
 .fy{background:#fff;border:1px solid #e7d38a;border-radius:10px;padding:12px;margin-bottom:10px;overflow-wrap:anywhere}
 .fy .ft{font-size:12px;color:var(--mute)}.fy .ft .repo{color:var(--ink);font-weight:600}
-.fq{font-size:16px;font-weight:700;line-height:1.35;margin:3px 0 6px;overflow-wrap:anywhere}
+.fq{display:block;font-size:16px;font-weight:700;line-height:1.35;margin:3px 0 6px;overflow-wrap:anywhere;color:inherit;text-decoration:none}
+.fy a.ft{display:block;color:var(--mute);text-decoration:none}.fy a.ft:hover .ttl,.fy a.fq:hover{text-decoration:underline}
 .choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .choices button{flex:1 1 0;min-width:84px;padding:10px 12px;font-weight:600;border-radius:8px}
 .choices button.drop{color:var(--red)}
@@ -518,8 +519,10 @@ function lineHtml(l, cls){
 }
 function forYouHtml(c){
   const repo = repoTag(c);
-  return `<div class="fy" data-id="${c.id}"><div class="ft">${repo}${repo?' · ':''}${esc(c.title)}</div>
-    <div class="fq">${esc(askQuestion(c.ask))}</div>${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
+  // the title and the question open the card (its ask, preview and details)
+  const open = `href="?card=${encodeURIComponent(c.id)}" onclick="event.preventDefault();openPanel('${c.id}')"`;
+  return `<div class="fy" data-id="${c.id}"><a class="ft" ${open}>${repo}${repo?' · ':''}<span class="ttl">${esc(c.title)}</span></a>
+    <a class="fq" ${open}>${esc(askQuestion(c.ask))}</a>${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
     <button class="link" onclick="openPanel('${c.id}')">Details</button></div>`;
 }
 function inboxHtml(S, q){
@@ -721,10 +724,11 @@ function evidenceHtml(c){
 }
 /* Ready for you (ready.go): what changed and the factory-run preview */
 function readyHtml(r){
-  const wait={failed:"The preview didn't start.",queued:'Preview not started: too many running. It starts when one stops.',starting:'The preview is still starting.'}[r.state];
+  // with no link, always say why (the server's previewWaitText, the same words as the email)
   const link=/^https:\/\//.test(r.preview||'')?`<a class="preview" href="${esc(r.preview)}" target="_blank" rel="noopener">Preview</a>`:'';
+  const wait=r.wait||'No live preview for this change.';
   return `<div class="ready">${(r.changed||[]).length?`<ul>${r.changed.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
-    ${link||(wait?`<div class="wait">${esc(wait)}</div>`:'')}${r.state==='failed'&&r.log?`<details><summary>Preview log</summary><pre>${esc(r.log)}</pre></details>`:''}
+    ${link||`<div class="wait">${esc(wait)}</div>`}${r.state==='failed'&&r.log?`<details><summary>Preview log</summary><pre>${esc(r.log)}</pre></details>`:''}
     ${r.sample?`<details open><summary>Sample output</summary><pre>${esc(r.sample)}</pre></details>`:''}</div>`;
 }
 function questionsHtml(c, where){

@@ -34,6 +34,12 @@ const two={id:'d2',title:'Two',ask:{kind:'decision',title:'Two?',questions:[{tex
   choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No',text:true}]}};
 const repo={id:'p1',title:'Pick',ask:{kind:'decision',title:'Which repo?',choices:[{id:'pick:example/one',label:'Start in example/one',repo:'example/one'},{id:'pick',label:'Other repo…',text:true},{id:'drop',label:'Drop'}]}};
 B.cards=[ready,dec,two,repo];
+// card images come only from this card's own evidence routes: never external, data, file, another card's or a query URL
+assert(allowedEvidenceSrc('/api/evidence/r1/before','r1')); assert(allowedEvidenceSrc('/api/evidence/r1/after','r1'));
+for(const src of ['https://example.org/x.png','data:image/png;base64,x','file:///x.png','/api/evidence/other/before','/api/evidence/r1/before?x','//example.org/api/evidence/r1/before','/api/evidence/r1/../other/before'])assert(!allowedEvidenceSrc(src,'r1'),src);
+// the images the board shows for a card use only those routes
+const evCard={id:'r1',ask:{evidence:{before:'before.png',after:'after.png'}}};
+for(const m of evidenceHtml(evCard).matchAll(/src="([^"]*)"/g)) assert(allowedEvidenceSrc(m[1],'r1'),m[1]);
 // one tap lands: no Submit
 let h=choicesHtml(ready,'l'); assert(!h.includes('Submit')); assert(h.includes('>Land</button>'));
 await choose('r1','land','l'); assert.deepEqual(sent.at(-1),['choose',{id:'r1',choice:'land'}]);
@@ -76,6 +82,9 @@ const S={forYou:[{id:'r1',title:'Phone board',state:'Ship the phone board?'}],wo
   stuck:[{id:'s',title:'Hung',state:'no activity for 40 min'}],shipped:[{id:'x',title:'Done thing',state:'shipped',at:'2026-10-27T15:00:00Z'}],
   noAnswer:[{title:'Order batteries',state:'no answer yet'}],routine:[{id:'q',title:'Hourly feed',state:'done'}]};
 const out=inboxHtml(S,''); const o=t=>out.html.indexOf(t);
+// tapping a For you card's title or question opens the card
+const fyHtml=forYouHtml(ready); assert.equal((fyHtml.match(/onclick="event.preventDefault\(\);openPanel\('r1'\)"/g)||[]).length,2,fyHtml);
+assert(/<a class="ft"[^>]*>.*Phone board.*<\/a>/.test(fyHtml),fyHtml);
 assert.equal(out.forYou,1); assert(o('For you')<o('Ship the phone board?')); assert(o('Ship the phone board?')<o('No answer yet'));
 assert(o('No answer yet')<o('Working on it')); assert(o('Hung')<o('Retries')); assert(o('Retries')<o('Shipped today'));
 assert(out.html.includes('Routine runs (1)')); assert(!out.html.includes('Hourly feed'));

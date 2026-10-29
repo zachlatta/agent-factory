@@ -571,9 +571,10 @@ func TestBoardPageReadyForYou(t *testing.T) {
 		fn + `
 console.log(JSON.stringify([
   readyHtml({changed:['Cards <b>group</b>'], preview:'https://board.example:7700/', state:'ready'}),
-  readyHtml({state:'failed', log:'boom'}),
+  readyHtml({state:'failed', log:'boom', wait:"The preview didn't start."}),
   readyHtml({preview:'javascript:alert(1)', state:'ready'}),
-  readyHtml({state:'sampled', sample:'out'}),
+  readyHtml({state:'sampled', sample:'out', wait:'No live preview: sample output below.'}),
+  readyHtml({}),
 ]));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
@@ -586,8 +587,9 @@ console.log(JSON.stringify([
 	for i, want := range [][]string{
 		{"<li>Cards &lt;b&gt;group&lt;/b&gt;</li>", `href="https://board.example:7700/"`, ">Preview</a>"},
 		{"The preview didn&#39;t start.", "boom"},
-		{},
-		{"Sample output", "out"},
+		{"No live preview for this change."}, // a link that is not https is never shown, and the card says so
+		{"Sample output", "out", "No live preview: sample output below."},
+		{"No live preview for this change."}, // never a blank spot
 	} {
 		for _, w := range want {
 			if !strings.Contains(got[i], strings.ReplaceAll(w, "&#39;", "'")) {
