@@ -601,3 +601,15 @@ console.log(JSON.stringify([
 		t.Errorf("a non-https preview link is shown: %s", got[2])
 	}
 }
+
+// A link chooses the view once (?view=); the old stage tabs and their implicit global are gone.
+func TestBoardPageViewLink(t *testing.T) {
+	page := boardPage(t)
+	fn := regexp.MustCompile(`(?s)function openFromHash\(\)\{.*?\n\}`).FindString(page)
+	if fn == "" || !strings.Contains(fn, "q.get('view')") || strings.Contains(fn, "tab=") || strings.Contains(fn, "'stage'") {
+		t.Errorf("openFromHash: %s", fn)
+	}
+	if regexp.MustCompile(`[^.\w]tab\s*=`).MatchString(page) {
+		t.Error("the board still assigns the old stage-tab global")
+	}
+}

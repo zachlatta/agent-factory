@@ -170,8 +170,8 @@ func TestRepoPreviewDeclarationUsesSafeCLI(t *testing.T) {
 	if !strings.Contains(cfg.Preview.Run, `-listen "${HOST:?}:${PORT:?}"`) || strings.Contains(cfg.Preview.Run, "-addr") {
 		t.Fatal("preview must use the actual CLI and require its host and port")
 	}
-	if cfg.Preview.Path != "/?stage=zach" {
-		t.Fatalf("preview should open question choices: %q", cfg.Preview.Path)
+	if cfg.Preview.Path != "/" {
+		t.Fatalf("preview should open on For you, where the question choices are: %q", cfg.Preview.Path)
 	}
 }
 
@@ -191,7 +191,7 @@ func TestRepoPreviewBootstrapThenReadyLifecycle(t *testing.T) {
 	f.SetAgents([]Agent{readyCard("subsequent")})
 	f.tickPreviews(t0)
 	p := waitPreview(t, f, "subsequent", previewReady)
-	if p.URL != "https://board.example:7700/?stage=zach" {
+	if p.URL != "https://board.example:7700/" {
 		t.Fatalf("live preview link: %+v", p)
 	}
 	c := mustCard(t, f, "subsequent")

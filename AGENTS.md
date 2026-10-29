@@ -53,9 +53,9 @@ Host settings (board URL, default repo, private scan patterns, PATH) live in
 
 ## Board UI checks
 
-- Follow README's Board layout checks. Use `npm run board:screenshot -- --stage=zach`
-  for 1280x800 desktop and 390x844 phone captures on fake data; add
-  `--card=preview-zach` for the card panel, or choose another fixture stage/card.
+- Follow README's Board layout checks. Use `npm run board:screenshot` for 1280x800 desktop
+  and 390x844 phone captures of For you on fake data; add `--card=preview-zach` for the card
+  panel, `--view=columns` for the desktop kanban, or choose another fixture card.
 - Inspect both PNGs, `phone-questions.png`, and saved page text. Keep `.factory-evidence/`, `.factory-scratch/`
   and `node_modules/` excluded from Git. Remove scratch before finishing.
 - Use the existing shared browser cache. If the helper reports a missing browser,

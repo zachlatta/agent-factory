@@ -59,11 +59,15 @@ export async function withPreview(work) {
   }
 }
 
-export async function capture(url, { stage = 'zach', card, out = join(root, '.factory-evidence') } = {}) {
+// The board opens on For you at every width; --view=columns shows the desktop kanban (the phone always
+// shows For you). --card opens one card's detail.
+export const views = ['inbox', 'columns'];
+
+export async function capture(url, { view = 'inbox', card, out = join(root, '.factory-evidence') } = {}) {
   try { await access(chromium.executablePath()); }
   catch { throw Error(`Browser missing. Setup: ${browserSetup}`); }
   const board = await (await fetch(`${url}/api/board`)).json();
-  if (!board.stages.some(s => s[0] === stage)) throw Error(`Unknown stage: ${stage}`);
+  if (!views.includes(view)) throw Error(`Unknown view: ${view} (use ${views.join(' or ')})`);
   if (card && !board.cards.some(c => c.id === card)) throw Error(`Unknown card: ${card}`);
   await mkdir(out, { recursive: true });
   const browser = await chromium.launch({ headless: true });
@@ -78,17 +82,13 @@ export async function capture(url, { stage = 'zach', card, out = join(root, '.fa
       page.on('response', response => { if (response.status() >= 400) errors.push(`HTTP ${response.status()}: ${response.url()}`); });
       // Keep relative ages stable without changing the production page or timers.
       await page.addInitScript(now => { Date.now = () => now; }, Date.parse(board.updated));
-      const query = new URLSearchParams({ stage });
+      const query = new URLSearchParams({ view });
       if (card) query.set('card', card);
       await page.goto(`${url}/?${query}`, { waitUntil: 'networkidle', timeout: 20000 });
       await page.waitForFunction(() => B.updated && !loadErr);
-      if (name === 'phone') await page.locator(`#tabs button.on[data-s="${stage}"]`).waitFor();
-      else await page.locator(`.cell[data-stage="${stage}"]`).first().evaluate(cell => {
-        // Reveal the requested column horizontally without scrolling a tall card
-        // under the sticky header or changing the required viewport height.
-        const main = cell.closest('main');
-        main.scrollLeft += Math.max(0, cell.getBoundingClientRect().right - main.clientWidth + 16);
-      });
+      const shown = name === 'phone' ? 'inbox' : view;
+      if (shown === 'inbox') await page.locator('#inbox .sec').first().waitFor();
+      else await page.locator('#grid .card').first().waitFor();
       if (card) {
         await page.locator('#panel.open').waitFor();
         await page.waitForFunction(id => sel === id && document.querySelector('#pTitle').textContent === B.cards.find(c => c.id === id).title, card);
@@ -96,24 +96,28 @@ export async function capture(url, { stage = 'zach', card, out = join(root, '.fa
       }
       await page.evaluate(() => document.fonts.ready);
       if (errors.length) throw Error(`${name}: ${errors.join('; ')}`);
+      const sideways = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+      if (name === 'phone' && sideways) throw Error('The phone page scrolls sideways');
       const path = resolve(out, `${name}.png`);
       await page.screenshot({ path, fullPage: false });
       const text = await page.locator('body').innerText();
       await writeFile(resolve(out, `${name}.txt`), text);
-      results.push({ name, width, height, stage, card: card || null, file: `${name}.png` });
+      results.push({ name, width, height, view: shown, card: card || null, file: `${name}.png` });
       if (name === 'phone') {
-        const questionCard=board.cards.find(c=>c.stage===stage && c.ask?.questions?.length);
-        if(questionCard){
-          if(await page.locator('#panel.open').count()) await page.locator('#panel > .x').click();
-          const question=page.locator(`.card[data-id="${questionCard.id}"] .qq`).first();
+        // a For you card whose question options must fit the phone screen
+        const forYou = new Set((board.sections?.forYou || []).map(l => l.id));
+        const questionCard = board.cards.find(c => forYou.has(c.id) && c.ask?.questions?.length);
+        if (questionCard) {
+          if (await page.locator('#panel.open').count()) await page.locator('#panel > .x').click();
+          const question = page.locator(`.fy[data-id="${questionCard.id}"] .qq`).first();
           await question.scrollIntoViewIfNeeded();
-          const visible=await question.locator('.opt').evaluateAll(options=>options.every(o=>{
-            const r=o.getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight;
+          const visible = await question.locator('.opt').evaluateAll(options => options.every(o => {
+            const r = o.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight;
           }));
-          if(!visible) throw Error('Phone question choices do not fit the capture');
-          await page.screenshot({path:resolve(out,'phone-questions.png'),fullPage:false});
-          await writeFile(resolve(out,'phone-questions.txt'),await page.locator('body').innerText());
-          results.push({name:'phone-questions',width,height,stage,card:questionCard.id,file:'phone-questions.png'});
+          if (!visible) throw Error('Phone question choices do not fit the capture');
+          await page.screenshot({ path: resolve(out, 'phone-questions.png'), fullPage: false });
+          await writeFile(resolve(out, 'phone-questions.txt'), await page.locator('body').innerText());
+          results.push({ name: 'phone-questions', width, height, view: 'inbox', card: questionCard.id, file: 'phone-questions.png' });
         }
       }
       await page.close();
@@ -125,7 +129,7 @@ export async function capture(url, { stage = 'zach', card, out = join(root, '.fa
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { values } = parseArgs({ options: { stage: { type: 'string', default: 'zach' }, card: { type: 'string' }, out: { type: 'string' } } });
+    const { values } = parseArgs({ options: { view: { type: 'string', default: 'inbox' }, card: { type: 'string' }, out: { type: 'string' } } });
     const results = await withPreview(url => capture(url, values));
     for (const result of results) console.log(`${result.name}: ${result.width}x${result.height} ${result.file}`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }

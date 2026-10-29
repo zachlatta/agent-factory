@@ -8,47 +8,53 @@ import { once } from 'node:events';
 import { chromium } from 'playwright';
 
 // Run against the real embedded page and real API, with the preview's fake inputs.
-test('stage/card links render at exact widths and preserve navigation', async () => {
+test('For you and card links render at exact widths and preserve navigation', async () => {
   const out = await mkdtemp('.factory-scratch/capture-test-');
   try {
     await withPreview(async url => {
-      const results = await capture(url, { stage: 'zach', card: 'preview-zach', out });
+      const results = await capture(url, { card: 'preview-zach', out });
       for (const [i, name] of ['desktop', 'phone'].entries()) {
         const png = await readFile(join(out, `${name}.png`));
         assert.equal(png.readUInt32BE(16), [1280, 390][i]);
         assert.equal(png.readUInt32BE(20), [800, 844][i]);
       }
       assert.equal(results.length, 3);
+      assert.deepEqual(results.map(r => r.view), ['inbox', 'inbox', 'inbox']);
       const questions=await readFile(join(out,'phone-questions.png'));
       assert.equal(questions.readUInt32BE(16),390);
       assert.equal(questions.readUInt32BE(20),844);
       assert.match(await readFile(join(out,'phone-questions.txt'),'utf8'),/Keep the clear layout/);
-      await assert.rejects(capture(url, { stage: 'missing', out }), /Unknown stage/);
+      assert.match(await readFile(join(out,'phone.txt'),'utf8'),/FOR YOU/i);
+      // the desktop kanban is a view; the phone stays on For you
+      const columns = await capture(url, { view: 'columns', out });
+      assert.deepEqual(columns.slice(0, 2).map(r => r.view), ['columns', 'inbox']);
+      await assert.rejects(capture(url, { view: 'missing', out }), /Unknown view/);
       await assert.rejects(capture(url, { card: 'missing', out }), /Unknown card/);
       const browser = await chromium.launch({ headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-        await page.goto(`${url}/?stage=plan`);
-        await page.locator('#tabs button.on[data-s="plan"]').waitFor();
-        await page.locator('#tabs button[data-s="building"]').click();
-        await page.locator('#tabs button.on[data-s="building"]').waitFor();
-        await page.locator('.card[data-id="preview-building"]').click({ position: { x: 8, y: 8 } });
+        await page.goto(url);
+        await page.locator('#inbox .sec').first().waitFor();
+        assert.equal(await page.locator('.tabs').count(), 0);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        // tapping a For you card's title opens it; a working card's line opens it too
+        await page.locator('.fy[data-id="preview-zach"] a.ft').click();
         await page.locator('#panel.open').waitFor();
         await page.locator('#panel > .x').click();
         await page.locator('#panel.open').waitFor({ state: 'hidden' });
+        await page.locator('.line[data-id="preview-building"]').click();
+        await page.locator('#panel.open').waitFor();
+        assert.match(await page.locator('#pTitle').innerText(), /Building:/);
+        await page.locator('#panel > .x').click();
         // A periodic refresh must not reopen a query-linked card after it is closed.
-        await page.goto(`${url}/?stage=zach&card=preview-zach`);
+        await page.goto(`${url}/?card=preview-zach`);
         await page.locator('#panel.open').waitFor();
         await page.locator('#panel > .x').click();
         await page.evaluate(() => load());
         assert.equal(await page.locator('#panel.open').count(), 0);
         await page.goto(url);
-        await page.goto(`${url}/?stage=zach&card=preview-zach#preview-plan`);
+        await page.goto(`${url}/?card=preview-zach#preview-plan`);
         // Preserve main's hash precedence; a later hash still opens its card.
-        await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pTitle').innerText(), /Plan:/);
-        await page.locator('#panel > .x').click();
-        await page.goto(`${url}/?stage=zach&card=preview-zach#preview-plan`);
         await page.locator('#panel.open').waitFor();
         assert.match(await page.locator('#pTitle').innerText(), /Plan:/);
         await page.locator('#panel > .x').click();
@@ -65,15 +71,14 @@ test('stage/card links render at exact widths and preserve navigation', async ()
           board.cards.find(c => c.id === 'preview-building').replaces = ['prior-preview-building'];
           await route.fulfill({ response, json: board });
         });
-        await page.goto(`${url}/?stage=building&card=prior-preview-b`);
-        await page.locator('#tabs button.on[data-s="building"]').waitFor();
+        await page.goto(`${url}/?card=prior-preview-b`);
         await page.locator('#panel.open').waitFor();
         assert.match(await page.locator('#pTitle').innerText(), /Building:/);
         await page.locator('#panel > .x').click();
         await page.evaluate(() => load());
         assert.equal(await page.locator('#panel.open').count(), 0);
-        await page.goto(`${url}/?stage=invalid&card=unknown`);
-        await page.locator('#tabs button.on').waitFor();
+        await page.goto(`${url}/?view=invalid&card=unknown`);
+        await page.locator('#inbox .sec').first().waitFor();
         assert.equal(await page.locator('#panel.open').count(), 0);
       } finally { await browser.close(); }
     });
@@ -126,6 +131,10 @@ test('declared live preview uses actual CLI and only simulates sample-card actio
     assert.equal((await post('approve','preview-zach')).status,200);
     const after=await (await fetch(address+'/api/board')).json();
     assert.equal(after.cards.find(c=>c.id==='preview-zach').stage,'building');
+    // the board's shared buttons are simulated too: Land on the finished-work card starts landing
+    const choose=await fetch(`${address}/api/choose`,{method:'POST',headers:{'X-Factory':'1','Content-Type':'application/json'},body:JSON.stringify({id:'preview-ready',choice:'land'})});
+    assert.equal(choose.status,200);
+    assert.equal((await (await fetch(address+'/api/board')).json()).cards.find(c=>c.id==='preview-ready').stage,'landing');
     assert.equal((await post('approve','real-card')).status,404);
     assert.equal((await post('new','preview-plan')).status,403);
   }finally{

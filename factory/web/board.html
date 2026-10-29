@@ -474,15 +474,16 @@ function findCard(id){
   if(!id) return null;
   return (B.cards||[]).find(c => c.id===id || c.id.startsWith(id) || (c.replaces||[]).some(r => r===id || r.startsWith(id))) || null;
 }
-// Apply a query stage once; retain hash precedence and replacement-card lookup.
+// Apply a query view once (?view=inbox or columns; the phone always shows For you), without saving it
+// as the remembered view; retain hash precedence and replacement-card lookup.
 let linkApplied = false;
 function openFromHash(){
   if(!B.updated) return;
   const q = new URLSearchParams(location.search);
   if(!linkApplied){
     linkApplied = true;
-    const stage = q.get('stage');
-    if(B.stages.some(s=>s[0]===stage)){ tab=stage; render(); }
+    const v = q.get('view');
+    if(v==='inbox' || v==='columns'){ view=v; render(); }
   }
   let hash = '';
   try{ hash=decodeURIComponent(location.hash.slice(1)); }catch(e){}

@@ -903,25 +903,31 @@ First exclude local outputs, then install the pinned development dependency:
 ```sh
 printf '\n.factory-scratch/\n.factory-evidence/\nnode_modules/\n' >> "$(git rev-parse --git-path info/exclude)"
 npm ci --ignore-scripts --cache .factory-scratch/npm-cache
-npm run board:screenshot -- --stage=zach
-npm run board:screenshot -- --stage=zach --card=preview-zach
+npm run board:screenshot
+npm run board:screenshot -- --card=preview-zach
+npm run board:screenshot -- --view=columns
 ```
 
 The helper uses Playwright's default shared browser cache. If Chromium is missing, it prints
 `npx playwright install chromium` and exits; it never downloads a browser automatically.
 Provision a missing browser through the host's approved setup process, outside a card build.
 
-Inspect both `.factory-evidence/desktop.png` and `phone.png`, plus their `.txt` page text.
-For a stage with questions, `phone-questions.png` also captures the visible choices at 390x844,
-closing the panel and scrolling to the question so the choices are not hidden below the screen.
+Inspect both `.factory-evidence/desktop.png` and `phone.png`, plus their `.txt` page text. Both
+open on For you; `--view=columns` shows the desktop kanban instead (the phone always shows For you).
+When a For you card has questions, `phone-questions.png` also captures its visible choices at
+390x844, closing the panel and scrolling to the question so the choices are not hidden below the
+screen.
 Each run replaces those files and `capture.json`; copy useful captures to distinct names before
 another run. Evidence stays excluded from Git. `--out` chooses another excluded output folder.
-A missing stage/card, incomplete load, page error, or failed request fails the capture.
+An unknown view or card, an incomplete load, a page error, a failed request, or a phone page that
+scrolls sideways fails the capture.
 The helper owns and stops its preview server and browser, including on failure.
 
 Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `building`,
-`review`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture includes approval content,
-long text, and choices. Real API serialization and Ask/transcript parsing build the preview;
+`review`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture
+(`preview-zach`, a decision with Yes / No / Drop) includes approval content, long text, and choices;
+`preview-ready` is finished work with Land / Change / Drop. Their buttons are simulated through the
+same `choose` route the board posts. Real API serialization and Ask/transcript parsing build the preview;
 when a UI needs a new scenario, extend the synthetic inputs in `factory/preview.go`.
 Run `npm run test:board` for browser regression checks.
 
@@ -934,9 +940,9 @@ TMPDIR="$PWD/.factory-scratch" go build -o .factory-scratch/board-preview ./cmd/
 ```
 
 Bind direct remote checks to the tailnet IP, never `0.0.0.0`. The command refuses wildcard
-addresses. The command prints its address. Append `/?stage=zach&card=preview-zach` to open a specific
-stage and card. A valid stage sets the phone tab; desktop shows all columns. Query selections
-apply once after loading, so closing a card keeps it closed during polling. Existing `#<id>`
+addresses. The command prints its address. Append `/?card=preview-zach` to open a card, and
+`view=columns` to show the desktop kanban for that visit (it is not saved; the phone always shows
+For you). Query selections apply once after loading, so closing a card keeps it closed during polling. Existing `#<id>`
 links still work. Invalid query values keep the normal view without opening an unknown card.
 Stop the server when finished; it removes its own temporary fixture directory.
 

@@ -18,6 +18,6 @@
   ],
   "preview": {
     "run": "TMPDIR=\"$HOME\" exec go run ./cmd/board-preview -listen \"${HOST:?}:${PORT:?}\" -scratch \"$HOME/board-preview\"",
-    "path": "/?stage=zach"
+    "path": "/"
   }
 }

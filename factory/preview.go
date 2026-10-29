@@ -213,7 +213,7 @@ const previewReply = `DECISION: Approve the board layout plan?
 OVERVIEW: Make the board easy to read on desktop and phone screens. Check long text, choices, and card details before landing.
 NEEDS FROM ZACH: Choose an option so the agent can build it.
 
-The preview uses synthetic cards. Open a card to inspect its details, or switch stage tabs on a phone.
+The preview uses synthetic cards. Tap a card's title to see its details, or switch to All columns on a desktop.
 
 QUESTION: Which layout should the agent build?
 - Keep the clear layout (recommended)

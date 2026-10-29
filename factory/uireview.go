@@ -26,9 +26,10 @@ UI feedback:
 // boardLayoutRule applies only to this repo; other repos retain uiReviewRule.
 const boardLayoutRule = "\n\n" + computerUseRule + `
 UI check: this change touches the agent-factory board.
-- Follow README's Board layout checks. Run npm run board:screenshot -- --stage=zach
-  and add --card=preview-zach to inspect the panel. Inspect both 1280x800 and 390x844
-  PNGs and saved page text in .factory-evidence; use other fixture stages/cards as needed.
+- Follow README's Board layout checks. Run npm run board:screenshot (For you) and add
+  --card=preview-zach to inspect the panel or --view=columns for the desktop kanban. Inspect
+  both 1280x800 and 390x844 PNGs and saved page text in .factory-evidence; use other fixture
+  cards as needed.
 - Use computer use for every changed interactive flow on fake data. Read the current
   openai-computer-use skill first. Start cmd/board-preview bound to this host's tailnet IP
   from ` + "`tailscale ip -4`" + ` so the remote browser can reach it. The layout preview
@@ -46,7 +47,7 @@ UI feedback:
 // Included in the shared Fellow template as a conditional instruction, without
 // teaching agents working in other repos to run this repo's helper.
 const boardBuilderRule = `For UI changes in zachlatta/agent-factory, follow README's Board layout checks:
-run npm run board:screenshot -- --stage=zach (add --card=preview-zach for the panel),
+run npm run board:screenshot (add --card=preview-zach for the panel, --view=columns for the kanban),
 inspect desktop and phone captures and page text, and use computer use for changed
 interactive flows on fake data or a documented dry run. The helper checks layout;
 it does not prove mutations work. In other repos follow their UI checking instructions.`
