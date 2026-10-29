@@ -107,11 +107,10 @@ func TestParseClaudeUsage(t *testing.T) {
 	if got := u.Accounts[3].Summary; got != "usage unknown" {
 		t.Errorf("Accounts[3].Summary = %q, want usage unknown", got)
 	}
-	// Past an account's own reset, withAge flips only that window to 100%
-	// and leaves the cached reading untouched on repeated calls.
+	// A reset passing never replaces an observed reading with an estimate.
 	aged := withAge(u, time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC))
-	if got := aged.Accounts[0].Windows[0].RemainingPct; got != 100 {
-		t.Errorf("aged Accounts[0] 7d = %d%%, want 100 after its reset", got)
+	if got := aged.Accounts[0].Windows[0].RemainingPct; got != 59 {
+		t.Errorf("aged Accounts[0] 7d = %d%%, want observed 59", got)
 	}
 	if got := u.Accounts[0].Windows[0].RemainingPct; got != 59 {
 		t.Errorf("withAge mutated the cached account: 7d = %d%%, want 59", got)
@@ -197,8 +196,8 @@ func TestReadCodexUsage(t *testing.T) {
 	if got := withAge(u, t0.Add(48*time.Minute)).Extra; got != "shared pool · as of 1h ago" {
 		t.Errorf("at t0+48m Extra = %q, want %q", got, "shared pool · as of 1h ago")
 	}
-	if afterReset := withAge(u, time.Unix(1793513843, 0).Add(time.Minute)); afterReset.Summary != "100% 7d left" || afterReset.Windows[0].RemainingPct != 100 {
-		t.Errorf("after reset = %+v, want 100%% 7d left", afterReset)
+	if afterReset := withAge(u, time.Unix(1793513843, 0).Add(time.Minute)); afterReset.Summary != "96% 7d left" || afterReset.Windows[0].RemainingPct != 96 {
+		t.Errorf("after reset = %+v, want observed 96%% 7d left", afterReset)
 	}
 }
 

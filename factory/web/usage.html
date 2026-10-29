@@ -1,178 +1,188 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Usage · Factory</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#1f2328;background:#f6f8fa}
-body{margin:0}
-header,main{max-width:1280px;margin:auto;padding:20px}
-header{padding-top:calc(20px + env(safe-area-inset-top))}
-main{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
-a{color:#0969da}
-h1{margin:16px 0 8px}
-h2{font-size:22px}
-h3{font-size:16px;margin:0 0 10px}
-p,dd{line-height:1.5}
-.muted{color:#59636e;font-size:14px}
-.notice{padding:12px;background:#fff8c5;border:1px solid #d4a72c;border-radius:6px}
-.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
-article,details{background:white;border:1px solid #d1d9e0;border-radius:8px;padding:16px;min-width:0}
-article p{margin:6px 0}
-.account{border-top:1px solid #d1d9e0;margin-top:12px;padding-top:8px}
-#filters{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
-label{display:flex;flex-direction:column;gap:4px;font-size:14px}
-select,button{font:inherit;padding:7px;border:1px solid #8c959f;border-radius:5px;background:white;color:inherit}
-select{max-width:240px}
-button{cursor:pointer;align-self:end}
-summary{cursor:pointer;font-weight:600}
-.scroll{overflow:auto;max-height:65vh;background:white;border:1px solid #d1d9e0;border-radius:6px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid #d1d9e0}
-th{position:sticky;top:0;background:#f6f8fa;white-space:nowrap}
-td{max-width:260px;overflow-wrap:anywhere}
-td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.tag{display:block;font-size:12px;color:#59636e;margin-top:4px}
-dt{font-weight:600;margin-top:12px}
-dd{margin:4px 0}
-#loadError[hidden]{display:none}
-@media(max-width:600px){header,main{padding-left:12px;padding-right:12px}
-.plans{grid-template-columns:1fr}
-#filters label{width:calc(50% - 5px)}
-select{max-width:100%;width:100%}
-h1{font-size:26px}
-.scroll{max-height:70vh}
-}
+:root{font-family:system-ui,sans-serif;color:#1f2328;background:#f6f8fa;font-size:15px}*{box-sizing:border-box}body{margin:0}header,main{max-width:1200px;margin:auto;padding:24px}header{padding-top:calc(24px + env(safe-area-inset-top));padding-bottom:0}main{padding-bottom:calc(32px + env(safe-area-inset-bottom))}a{color:#0969da}h1{font-size:32px;margin:14px 0 6px}h2{font-size:23px;margin:0 0 8px}h3{font-size:16px;margin:0 0 10px}p{line-height:1.5;margin:8px 0}section{margin:0 0 32px}nav{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px}.muted,.tag{color:#59636e;font-size:13px}.tag{display:block;margin-top:5px}.notice{padding:12px;background:#fff8c5;border:1px solid #d4a72c;border-radius:8px}.good{color:#116329}.warn{color:#7d4e00}.bad{color:#a40e26}.badge{display:inline-block;padding:4px 8px;border-radius:5px;background:#eef1f4;font-size:13px;font-weight:600}.badge.good{background:#dafbe1}.badge.warn{background:#fff8c5}.badge.bad{background:#ffebe9}.plans,.metrics,.breakdowns{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.metrics{grid-template-columns:repeat(3,minmax(0,1fr));margin:16px 0}article,details{background:white;border:1px solid #d1d9e0;border-radius:8px;padding:16px;min-width:0}article p{margin:8px 0}.account+ .account{border-top:1px solid #d1d9e0;margin-top:14px;padding-top:14px}.account b{overflow-wrap:anywhere}.value{font-size:28px;font-weight:650;font-variant-numeric:tabular-nums;display:block}.controls,#filters{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:16px 0}label{display:flex;flex-direction:column;gap:5px;font-size:14px}select,input,button{font:inherit;padding:9px;border:1px solid #8c959f;border-radius:6px;background:white;color:inherit;max-width:100%}select{max-width:250px}button{cursor:pointer}button:hover{background:#eef1f4}button:disabled{opacity:.5;cursor:default}:focus-visible{outline:3px solid #0969da;outline-offset:2px}summary{cursor:pointer;font-weight:600}.scroll{overflow:auto;max-height:65vh;border:1px solid #d1d9e0;border-radius:6px;margin-top:14px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid #d1d9e0}th{position:sticky;top:0;background:#f6f8fa;white-space:nowrap}td{max-width:240px;overflow-wrap:anywhere}td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.rank{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:12px 0}.rank button{grid-column:1/-1;text-align:left;padding:0;border:0;background:none;color:#0969da;overflow-wrap:anywhere}.bar{height:7px;background:#dbeafe;grid-column:1/-1;border-radius:4px;overflow:hidden}.bar span{height:100%;background:#0969da;display:block}.issue{border-top:1px solid #d1d9e0;padding:12px 0}.issue button{margin-top:8px}.pager{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px}#periodNote{max-width:800px}[hidden]{display:none!important}dt{font-weight:600;margin-top:12px}dd{margin:4px 0;line-height:1.5}.chart{display:flex;align-items:end;gap:4px;height:125px;margin:16px 0 0}.day{display:flex;flex-direction:column;justify-content:end;align-items:center;flex:1;height:100%;min-width:0;font-size:11px}.day i{background:#0969da;width:80%;min-height:2px;display:block;border-radius:3px 3px 0 0}.day span{margin-top:6px}.chart-label{margin-top:8px}
+@media(max-width:600px){header,main{padding-left:14px;padding-right:14px}h1{font-size:28px}h2{font-size:21px}.metrics{grid-template-columns:1fr}.metrics article{display:flex;justify-content:space-between;align-items:center;gap:10px}.value{font-size:24px}.plans,.breakdowns{grid-template-columns:1fr}#filters label{width:calc(50% - 6px)}#filters select{width:100%;max-width:100%}.controls{align-items:stretch}.controls label{width:100%}.controls select{max-width:100%}nav{gap:12px}article,details{padding:14px}.scroll{max-height:65vh}}
 
+/* Keep all subscription readings together, before recommendations or analysis. */
+.subscriptions{table-layout:fixed;background:white;border:1px solid #d1d9e0;border-radius:8px;overflow:hidden;font-size:14px}
+.subscriptions thead th{position:static;color:#59636e;font-size:12px;font-weight:500;padding:8px 14px}
+.subscriptions th:first-child{width:38%}
+.subscriptions tbody th{position:static;background:white;white-space:normal;font-weight:400}
+.subscriptions tbody th,.subscriptions td{padding:12px 14px;vertical-align:middle}
+.subscriptions tbody tr:last-child>*{border-bottom:0}
+.account-label,.reading-age,.reading-state{display:block;font-size:12px;line-height:1.5}
+.account-email{display:block;color:#59636e;font-size:11px;line-height:1.5;overflow-wrap:anywhere}.account-label{color:#59636e}.reading-age{color:#59636e}.reading-state{font-weight:600}
+.quota strong{display:block;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.quota>span{display:block;font-size:12px;color:#59636e;line-height:1.5}
+.quota-bar{height:5px;border-radius:4px;background:#eef1f4;overflow:hidden;max-width:180px;margin:5px 0}
+.quota-bar i{display:block;height:100%;background:#0969da}.quota.old .quota-bar i{background:#8c959f}.quota.low .quota-bar i{background:#bf8700}.quota.empty .quota-bar i{background:#cf222e}
+.quota-unknown{font-size:13px;color:#59636e}.extra-window{margin-top:8px}
+#recommendation{margin:12px 0}#allowanceDetails{padding:10px 14px}#allowanceDetailsBody{margin-top:12px}
+@media(max-width:600px){header{padding-top:calc(14px + env(safe-area-inset-top))}main{padding-top:12px}h1{margin:8px 0 0}#capacity h2{font-size:19px}#capacity>p:first-of-type{margin:4px 0 10px}.subscriptions th:first-child{width:36%}.subscriptions thead th{padding:7px 8px;white-space:normal}.subscriptions tbody th,.subscriptions td{padding:9px 8px}.subscriptions b{font-size:13px}.quota strong{font-size:18px}.quota-bar{margin:4px 0}.quota .reset{font-size:11px}.account-label,.reading-age,.reading-state{font-size:11px}#capacity nav{margin-top:12px}}
 </style>
 </head>
 <body>
-<header><a href="/">← Factory</a><h1>Usage</h1>
-<p>Subscription allowances cover activity across devices. Recorded local tokens below cover only retained sessions on this factory host. These figures cannot be reconciled as a bill.</p>
-<div id="loadError" class="notice" role="alert" hidden></div>
-<p id="snapshot" role="status">Loading recorded usage…</p></header>
+<header><a href="/">← Factory</a><h1>Usage</h1><div id="loadError" class="notice" role="alert" hidden></div></header>
 <main>
-<section aria-labelledby="allowanceHeading"><h2 id="allowanceHeading">Subscription allowances</h2>
-<p class="muted">One entry per provider and plan, independent of the token filters. Historical account attribution is unknown; current account allowances do not identify which account paid for earlier tokens.</p>
-<div class="plans" id="plans">Loading allowances…</div></section>
-<section aria-labelledby="recordedHeading"><h2 id="recordedHeading">Recorded local tokens</h2>
-<p class="notice" id="coverage">Waiting for a bounded scan. This is not complete history.</p>
-<p>Input includes cached input. Cache read/write and Reasoning counts are subsets of input/output; total is input plus output. Missing or unsupported records are unavailable, not proof of zero usage.</p>
-<div id="filters" aria-label="Token filters"></div>
-<p id="totals" aria-live="polite"></p>
-<p id="transcriptStatus" class="muted"></p>
-<div class="scroll" tabindex="0" role="region" aria-label="Recorded token rows"><table>
-<thead><tr><th>Plan / model</th><th>Role</th><th>Card / agent</th><th>Recorded stage</th><th>Status</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num">Reasoning</th><th class="num">Total</th></tr></thead>
-<tbody id="rows"><tr><td colspan="11">Waiting for recorded usage…</td></tr></tbody>
-</table></div></section>
-<details style="margin-top:20px"><summary>How to read roles, stages and coverage</summary>
-<dl>
-<dt>Fellow (fellow)</dt><dd>The card's agent owns planning, building, rework and landing.</dd>
-<dt>Plan reviewer (plan reviewer) / code reviewer (code reviewer)</dt><dd>Separate agents check the plan or built work. A recorded review round is shown when available.</dd>
-<dt>Scout (scout)</dt><dd>Looks for useful work and proposes ideas.</dd>
-<dt>Repo picker (picker)</dt><dd>Chooses the repository for a request before its card starts.</dd>
-<dt>Sub-agent (sub-agent)</dt><dd>A delegated Paseo agent belongs to its owning card, including nested delegation. Claude's built-in sub-agent files are included under their owning agent, card and stage, rather than shown as separate Paseo agents.</dd>
-<dt>Other / unassigned</dt><dd>Other is the existing role for agents outside these factory roles. Shared sessions with conflicting owners or roles remain unassigned; duplicate references do not add tokens twice.</dd>
-<dt>Recorded stages</dt><dd>Stages use the same identifiers and descriptions as the board. A span identifies a recorded visit, so repeated Building visits remain distinct; a round identifies a recorded review round.</dd>
-</dl><dl id="stages"></dl>
-<p>Initial Codex cumulative readings, ambiguous intervals crossing stage boundaries, and missing or expired timing stay unassigned. Timing history is retained for 30 days. Stage attribution describes the recorded interval, not the current board column.</p>
-<p>Each scan is bounded to 2,000 newly changed metadata files, 32 MiB per session per refresh, 128 MiB of session data and 20 seconds. Later scans read only records not counted yet, so a large history is counted over several scans; until then coverage says LIMITED and the counts are partial. Coverage includes built-in Claude sub-agent files. Missing, unsupported, duplicate and limit-skipped sessions are reported separately.</p>
-<p>Records can disappear after cleanup and totals can shrink. Disappeared sources are detected against this process's prior inventory only on scans that are not limited; restarting forgets that inventory. Timing entries without agent metadata cannot supply token records.</p>
-<p>Complete snapshots are cached for up to five minutes. While coverage is limited, a request after 15 seconds counts the next bounded slice; nothing is counted while no one requests usage. This page polls for updated snapshots; reloading does not force a new collection. Transcript links are offered only for agents currently available through the board; older retained usage can outlive that access.</p>
-</details>
+<section id="capacity" aria-labelledby="allowanceHeading">
+<h2 id="allowanceHeading">Your subscriptions</h2>
+<p class="muted">Last known usage across devices. Older readings stay visible.</p>
+<div id="plans">Loading subscription readings…</div>
+<p id="recommendation" class="muted" role="status">Checking subscription allowances…</p>
+<details id="allowanceDetails"><summary>Reading details and reset times</summary><div class="plans" id="allowanceDetailsBody"></div><p class="muted">Percentages above show usage consumed, with remaining allowance underneath. A reset passing does not replace the last known reading. Subscription allowances cover activity across devices and cannot guarantee a task will fit. Recommendations compare current accounts only and never switch accounts. Token filters below do not change these allowances.</p></details>
+<nav aria-label="Usage sections"><a href="#consumption">Consumption</a><a href="#confidence">Data confidence</a></nav>
+</section>
+<section id="consumption" aria-labelledby="recordedHeading"><h2 id="recordedHeading">Where did usage go?</h2><p id="snapshot" class="muted" role="status">Loading recorded usage…</p><p>Recorded local tokens from retained sessions on this factory host, including archived agents. Token volume is not money spent or subscription quota.</p>
+<p id="selection" class="muted"></p><button id="resetSelection" hidden>Show all work</button>
+<div class="controls"><label>Time period<select id="period"><option value="today">Today (UTC, in progress)</option><option value="week" selected>Last 7 complete days (UTC)</option><option value="month">Last 30 complete days (UTC)</option><option value="all">All retained history</option></select></label></div>
+<p id="periodNote" class="muted"></p><p id="dateCoverage" class="notice"></p>
+<div class="metrics" id="metrics" aria-live="polite"></div>
+<article><h3>Daily recorded tokens</h3><div id="trend"></div></article>
+<div class="breakdowns" style="margin-top:12px"><article><h3>Largest consumers</h3><p class="muted">Cards include their reviews and delegated work. Work without a card is listed by agent.</p><div id="topCards"></div></article><article><h3>By model</h3><div id="byModel"></div><h3 style="margin-top:24px">By role</h3><div id="byRole"></div></article></div>
+<p id="attribution" class="muted"></p>
+<details id="records" style="margin-top:16px"><summary>Explore records</summary><p>Choose a consumer above or use filters here. Summaries above follow these filters. Allowances and source coverage stay unchanged.</p>
+<div id="filters" aria-label="Token filters"></div><p id="totals" aria-live="polite"></p><p id="transcriptStatus" class="muted">Open evidence to inspect a retained transcript, including archived work. Missing records may have no transcript.</p>
+<div class="scroll" tabindex="0" role="region" aria-label="Recorded token rows"><table><thead><tr><th>Work / agent</th><th>Model / role</th><th>Day (UTC)</th><th>Stage / visit</th><th>Source status</th><th class="num">Input</th><th class="num">Output</th><th class="num">Total</th><th>Evidence</th></tr></thead><tbody id="rows"><tr><td colspan="9">Waiting for recorded usage…</td></tr></tbody></table></div>
+<div class="pager"><button id="prevPage">Previous</button><span id="pageLabel"></span><button id="nextPage">Next</button></div>
+<p class="muted">Input includes cached input. Cache read/write and Reasoning counts are subsets; total is input plus output. Open row details for exact subset counts.</p></details></section>
+<section id="confidence" aria-labelledby="confidenceHeading"><h2 id="confidenceHeading">Can I trust these numbers?</h2><p id="confidenceSummary" class="notice">Waiting for coverage…</p><div id="issues"></div><details style="margin-top:12px"><summary>Source coverage and counting rules</summary><p id="coverage">Waiting for a bounded scan. This is not complete history.</p><p>Missing or unsupported records are unavailable, not evidence of zero usage. Unknown token volume cannot be estimated from a session count. Errors can leave known counts partial.</p><p>Historical account attribution is unknown. Current account allowances do not identify which account paid for earlier tokens. These figures cannot be reconciled as a bill.</p><p>Initial Codex cumulative readings and intervals crossing UTC days are excluded from dated summaries. Unknown dates remain in All retained history. Intervals crossing stage boundaries, conflicting owners, and missing or expired timing stay unassigned. Timing history is retained for 30 days. A recorded visit (span) identifies repeated Building visits; a review round identifies repeated review. Built-in sub-agent files use their owner's card and stage.</p><p>Each scan is bounded to 2,000 changed metadata files, 32 MiB per session per refresh, 128 MiB overall and 20 seconds. LIMITED means counts are partial. Another bounded slice can start after 15 seconds while the page is open. Complete snapshots are cached for five minutes. Reloading does not force a collection.</p><p>Cleanup can remove records and shrink totals or alter comparisons. Disappeared sources are detected only against this process's prior inventory on complete scans. Restarting forgets that inventory. Comparisons describe the records retained now, not an immutable ledger.</p><dl id="stages"></dl></details></section>
 </main>
 <script>
 // usage helpers: begin
 const countKeys=['input','output','cacheRead','cacheWrite','reasoning','total'];
-const filterKeys=['provider','plan','model','role','card','agent','stage'];
+const filterKeys=['provider','plan','model','role','card','agent','stage','status'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const emailHTML=email=>esc(email).replace('@','@<wbr>');
 const number=n=>Number(n||0).toLocaleString();
+const compact=n=>Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n||0);
+const pct=(n,total)=>total?`${(100*n/total).toFixed(1)}%`:'unavailable';
+const roleName=id=>({fellow:'Builder / planner',other:'Other work','sub-agent':'Delegated work',picker:'Repository selection',scout:'Work discovery'}[id]||id||'Unassigned');
 const stageName=(id,stages)=>(stages||[]).find(s=>s[0]===id)?.[1]||id||'unassigned';
-function selectRows(rows,filters){return rows.filter(r=>filterKeys.every(k=>!filters[k]||(r[k]||'unassigned')===filters[k]));}
-function sumCounts(rows){
-  const c=Object.fromEntries(countKeys.map(k=>[k,0]));
-  for(const r of rows)for(const k of countKeys)c[k]+=Number(r.counts?.[k]||0);
-  c.total=c.input+c.output;return c;
-}
-function freshness(at){
-  if(!at||!Number.isFinite(Date.parse(at)))return 'freshness unknown';
-  const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));
-  return `${minutes} min old · ${new Date(at).toLocaleString()}`;
-}
+function selectRows(rows,filters){return rows.filter(r=>filterKeys.every(k=>!filters[k]||(r[k]||'unassigned')===filters[k])&&(!filters.undated||!r.day)&&(!filters.query||[r.title,r.cardTitle,r.agent,r.card,r.model].join(' ').toLowerCase().includes(filters.query.toLowerCase())));}
+function sumCounts(rows){const c=Object.fromEntries(countKeys.map(k=>[k,0]));for(const r of rows)for(const k of countKeys)c[k]+=Number(r.counts?.[k]||0);c.total=c.input+c.output;return c;}
+function freshness(at){if(!at||!Number.isFinite(Date.parse(at)))return 'freshness unknown';const mins=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));const age=mins<60?`${mins} min`:mins<1440?`${Math.floor(mins/60)} h`:`${Math.floor(mins/1440)} d`;return `${age} old · ${new Date(at).toLocaleString()}`;}
 function snapshotText(v){return v.updatedAt?`${v.refreshing?'Refreshing; showing cached snapshot. ':''}Recorded snapshot ${freshness(v.updatedAt)}.`:'Waiting for the first recorded snapshot; refreshing.';}
 const mib=n=>(Number(n||0)/1048576).toFixed(1)+' MiB';
-function coverageText(c){
-  const progress=c.limited?` Older sessions are still being counted: ${mib(c.pendingBytes)} of found session records not counted yet, plus any sessions not reached; while this page is open, another bounded slice runs about every 15 seconds until coverage is complete.`:'';
-  return `Retained local records only — bounded scan${c.limited?' LIMITED; counts are partial':''}.${progress} ${c.agents||0} agents; ${c.readableSessions||0} readable sessions; ${c.missingSessions||0} missing; ${c.unsupportedSessions||0} unsupported; ${c.errors||0} errors; ${c.duplicateSessions||0} duplicate references; ${c.timingWithoutAgent||0} timing entries without agents; ${c.disappearedSources||0} disappeared sources; ${c.limitedSessions||0} limit-skipped sessions. Not complete history.`;
+function coverageText(c){return `Retained local records only — bounded scan${c.limited?' LIMITED; counts are partial. Older sessions are still being counted; '+mib(c.pendingBytes)+' not counted yet. Another slice can start after 15 seconds.':'.'} ${c.agents||0} agents; ${c.readableSessions||0} readable sessions; ${c.missingSessions||0} missing; ${c.unsupportedSessions||0} unsupported; ${c.errors||0} errors; ${c.duplicateSessions||0} duplicate references; ${c.timingWithoutAgent||0} timing entries without agents; ${c.disappearedSources||0} disappeared sources; ${c.limitedSessions||0} limit-skipped sessions. Not complete history.`;}
+const dayMs=86400000;
+function periodRange(period,now=Date.now()) {const today=Math.floor(now/dayMs)*dayMs;if(period==='all')return null;if(period==='today')return {start:today,end:today+dayMs,days:1,ongoing:true};const days=period==='month'?30:7;return {start:today-days*dayMs,end:today,days};}
+function previousRange(range){return range?{start:range.start-range.days*dayMs,end:range.start,days:range.days}:null;}
+function selectPeriod(rows,range){return range?rows.filter(r=>r.day&&Date.parse(r.day)>=range.start&&Date.parse(r.day)<range.end):rows;}
+function groupCounts(rows,key){const groups=new Map();for(const r of rows){const id=key==='card'?(r.card||r.agent||'unassigned'):(r[key]||'unassigned');const g=groups.get(id)||{id,label:key==='card'?(r.cardTitle||r.title||id):key==='role'?roleName(id):id,key:key==='card'?(r.card?'card':'agent'):key,total:0};g.total+=Number(r.counts?.input||0)+Number(r.counts?.output||0);groups.set(id,g)}return [...groups.values()].sort((a,b)=>b.total-a.total||a.id.localeCompare(b.id));}
+function usageStats(rows){const total=sumCounts(rows).total;return {total,review:sumCounts(rows.filter(r=>(r.role||'').includes('reviewer'))).total,rework:sumCounts(rows.filter(r=>r.rework)).total,unassigned:sumCounts(rows.filter(r=>!r.stage||r.stage==='unassigned')).total,undated:sumCounts(rows.filter(r=>!r.day)).total};}
+function capacity(u={},now=Date.now()) {
+ const windows=u.windows||[];let state='ready',label='Headroom available',tone='good';
+ if(!windows.length){state='unknown';label='Allowance unavailable';tone='warn'}
+ else if(windows.some(w=>w.resetsAt&&Date.parse(w.resetsAt)<=now)){state='expired';label='Reset passed · needs a new reading';tone='warn'}
+ else if(u.refreshError||!u.updatedAt||!Number.isFinite(Date.parse(u.updatedAt))||now-Date.parse(u.updatedAt)>10*60000){state='stale';label='Needs a fresh reading';tone='warn'}
+ else if(u.estimated){state='estimated';label='Estimated · no usage reported';tone='warn'}
+ else if(windows.some(w=>w.remainingPct<=0)){state='exhausted';label='Quota exhausted';tone='bad'}
+ else if(windows.some(w=>w.remainingPct<=20)){state='low';label='Low headroom';tone='warn'}
+ const week=windows.find(w=>w.label==='7d');const reset=Date.parse(week?.resetsAt);const pace=week&&reset>now?week.remainingPct-Math.min(100,(reset-now)/(7*dayMs)*100):null;
+ return {state,label,tone,pace};
 }
-function allowanceHTML(u={}){
-  return `<p>${esc(u.summary||'Allowance unknown')}</p>`+(u.windows||[]).map(w=>`<p>${esc(w.label)}: <b>${esc(w.remainingPct)}% remaining</b><br><span class="muted">Resets ${esc(w.resetsAt?new Date(w.resetsAt).toLocaleString():'unknown')}</span></p>`).join('')+
-    (u.extra?`<p>${esc(u.extra)}</p>`:'')+`<p class="muted">${esc(freshness(u.updatedAt))}</p>`;
+function allowanceHTML(u={},error='') {
+ const data={...u,refreshError:error||u.refreshError},c=capacity(data);
+ return `<p><span class="badge ${c.tone}">${esc(c.label)}</span></p>`+(u.windows||[]).map(w=>`<p><b>${esc(w.remainingPct)}% remaining</b> · ${esc(w.label)}<span class="tag">${w.resetsAt?`${Date.parse(w.resetsAt)<=Date.now()?'Previous reset':'Resets'} ${esc(new Date(w.resetsAt).toLocaleString())}`:'Reset time unavailable'}</span></p>`).join('')+
+ (c.pace!==null&&['ready','low'].includes(c.state)?`<p class="muted">${Math.abs(c.pace).toFixed(0)} percentage points ${c.pace>=0?'ahead of':'behind'} a steady weekly pace.</p>`:'')+
+ `<p class="muted">${esc(u.source||'Provider allowance')} · ${esc(freshness(u.updatedAt))}</p>`+(data.refreshError?`<p class="warn">${esc(data.refreshError)}</p>`:'')+(c.state==='expired'?'<p class="muted">The previous percentage is shown for reference; current capacity is unknown.</p>':'');
+}
+function accountReading(allowance,account){
+ return {...account,refreshError:allowance.refreshError||account.refreshError};
+}
+function allowanceDetailsHTML(plans=[]){const seen=new Set();return plans.filter(p=>{const k=JSON.stringify([p.provider,p.plan]);if(seen.has(k))return false;seen.add(k);return true}).map(p=>`<article><h3>${esc(p.plan)}</h3>${p.status&&p.status!=='available'?`<p class="warn">Provider ${esc(p.status)} on this host</p>`:''}${p.allowance?.accounts?.length?(p.allowance.accounts.map(a=>`<div class="account"><b>${esc(a.label)}</b>${a.active?' · active':''}${a.email?`<span class="account-email">${emailHTML(a.email)}</span>`:''}${allowanceHTML(accountReading(p.allowance,a))}</div>`).join('')):allowanceHTML(p.allowance)}</article>`).join('')||'Allowances unavailable.';}
+function readingAge(at){
+ if(!at||!Number.isFinite(Date.parse(at)))return 'Time unknown';
+ const m=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));
+ return m<1?'Just checked':`Checked ${m<60?m+'m':m<1440?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'} ago`;
+}
+function resetText(at){
+ if(!at||!Number.isFinite(Date.parse(at)))return 'Reset unknown';
+ const m=Math.ceil((Date.parse(at)-Date.now())/60000);
+ if(m<=0)return 'Reset passed';
+ const duration=m<60?m+'m':m<1440?Math.floor(m/60)+'h'+(m%60?' '+m%60+'m':''):Math.floor(m/1440)+'d'+(Math.floor(m%1440/60)?' '+Math.floor(m%1440/60)+'h':'');
+ return `Resets in ${duration}`;
+}
+function quotaHTML(w,reading){
+ if(!w)return `<span class="quota-unknown">${reading?'Not reported':'No reading'}</span>`;
+ const used=Math.max(0,Math.min(100,100-Number(w.remainingPct))),c=capacity(reading);
+ const muted=['stale','expired','estimated'].includes(c.state),tone=muted?'old':used>=100?'empty':used>=80?'low':'normal';
+ return `<div class="quota ${tone}"><strong>${used}% used</strong><span>${esc(w.remainingPct)}% left</span><div class="quota-bar" aria-hidden="true"><i style="width:${used}%"></i></div><span class="reset" title="${esc(w.resetsAt?new Date(w.resetsAt).toLocaleString():'Reset time unavailable')}">${esc(resetText(w.resetsAt))}</span></div>`;
 }
 function plansHTML(plans=[]){
-  const seen=new Set();
-  return plans.filter(p=>{const key=JSON.stringify([p.provider,p.plan]);if(seen.has(key))return false;seen.add(key);return true}).map(p=>`<article><h3>${esc(p.plan)} · ${esc(p.provider)}</h3>${p.allowance?.accounts?.length?'<p class="muted">Current account allowances</p>':allowanceHTML(p.allowance)}${(p.allowance?.accounts||[]).map(a=>`<div class="account"><b>${esc(a.label)}</b>${a.active?' · active':''}${a.email?` · ${esc(a.email)}`:''}${allowanceHTML(a)}</div>`).join('')}</article>`).join('')||'Allowances unavailable.';
+ const seen=new Set(),rows=[];
+ for(const p of plans){
+  const key=JSON.stringify([p.provider,p.plan]);if(seen.has(key))continue;seen.add(key);
+  const allowance=p.allowance||{},accounts=allowance.accounts?.length?allowance.accounts:[allowance];
+  for(const account of accounts){
+   const u=accountReading(allowance,account),windows=u.windows||[],state=capacity(u);
+   const status=u.refreshError?'Refresh failed':{ready:'',stale:'Older reading',expired:'Reset passed',low:'Low remaining',exhausted:'Exhausted',estimated:'Estimate',unknown:'No reading'}[state.state];
+   const extra=windows.filter(w=>!['7d','5h'].includes(w.label));
+   rows.push(`<tr class="subscription-row" data-provider="${esc(p.provider)}"><th scope="row"><b>${esc(p.plan)}</b>${account.label?`<span class="account-label">${esc(account.label)}${account.active?' · active':''}</span>`:''}${account.email?`<span class="account-email">${emailHTML(account.email)}</span>`:''}<span class="reading-age" title="${esc(u.updatedAt?new Date(u.updatedAt).toLocaleString():'Observation time unavailable')}">${esc(readingAge(u.updatedAt))}</span>${status?`<span class="reading-state ${state.tone}">${esc(status)}</span>`:''}</th><td>${quotaHTML(windows.find(w=>w.label==='7d'),windows.length?u:null)}</td><td>${quotaHTML(windows.find(w=>w.label==='5h'),windows.length?u:null)}${extra.map(w=>`<div class="extra-window"><b>${esc(w.label)} window</b>${quotaHTML(w,u)}</div>`).join('')}</td></tr>`);
+  }
+ }
+ return rows.length?`<table class="subscriptions"><thead><tr><th scope="col">Subscription</th><th scope="col">Weekly usage</th><th scope="col">5-hour usage</th></tr></thead><tbody>${rows.join('')}</tbody></table>`:'Subscription readings unavailable.';
 }
-function transcriptLink(id,label,available){return available.has(id)?`<a href="/t/${encodeURIComponent(id)}">${esc(label||id)}</a>`:esc(label||id||'unassigned');}
-function rowsHTML(rows,stages,available){
-  return rows.map(r=>{
-    const unavailable=['missing','unsupported','duplicate','limited','error'].includes(r.status)&&!countKeys.some(k=>r.counts?.[k]>0);
-    return `<tr><td>${esc(r.plan)}<span class="tag">${esc(r.provider)} · ${esc(r.model||'model unknown')}</span></td><td>${esc(r.role||'unassigned')}</td>
-<td>${transcriptLink(r.card,r.cardTitle||r.card,available)}<span class="tag">Agent: ${transcriptLink(r.agent,r.title||r.agent,available)}</span>${!available.has(r.agent)?'<span class="tag">Transcript unavailable</span>':''}</td>
-<td>${esc(stageName(r.stage,stages))}<span class="tag">${esc(r.stage||'unassigned')}${r.span?` · span ${r.span}`:' · unassigned span'}${r.round?` · round ${r.round}`:''}</span></td>
-<td>${esc(r.status||'unknown')}${r.sharedSession?'<span class="tag">shared session</span>':''}</td>${countKeys.map(k=>`<td class="num">${unavailable?'—':number(r.counts?.[k])}</td>`).join('')}</tr>`;
-  }).join('')||'<tr><td colspan="11">No recorded rows match these filters.</td></tr>';
-}
-async function fetchJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error(`HTTP ${r.status}`);return r.json();}
+function recommendation(plans){const candidates=[];for(const p of plans||[]){if(p.status!=='available')continue;const u=p.allowance||{},a=u.accounts?.length?u.accounts.find(a=>a.active):u;if(!a)continue;const c=capacity(accountReading(u,a));if(c.state==='ready')candidates.push({label:p.plan,pace:c.pace??-100,remaining:Math.min(...a.windows.map(w=>w.remainingPct))})}candidates.sort((a,b)=>b.pace-a.pace||b.remaining-a.remaining);return candidates.length?`Suggested next: ${candidates[0].label}. Based on remaining allowance and reset timing.`:'No provider has confirmed comfortable headroom. Check the warnings below before starting a large task.';}
+
+const statusHelp={missing:'Local session not found. Counts are unavailable; restore retained records if they should exist.',unsupported:'This provider or record has no supported token counter. Counts are unavailable.',error:'Some records could not be read or validated. Known counts can be partial. Inspect evidence; restore or repair the source before treating it as complete.',limited:'Collection is still in progress. Keep this page open for the next slice.',duplicate:'Another agent references this session. Tokens are counted once under the owning row.',readable:'Retained counters were read. Scope and attribution limits still apply.'};
+function rowKey(r){return JSON.stringify([r.agent,r.model,r.day,r.span,r.stage,r.status,r.timeReason])}
+function rowsHTML(rows,stages,openRows=new Set()){return rows.map(r=>{const unavailable=['missing','unsupported','duplicate','limited','error'].includes(r.status)&&!countKeys.some(k=>r.counts?.[k]>0);return `<tr><td>${esc(r.cardTitle||r.card||'Unassigned')}<span class="tag">Agent: ${esc(r.title||r.agent)}</span></td><td>${esc(r.model||'model unknown')}<span class="tag">${esc(r.provider)} · ${esc(r.plan)} · ${esc(roleName(r.role))}</span></td><td>${esc(r.day||'Unknown')}<span class="tag">${esc(r.timeReason||'')}</span></td><td>${esc(stageName(r.stage,stages))}<span class="tag">${r.span?`span ${r.span}`:'unassigned span'}${r.round?` · round ${r.round}`:''}${r.rework?' · repeated build':''}</span><span class="tag">${esc(r.stageReason||'')}</span></td><td>${esc(r.status||'unknown')}${r.sharedSession?'<span class="tag">shared session</span>':''}</td>${['input','output','total'].map(k=>`<td class="num">${unavailable?'—':number(r.counts?.[k])}</td>`).join('')}<td><details data-row="${esc(rowKey(r))}"${openRows.has(rowKey(r))?' open':''}><summary>Row details</summary><p>${esc(statusHelp[r.status]||'Status unavailable')}</p><p>Cache read: ${unavailable?'—':number(r.counts?.cacheRead)}<br>Cache write: ${unavailable?'—':number(r.counts?.cacheWrite)}<br>Reasoning: ${unavailable?'—':number(r.counts?.reasoning)}</p><p>${r.evidence?`<a href="/usage/agent/${encodeURIComponent(r.agent)}">Open retained transcript</a>`:'Transcript unavailable: no supported retained main session was found.'}</p><p class="muted">${esc(r.agent)}</p></details></td></tr>`}).join('')||'<tr><td colspan="9">No recorded rows match. Try another period or clear the filters. This does not prove zero usage.</td></tr>';}
+async function fetchJSON(url){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),12000);try{const r=await fetch(url,{cache:'no-store',signal:ctrl.signal});if(!r.ok)throw Error(`HTTP ${r.status}`);return await r.json()}finally{clearTimeout(timer)}}
 // usage helpers: end
 const $=id=>document.getElementById(id);
-let view=null,available=new Set(),filters={};
+let view=null,filters={},page=0,period='week';
+const pageSize=40;
+function ranking(rows,key){const groups=groupCounts(rows,key),total=sumCounts(rows).total;return groups.filter(g=>g.total>0).slice(0,8).map(g=>`<div class="rank"><button data-filter="${esc(g.key)}" data-value="${esc(g.id)}">${esc(g.label)}</button><span>${compact(g.total)} tokens</span><span class="muted">${pct(g.total,total)}</span><div class="bar"><span style="width:${total?100*g.total/total:0}%"></span></div></div>`).join('')||'<p class="muted">No recorded counts in this selection.</p>';}
 function renderRows(){
-  if(!view.updatedAt){
-    $('rows').innerHTML='<tr><td colspan="11">Waiting for the first recorded snapshot…</td></tr>';
-    $('totals').textContent='Waiting for recorded counts; totals are not available yet.';return;
-  }
-  const rows=selectRows(view.rows||[],filters),c=sumCounts(rows);
-  $('rows').innerHTML=rowsHTML(rows,view.stages,available);
-  $('totals').textContent=`${rows.length} matching rows · ${number(c.input)} input + ${number(c.output)} output = ${number(c.total)} recorded tokens. Subsets: ${number(c.cacheRead)} cache read, ${number(c.cacheWrite)} cache write, ${number(c.reasoning)} reasoning. Coverage limits still apply.`;
+ if(!view?.updatedAt){$('rows').innerHTML='<tr><td colspan="9">Waiting for the first recorded snapshot…</td></tr>';$('totals').textContent='Waiting for recorded counts; totals are not available yet.';return}
+ const range=periodRange(period),all=selectRows(view.rows||[],filters),rows=selectPeriod(all,range).sort((a,b)=>(b.counts?.total||0)-(a.counts?.total||0)),stats=usageStats(rows),prev=usageStats(selectPeriod(all,previousRange(range))),allStats=usageStats(all);
+ const hasCounts=rows.some(r=>r.status==='readable'||(Number(r.counts?.input||0)+Number(r.counts?.output||0))>0);
+ const maxPage=Math.max(0,Math.ceil(rows.length/pageSize)-1);page=Math.min(page,maxPage);
+ const openRows=new Set([...document.querySelectorAll('#rows details[open]')].map(d=>d.dataset.row));
+ $('rows').innerHTML=rowsHTML(rows.slice(page*pageSize,(page+1)*pageSize),view.stages,openRows);
+ $('totals').textContent=`${rows.length} matching rows · ${hasCounts?number(stats.total)+' recorded tokens':'Counts unavailable for this selection'}. Coverage limits still apply.`;
+ $('pageLabel').textContent=`Page ${page+1} of ${maxPage+1}`;$('prevPage').disabled=page===0;$('nextPage').disabled=page===maxPage;
+ $('selection').textContent=Object.entries(filters).filter(([,v])=>v).map(([k,v])=>`${k}: ${k==='card'?view.rows.find(r=>r.card===v)?.cardTitle||v:k==='agent'?view.rows.find(r=>r.agent===v)?.title||v:v}`).join(' · ');$('resetSelection').hidden=!Object.values(filters).some(Boolean);
+ $('periodNote').textContent=range?`${new Date(range.start).toISOString().slice(0,10)} through ${new Date(range.end-dayMs).toISOString().slice(0,10)} · UTC. ${range.ongoing?'Today is still in progress; compare its daily bar with full days cautiously.':'Compared with the preceding '+range.days+' complete UTC days.'}`:'All retained dates, including unknown dates. Cleanup can shrink these totals.';
+ const unknown=allStats.undated,partial=!!view.coverage?.limited;$('dateCoverage').className=unknown||partial?'notice':'muted';
+ $('dateCoverage').textContent=(partial?'Still counting retained records; these totals are partial. ':'')+(!hasCounts?'No usable recorded counts in this selection. Missing or unsupported counts are not zero usage.':unknown?`${number(unknown)} recorded tokens have an uncertain date${range?' and are excluded from this period':''}. Choose All retained history to inspect them. Missing sources can also hide unknown amounts.`:'All counted tokens in this selection have a usable date. Missing or unreadable sources can still hide usage.');
+ let comparison='No period comparison for retained-history totals.';
+ if(range&&!range.ongoing)comparison=prev.total?`${((stats.total-prev.total)/prev.total*100).toFixed(1)}% versus preceding ${range.days} days (${compact(prev.total)} recorded).`:'No recorded baseline in the preceding period; change is unavailable.';
+ if(range?.ongoing)comparison=`Yesterday: ${compact(prev.total)} recorded tokens (full UTC day).`;
+ if(!hasCounts)comparison='No usable recorded counts in this selection; change is unavailable.';
+ if(partial)comparison='Comparison waits until the retained-record scan finishes.';
+ $('metrics').innerHTML=`<article><div>Recorded tokens<span class="muted tag">${esc(comparison)} Retained records only.</span></div><span class="value">${hasCounts?compact(stats.total):'Unavailable'}</span></article><article><div>Review share<span class="muted tag">${compact(stats.review)} tokens · includes all reviewer roles</span></div><span class="value">${pct(stats.review,stats.total)}</span></article><article><div>Repeated build share<span class="muted tag">${compact(stats.rework)} tokens · recorded later Building visits only</span></div><span class="value">${pct(stats.rework,stats.total)}</span></article>`;
+ $('topCards').innerHTML=ranking(rows,'card');$('byModel').innerHTML=ranking(rows,'model');$('byRole').innerHTML=ranking(rows,'role');
+ $('attribution').textContent=`${pct(stats.unassigned,stats.total)} of selected recorded tokens lack a stage. Repeated build share is a known minimum; unknown stages cannot be classified. Use Data confidence to inspect gaps.`;
+ const chartRange=range||periodRange('month');const chartDays=chartRange.ongoing?7:chartRange.days;const end=chartRange.end,start=end-chartDays*dayMs;
+ const days=Array.from({length:chartDays},(_,i)=>{const day=new Date(start+i*dayMs).toISOString().slice(0,10);return {day,total:sumCounts(all.filter(r=>r.day===day)).total}}),peak=Math.max(1,...days.map(d=>d.total));
+ const dailyOpen=document.getElementById('dailyDetails')?.open;
+ $('trend').innerHTML=`<div class="chart" role="img" aria-label="Daily recorded tokens. Exact daily counts follow below.">${days.map(d=>`<div class="day" title="${esc(d.day)}: ${number(d.total)} recorded tokens"><i style="height:${Math.max(2,95*d.total/peak)}px"></i>${chartDays<=7?`<span>${esc(d.day.slice(5))}</span>`:''}</div>`).join('')}</div><p class="chart-label muted">${esc(days[0].day)} – ${esc(days.at(-1).day)} · UTC${period==='all'?' · latest 30 complete days':''}. Zero-height days mean no retained dated counts; they may have missing records.</p><details id="dailyDetails"${dailyOpen?' open':''}><summary>Exact daily counts</summary>${days.map(d=>`<p>${esc(d.day)}: ${number(d.total)} tokens</p>`).join('')}</details>`;
 }
-function render(){
-  $('snapshot').textContent=snapshotText(view);
-  $('plans').innerHTML=plansHTML(view.plans);
-  $('coverage').textContent=view.updatedAt?coverageText(view.coverage||{}):'Waiting for a bounded scan. Coverage is not available yet.';
-  $('stages').innerHTML=(view.stages||[]).map(s=>`<dt>${esc(s[1])} (${esc(s[0])})</dt><dd>${esc(s[2])}</dd>`).join('');
-  const focus=document.activeElement?.id;
-  $('filters').innerHTML=filterKeys.map(k=>{
-    const values=[...new Set((view.rows||[]).map(r=>r[k]||'unassigned'))].sort();
-    if(filters[k]&&!values.includes(filters[k]))values.push(filters[k]);
-    return `<label>${esc(k[0].toUpperCase()+k.slice(1))}<select id="filter-${k}" data-key="${k}"><option value="">All</option>${values.map(v=>{
-      const row=(view.rows||[]).find(r=>r[k]===v);
-      const label=k==='stage'?stageName(v,view.stages):k==='card'?(row?.cardTitle||v):k==='agent'?(row?.title||v):v;
-      return `<option value="${esc(v)}"${filters[k]===v?' selected':''}>${esc(label)}${['card','agent'].includes(k)&&label!==v?' · '+esc(v):''}</option>`;
-    }).join('')}</select></label>`;
-  }).join('')+'<button id="clearFilters">Clear filters</button>';
-  if(focus?.startsWith('filter-'))$(focus)?.focus();
-  renderRows();
+function renderFilters(){const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;$('filters').innerHTML=`<label>Search work<input id="workQuery" type="search" value="${esc(filters.query||'')}" placeholder="Card or agent title"></label>`+filterKeys.map(k=>{const values=[...new Set((view.rows||[]).map(r=>r[k]||'unassigned'))].sort();if(filters[k]&&!values.includes(filters[k]))values.push(filters[k]);return `<label>${esc(k[0].toUpperCase()+k.slice(1))}<select id="filter-${k}" data-key="${k}"><option value="">All</option>${values.map(v=>{const r=view.rows.find(r=>r[k]===v);const label=k==='stage'?stageName(v,view.stages):k==='role'?roleName(v):k==='card'?(r?.cardTitle||v):k==='agent'?(r?.title||v):v;return `<option value="${esc(v)}"${filters[k]===v?' selected':''}>${esc(label)}</option>`}).join('')}</select></label>`}).join('')+'<button id="clearFilters">Clear filters</button>';if(focus?.startsWith('filter-')||focus==='workQuery'){$(focus)?.focus();if(focus==='workQuery')$(focus)?.setSelectionRange(caret,caret);}}
+function issueHTML(title,body,filter,value){return `<div class="issue"><b>${esc(title)}</b><p>${esc(body)}</p>${filter?`<button data-filter="${filter}" data-value="${esc(value)}" data-all="1">Inspect affected records</button>`:''}</div>`}
+function renderConfidence(){const c=view.coverage||{},s=usageStats(view.rows||[]),problems=(c.missingSessions||0)+(c.unsupportedSessions||0)+(c.errors||0);$('confidenceSummary').textContent=!view.updatedAt?'Waiting for coverage; counts are not available yet.':c.limited?'Still counting. All summaries are partial. Keep this page open for collection to continue.':problems?`Collection finished with gaps: ${problems} missing, unsupported or errored source issues. The missing token amount is unknown. Treat totals and comparisons as partial.`:'Collection finished for currently retained supported sources. This is local retained history, not every device or a bill.';
+ let h='';for(const [key,status,title,body] of [['missingSessions','missing','Missing sessions','The retained session could not be found. Restore it from a trusted backup if available; the next scan will retry.'],['unsupportedSessions','unsupported','Unsupported sessions','The provider or session format has no supported counters. Inspect the provider and evidence; do not treat these sessions as zero usage.'],['errors','error','Read or counter errors','Known counts may be partial. Inspect the source transcript. Metadata errors may have no associated row. Restore or repair damaged records before trusting totals; collection retries automatically.'],['limitedSessions','limited','Sources still being counted','Keep this page open. Another bounded slice can start after 15 seconds.'],['duplicateSessions','duplicate','Duplicate references','These references add no tokens. The owning session is counted once.']])if(c[key])h+=issueHTML(`${c[key]} ${title.toLowerCase()}`,body,status?'status':'',status);
+ if(s.unassigned)h+=issueHTML(`${pct(s.unassigned,s.total)} of recorded tokens have no stage`,'Each row explains its attribution gap. Missing timing and ambiguous intervals cannot be reconstructed reliably. Review share can still use a known reviewer role; repeated build share is a minimum.','stage','unassigned');
+ if(s.undated)h+=issueHTML(`${number(s.undated)} tokens have an uncertain date`,'Initial cumulative readings and intervals crossing UTC days remain in retained history but are excluded from dated comparisons. Inspect their time explanation.','undated','1');
+ if(c.timingWithoutAgent)h+=issueHTML(`${c.timingWithoutAgent} timing entries without agents`,'Timing alone supplies no token counts. Restore agent metadata if available.');
+ if(c.disappearedSources)h+=issueHTML(`${c.disappearedSources} previously observed sources disappeared`,'Cleanup changed retained history. Totals and historical comparisons may have changed; restore records if a stable comparison is needed.');
+ $('issues').innerHTML=h||'<p>No source or attribution gaps found in the current retained snapshot.</p>';$('coverage').textContent=view.updatedAt?coverageText(c):'Waiting for a bounded scan. Coverage is not available yet.';
 }
-$('filters').addEventListener('change',e=>{if(e.target.dataset.key){filters[e.target.dataset.key]=e.target.value;renderRows()}});
-$('filters').addEventListener('click',e=>{if(e.target.id==='clearFilters'){filters={};render()}});
-async function load(){
-  try{
-    const next=await fetchJSON('/api/usage');
-    view=next;render();$('loadError').hidden=true;
-  }catch(e){
-    $('loadError').hidden=false;
-    $('loadError').textContent=`Cannot load usage (${e.message}). ${view?'Showing the last successful snapshot; it may be stale.':'No snapshot available.'} Retrying automatically.`;
-  }
-  try{
-    const board=await fetchJSON('/api/board');
-    available=new Set((board.cards||[]).flatMap(c=>[c.id,...(c.children||[]).map(k=>k.id)]));
-    $('transcriptStatus').textContent='Transcript links reflect agents currently available on the board.';
-  }catch(e){available=new Set();$('transcriptStatus').textContent='Transcript availability could not be checked; links are unavailable.';}
-  if(view)renderRows();
-  setTimeout(load,15000);
-}
+function render(){if(!view)return;$('snapshot').textContent=snapshotText(view);$('plans').innerHTML=plansHTML(view.plans);$('allowanceDetailsBody').innerHTML=allowanceDetailsHTML(view.plans);$('recommendation').textContent=recommendation(view.plans);$('stages').innerHTML=(view.stages||[]).map(s=>`<dt>${esc(s[1])} (${esc(s[0])})</dt><dd>${esc(s[2])}</dd>`).join('');renderFilters();renderRows();renderConfidence();}
+$('period').addEventListener('change',e=>{period=e.target.value;page=0;renderRows()});
+$('filters').addEventListener('change',e=>{if(e.target.dataset.key){filters[e.target.dataset.key]=e.target.value;page=0;renderRows()}});
+$('filters').addEventListener('input',e=>{if(e.target.id==='workQuery'){filters.query=e.target.value;page=0;renderRows()}});
+$('filters').addEventListener('click',e=>{if(e.target.id==='clearFilters'){filters={};page=0;render()}});
+for(const id of ['topCards','byModel','byRole','issues'])$(id).addEventListener('click',e=>{const b=e.target.closest('button[data-filter]');if(!b)return;filters={};if(b.dataset.filter==='undated')filters.undated='1';else filters[b.dataset.filter]=b.dataset.value;if(b.dataset.all){period='all';$('period').value='all'}page=0;$('records').open=true;renderFilters();renderRows();$('records').scrollIntoView({block:'start'});});
+$('resetSelection').addEventListener('click',()=>{filters={};page=0;render()});
+$('prevPage').addEventListener('click',()=>{page=Math.max(0,page-1);renderRows()});$('nextPage').addEventListener('click',()=>{page++;renderRows()});
+async function load(){try{const [usage,agents]=await Promise.allSettled([fetchJSON('/api/usage'),fetchJSON('/api/agents')]);if(usage.status==='rejected')throw usage.reason;view=usage.value;const statuses=new Map((agents.status==='fulfilled'?agents.value.agents||[]:[]).map(a=>[a.provider.split('/')[0],a.status]));for(const p of view.plans||[])p.status=statuses.get(p.provider)||'unknown';render();$('loadError').hidden=true}catch(e){$('loadError').hidden=false;$('loadError').textContent=`Cannot load usage (${e.message}). ${view?'Showing the last successful snapshot; it may be stale.':'No snapshot available.'} Retrying automatically.`;if(view)render()}setTimeout(load,15000)}
 load();
 </script>
 </body>

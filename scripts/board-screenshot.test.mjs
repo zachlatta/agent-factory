@@ -217,3 +217,98 @@ test('declared live preview uses actual CLI and only simulates sample-card actio
     await rm(home,{recursive:true,force:true});
   }
 });
+
+test('usage answers decisions, filters dated summaries and opens archived evidence', async () => {
+  await withPreview(async url => {
+    const browser=await chromium.launch({headless:true});
+    try {
+      for(const viewport of [{width:1280,height:800},{width:390,height:844}]) {
+        const page=await browser.newPage({viewport});
+        const errors=[];page.on('pageerror',e=>errors.push(e.message));
+        const mutations=[];page.on('request',r=>{if(r.method()==='POST')mutations.push(r.url())});
+        await page.goto(`${url}/usage`);
+        await page.locator('#metrics article').first().waitFor();
+        assert.match(await page.locator('#recommendation').innerText(),/Suggested next/);
+        assert.equal(await page.locator('.subscription-row').count(),5);
+        const overview=await page.locator('#plans').innerText();
+        for(const name of ['Claude Max','ChatGPT Pro','Google AI Ultra','Muse Code Power'])assert.ok(overview.includes(name));
+        assert.match(overview,/60% used/);
+        assert.match(overview,/Checked 9h ago/);
+        assert.match(overview,/first.account@example.com/);
+        assert.match(overview,/second.account@example.com/);
+        assert.match(overview,/Older reading/);
+        assert.equal(await page.locator('#allowanceDetails').getAttribute('open'),null);
+        await page.locator('#allowanceDetails > summary').click();
+        assert.match(await page.locator('#allowanceDetailsBody').innerText(),/Sample refresh failed/);
+        await page.locator('#allowanceDetails > summary').click();
+        if(viewport.width===390){
+          const lastSubscription=await page.locator('.subscription-row').last().boundingBox();
+          assert.ok(lastSubscription.y+lastSubscription.height<=viewport.height,'All subscription readings fit on the first phone screen');
+        }
+        assert.match(await page.locator('#confidenceSummary').innerText(),/finished with gaps/);
+        assert.match(await page.locator('#metrics').innerText(),/Review share[\s\S]*Repeated build share/);
+        assert.equal(await page.locator('#records').getAttribute('open'),null);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+        const allSummary=await page.locator('#metrics').innerText();
+        await page.locator('#topCards button').first().click();
+        assert.notEqual(await page.locator('#metrics').innerText(),allSummary);
+        assert.equal(await page.locator('#plans').innerText(),overview);
+        assert.notEqual(await page.locator('#records').getAttribute('open'),null);
+        await page.locator('#clearFilters').click();
+        assert.equal(await page.locator('#metrics').innerText(),allSummary);
+        await page.locator('#period').selectOption('today');
+        assert.match(await page.locator('#periodNote').innerText(),/Today is still in progress/);
+        assert.match(await page.locator('#metrics').innerText(),/Yesterday/);
+        await page.locator('#issues .issue', {hasText:'unsupported sessions'}).locator('button').click();
+        assert.equal(await page.locator('#period').inputValue(),'all');
+        assert.equal(await page.locator('#filter-status').inputValue(),'unsupported');
+        assert.match(await page.locator('#totals').innerText(),/1 matching rows/);
+        assert.match(await page.locator('#totals').innerText(),/Counts unavailable/);
+        assert.match(await page.locator('#metrics .value').first().innerText(),/Unavailable/);
+        await page.locator('#clearFilters').click();
+        await page.locator('#filter-agent').selectOption('preview-usage-old');
+        const details=page.locator('#rows details').first();await details.locator('summary').click();
+        await page.evaluate(()=>load());
+        assert.notEqual(await details.getAttribute('open'),null);
+        await details.locator('a').click();
+        await page.waitForURL('**/usage/agent/preview-usage-old');
+        await page.locator('#events article').first().waitFor();
+        assert.match(await page.locator('body').innerText(),/read-only view[\s\S]*Synthetic work is complete/);
+        assert.equal(await page.locator('textarea').count(),0);
+        assert.equal(mutations.length,0);
+        assert.deepEqual(errors,[]);
+        await page.close();
+      }
+      const page=await browser.newPage({viewport:{width:390,height:844}});
+      await page.goto(`${url}/usage`);await page.locator('#metrics article').first().waitFor();
+      const before=await page.locator('#metrics').innerText();
+      await page.route('**/api/usage',route=>route.fulfill({status:503,body:'unavailable'}));
+      await page.evaluate(()=>{Date.now=()=>Date.parse('2026-01-01T14:00:00Z')});
+      await page.evaluate(()=>load());
+      assert.match(await page.locator('#loadError').innerText(),/last successful snapshot/);
+      assert.equal(await page.locator('#metrics').innerText(),before);
+      assert.match(await page.locator('#recommendation').innerText(),/No provider has confirmed/);
+      await page.evaluate(()=>{Date.now=()=>Date.parse('2026-01-01T12:00:00Z')});
+      await page.unroute('**/api/usage');
+      await page.evaluate(()=>load());
+      assert.equal(await page.locator('#loadError').isVisible(),false);
+      // Thousands of source rows stay paginated; unknown counters never become zero-valued evidence.
+      await page.route('**/api/usage',async route=>{
+        const res=await route.fetch(),v=await res.json();
+        const base=v.rows.find(r=>r.counts.total>0);
+        v.coverage.limited=true;
+        v.rows=Array.from({length:100},(_,i)=>({...base,agent:`sample-${i}`,title:'<img src=x onerror=bad>',day:'2025-12-31'}));
+        await route.fulfill({response:res,json:v});
+      });
+      await page.evaluate(()=>load());
+      await page.locator('#records > summary').click();
+      assert.match(await page.locator('#dateCoverage').innerText(),/Still counting/);
+      assert.match(await page.locator('#metrics').innerText(),/Comparison waits/);
+      assert.equal(await page.locator('#rows tr').count(),40);
+      assert.equal(await page.locator('#rows img').count(),0);
+      await page.locator('#nextPage').click();
+      assert.equal(await page.locator('#pageLabel').innerText(),'Page 2 of 3');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    } finally {await browser.close()}
+  });
+});

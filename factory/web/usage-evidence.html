@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Usage evidence · Factory</title>
+<style>
+body{font:15px system-ui,sans-serif;background:#f6f8fa;color:#1f2328;max-width:900px;margin:auto;padding:20px}
+a{color:#0969da}p{line-height:1.5}
+article{background:white;border:1px solid #d1d9e0;border-radius:8px;padding:16px;margin:12px 0;overflow-wrap:anywhere}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px ui-monospace,monospace}
+button{font:inherit;padding:10px;cursor:pointer}small{color:#59636e}
+</style>
+</head>
+<body>
+<a href="/usage">← Usage</a>
+<h1 id="title">Retained transcript evidence</h1>
+<p>This is a read-only view of the agent's retained main session, including archived work.
+It does not start or resume an agent. Images are omitted. Built-in sub-agent counters are
+included in usage; their separate transcripts are not shown here.</p>
+<p id="status" role="status">Loading…</p>
+<button id="older" hidden>Load earlier records</button>
+<main id="events"></main>
+<script>
+const id=location.pathname.split('/').pop();
+const el=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let before=0,events=[],busy=false;
+async function load(){
+  if(busy)return;
+  busy=true;el('older').disabled=true;
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+  try{
+    const r=await fetch('/api/usage/evidence/'+encodeURIComponent(id)+(before?'?before='+before:'?tail=1'),{signal:controller.signal});
+    const d=await r.json();
+    if(!r.ok)throw Error(d.error||r.status);
+    const t=d.transcript;
+    events=(t.events||[]).concat(events);before=t.before;
+    el('title').textContent=d.title||'Retained transcript evidence';
+    el('events').innerHTML=events.map(e=>{
+      const text=e.text||(e.name?e.name+'\n'+JSON.stringify(e.input||{},null,2):'(non-text record)');
+      return `<article><b>${esc(e.kind)}</b> <small>${esc(e.ts||'')}</small><pre>${esc(text)}</pre></article>`;
+    }).join('');
+    el('older').hidden=!t.older;
+    el('older').textContent='Load earlier records';
+    el('status').textContent=t.older?'Showing recent records. Earlier records are available.':'All retained main-session records loaded.';
+  }catch(e){
+    el('status').textContent='Cannot load evidence: '+e.message;
+    el('older').hidden=false;el('older').textContent='Retry loading';
+  }finally{
+    clearTimeout(timer);busy=false;el('older').disabled=false;
+  }
+}
+el('older').onclick=load;
+load();
+</script>
+</body>
+</html>

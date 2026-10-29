@@ -321,3 +321,27 @@ func TestPreviewDismissesASampleRequest(t *testing.T) {
 		t.Errorf("the dismissal is not in the preview's own store: %v", err)
 	}
 }
+
+func TestPreviewUsageHasDatedHistoryAndEvidence(t *testing.T) {
+	h, err := PreviewHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/usage", nil))
+	if rec.Code != 200 {
+		t.Fatalf("usage preview: %d", rec.Code)
+	}
+	var v UsageView
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Rows) < 5 || len(v.Plans) != 4 || v.Totals.Total == 0 {
+		t.Fatalf("missing usage fixtures: %+v", v)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/usage/evidence/preview-usage-old", nil))
+	if rec.Code != 200 {
+		t.Fatalf("archived preview evidence: %d %s", rec.Code, rec.Body)
+	}
+}

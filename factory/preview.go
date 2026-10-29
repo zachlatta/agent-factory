@@ -124,12 +124,15 @@ func PreviewHandler(root string) (http.Handler, error) {
 	}
 	f.fleet = nil
 	f.SetAgents(agents)
+	if err := seedPreviewUsage(f, now); err != nil {
+		return nil, err
+	}
 	var actionMu sync.Mutex
 	real := f.Handler()
 	// Keep host/process inspection routes out of the preview, including future routes
 	// until they are explicitly reviewed as safe. Allowed APIs use production handlers.
 	allowed := map[string]bool{"/": true, "/index.html": true, "/api/board": true,
-		"/api/agents": true, "/api/lanes": true, "/api/deploy": true, "/api/hosts": true, "/host-metrics.js": true}
+		"/usage": true, "/api/usage": true, "/api/agents": true, "/api/lanes": true, "/api/deploy": true, "/api/hosts": true, "/host-metrics.js": true}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			actionMu.Lock()
@@ -138,10 +141,13 @@ func PreviewHandler(root string) (http.Handler, error) {
 			return
 		}
 		safe := allowed[r.URL.Path]
-		for _, prefix := range []string{"/t/", "/api/logs/", "/api/transcript/"} {
+		for _, prefix := range []string{"/usage/agent/", "/api/usage/evidence/", "/t/", "/api/logs/", "/api/transcript/"} {
 			if strings.HasPrefix(r.URL.Path, prefix) {
 				id := strings.TrimPrefix(r.URL.Path, prefix)
 				_, safe = f.agentOK(id)
+				if prefix == "/usage/agent/" || prefix == "/api/usage/evidence/" {
+					safe = strings.HasPrefix(id, "preview-usage-")
+				}
 				if prefix == "/api/logs/" {
 					_, safe = f.card(id)
 				}
@@ -152,12 +158,20 @@ func PreviewHandler(root string) (http.Handler, error) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "preview: navigation only; mutations and host inspection are disabled"})
 			return
 		}
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-			page, _ := web.ReadFile("web/board.html")
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" || r.URL.Path == "/usage" {
+			name := "web/board.html"
+			if r.URL.Path == "/usage" {
+				name = "web/usage.html"
+			}
+			page, _ := web.ReadFile(name)
 			// Keep the real embedded board, with only its preview clock fixed and its preview mode marked:
 			// the page then shows its sample-data notice (#previewNote).
 			clock := fmt.Sprintf("<title>Factory preview</title><script>Date.now=()=>%d;</script>", now.UnixMilli())
 			html := strings.Replace(string(page), "<title>Factory</title>", clock, 1)
+			if r.URL.Path == "/usage" {
+				html = strings.Replace(string(page), "<title>Usage · Factory</title>", fmt.Sprintf("<title>Usage preview</title><script>Date.now=()=>%d;</script>", now.UnixMilli()), 1)
+				html = strings.Replace(html, "<main>", "<main><p class=notice>Sample usage only. No live data or provider commands.</p>", 1)
+			}
 			page = []byte(strings.Replace(html, `<html lang="en">`, `<html lang="en" data-mode="preview">`, 1))
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")

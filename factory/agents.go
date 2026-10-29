@@ -131,22 +131,29 @@ type planScore struct {
 }
 
 func usageScore(u AgentUsage, now time.Time) planScore {
-	if len(u.Windows) == 0 {
+	windows := decisionUsageWindows(u, now)
+	if len(windows) == 0 {
 		return planScore{tier: 1}
 	}
-	w7 := u.Windows[0]
-	w5Pct := w7.RemainingPct
-	has5h := false
-	for _, w := range u.Windows {
+	var w7 UsageWindow
+	w5Pct := 0
+	hasWeek, has5h := false, false
+	for _, w := range windows {
 		if w.RemainingPct <= 0 {
 			return planScore{tier: 0}
 		}
 		if w.Label == "7d" {
 			w7 = w
-		} else if w.Label == "5h" {
+			hasWeek = true
+		}
+		if w.Label == "5h" {
 			w5Pct = w.RemainingPct
 			has5h = true
 		}
+	}
+	// A short window cannot establish the weekly pace.
+	if !hasWeek {
+		return planScore{tier: 1, w5: w5Pct}
 	}
 	if !has5h {
 		w5Pct = w7.RemainingPct

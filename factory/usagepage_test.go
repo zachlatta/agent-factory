@@ -26,7 +26,7 @@ func TestUsagePageRouteAndNavigation(t *testing.T) {
 	if !strings.Contains(boardPage(t), `href="/usage"`) {
 		t.Fatal("missing board link")
 	}
-	for _, want := range []string{`href="/"`, "Subscription allowances", "Recorded local tokens", "across devices", "bounded", "Historical account attribution is unknown", "Initial Codex", "built-in sub-agent", "unassigned", "Cache", "Reasoning", "32 MiB per session per refresh", "15 seconds", "input plus output", `id="filters"`, `role="status"`} {
+	for _, want := range []string{`href="/"`, "Your subscriptions", "Where did usage go?", "Can I trust these numbers?", "across devices", "bounded", "Historical account attribution is unknown", "Initial Codex", "Built-in sub-agent", "unassigned", "Cache", "Reasoning", "32 MiB per session per refresh", "15 seconds", "input plus output", `id="filters"`, `role="status"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -61,8 +61,8 @@ for (const key of ['provider','plan','model','role','card','agent','stage']) {
 assert.equal(sumCounts(selectRows(rows,{stage:'building'})).total,132);
 assert.equal(sumCounts([row]).total,120); // cache/reasoning are never added to total
 assert.equal(sumCounts([row]).input,100);
-const html=rowsHTML(rows,view.stages,new Set(['agent-a']));
-for(const word of ['span 2','span 4','round 2','error','shared session','unassigned','missing','Transcript unavailable','/t/agent-a','Code review']) assert.ok(html.includes(word),word);
+const html=rowsHTML(rows,view.stages,new Set());
+for(const word of ['span 2','span 4','round 2','error','shared session','unassigned','missing','Transcript unavailable','Code review']) assert.ok(html.includes(word),word);
 assert.ok(!html.includes('/t/old-agent'));
 assert.ok(!rowsHTML([{...row,title:'<img src=x onerror=bad>'}],[],new Set()).includes('<img'));
 const cov=coverageText(view.coverage);
@@ -73,13 +73,13 @@ const done=coverageText({...view.coverage,limited:false,limitedSessions:0,pendin
 assert.ok(!done.includes('Older sessions')&&!done.includes('LIMITED'));
 const allowance={summary:'50% left',updatedAt:'2026-01-01T00:00:00Z',windows:[{label:'7d',remainingPct:50,resetsAt:'2026-01-07T00:00:00Z'}]};
 const plans=[{provider:'claude',plan:'Plan A',allowance},{provider:'claude',plan:'Plan A',allowance}];
-assert.equal((plansHTML(plans).match(/<article/g)||[]).length,1);
-assert.ok(plansHTML(plans).includes('50% remaining'));
-assert.ok(plansHTML(plans).includes('Resets'));
-assert.ok(plansHTML([{provider:'codex',plan:'Plan B',allowance:{}}]).includes('unknown'));
+assert.equal((plansHTML(plans).match(/class="subscription-row"/g)||[]).length,1);
+assert.ok(plansHTML(plans).includes('50% used'));
+assert.ok(plansHTML(plans).includes('Reset passed'));
+assert.ok(plansHTML([{provider:'codex',plan:'Plan B',allowance:{}}]).includes('No reading'));
 const accountHTML=plansHTML([{...plans[0],allowance:{...allowance,accounts:[{label:'Account 1',active:true,...allowance}]}}]);
 assert.ok(accountHTML.includes('Account 1'));
-assert.equal((accountHTML.match(/50% remaining/g)||[]).length,1);
+assert.equal((accountHTML.match(/50% used/g)||[]).length,1);
 assert.ok(snapshotText({refreshing:true}).includes('Waiting'));
 assert.ok(snapshotText({updatedAt:'2026-01-01T00:00:00Z',refreshing:true}).includes('Refreshing'));
 assert.ok(snapshotText({updatedAt:'2026-01-01T00:00:00Z'}).includes('old'));
@@ -108,46 +108,47 @@ func TestUsagePageRefreshAndFilters(t *testing.T) {
 	harness := `
 const assert=require('node:assert/strict');
 const elements=new Map();
-global.document={activeElement:null,getElementById(id){
+global.document={activeElement:null,querySelectorAll(){return []},getElementById(id){
  if(!elements.has(id))elements.set(id,{id,textContent:'',innerHTML:'',hidden:true,listeners:{},addEventListener(k,fn){this.listeners[k]=fn},focus(){}});
  return elements.get(id);
 }};
-let pending,failUsage=false,failBoard=false;
+let pending,failUsage=false;
 global.setTimeout=fn=>{pending=fn};
 const fixture={updatedAt:'2026-01-01T00:00:00Z',refreshing:true,plans:[],stages:[],coverage:{errors:3,limited:true},rows:[
  {agent:'a',card:'a',plan:'Demo',role:'fellow',model:'demo',provider:'claude',stage:'building',span:1,status:'readable',counts:{input:100,output:20,total:120}},
  {agent:'b',plan:'Demo',role:'picker',model:'demo',provider:'claude',stage:'unassigned',status:'unsupported',counts:{}}]};
 global.fetch=async url=>{
  if(url==='/api/usage'&&failUsage)throw Error('offline');
- if(url==='/api/board'&&failBoard)throw Error('board offline');
- return {ok:true,json:async()=>url==='/api/usage'?fixture:{cards:[{id:'a',children:[]}]}};
+ return {ok:true,json:async()=>url==='/api/usage'?fixture:{agents:[]}};
 };
 `
 	checks := `
 (async()=>{
  // Complete the first asynchronous load started by the page.
  for(let i=0;i<12;i++)await Promise.resolve();
+ period='all';renderRows();
  const el=id=>document.getElementById(id);
  assert.ok(el('coverage').textContent.includes('3 errors'));
  assert.equal(el('loadError').hidden,true); // collection errors are not fetch failures
  assert.ok(el('snapshot').textContent.includes('Refreshing'));
- assert.ok(el('rows').innerHTML.includes('/t/a'));
+ assert.ok(el('rows').innerHTML.includes('100'));
  el('filters').listeners.change({target:{dataset:{key:'role'},value:'picker'}});
  assert.ok(el('totals').textContent.startsWith('1 matching rows'));
+ assert.ok(el('totals').textContent.includes('Counts unavailable'));
  assert.ok(!el('rows').innerHTML.includes('/t/a'));
  el('filters').listeners.click({target:{id:'clearFilters'}});
  assert.ok(el('totals').textContent.startsWith('2 matching rows'));
- failUsage=true;failBoard=true;
+ failUsage=true;
  await pending();
  assert.equal(el('loadError').hidden,false);
  assert.ok(el('loadError').textContent.includes('last successful snapshot'));
  assert.ok(el('rows').innerHTML.includes('Transcript unavailable'));
  assert.ok(!el('rows').innerHTML.includes('/t/a'));
- failUsage=false;failBoard=false;fixture.refreshing=false;
+ failUsage=false;fixture.refreshing=false;
  await pending();
  assert.equal(el('loadError').hidden,true);
  assert.ok(!el('snapshot').textContent.includes('Refreshing'));
- assert.ok(el('rows').innerHTML.includes('/t/a'));
+ assert.ok(el('rows').innerHTML.includes('100'));
  const savedAt=fixture.updatedAt;delete fixture.updatedAt;fixture.refreshing=true;fixture.rows=[];
  await pending();
  assert.ok(el('totals').textContent.includes('Waiting'));

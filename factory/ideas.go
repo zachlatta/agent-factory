@@ -250,7 +250,10 @@ func (f *Factory) ideaHold() string {
 	if !ok {
 		return ""
 	}
-	for _, w := range f.providerUsages()[a.providerID()].Windows {
+	usage := f.providerUsages()[a.providerID()]
+	// Check the weekly window itself: an elapsed short window cannot release
+	// a current weekly floor. Failed or elapsed weekly readings do not hold.
+	for _, w := range decisionUsageWindows(usage, f.Now()) {
 		if w.Label == "7d" && w.RemainingPct <= ideaUsageFloor {
 			return fmt.Sprintf("Paused: the suggested agent (%s) has %d%% of its weekly usage left", a.Label, w.RemainingPct)
 		}

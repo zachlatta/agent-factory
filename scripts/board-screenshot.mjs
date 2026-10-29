@@ -61,7 +61,7 @@ export async function withPreview(work) {
 
 // The board opens on For you at every width; --view=columns shows the desktop kanban (the phone always
 // shows For you). --card opens one card's detail.
-export const views = ['inbox', 'columns'];
+export const views = ['inbox', 'columns', 'usage'];
 
 export async function capture(url, { view = 'inbox', card, out = join(root, '.factory-evidence') } = {}) {
   try { await access(chromium.executablePath()); }
@@ -84,11 +84,12 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
       await page.addInitScript(now => { Date.now = () => now; }, Date.parse(board.updated));
       const query = new URLSearchParams({ view });
       if (card) query.set('card', card);
-      await page.goto(`${url}/?${query}`, { waitUntil: 'networkidle', timeout: 20000 });
-      await page.waitForFunction(() => B.updated && !loadErr);
-      const shown = name === 'phone' ? 'inbox' : view;
+      await page.goto(view==='usage'?`${url}/usage`:`${url}/?${query}`, { waitUntil: 'networkidle', timeout: 20000 });
+      if(view==='usage')await page.waitForFunction(()=>document.querySelector('#totals').textContent.includes('matching rows'));
+      else await page.waitForFunction(() => B.updated && !loadErr);
+      const shown = view==='usage'?'usage':name === 'phone' ? 'inbox' : view;
       if (shown === 'inbox') await page.locator('#inbox .sec').first().waitFor();
-      else await page.locator('#grid .card').first().waitFor();
+      else if(shown==='columns')await page.locator('#grid .card').first().waitFor();
       if (card) {
         await page.locator('#panel.open').waitFor();
         await page.waitForFunction(id => sel === id && document.querySelector('#pTitle').textContent === B.cards.find(c => c.id === id).title, card);
@@ -103,7 +104,7 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
       const text = await page.locator('body').innerText();
       await writeFile(resolve(out, `${name}.txt`), text);
       results.push({ name, width, height, view: shown, card: card || null, file: `${name}.png` });
-      if (name === 'phone') {
+      if (name === 'phone' && view!=='usage') {
         // a For you card whose question options must fit the phone screen
         const forYou = new Set((board.sections?.forYou || []).map(l => l.id));
         const questionCard = board.cards.find(c => forYou.has(c.id) && c.ask?.questions?.length);
@@ -120,6 +121,11 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
           await writeFile(resolve(out, 'phone-questions.txt'), await page.locator('body').innerText());
           results.push({ name: 'phone-questions', width, height, view: 'inbox', card: questionCard.id, file: 'phone-questions.png' });
         }
+      }
+      if(view==='usage')for(const section of ['consumption','confidence']) {
+        await page.locator('#'+section).scrollIntoViewIfNeeded();
+        await page.locator('#'+section).evaluate(e=>e.scrollIntoView({block:'start'}));
+        await page.screenshot({path:resolve(out,`${name}-${section}.png`),fullPage:false});
       }
       await page.close();
     }

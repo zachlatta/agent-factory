@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 
 const (
 	usageTTL     = 5 * time.Minute
-	usageTimeout = 5 * time.Second
+	usageTimeout = 25 * time.Second
 )
 
 // UsageWindow is one rate-limit window (such as 7d or 5h) with its remaining percentage.
@@ -31,11 +32,14 @@ type UsageWindow struct {
 
 // AgentUsage is the remaining subscription allowance for an agent choice's provider.
 type AgentUsage struct {
-	Summary   string         `json:"summary"`
-	Windows   []UsageWindow  `json:"windows,omitempty"`
-	Extra     string         `json:"extra,omitempty"`
-	UpdatedAt string         `json:"updatedAt,omitempty"`
-	Accounts  []AccountUsage `json:"accounts,omitempty"`
+	Summary      string         `json:"summary"`
+	RefreshError string         `json:"refreshError,omitempty"`
+	Source       string         `json:"source,omitempty"`
+	Estimated    bool           `json:"estimated,omitempty"`
+	Windows      []UsageWindow  `json:"windows,omitempty"`
+	Extra        string         `json:"extra,omitempty"`
+	UpdatedAt    string         `json:"updatedAt,omitempty"`
+	Accounts     []AccountUsage `json:"accounts,omitempty"`
 }
 
 // AccountUsage is one account's remaining allowance, for providers whose
@@ -43,13 +47,14 @@ type AgentUsage struct {
 // number; the account email is carried for display, but no organization
 // name or identifier is.
 type AccountUsage struct {
-	Label     string        `json:"label"`
-	Email     string        `json:"email,omitempty"`
-	Active    bool          `json:"active,omitempty"`
-	Summary   string        `json:"summary"`
-	Windows   []UsageWindow `json:"windows,omitempty"`
-	Extra     string        `json:"extra,omitempty"`
-	UpdatedAt string        `json:"updatedAt,omitempty"`
+	RefreshError string        `json:"refreshError,omitempty"`
+	Label        string        `json:"label"`
+	Email        string        `json:"email,omitempty"`
+	Active       bool          `json:"active,omitempty"`
+	Summary      string        `json:"summary"`
+	Windows      []UsageWindow `json:"windows,omitempty"`
+	Extra        string        `json:"extra,omitempty"`
+	UpdatedAt    string        `json:"updatedAt,omitempty"`
 }
 
 type usageCache struct {
@@ -82,22 +87,6 @@ func formatSummary(ws []UsageWindow) string {
 	return strings.Join(parts, " · ") + " left"
 }
 
-// resetWindows copies ws and flips any window whose reset has passed back
-// to 100% remaining, reporting whether anything flipped.
-func resetWindows(ws []UsageWindow, now time.Time) ([]UsageWindow, bool) {
-	out := make([]UsageWindow, len(ws))
-	copy(out, ws)
-	reset := false
-	for i, w := range out {
-		if rt, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil && !now.Before(rt) {
-			out[i].RemainingPct = 100
-			out[i].ResetsAt = ""
-			reset = true
-		}
-	}
-	return out, reset
-}
-
 func ageExtra(extra, updatedAt string, now time.Time) string {
 	ts, err := time.Parse(time.RFC3339Nano, updatedAt)
 	if updatedAt == "" || err != nil {
@@ -110,23 +99,44 @@ func ageExtra(extra, updatedAt string, now time.Time) string {
 	return age
 }
 
-func withAge(u AgentUsage, now time.Time) AgentUsage {
-	if len(u.Windows) > 0 {
-		if ws, reset := resetWindows(u.Windows, now); reset {
-			u.Windows = ws
-			u.Summary = formatSummary(ws)
+// decisionUsageWindows leaves stored readings intact and ignores only elapsed
+// windows. A current weekly window still governs work after a short-window reset.
+// Failed refreshes are unknown for decisions even when old values remain visible.
+func decisionUsageWindows(u AgentUsage, now time.Time) []UsageWindow {
+	if u.RefreshError != "" {
+		return nil
+	}
+	hasActive := false
+	for _, a := range u.Accounts {
+		if a.Active {
+			hasActive = true
+			if a.RefreshError != "" {
+				return nil
+			}
 		}
 	}
+	if !hasActive {
+		for _, a := range u.Accounts {
+			if a.RefreshError != "" {
+				return nil
+			}
+		}
+	}
+	windows := make([]UsageWindow, 0, len(u.Windows))
+	for _, w := range u.Windows {
+		if reset, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil && !now.Before(reset) {
+			continue
+		}
+		windows = append(windows, w)
+	}
+	return windows
+}
+
+func withAge(u AgentUsage, now time.Time) AgentUsage {
 	if len(u.Accounts) > 0 {
 		accts := make([]AccountUsage, len(u.Accounts))
 		copy(accts, u.Accounts)
 		for i := range accts {
-			if len(accts[i].Windows) > 0 {
-				if ws, reset := resetWindows(accts[i].Windows, now); reset {
-					accts[i].Windows = ws
-					accts[i].Summary = formatSummary(ws)
-				}
-			}
 			accts[i].Extra = ageExtra(accts[i].Extra, accts[i].UpdatedAt, now)
 		}
 		u.Accounts = accts
@@ -187,7 +197,7 @@ func (f *Factory) refreshUsage(done chan struct{}, now time.Time) {
 			defer wg.Done()
 			u := f.Usage(ctx, prov)
 			if u.Summary == "" {
-				u = unknownUsage()
+				u.Summary = formatSummary(u.Windows)
 			}
 			mu.Lock()
 			res[prov] = u
@@ -196,6 +206,39 @@ func (f *Factory) refreshUsage(done chan struct{}, now time.Time) {
 	}
 	wg.Wait()
 	f.usageMu.Lock()
+	for p, u := range res {
+		previous := f.usage.byProvider[p]
+		u.Accounts = append([]AccountUsage(nil), u.Accounts...)
+		for i, a := range u.Accounts {
+			if len(a.Windows) == 0 {
+				for _, old := range previous.Accounts {
+					same := a.Email == old.Email && (a.Email != "" || a.Label == old.Label)
+					if same && len(old.Windows) > 0 {
+						old.Label = a.Label
+						old.Active = a.Active
+						old.RefreshError = "Account refresh failed; showing its last known reading."
+						u.Accounts[i] = old
+						break
+					}
+				}
+			}
+			if account := u.Accounts[i]; account.Active && account.RefreshError != "" {
+				u.Windows = account.Windows
+				u.Summary = account.Summary
+				u.UpdatedAt = account.UpdatedAt
+			}
+		}
+		failed := len(u.Windows) == 0 && len(u.Accounts) == 0
+		message := u.RefreshError
+		if failed && message == "" {
+			message = "Allowance refresh failed. Check the provider login; retries run automatically."
+		}
+		if previous, ok := f.usage.byProvider[p]; ok && (failed || (message != "" && len(u.Accounts) == 0 && parseTime(previous.UpdatedAt).After(parseTime(u.UpdatedAt)))) {
+			u = previous
+		}
+		u.RefreshError = message
+		res[p] = u
+	}
 	f.usage.byProvider = res
 	f.usage.fetched = now
 	f.usage.refreshing = nil
@@ -212,7 +255,13 @@ func (f *Factory) readProviderUsage(ctx context.Context, provider string) AgentU
 		}
 		return parseClaudeUsage(out, f.Now())
 	case "codex":
-		return readCodexUsage(f.cfg.Home)
+		u := readLiveCodexUsage(ctx, f.cfg.Home, f.Now())
+		if len(u.Windows) == 0 {
+			u = readCodexUsage(f.cfg.Home)
+			u.RefreshError = "Live meter unavailable; showing the last local session reading."
+			u.Source = "Local session"
+		}
+		return u
 	case "antigravity":
 		// A read-only slash command in print mode: no agent turn, no quota spent, no conversation.
 		cmd := exec.CommandContext(ctx, "agy", "-p", "/usage", "--output-format", "json")
@@ -279,9 +328,6 @@ func parseClaudeUsage(raw []byte, now time.Time) AgentUsage {
 			ws = append(ws, UsageWindow{Label: "5h", RemainingPct: remPct(w.Pct), ResetsAt: normISO(w.ResetsAt)})
 		}
 		updated := normISO(a.UsageFetchedAt)
-		if updated == "" && len(ws) > 0 {
-			updated = now.UTC().Format(time.RFC3339)
-		}
 		rows[i] = numbered{num, AccountUsage{
 			Label:     fmt.Sprintf("Claude #%d", num),
 			Email:     a.Email,
@@ -440,6 +486,7 @@ func parseMuseUsage(raw []byte, now time.Time) AgentUsage {
 			ws := []UsageWindow{{Label: "7d", RemainingPct: 100}, {Label: "5h", RemainingPct: 100}}
 			return AgentUsage{
 				Summary:   formatSummary(ws),
+				Estimated: true, Source: "Provider reports no usage in this window",
 				Windows:   ws,
 				UpdatedAt: now.UTC().Format(time.RFC3339),
 			}
@@ -534,4 +581,73 @@ func parseAntigravityUsage(raw []byte, now time.Time) AgentUsage {
 		Windows:   ws,
 		UpdatedAt: now.UTC().Format(time.RFC3339),
 	}
+}
+
+// readLiveCodexUsage uses the subscription meter without starting a model turn.
+// Credentials stay on this host and are sent only to the fixed provider endpoint.
+func readLiveCodexUsage(ctx context.Context, home string, now time.Time) AgentUsage {
+	b, err := os.ReadFile(filepath.Join(home, ".codex/auth.json"))
+	if err != nil {
+		return unknownUsage()
+	}
+	var auth struct {
+		Tokens struct {
+			Access  string `json:"access_token"`
+			Account string `json:"account_id"`
+		}
+	}
+	if json.Unmarshal(b, &auth) != nil || auth.Tokens.Access == "" {
+		return unknownUsage()
+	}
+	return fetchCodexUsage(ctx, &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, "https://chatgpt.com/backend-api/wham/usage", auth.Tokens.Access, auth.Tokens.Account, now)
+}
+
+func fetchCodexUsage(ctx context.Context, client *http.Client, endpoint, token, account string, now time.Time) AgentUsage {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return unknownUsage()
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("ChatGPT-Account-Id", account)
+	res, err := client.Do(req)
+	if err != nil {
+		return unknownUsage()
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return unknownUsage()
+	}
+	type win struct {
+		Used    *float64 `json:"used_percent"`
+		Seconds int      `json:"limit_window_seconds"`
+		Reset   int64    `json:"reset_at"`
+	}
+	var d struct {
+		Rate struct {
+			Primary   *win `json:"primary_window"`
+			Secondary *win `json:"secondary_window"`
+		} `json:"rate_limit"`
+	}
+	if json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&d) != nil {
+		return unknownUsage()
+	}
+	var ws []UsageWindow
+	for _, w := range []*win{d.Rate.Primary, d.Rate.Secondary} {
+		if w == nil || w.Used == nil {
+			continue
+		}
+		label := fmt.Sprintf("%dh", w.Seconds/3600)
+		if w.Seconds == 604800 {
+			label = "7d"
+		}
+		reset := ""
+		if w.Reset > 0 {
+			reset = iso(time.Unix(w.Reset, 0))
+		}
+		ws = append(ws, UsageWindow{Label: label, RemainingPct: remPct(*w.Used), ResetsAt: reset})
+	}
+	if len(ws) == 0 {
+		return unknownUsage()
+	}
+	return AgentUsage{Summary: formatSummary(ws), Windows: ws, UpdatedAt: iso(now), Source: "Live subscription meter"}
 }

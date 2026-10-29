@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-//go:embed web/board.html web/transcript.html web/host.html web/host-metrics.js web/usage.html
+//go:embed web/board.html web/transcript.html web/host.html web/host-metrics.js web/usage.html web/usage-evidence.html
 var web embed.FS
 
 // Handler serves the board, the transcript pages and the JSON API.
@@ -34,6 +34,8 @@ func (f *Factory) Handler() http.Handler {
 	// plain unless it opts in here, so a future streaming route cannot stall behind it.
 	mux.HandleFunc("GET /{$}", gzipHandler(page("board.html")))
 	mux.HandleFunc("GET /index.html", gzipHandler(page("board.html")))
+	mux.HandleFunc("GET /usage/agent/{id}", gzipHandler(page("usage-evidence.html")))
+	mux.HandleFunc("GET /api/usage/evidence/{id}", gzipHandler(f.handleUsageEvidence))
 	mux.HandleFunc("GET /usage", gzipHandler(page("usage.html")))
 	mux.HandleFunc("GET /t/{id}", gzipHandler(page("transcript.html")))
 	mux.HandleFunc("GET /api/evidence/{id}/{slot}", f.handleEvidence)

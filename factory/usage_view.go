@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,17 +17,20 @@ import (
 // UsageView is a snapshot of retained local records, not a subscription bill.
 // Rows are disjoint: totals sum the rows, cache/reasoning columns are subsets.
 type UsageView struct {
-	UpdatedAt  string          `json:"updatedAt,omitempty"`
-	Refreshing bool            `json:"refreshing"`
-	Rows       []UsageTokenRow `json:"rows"`
-	Totals     TokenCounts     `json:"totals"`
-	Coverage   UsageCoverage   `json:"coverage"`
-	Plans      []UsagePlan     `json:"plans"`
-	Stages     [][3]string     `json:"stages"`
+	// Immutable server-only inventory published with the snapshot for evidence reads.
+	evidenceAgents map[string]Agent
+	UpdatedAt      string          `json:"updatedAt,omitempty"`
+	Refreshing     bool            `json:"refreshing"`
+	Rows           []UsageTokenRow `json:"rows"`
+	Totals         TokenCounts     `json:"totals"`
+	Coverage       UsageCoverage   `json:"coverage"`
+	Plans          []UsagePlan     `json:"plans"`
+	Stages         [][3]string     `json:"stages"`
 }
 
 type UsagePlan struct {
 	Provider  string     `json:"provider"`
+	Status    string     `json:"status"`
 	Plan      string     `json:"plan"`
 	Allowance AgentUsage `json:"allowance"`
 }
@@ -48,6 +52,9 @@ type UsageCoverage struct {
 
 type UsageTokenRow struct {
 	Agent         string      `json:"agent"`
+	Day           string      `json:"day,omitempty"`
+	TimeReason    string      `json:"timeReason,omitempty"`
+	StageReason   string      `json:"stageReason,omitempty"`
 	Title         string      `json:"title"`
 	Card          string      `json:"card,omitempty"`
 	CardTitle     string      `json:"cardTitle,omitempty"`
@@ -59,6 +66,8 @@ type UsageTokenRow struct {
 	Span          int         `json:"span"` // one-based TimingStore event index; repeated build spans identify rework
 	Round         int         `json:"round"`
 	Status        string      `json:"status"`
+	Rework        bool        `json:"rework,omitempty"`
+	Evidence      bool        `json:"evidence,omitempty"`
 	SharedSession bool        `json:"sharedSession"`
 	Counts        TokenCounts `json:"counts"`
 }
@@ -121,7 +130,8 @@ func (f *Factory) handleUsage(w http.ResponseWriter, r *http.Request) {
 	for _, a := range AgentChoices {
 		p := a.providerID()
 		if !seen[p] {
-			v.Plans = append(v.Plans, UsagePlan{Provider: p, Plan: a.Plan, Allowance: allowances[p]})
+			status, _ := f.cachedProviderStatus(p)
+			v.Plans = append(v.Plans, UsagePlan{Provider: p, Plan: a.Plan, Allowance: allowances[p], Status: status})
 			seen[p] = true
 		}
 	}
@@ -251,6 +261,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 			delete(c.metas, path)
 		}
 	}
+	v.evidenceAgents = agents
 	allTiming := f.timings.all()
 	for id := range allTiming {
 		if _, ok := agents[id]; !ok {
@@ -333,6 +344,9 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 		v.Coverage.Agents++
 		owner := usageOwner(a, agents)
 		row := UsageTokenRow{Agent: id, Title: a.Title, Card: owner, CardTitle: agents[owner].Title, Provider: a.Provider, Plan: usagePlan(a.Provider), Model: a.Model, Role: usageRole(a), Stage: "unassigned"}
+		if st, err := os.Stat(usageEvidencePath(f.cfg.Home, a)); err == nil && !st.IsDir() {
+			row.Evidence = true
+		}
 		key := a.Provider + ":" + nativeSessionID(a.SessionID)
 		finished := metadataComplete && !unfinished[key]
 		row.SharedSession = shared[key]
@@ -395,6 +409,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 				v.Coverage.Errors++
 			}
 			row.Status = read.status
+			row.StageReason = "no attributable token interval"
 			if len(read.events) == 0 {
 				if _, exists := rows[row]; !exists {
 					rows[row] = TokenCounts{}
@@ -406,6 +421,30 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 					r.Model = e.Model
 				}
 				r.Stage, r.Span, r.Round = tokenStage(e, allTiming[owner], now)
+				r.Day, r.TimeReason = usageDay(e, now)
+				r.StageReason = ""
+				if r.Stage == "building" && r.Span > 1 {
+					for _, span := range allTiming[owner].Events[:r.Span-1] {
+						if span.Stage == "building" {
+							r.Rework = true
+							break
+						}
+					}
+				}
+				if r.Stage == "unassigned" {
+					switch {
+					case ambiguous[key]:
+						r.StageReason = "conflicting session owners"
+					case owner == "":
+						r.StageReason = "outside a recorded card"
+					case len(allTiming[owner].Events) == 0:
+						r.StageReason = "timing history unavailable or expired"
+					case e.From.IsZero():
+						r.StageReason = "initial cumulative reading"
+					default:
+						r.StageReason = "interval outside or across recorded stages"
+					}
+				}
 				c := rows[r]
 				c.add(e.Counts)
 				rows[r] = c
@@ -433,7 +472,16 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 		if a.Span != b.Span {
 			return a.Span < b.Span
 		}
-		return a.Model < b.Model
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		if a.Day != b.Day {
+			return a.Day < b.Day
+		}
+		if a.Status != b.Status {
+			return a.Status < b.Status
+		}
+		return a.TimeReason < b.TimeReason
 	})
 	v.Coverage.BytesRead = used
 	v.UpdatedAt = iso(f.Now())
@@ -459,4 +507,54 @@ func readUsageMeta(path string, st os.FileInfo) (usageMeta, bool) {
 	}
 	return usageMeta{size: st.Size(), mod: st.ModTime(), internal: d.Internal,
 		agent: Agent{ID: d.ID, Title: d.Title, Provider: d.Provider, Model: d.Config.Model, Cwd: d.Cwd, CreatedAt: parseTime(d.CreatedAt), ArchivedAt: parseTime(d.ArchivedAt), Status: d.LastStatus, SessionID: d.Persistence.SessionID, Labels: d.Labels}}, true
+}
+
+// usageDay assigns only whole intervals within one UTC day. Unknown cumulative
+// starts and intervals crossing midnight stay outside date-filtered totals.
+func usageDay(e tokenEvent, now time.Time) (string, string) {
+	if e.At.IsZero() || e.At.After(now) || e.From.After(e.At) {
+		return "", "timestamp unavailable"
+	}
+	if e.From.IsZero() {
+		return "", "initial cumulative reading"
+	}
+	day := e.At.UTC().Format("2006-01-02")
+	if e.From.UTC().Format("2006-01-02") != day {
+		return "", "interval crosses UTC days"
+	}
+	return day, ""
+}
+
+// handleUsageEvidence reads only agents in the retained accounting inventory. It
+// never loads an archived agent into Paseo. Source paths are not returned as metadata.
+func (f *Factory) handleUsageEvidence(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	f.tokenMu.Lock()
+	a, found := f.tokenCache.view.evidenceAgents[id]
+	f.tokenMu.Unlock()
+	if !found {
+		writeJSON(w, 404, map[string]string{"error": "Agent is not in the current retained usage inventory. Open Usage to collect the inventory first."})
+		return
+	}
+	before := 0
+	if n, err := strconv.Atoi(r.URL.Query().Get("before")); err == nil && n > 0 {
+		before = n
+	}
+	page := Page{Before: before, Tail: before == 0, Budget: TranscriptBudget, Refs: true}
+	result, err := ReadTranscriptPage(f.cfg.Home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd}, page)
+	if err != nil || result.Fallback {
+		writeJSON(w, 404, map[string]string{"error": "Retained transcript unavailable. The source may have been removed or its format may be unsupported."})
+		return
+	}
+	result.Path = ""
+	writeJSON(w, 200, map[string]any{"title": a.Title, "provider": a.Provider, "transcript": result})
+}
+
+// Transcript support is independent of token-counter support.
+func usageEvidencePath(home string, a Agent) string {
+	if a.Provider == "antigravity" && nativeSessionID(a.SessionID) != "" {
+		return filepath.Join(home, ".gemini/antigravity-cli/brain", nativeSessionID(a.SessionID), ".system_generated/logs/transcript_full.jsonl")
+	}
+	path, _ := sessionFile(home, TranscriptSource{Provider: a.Provider, SessionID: a.SessionID, Cwd: a.Cwd})
+	return path
 }

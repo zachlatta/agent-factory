@@ -523,12 +523,41 @@ on subsequent complete scans. Restarting forgets that inventory. Totals can shri
 cleanup; they describe retained local records, not every device's activity or a subscription
 bill. Historical subscription account attribution is unknown. No prompts, session contents
 or filesystem paths are returned. The board’s Usage link opens `/usage`, which consumes this feed without another collector.
-The page separates subscription allowances across devices from retained local tokens, with
-filters for provider, plan, model, role, card, agent and recorded stage. Rows show stage spans,
-review rounds, session status and links to transcripts currently available on the board.
-Filters affect recorded counts only; allowances and coverage remain visible for the snapshot.
-Refresh and fetch failures keep the last snapshot visibly dated. Missing or unsupported records
-are unavailable, not evidence of zero usage. Cache and reasoning fields remain subsets.
+The page starts with a compact overview of every subscription and account: last
+known weekly and five-hour usage, account emails, percent used and left, resets
+and observation age. Old readings stay visible and labeled; missing windows never become zero.
+Capacity advice follows the readings. It then asks **Where did usage go?**
+and **Can I trust these numbers?** Capacity advice uses only available providers
+with recent observed headroom. Codex reads its live subscription meter, with local
+session readings as an explicitly failed-refresh fallback. Provider commands run
+in a bounded background refresh. Failed refreshes retain the newest successful
+provider and account readings. Automatic handoff and idea auto-start ignore only elapsed windows and treat
+failed readings as unknown. A current low weekly window still holds ideas when
+a short window resets; an elapsed weekly window does not hold them.
+Elapsed resets never manufacture 100% capacity; estimates, old readings,
+and unknown allowance are labeled and excluded from recommendations.
+
+Consumption defaults to seven complete UTC days, with Today, thirty complete days
+and all retained history available. Ranked consumers include a card's reviews and
+delegated work; model and role summaries, review share, repeated Building share,
+and daily counts use the same filtered selection. Complete periods compare with
+the preceding equal period; percentage comparisons wait until a bounded scan
+finishes, and partial totals are labeled while collection is in progress. Unknown-date intervals stay in retained history but
+are excluded from dated comparisons. `day`, `timeReason`, `stageReason`, `rework`
+and `evidence` describe these limits on each disjoint row. Filters and paginated
+source rows live under Explore records. Allowances and source coverage stay
+visible independently of filters.
+
+Data confidence explains coverage gaps and links to affected rows. Row details
+show exact counters and subset counts. `/usage/agent/{id}` opens read-only retained
+main-session evidence through `/api/usage/evidence/{id}`, including archived
+agents, without loading or resuming them. Only the accounting inventory's agents
+are eligible; missing records remain unavailable. This separate evidence route
+returns bounded transcript pages; the usage snapshot itself contains no text.
+Refresh/fetch failures keep the last snapshot visibly dated. Missing or unsupported
+records are unavailable, not proof of zero usage. Cleanup can change historical
+comparisons. See [Usage product contracts](docs/usage.md) for acceptance criteria.
+
 
 
 ### Ideas
