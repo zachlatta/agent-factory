@@ -7,7 +7,8 @@ finished, once, before it lands; what the factory started lands on its own unles
 always-ask list.
 
 One Go binary. It reads Paseo's agent files every 15 seconds and whenever one changes, applies the
-rules below, and calls the `paseo` CLI for every move (labels on agents are the state:
+rules below, and makes every move through Paseo: the Paseo helper below for agent checks, label
+and name changes, messages and archives, and the `paseo` CLI for the rest (labels on agents are the state:
 `factory.stage`, `factory.tier` and so on, see `factory/labels.go`). It serves the board on
 `127.0.0.1:7478`; the deployer puts it on the tailnet with `tailscale serve`.
 
@@ -30,8 +31,27 @@ rules below, and calls the `paseo` CLI for every move (labels on agents are the 
 - `paseo permit ls` runs at most every 15 seconds; reads in between keep the prompts it last found,
   unless an agent's file flags a permission wait it did not see. The archive CLI's version check
   runs once per executable (again if the file changes or an archive fails).
-- `/api/health` reports `paseoCalls`: the CLI calls of the last 10 minutes, with count and wall
-  time per command.
+- **Paseo helper** (`factory/paseohelper.go`, `factory/paseohelper.mjs`). One long-lived `node`
+  process, connected to the daemon, serves `inspect`, `agent update` (name and labels), `send
+  --no-wait` and `archive`; the factory writes it to the state directory and talks to it in JSON
+  lines over stdin and stdout. It loads the client code of the `paseo` CLI on PATH and serves only
+  while the daemon reports that CLI's version; a changed CLI package restarts it. Its answers and
+  errors are the CLI's, word for word.
+  - When it cannot serve a call (cannot start, another version, stopped, crashed, or no answer
+    within 20 seconds, which stops it), the call runs the CLI; a stopped helper starts again 30
+    seconds later. A daemon error (not found, currently running, an invalid label) is returned
+    without running the CLI.
+  - A message runs the CLI only when it surely never reached the daemon (no helper, the request
+    could not be written, or the helper was not connected). One that may have gone out returns
+    an error and is not sent again.
+  - Archive uses the helper only when its version passes the archive version rule below;
+    otherwise the CLI (and `FACTORY_ARCHIVE_CLI`) archives. The check after each archive is the
+    same on both paths.
+  - The helper exits when its connection drops or the factory stops.
+- `/api/health` reports `paseoCalls`: the paseo calls of the last 10 minutes, with count and wall
+  time per command. `cliCalls` started the CLI (one process each), `helperCalls` were served by
+  the helper, each command has `cli` and `helper` counts, and `helper` shows its state
+  (`running`, `down`, ...), CLI and daemon versions, start time, restarts and last error.
 
 **Unread** on a card: its agent finished a turn you have not opened. Opening the card or loading its
 transcript page marks it seen (`factory.seen`) until the agent is sent another message and finishes
@@ -400,9 +420,10 @@ idle agents (`factory/reap.go`), at most 20 archives per Tick:
 
 Archive writes require a stable Paseo CLI version 0.13.0 or newer: earlier versions search only
 one page of agents, even for a full ID. `FACTORY_ARCHIVE_CLI` selects a separate executable for
-archive writes; other commands use the existing CLI on PATH. Factory checks the selected
+archive writes; other commands use the existing CLI on PATH (or the Paseo helper, which archives
+only when its own version passes the same rule). Factory checks the selected
 executable's version, reads each agent by full ID before archiving, and verifies its archive
-timestamp afterward. Automatic archives never stop a running agent, except a retired reviewer (above). Each CLI call has a
+timestamp afterward. Automatic archives never stop a running agent, except a retired reviewer (above). Each paseo call has a
 90-second deadline, including paginated lookups; failures leave the agent unmarked for retry.
 Dry-run skips writes and simulates the local result.
 

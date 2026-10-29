@@ -35,7 +35,7 @@ type Health struct {
 	Live           bool           `json:"live"`
 	OK             bool           `json:"ok"`
 	Agents         AgentCounts    `json:"agents"`
-	PaseoCalls     PaseoCalls     `json:"paseoCalls"` // paseo CLI calls in the last 10 minutes (paseocalls.go)
+	PaseoCalls     PaseoCalls     `json:"paseoCalls"` // paseo calls in the last 10 minutes, by CLI and helper (paseocalls.go)
 	Workflow       WorkflowHealth `json:"workflow"`
 }
 
@@ -201,6 +201,10 @@ func (f *Factory) Health() Health {
 	h.Agents = f.agentCounts()
 	h.Workflow = workflowHealth(f.agents())
 	h.PaseoCalls = f.calls.report(now)
+	if f.helper != nil {
+		st := f.helper.Status()
+		h.PaseoCalls.Helper = &st
+	}
 	return h
 }
 

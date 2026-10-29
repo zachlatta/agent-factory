@@ -166,6 +166,7 @@ type Factory struct {
 	stopping                     atomic.Bool // set when Run's context ends; Tick stops between agents
 
 	calls    callLog         // paseo calls in the last callWindow, for /api/health (paseocalls.go)
+	helper   *PaseoHelper    // the Paseo helper, when the factory runs one (paseohelper.go)
 	permitAt time.Time       // last `permit ls` that succeeded (addPending)
 	hot      map[string]bool // agents whose file changed in a way the rules act on (watch.go)
 	archiveQ *[]string       // during a Tick: reviewer and scout archives, run after the moves
@@ -198,6 +199,7 @@ func New(cfg Config, p Paseo) *Factory {
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
 		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, retireTries: map[string]retireTry{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}, denied: map[string]bool{}}
+	f.helper, _ = p.(*PaseoHelper)
 	if cfg.DryRun {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}
 		f.Git, f.GitOut = f.dryRunGit(runGit, runGitOut)
@@ -407,6 +409,9 @@ func (f *Factory) Run(ctx context.Context) {
 	defer t.Stop()
 	stop := context.AfterFunc(ctx, func() { f.stopping.Store(true) })
 	defer stop()
+	if f.helper != nil {
+		defer f.helper.Close()
+	}
 	defer f.startWatch()()
 	full := true
 	for {
@@ -532,8 +537,9 @@ func (f *Factory) rawPaseo(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	start := time.Now()
-	out, err := f.p.Run(ctx, args...)
-	f.calls.add(f.Now(), args, time.Since(start))
+	var path string
+	out, err := f.p.Run(withCallPath(ctx, &path), args...)
+	f.calls.add(f.Now(), args, time.Since(start), path)
 	return out, err
 }
 
@@ -688,6 +694,7 @@ func runGitOut(ctx context.Context, dir string, args ...string) (string, error) 
 type CLI struct{ Bin, ArchiveBin string }
 
 func (c CLI) Run(ctx context.Context, args ...string) (string, error) {
+	markCall(ctx, callCLI)
 	bin := c.Bin
 	if bin == "" {
 		bin = "paseo"

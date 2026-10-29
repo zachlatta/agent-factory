@@ -3,7 +3,8 @@
 // Paseo is the orchestrator and the database. Every card is a Paseo agent; its column is the
 // agent's `factory.stage` label (or is derived from its status when unlabeled). Review gates are
 // fresh Paseo agents. The factory reads agent state from Paseo's files, moves labels, and starts
-// or messages agents through the paseo CLI.
+// or messages agents through the paseo CLI or, for the calls it serves, the Paseo helper
+// (paseohelper.go).
 package factory
 
 import (
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-// Paseo runs one paseo CLI command and returns its stdout.
+// Paseo runs one paseo CLI command (or serves it as the CLI would) and returns its stdout.
 type Paseo interface {
 	Run(ctx context.Context, args ...string) (string, error)
 }

@@ -240,7 +240,9 @@ func TestHealthReportsPaseoCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := h.PaseoCalls
-	if c.Calls != 3 || c.ByVerb["permit ls"].Calls != 2 || c.ByVerb["inspect"].Calls != 1 || c.Window != "10m0s" {
+	// the fake Paseo is neither the CLI nor the helper, and the factory runs no helper
+	if c.Calls != 3 || c.ByVerb["permit ls"].Calls != 2 || c.ByVerb["inspect"].Calls != 1 || c.Window != "10m0s" ||
+		c.CLICalls != 0 || c.HelperCalls != 0 || c.Helper != nil {
 		t.Errorf("paseoCalls = %+v", c)
 	}
 	f.Now = func() time.Time { return t0.Add(callWindow + time.Second) }
