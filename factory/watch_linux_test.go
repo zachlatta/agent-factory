@@ -3,7 +3,6 @@
 package factory
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,15 +84,11 @@ func TestRunPollsWithoutWatcher(t *testing.T) {
 	var tick atomic.Int64 // a clock that moves on every read, so each loop's end time differs
 	f.Now = func() time.Time { return t0.Add(time.Duration(tick.Add(1)) * time.Millisecond) }
 	f.cfg.Poll = 10 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan struct{})
-	go func() { f.Run(ctx); close(done) }()
+	stop := startRun(t, f)
 	waitFor(t, "a first poll", func() bool { return f.Health().LastLoopDone != "" })
 	first := f.Health().LastLoopDone
 	waitFor(t, "another poll", func() bool { return f.Health().LastLoopDone != first })
-	cancel()
-	<-done
+	stop()
 	if logs := strings.Join(f.log, "\n"); !strings.Contains(logs, "agent watcher off") {
 		t.Errorf("no watcher-off line in %v", logs)
 	}
@@ -110,9 +105,7 @@ func TestRunActsOnStoppedReviewerWithinASecond(t *testing.T) {
 	}
 	f.reload()
 	f.cfg.Poll = time.Hour
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go f.Run(ctx)
+	startRun(t, f)
 	waitFor(t, "first pass", func() bool { return f.Health().LastLoopDone != "" })
 	time.Sleep(50 * time.Millisecond) // the watcher is started before the first pass ends
 	start := time.Now()
@@ -126,5 +119,4 @@ func TestRunActsOnStoppedReviewerWithinASecond(t *testing.T) {
 	if len(p.sent("c1")) != 0 || len(p.sent("c3")) != 0 {
 		t.Error("running reviewers' cards moved")
 	}
-	cancel()
 }

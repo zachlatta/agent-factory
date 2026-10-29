@@ -191,6 +191,26 @@ func TestGraceDue(t *testing.T) {
 	}
 }
 
+// startRun runs f's loop in the background and returns stop, which cancels the loop and waits for
+// Run to return. stop also runs as a cleanup registered after the factory's TempDirs, so no pass
+// writes while those are removed, even when the test fails early.
+func startRun(t *testing.T, f *Factory) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.Run(ctx); close(done) }()
+	stop = func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("Run did not return after cancel")
+		}
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
 // The loop wakes when a reviewer's first minute ends, not at the next poll.
 func TestRunWakesAtGraceEnd(t *testing.T) {
 	f, p := threeReviews(t)
@@ -201,14 +221,11 @@ func TestRunWakesAtGraceEnd(t *testing.T) {
 	writeAgents(t, f, r)
 	f.p = hookPaseo{p, func([]string) {}}
 	f.cfg.Poll = time.Hour
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go f.Run(ctx)
+	startRun(t, f)
 	waitFor(t, "r1's verdict sent", func() bool { return p.countCalls("send", "") >= 3 })
 	if took := time.Since(start); took > 3*time.Second {
 		t.Errorf("verdict after %v", took)
 	}
-	cancel()
 }
 
 func TestHealthReportsPaseoCalls(t *testing.T) {
