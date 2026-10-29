@@ -86,7 +86,7 @@ type Ready struct {
 	State   string   `json:"state,omitempty"`   // preview state (tryout.go): starting, ready, failed, queued, none
 	Log     string   `json:"log,omitempty"`     // the last lines of a failed preview's output
 	Sample  string   `json:"sample,omitempty"`  // a no-UI repo's sample output
-	Wait    string   `json:"wait,omitempty"`    // with no preview link: why (previewWaitText)
+	Wait    string   `json:"wait,omitempty"`    // with no preview link: why (previewReason), for the board
 }
 
 var changedLine = regexp.MustCompile(`(?m)^\s*(?:[-*]\s+)?\**CHANGED:\**\s*(.+?)\s*$`)
@@ -116,7 +116,7 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 		}
 	}
 	if ask.Ready.Preview == "" {
-		ask.Ready.Wait = previewWaitText(ask.Ready)
+		ask.Ready.Wait = previewReason(ask.Ready)
 	}
 }
 
@@ -154,6 +154,17 @@ func previewWaitText(r *Ready) string {
 		return "Preview not started: too many running. It starts when one stops."
 	case previewStarting:
 		return "The preview is still starting."
+	}
+	return ""
+}
+
+// previewReason is the board's line for a Ready card with no preview link: always why, in the email's
+// words where it has them (previewWaitText; the short email leaves the other states out).
+func previewReason(r *Ready) string {
+	if t := previewWaitText(r); t != "" {
+		return t
+	}
+	switch r.State {
 	case previewNone:
 		return "No live preview: this repo has no preview to run, so what changed and the screenshots show it."
 	case previewSampled:

@@ -161,11 +161,12 @@ func TestReadyEmailShowsQuestionsAndLettersAnswerThem(t *testing.T) {
 	}
 }
 
-// A Ready for you card with no preview link always says why, in one sentence the board and email share.
+// A Ready for you card with no preview link always says why on the board, in the email's words where
+// the email has them.
 func TestReadyWithoutPreviewSaysWhy(t *testing.T) {
 	for _, st := range []string{"", previewNone, previewSampled, previewStarting, previewQueued, previewFailed} {
 		r := &Ready{State: st}
-		if previewWaitText(r) == "" {
+		if previewReason(r) == "" || (previewWaitText(r) != "" && previewReason(r) != previewWaitText(r)) {
 			t.Errorf("state %q: no reason given for the missing preview", st)
 		}
 	}
@@ -174,5 +175,50 @@ func TestReadyWithoutPreviewSaysWhy(t *testing.T) {
 	f.fillReady(ask, "c1", "CHANGED: one thing")
 	if ask.Ready.Preview != "" || ask.Ready.Wait == "" {
 		t.Errorf("no preview record: %+v", ask.Ready)
+	}
+}
+
+// On Ready for you, the board and email answer alike: a letter and a tapped option reach the builder
+// as Change with the same answer, and "land" and Land both land it.
+func TestReadyBoardAndEmailParity(t *testing.T) {
+	ready := func() Agent {
+		return card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1", labelZachThread: "nt1"})
+	}
+	reply := "CHANGED: Buttons say Land.\n\nQUESTION: Which colour for the button?\n- Blue (recommended)\n- Red\n"
+	setup := func() (*Factory, *fakePaseo) {
+		f, p, _ := mailFactory(t)
+		storeLog(t, f, p, "c1", "[User] go\n"+reply)
+		f.SetAgents([]Agent{ready()})
+		return f, p
+	}
+	// email: "b"
+	f, p := setup()
+	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	email := p.sent("c1")
+	// board: the tapped option, sent through Change as the board page does
+	g, q := setup()
+	if _, err := g.Act("choose", Body{ID: "c1", Choice: "change", Message: "Zach's answers:\n1. Which colour for the button?\n   → Red"}); err != nil {
+		t.Fatal(err)
+	}
+	board := q.sent("c1")
+	if len(email) != 1 || len(board) != 1 || !strings.Contains(email[0], "→ Red") || !strings.Contains(board[0], "→ Red") {
+		t.Fatalf("email sent %v, board sent %v", email, board)
+	}
+	if p.labels("c1")[labelStage] != q.labels("c1")[labelStage] {
+		t.Errorf("email moved the card to %q, board to %q", p.labels("c1")[labelStage], q.labels("c1")[labelStage])
+	}
+	// land
+	f, p = setup()
+	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m3", Text: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	g, q = setup()
+	if _, err := g.Act("choose", Body{ID: "c1", Choice: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	if p.labels("c1")[labelStage] != "landing" || q.labels("c1")[labelStage] != "landing" {
+		t.Errorf("land: email %q, board %q", p.labels("c1")[labelStage], q.labels("c1")[labelStage])
 	}
 }

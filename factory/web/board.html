@@ -724,7 +724,7 @@ function evidenceHtml(c){
 }
 /* Ready for you (ready.go): what changed and the factory-run preview */
 function readyHtml(r){
-  // with no link, always say why (the server's previewWaitText, the same words as the email)
+  // with no link, always say why (the server's previewReason: the email's words where it has them)
   const link=/^https:\/\//.test(r.preview||'')?`<a class="preview" href="${esc(r.preview)}" target="_blank" rel="noopener">Preview</a>`:'';
   const wait=r.wait||'No live preview for this change.';
   return `<div class="ready">${(r.changed||[]).length?`<ul>${r.changed.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
@@ -751,8 +751,9 @@ function choicesHtml(c, where){
 function askPick(id, qi, oi, where){
   const c=findCard(id); if(!c) return;
   (askPicks[id]=askPicks[id]||{})[qi]=oi;
-  const go=(c.ask.choices||[]).find(x=>x.id==='yes'||x.id==='land'||x.id==='answer');
-  if(c.ask.questions.length===1 && go && !askSay[id]) return choose(id, go.id, where, go.id==='answer');
+  // a tapped option answers at once: through Yes or Answer, and on finished work through Change (as an emailed letter does), never Land
+  const go=(c.ask.choices||[]).find(x=>x.id==='yes'||x.id==='answer'||(c.ask.kind==='ready'&&x.id==='change'));
+  if(c.ask.questions.length===1 && go && !askSay[id]) return choose(id, go.id, where, go.id==='answer'||go.id==='change');
   askOpen.add(id); rerenderAsk(id);
 }
 // decisionAnswers is the picked answers in the words an email reply's letters expand to
@@ -774,10 +775,11 @@ async function choose(id, cid, where, send){
     askOpen.add(id); rerenderAsk(id); return;
   }
   const text=((($('say-'+where+'-'+id)||{}).value)??askDraft[id]??'').trim(), answers=decisionAnswers(c);
-  const answered=cid==='answer' && answers;
+  const answered=(cid==='answer'||(cid==='change'&&c.ask.kind==='ready')) && answers;
   if(ch.text && cid!=='pick' && !text && !answered){ toast(cid==='answer'?'Write your answer first':'Write what should change first'); return; }
   const body={id, choice:cid};
-  if(!['drop','done','rerun','resume','stop'].includes(cid)){ const m=[answers,text].filter(Boolean).join('\n\n'); if(m) body.message=m; }
+  // Land on finished work carries no answers (an emailed "land" does not either): they go through Change
+  if(!['drop','done','rerun','resume','stop','land'].includes(cid)){ const m=[answers,text].filter(Boolean).join('\n\n'); if(m) body.message=m; }
   if(cid==='pick') body.repo=($('repo-'+where+'-'+id)||{}).value;
   try{ await post('choose', body); }catch(e){ return; }
   askDone(id, ch.label+': sent');

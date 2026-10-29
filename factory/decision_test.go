@@ -63,6 +63,13 @@ await choose('d2','yes','l'); assert.match(sent.at(-1)[1].message,/A\?\n   → y
 // No on an open question may go empty; No on a plan needs words
 nodes['say-l-d1']={value:'',focus(){}}; const n0=sent.length; await choose('d1','no','l'); await choose('d1','no','l',true); assert.equal(sent.length,n0); assert.match(notices.at(-1),/Write what should change/);
 await choose('d2','no','l'); nodes['say-l-d2']={value:'Do q instead'}; await choose('d2','no','l',true); assert.equal(sent.at(-1)[1].choice,'no'); assert.match(sent.at(-1)[1].message,/Do q instead/);
+// finished work with a builder's question: a tapped option goes through Change (as an emailed letter
+// does) and never lands it; Land itself carries no answers
+const rq={id:'rq',title:'Colours',ask:{kind:'ready',title:'Ready to try',questions:[{text:'Which colour?',options:['Blue (recommended)','Red']}],
+  choices:[{id:'land',label:'Land',primary:true},{id:'change',label:'Change',text:true},{id:'drop',label:'Drop'}]}};
+B.cards.push(rq);
+await askPick('rq',0,1,'l'); assert.equal(sent.at(-1)[1].choice,'change'); assert.match(sent.at(-1)[1].message,/Which colour\?\n   → Red/);
+await choose('rq','land','l'); assert.deepEqual(sent.at(-1),['choose',{id:'rq',choice:'land'}]);
 // an open question has no Yes or No: tapping an option answers it, Answer opens a box, empty is refused
 const q={id:'q1',title:'Ask',ask:{kind:'question',title:'Waiting on you: question',questions:[{text:'Which port?',options:['8080 (recommended)','9090']}],
   choices:[{id:'answer',label:'Answer',primary:true,text:true},{id:'drop',label:'Drop'}]}};
