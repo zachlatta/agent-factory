@@ -51,7 +51,9 @@ func (f *Factory) sections() Sections {
 	cards, srcs := f.cards, append([]NoAnswerSource{}, f.noAnswer...)
 	f.mu.Unlock()
 	s := BuildSections(cards, now, f.cfg.Location)
-	s.Shipped = mergeLines(s.Shipped, f.shippedToday(now)) // cards shipped today that have left the board
+	// cards finished today that have left the board
+	shipped, noAnswer := f.finishedToday(now)
+	s.Shipped, s.NoAnswer = mergeLines(s.Shipped, shipped), mergeLines(s.NoAnswer, noAnswer)
 	for _, src := range srcs {
 		s.NoAnswer = append(s.NoAnswer, src(now)...)
 	}
@@ -101,20 +103,12 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 			if !sameDay(done, now, loc) {
 				continue
 			}
-			line.At = done.Format(time.RFC3339)
-			if c.Timing != nil && c.Timing.NoReply {
-				line.State = "no answer sent"
-				s.NoAnswer = append(s.NoAnswer, line)
-				continue
+			switch l, kind := finishedLine(c, done); kind {
+			case finishedShipped:
+				s.Shipped = append(s.Shipped, l)
+			case finishedNoAnswer:
+				s.NoAnswer = append(s.NoAnswer, l)
 			}
-			if dropped(c) || c.Timing == nil || (c.Timing.LandedAt == "" && c.Timing.RepliedAt == "") {
-				continue
-			}
-			line.State = "shipped"
-			if c.Timing.LandedAt == "" {
-				line.State = "answered"
-			}
-			s.Shipped = append(s.Shipped, line)
 		default:
 			if st := stuckFlag(c); st != "" {
 				line.State = st
@@ -133,6 +127,52 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 	sortNewest(s.Shipped)
 	sortNewest(s.Routine)
 	return s
+}
+
+type finishedKind int
+
+const (
+	finishedNone     finishedKind = iota // not listed: dropped, or Done with no landing or reply
+	finishedShipped                      // landed, or answered with a reply
+	finishedNoAnswer                     // ended with no reply
+)
+
+// finishedLine is the line of a card that reached Done at done, and where it is listed.
+func finishedLine(c Card, done time.Time) (SectionLine, finishedKind) {
+	line := SectionLine{ID: c.ID, Title: c.Title, At: done.Format(time.RFC3339)}
+	switch {
+	case c.Timing != nil && c.Timing.NoReply:
+		line.State = "no answer sent"
+		return line, finishedNoAnswer
+	case dropped(c) || c.Timing == nil || (c.Timing.LandedAt == "" && c.Timing.RepliedAt == ""):
+		return line, finishedNone
+	case c.Timing.LandedAt == "":
+		line.State = "answered"
+	default:
+		line.State = "shipped"
+	}
+	return line, finishedShipped
+}
+
+// FinishedSince is the shipped and unanswered lines of the cards that reached Done after since,
+// whatever the day: the daily digest lists everything finished since the last one went out.
+func FinishedSince(cards []Card, since time.Time) (shipped, noAnswer []SectionLine) {
+	for _, c := range cards {
+		if c.Stage != "landed" || c.Source == "scout" || c.Tier == "routine" || c.Source == "schedule" {
+			continue
+		}
+		done := doneAt(c)
+		if done.IsZero() || !done.After(since) {
+			continue
+		}
+		switch l, kind := finishedLine(c, done); kind {
+		case finishedShipped:
+			shipped = append(shipped, l)
+		case finishedNoAnswer:
+			noAnswer = append(noAnswer, l)
+		}
+	}
+	return shipped, noAnswer
 }
 
 func sortNewest(ls []SectionLine) {

@@ -546,8 +546,8 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
   stuck ones first: board-only waits (the factory's own trouble, finished or hand-moved cards),
   stalls and errors.
 - **Shipped today**: cards that reached Done today (Zach's time zone) with a landing or a reply;
-  dropped cards are left out. Each pass records them in `digest.json`, so they stay listed all day
-  after Done cards leave the board (12 hours).
+  dropped cards are left out. Each pass records finished cards in `digest.json`, so they stay
+  listed all day after Done cards leave the board (12 hours).
 - **Routine runs (N)**: scheduled runs started today, shown only when the filter is on.
 
 The list never reads a session file or log. Opening a card reads them once: the card starts with
@@ -615,9 +615,13 @@ ready; a digest set after 6 PM still goes out that evening.
 possibly sent); it never fails the health check.
 
 - It lists, from the same `Sections` the board shows, one line per card with its board link:
-  Waiting on you, Shipped today (with the time), In progress, Stuck, and No answer yet, then the
+  Waiting on you, Shipped (with the time), In progress, Stuck, and No answer yet, then the
   count of routine runs and the board link. The subject counts them ("Factory today: 2 shipped,
   1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs and file names are cut.
+- Shipped and No answer yet cover everything that finished since the last digest was built,
+  whatever the day: a card that lands at 7 PM is in the next evening's digest, and a digest never
+  lists a card a previous one did. `digest.json` keeps those cards after they leave the board
+  (a week at most while no digest goes out).
 - The factory writes it itself from the board; no agent turn.
 - `digest.json` in the state directory keeps the day last sent, written before the send, so a
   restart never sends a day twice, and a factory that was down at 6 PM still sends that evening.

@@ -122,7 +122,7 @@ func TestDigestContent(t *testing.T) {
 	}
 }
 
-// Shipped today shows each shipped card on one line with its link.
+// Shipped shows each shipped card on one line with its link.
 func TestDigestShippedToday(t *testing.T) {
 	loc, _ := time.LoadLocation("America/New_York")
 	shipped := []Card{{ID: "d1", Title: "Phone board", Stage: "landed", Source: "board",
@@ -131,7 +131,7 @@ func TestDigestShippedToday(t *testing.T) {
 	f, _ := newTestFactory(t)
 	f.cfg.BoardURL, f.cfg.Location = "https://board.example/", loc
 	e, ok := f.digestEmail(s)
-	if !ok || !strings.Contains(e.Subject, "1 shipped") || !strings.Contains(e.Text, "Shipped today") ||
+	if !ok || !strings.Contains(e.Subject, "1 shipped") || !strings.Contains(e.Text, "Shipped\n") ||
 		!strings.Contains(e.Text, "Phone board") || !strings.Contains(e.Text, "https://board.example/#d1") {
 		t.Errorf("digest = %+v", e)
 	}
@@ -268,5 +268,91 @@ func TestDigestAmbiguousSendIsNotRepeated(t *testing.T) {
 	}
 	if d, _ := f.digestState(); d != "2026-10-28" {
 		t.Errorf("state = %q", d)
+	}
+}
+
+// A card that lands after the 6 PM digest, and one that ends with no reply then, are in the next
+// evening's digest after they have left the board; what one digest listed is not listed again.
+func TestDigestListsWhatFinishedAfterTheLastOne(t *testing.T) {
+	f, m, now := digestFactory(t, 18, 0)
+	loc := f.cfg.Location
+	f.mu.Lock()
+	board := f.cards
+	f.mu.Unlock()
+	finish := func(cards ...Card) {
+		f.mu.Lock()
+		f.cards = append(append([]Card{}, board...), cards...)
+		f.mu.Unlock()
+		f.recordShipped()
+	}
+	done := func(id, title string, at time.Time, noReply bool) Card {
+		ts := at.Format(time.RFC3339)
+		tv := &TimingView{LandedAt: ts, Stages: []StageSpan{{Stage: "landed", Start: ts}}}
+		if noReply {
+			tv = &TimingView{NoReply: true, Stages: tv.Stages}
+		}
+		return Card{ID: id, Short: id, Title: title, Stage: "landed", Source: "board", Timing: tv}
+	}
+	morning := done("d0", "Morning fix", time.Date(2026, 10, 28, 10, 0, 0, 0, loc), false)
+	finish(morning)
+	f.tickDigest()
+	if d := digests(m); len(d) != 1 || !strings.Contains(d[0].Args["text"].(string), "Morning fix") {
+		t.Fatalf("first digest = %+v", d)
+	}
+	// 7 PM: one lands and one ends unanswered, after that digest
+	*now = time.Date(2026, 10, 28, 19, 0, 0, 0, loc)
+	evening := done("d1", "Evening fix", *now, false)
+	unanswered := done("d2", "Evening question", *now, true)
+	finish(morning, evening, unanswered)
+	// by the next evening all three have left the board
+	*now = time.Date(2026, 10, 29, 18, 0, 0, 0, loc)
+	finish()
+	if got := f.sections().Shipped; len(got) != 0 {
+		t.Errorf("the board lists yesterday's cards as shipped today: %+v", got)
+	}
+	f.tickDigest()
+	d := digests(m)
+	if len(d) != 2 {
+		t.Fatalf("digests = %d, want 2", len(d))
+	}
+	text, subj := d[1].Args["text"].(string), d[1].Args["subject"].(string)
+	for _, w := range []string{"Evening fix", "Wed 7:00 PM", "Evening question", "https://board.example/#d1", "https://board.example/#d2"} {
+		if !strings.Contains(text, w) {
+			t.Errorf("second digest lacks %q:\n%s", w, text)
+		}
+	}
+	if strings.Contains(text, "Morning fix") || !strings.Contains(subj, "1 shipped") {
+		t.Errorf("second digest repeats the first or miscounts: %s\n%s", subj, text)
+	}
+	// and the third lists neither again
+	*now = now.Add(24 * time.Hour)
+	f.tickDigest()
+	if d := digests(m); len(d) != 3 || strings.Contains(d[2].Args["text"].(string), "Evening") {
+		t.Errorf("third digest = %+v", d[len(d)-1].Args["text"])
+	}
+}
+
+// A send that surely failed keeps its lines for the retry.
+func TestDigestFailedSendKeepsItsLines(t *testing.T) {
+	f, m, now := digestFactory(t, 9, 0)
+	ts := now.Format(time.RFC3339)
+	f.mu.Lock()
+	board := f.cards
+	f.cards = append(append([]Card{}, board...), Card{ID: "d1", Short: "d1", Title: "Phone board", Stage: "landed",
+		Source: "board", Timing: &TimingView{LandedAt: ts, Stages: []StageSpan{{Stage: "landed", Start: ts}}}})
+	f.mu.Unlock()
+	f.recordShipped()
+	f.mu.Lock()
+	f.cards = board
+	f.mu.Unlock()
+	*now = now.Add(9 * time.Hour)
+	m.errs["send_email"] = errors.New("mailbox down")
+	f.tickDigest()
+	delete(m.errs, "send_email")
+	*now = now.Add(mailRetryAfter + time.Second)
+	f.tickDigest()
+	d := digests(m)
+	if len(d) < 2 || !strings.Contains(d[len(d)-1].Args["text"].(string), "Phone board") {
+		t.Errorf("the retry lost the shipped card: %+v", d)
 	}
 }

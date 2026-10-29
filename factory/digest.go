@@ -22,8 +22,10 @@ import (
 // It is opt-in: with no DigestTo it is off and never falls back to ZachEmail. The operator sets
 // DigestTo once the chosen delivery is ready (README: normal, or quiet with a recipient filter), and
 // the first digest goes out that evening (catch-up).
-// Done cards leave the board after Config.Window, so each pass also records the day's shipped cards in
-// digest.json (recordShipped); Sections lists them all day, and the digest has every one.
+// Shipped and No answer yet list everything that finished since the last digest was built, whatever
+// the day, so a card that lands after 6 PM is in the next evening's digest. Done cards leave the board
+// after Config.Window, so each pass also records them in digest.json (recordShipped); the board lists
+// today's all day, and a digest's lines leave the ledger when it is recorded as sent.
 
 const digestHour = 18 // 6 PM
 
@@ -31,9 +33,10 @@ const digestHour = 18 // 6 PM
 const digestSubject = "Factory today: "
 
 type digestFile struct {
-	Sent    string        `json:"sent"`              // the local day (2006-01-02) of the last digest
-	Day     string        `json:"day,omitempty"`     // the local day Shipped is for
-	Shipped []SectionLine `json:"shipped,omitempty"` // that day's shipped cards, kept after they leave the board
+	Sent     string        `json:"sent"`               // the local day (2006-01-02) of the last digest
+	Since    string        `json:"since,omitempty"`    // RFC 3339: when the last digest was built
+	Shipped  []SectionLine `json:"shipped,omitempty"`  // cards shipped since then, kept after they leave the board
+	NoAnswer []SectionLine `json:"noAnswer,omitempty"` // cards that ended with no reply since then, likewise
 }
 
 func (f *Factory) digestPath() string { return filepath.Join(f.cfg.StateDir, "digest.json") }
@@ -57,17 +60,6 @@ func (f *Factory) digestState() (string, error) {
 	return d.Sent, err
 }
 
-func (f *Factory) setDigestState(day string) error {
-	f.digestMu.Lock()
-	defer f.digestMu.Unlock()
-	d, err := f.readDigest()
-	if err != nil {
-		return err
-	}
-	d.Sent = day
-	return f.writeDigest(d)
-}
-
 func (f *Factory) writeDigest(d digestFile) error {
 	data, _ := json.Marshal(d)
 	tmp := f.digestPath() + ".tmp"
@@ -77,13 +69,22 @@ func (f *Factory) writeDigest(d digestFile) error {
 	return os.Rename(tmp, f.digestPath())
 }
 
-// recordShipped adds today's shipped cards on the board to the day's ledger in digest.json.
+// digestSince is when the last digest was built, else the start of now's local day.
+func (f *Factory) digestSince(d digestFile, now time.Time) time.Time {
+	if t := parseTime(d.Since); !t.IsZero() {
+		return t
+	}
+	y, m, day := now.In(f.cfg.Location).Date()
+	return time.Date(y, m, day, 0, 0, 0, 0, f.cfg.Location)
+}
+
+// recordShipped adds the cards on the board that finished since the last digest to the ledger in
+// digest.json, and drops lines older than ledgerKeep.
 func (f *Factory) recordShipped() {
 	if f.passive() {
 		return
 	}
-	day := f.Now().In(f.cfg.Location).Format("2006-01-02")
-	shipped := BuildSections(f.boardCards(), f.Now(), f.cfg.Location).Shipped
+	now := f.Now()
 	f.digestMu.Lock()
 	defer f.digestMu.Unlock()
 	d, err := f.readDigest()
@@ -91,13 +92,13 @@ func (f *Factory) recordShipped() {
 		f.logf("daily digest: reading %s: %v", filepath.Base(f.digestPath()), err)
 		return
 	}
-	changed := d.Day != day
-	if changed {
-		d.Day, d.Shipped = day, nil
-	}
-	n := len(d.Shipped)
-	d.Shipped = mergeLines(d.Shipped, shipped)
-	if !changed && len(d.Shipped) == n {
+	shipped, noAnswer := FinishedSince(f.boardCards(), f.digestSince(d, now))
+	before := len(d.Shipped) + len(d.NoAnswer)
+	d.Shipped, d.NoAnswer = mergeLines(d.Shipped, shipped), mergeLines(d.NoAnswer, noAnswer)
+	added := len(d.Shipped)+len(d.NoAnswer) != before
+	keep := func(l SectionLine) bool { return !parseTime(l.At).Before(now.Add(-ledgerKeep)) }
+	d.Shipped, d.NoAnswer = filterLines(d.Shipped, keep), filterLines(d.NoAnswer, keep)
+	if !added && len(d.Shipped)+len(d.NoAnswer) == before {
 		return // nothing new: no write
 	}
 	if err := f.writeDigest(d); err != nil {
@@ -105,13 +106,79 @@ func (f *Factory) recordShipped() {
 	}
 }
 
-// shippedToday is the day's ledger of shipped cards (recordShipped), or nil.
-func (f *Factory) shippedToday(now time.Time) []SectionLine {
+// ledgerKeep bounds the ledger while no digest goes out (off, or failing).
+const ledgerKeep = 7 * 24 * time.Hour
+
+// finishedToday is the ledger's lines that finished on now's local day, for the board.
+func (f *Factory) finishedToday(now time.Time) (shipped, noAnswer []SectionLine) {
 	d, err := f.readDigest()
-	if err != nil || d.Day != now.In(f.cfg.Location).Format("2006-01-02") {
-		return nil
+	if err != nil {
+		return nil, nil
 	}
-	return d.Shipped
+	today := func(l SectionLine) bool { return sameDay(parseTime(l.At), now, f.cfg.Location) }
+	return filterLines(d.Shipped, today), filterLines(d.NoAnswer, today)
+}
+
+// digestSections is the board's Sections with Shipped and NoAnswer replaced by everything that
+// finished after since (on the board or in the ledger d), plus the other unanswered requests.
+func (f *Factory) digestSections(d digestFile, since time.Time) Sections {
+	now := f.Now()
+	f.mu.Lock()
+	cards, srcs := f.cards, append([]NoAnswerSource{}, f.noAnswer...)
+	f.mu.Unlock()
+	s := BuildSections(cards, now, f.cfg.Location)
+	shipped, noAnswer := FinishedSince(cards, since)
+	after := func(l SectionLine) bool { return parseTime(l.At).After(since) }
+	s.Shipped = mergeLines(filterLines(d.Shipped, after), shipped)
+	s.NoAnswer = mergeLines(filterLines(d.NoAnswer, after), noAnswer)
+	for _, src := range srcs {
+		s.NoAnswer = append(s.NoAnswer, src(now)...)
+	}
+	return s
+}
+
+// commitDigest records, before the send, that day's digest went out with s built at built: the
+// lines it lists leave the ledger and the next digest lists only what finished after built. It
+// returns the undo for a send that surely failed.
+func (f *Factory) commitDigest(day string, built time.Time, s Sections) (undo func() error, err error) {
+	f.digestMu.Lock()
+	defer f.digestMu.Unlock()
+	prev, err := f.readDigest()
+	if err != nil {
+		return nil, err
+	}
+	listed := map[string]bool{}
+	for _, l := range append(append([]SectionLine{}, s.Shipped...), s.NoAnswer...) {
+		listed[l.ID] = true
+	}
+	unlisted := func(l SectionLine) bool { return !listed[l.ID] }
+	d := digestFile{Sent: day, Since: built.Format(time.RFC3339Nano),
+		Shipped: filterLines(prev.Shipped, unlisted), NoAnswer: filterLines(prev.NoAnswer, unlisted)}
+	if err := f.writeDigest(d); err != nil {
+		return nil, err
+	}
+	return func() error {
+		f.digestMu.Lock()
+		defer f.digestMu.Unlock()
+		cur, err := f.readDigest()
+		if err != nil {
+			return err
+		}
+		cur.Sent, cur.Since = prev.Sent, prev.Since
+		cur.Shipped, cur.NoAnswer = mergeLines(cur.Shipped, prev.Shipped), mergeLines(cur.NoAnswer, prev.NoAnswer)
+		return f.writeDigest(cur)
+	}, nil
+}
+
+// filterLines is the lines of ls that keep accepts.
+func filterLines(ls []SectionLine, keep func(SectionLine) bool) []SectionLine {
+	var out []SectionLine
+	for _, l := range ls {
+		if keep(l) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // mergeLines is a plus the lines of b whose card a lacks, newest first.
@@ -153,7 +220,7 @@ func (f *Factory) tickDigest() {
 		return
 	}
 	day := now.Format("2006-01-02")
-	prev, err := f.digestState()
+	d, err := f.readDigest()
 	if err != nil {
 		f.logf("daily digest: reading %s: %v", filepath.Base(f.digestPath()), err)
 		return
@@ -161,12 +228,14 @@ func (f *Factory) tickDigest() {
 	f.mu.Lock()
 	retry := f.digestRetry
 	f.mu.Unlock()
-	if prev == day || now.Before(retry) {
+	if d.Sent == day || now.Before(retry) {
 		return
 	}
-	e, ok := f.digestEmail(f.sections())
+	s := f.digestSections(d, f.digestSince(d, now))
+	e, ok := f.digestEmail(s)
 	// recorded first: one digest a day even if the factory stops mid-send
-	if err := f.setDigestState(day); err != nil {
+	undo, err := f.commitDigest(day, now, s)
+	if err != nil {
 		f.logf("daily digest: %v", err)
 		return
 	}
@@ -187,7 +256,7 @@ func (f *Factory) tickDigest() {
 		f.digestRetry = f.Now().Add(mailRetryAfter)
 		f.mu.Unlock()
 		f.setDigestStatus("send failed " + day + ", retrying")
-		f.logf("daily digest not sent: %v", errors.Join(err, f.setDigestState(prev)))
+		f.logf("daily digest not sent: %v", errors.Join(err, undo()))
 	default:
 		f.setDigestStatus("sent " + day)
 		f.logf("daily digest sent: %s", e.Subject)
@@ -203,7 +272,7 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 	}
 	parts := []part{
 		{"Waiting on you", "for you", s.ForYou, false},
-		{"Shipped today", "shipped", s.Shipped, true},
+		{"Shipped", "shipped", s.Shipped, true},
 		{"In progress", "in progress", s.Working, false},
 		{"Stuck", "stuck", s.Stuck, false},
 		{"No answer yet", "no answer", s.NoAnswer, false},
@@ -238,6 +307,9 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 			if p.clock && l.At != "" {
 				if at := parseTime(l.At); !at.IsZero() {
 					state = at.In(loc).Format("3:04 PM")
+					if !sameDay(at, f.Now(), loc) {
+						state = at.In(loc).Format("Mon 3:04 PM")
+					}
 				}
 			}
 			link := ""
