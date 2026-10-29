@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -461,4 +462,78 @@ func waitPreviewLong(t *testing.T, f *Factory, id string) Preview {
 	}
 	t.Fatal("preview did not settle")
 	return Preview{}
+}
+
+func TestExistingReadyPreviewNonePicksUpTrustedDeclaration(t *testing.T) {
+	f, _, runner := previewFactory(t, `{}`, readyCard("existing"))
+	f.tickPreviews(t0)
+	waitPreview(t, f, "existing", previewNone)
+	before, err := os.ReadFile(f.previews.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An absent declaration must not rewrite the same no-preview record on each Tick.
+	if err := os.Chtimes(f.previews.path, t0, t0); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		f.tickPreviews(t0.Add(time.Duration(i+1) * time.Minute))
+	}
+	st, err := os.Stat(f.previews.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.ModTime().Equal(t0) {
+		t.Fatal("unchanged no-preview state was rewritten")
+	}
+	// The same Ready card must pick up a later declaration, only from trusted main.
+	f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
+		if strings.Join(args, " ") != "show origin/main:.factory.json" {
+			return "", fmt.Errorf("untrusted preview declaration read")
+		}
+		return runSpec, nil
+	}
+	for _, mode := range []string{"dry-run", "read-only"} {
+		f.cfg.DryRun = mode == "dry-run"
+		f.cfg.ReadOnly = mode == "read-only"
+		f.tickPreviews(t0.Add(4 * time.Minute))
+		after, err := os.ReadFile(f.previews.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatalf("%s changed saved preview state", mode)
+		}
+		if n, _ := runner.count(); n != 0 {
+			t.Fatalf("%s started a preview", mode)
+		}
+	}
+	f.cfg.DryRun = false
+	f.cfg.ReadOnly = false
+	f.tickPreviews(t0.Add(5 * time.Minute))
+	p := waitPreview(t, f, "existing", previewReady)
+	if p.Port != 7700 || p.URL != "https://board.example:7700/x" {
+		t.Fatalf("unexpected preview: %+v", p)
+	}
+	f.tickPreviews(t0.Add(5 * time.Minute))
+	if n, _ := runner.count(); n != 1 {
+		t.Fatalf("started %d processes for one Ready card", n)
+	}
+	// The retry path must use the normal cap and queue, not bypass it.
+	f.cfg.PreviewMax = 1
+	capped := readyCard("capped")
+	if err := f.previews.put(Preview{Card: capped.ID, Cwd: capped.Cwd, State: previewNone}); err != nil {
+		t.Fatal(err)
+	}
+	f.SetAgents([]Agent{readyCard("existing"), capped})
+	f.tickPreviews(t0.Add(5 * time.Minute))
+	waitPreview(t, f, "capped", previewQueued)
+	if n, _ := runner.count(); n != 1 {
+		t.Fatalf("saved-none retry bypassed preview cap: %d", n)
+	}
+	f.SetAgents(nil)
+	f.tickPreviews(t0.Add(6 * time.Minute))
+	if _, stopped := runner.count(); stopped != 1 {
+		t.Fatalf("owned preview cleanup: %d", stopped)
+	}
 }

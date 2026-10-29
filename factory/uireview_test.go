@@ -168,7 +168,7 @@ func TestUIReviewRuleServesOnTailnetIP(t *testing.T) {
 func TestBoardLayoutRuleIsRepoSpecific(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review"}))
 	f.GitOut = gitStub(diffFiles("factory/web/board.html\n"))
-	if _, err := f.runReviewer(Card{ID: "c1", Cwd: "/w/c1", Repo: "zachlatta/agent-factory"}, "code", "public", "t", "", "h1"); err != nil {
+	if _, err := f.runReviewer(Card{ID: "c1", Cwd: "/w/c1", Repo: "zachlatta/agent-factory"}, "code", reviewSpec{}, "public", "t", "", "h1"); err != nil {
 		t.Fatal(err)
 	}
 	runs := p.runsWithLabel(labelArg(labelReviewKind, "code"))
@@ -201,5 +201,22 @@ func TestBoardInstructionsExplicitlyRejectWildcardBinding(t *testing.T) {
 	}
 	if !strings.Contains(boardLayoutRule, "never 0.0.0.0") {
 		t.Fatal("board review must prohibit wildcard binding explicitly")
+	}
+}
+
+func TestBoardLayoutRulePreservesPhoneUXLens(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review"}))
+	f.GitOut = gitStub(diffFiles("factory/web/board.html\n"))
+	_, err := f.runReviewer(Card{ID: "c1", Cwd: "/w/c1", Repo: "zachlatta/agent-factory"}, "code", reviewSpec{lens: lensUX, panel: "sample-panel"}, "public", "t", "", "h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := p.runsWithLabel(labelArg(labelLens, lensUX))
+	if len(runs) != 1 {
+		t.Fatalf("phone UX reviewer runs: %d", len(runs))
+	}
+	prompt := runs[0][len(runs[0])-1]
+	if !strings.Contains(prompt, boardLayoutRule) || !strings.Contains(prompt, lensFocus[lensUX]) {
+		t.Fatal("board helper dropped the phone UX focus or layout rule")
 	}
 }

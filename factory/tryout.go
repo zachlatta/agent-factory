@@ -361,7 +361,9 @@ func (f *Factory) tickPreviews(now time.Time) {
 		p, ok := saved[a.ID]
 		_, live := f.pv.proc(a.ID)
 		switch {
-		case !ok || p.State == previewQueued:
+		case !ok || p.State == previewQueued || (p.State == previewNone && f.previewSpec(a.Cwd) != nil):
+			// A later trusted declaration can enable an existing Ready card.
+			// Missing declarations only read state; they do not rewrite previewNone.
 			if f.startPreview(a, saved, running) {
 				running++
 			}
