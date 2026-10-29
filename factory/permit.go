@@ -19,13 +19,13 @@ func (f *Factory) mailStuckPrompts(agents []Agent, now time.Time) {
 	if f.passive() || f.Mail == nil {
 		return
 	}
-	managed, byID, told := quietManaged(agents), f.byID(), map[string]bool{}
+	managed, byID, owners, told := quietManaged(agents), f.byID(), cardOwners(agents, nil), map[string]bool{}
 	for _, a := range agents {
 		if !managed[a.ID] || a.archived() || a.Status != "running" || a.Pending == "" ||
 			a.LastActivityAt.IsZero() || now.Sub(a.LastActivityAt) < permitTimeout {
 			continue
 		}
-		o, ok := promptOwner(byID, a)
+		o, ok := promptOwner(byID, owners, a)
 		if !ok || told[o.ID] {
 			continue
 		}
@@ -57,30 +57,17 @@ func permitMark(o Agent) string {
 	return o.L(labelRole) + "@" + iso(o.CreatedAt)
 }
 
-// promptOwner is the factory agent whose thread hears about a's stuck prompt: the card a belongs to (a
-// itself, the card a reviewer reviews, or the card a sub-agent was started from), or else the nearest
-// Scout or picker above it.
-func promptOwner(byID map[string]Agent, a Agent) (Agent, bool) {
-	cur := a
-	for range 10 {
-		if cur.L(labelStage) != "" && cur.L(labelRole) == "" {
-			if r, ok := byID[resolveCardID(byID, cur.ID)]; ok {
-				return r, true
-			}
-			return cur, true
+// promptOwner is the factory agent whose thread hears about a's stuck prompt: the card the board files a
+// under (cardOwners: the card a reviewer reviews, or the top of a sub-agent's parents), else a itself
+// when the factory started it. Agents the factory did not start have no owner.
+func promptOwner(byID map[string]Agent, owners map[string]string, a Agent) (Agent, bool) {
+	if id, ok := owners[a.ID]; ok {
+		if o, ok := byID[id]; ok && factoryAgent(o) {
+			return o, true
 		}
-		up := cur.L(labelReviewOf)
-		if up == "" {
-			up = cur.Labels[parentAgentLabel]
-		}
-		p, ok := lookupAgentByPrefix(byID, up)
-		if !ok || up == "" || boardAnchor(p) {
-			break
-		}
-		cur = p
 	}
-	if factoryAgent(cur) {
-		return cur, true
+	if factoryAgent(a) {
+		return a, true
 	}
 	return Agent{}, false
 }

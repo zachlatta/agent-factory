@@ -14,7 +14,7 @@ func stuckCard(id string, idle time.Duration) Agent {
 	return c
 }
 
-// A factory agent still on a prompt 20 minutes after it was refused gets Zach one email, once per
+// A factory agent still on a refused prompt with no activity for 20 minutes gets Zach one email, once per
 // move; the factory never approves the prompt (the fake paseo panics on permit allow).
 func TestStuckPromptEmailsZachOnce(t *testing.T) {
 	f, p, m := mailFactory(t, stuckCard("c1", 19*time.Minute))
@@ -94,8 +94,19 @@ func TestStuckPromptOfHelpersGoesToTheirCard(t *testing.T) {
 	if p.labels("c1")[labelPermitTold] == "" || p.labels("r1")[labelPermitTold] != "" {
 		t.Error("the mark belongs on the card")
 	}
-	if o, ok := promptOwner(f.byID(), mine); ok {
+	if o, ok := promptOwner(f.byID(), cardOwners(f.agents(), nil), mine); ok {
 		t.Errorf("owner of an outside agent = %s", o.ID)
+	}
+	// the email goes to the card the board files the helper under, at any depth
+	deep := Agent{ID: "d1", Status: "running", CreatedAt: t0.Add(-time.Hour), Labels: map[string]string{parentAgentLabel: "r1"}}
+	agents := append(f.agents(), deep)
+	byID := map[string]Agent{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	owners := cardOwners(agents, nil)
+	if o, ok := promptOwner(byID, owners, deep); !ok || o.ID != "c1" || owners["d1"] != "c1" {
+		t.Errorf("owner of a reviewer's sub-agent = %s (board: %s), want c1", o.ID, owners["d1"])
 	}
 }
 

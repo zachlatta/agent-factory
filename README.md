@@ -835,10 +835,10 @@ The email is the decision alone:
   their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
   `FACTORY_ZACH_EMAIL`. If sending with inline screenshots fails, it retries once without them.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
-- `factory.permit-told` holds the move (`<stage>@<since>`) whose stuck permission prompt was already
-  emailed (`factory/permit.go`); a later move that gets stuck again is emailed again.
   A wait where the builder was just asked for a decision or preview (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).
+- `factory.permit-told` holds the move (`<stage>@<since>`) whose stuck permission prompt was already
+  emailed (`factory/permit.go`); a later move that gets stuck again is emailed again.
 - Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
   retried after 5 minutes; a timed-out one is not, since it may have gone out.
 - Cards that were waiting in Needs Zach for a reason automatic recovery now handles take the
