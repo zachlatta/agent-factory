@@ -88,6 +88,13 @@ func PreviewHandler(root string) (http.Handler, error) {
 		}
 		agents = append(agents, a)
 	}
+	// finished work waiting on Zach: the Ready for you stop with Land / Change / Drop
+	ready := agents[slices.IndexFunc(agents, func(a Agent) bool { return a.ID == "preview-zach" })]
+	ready.ID, ready.SessionID, ready.Title = "preview-ready", "preview-zach", "Ready to try: clearer board buttons"
+	ready.Labels = maps.Clone(ready.Labels)
+	delete(ready.Labels, labelPrefix+labelAwaiting)
+	ready.Labels[labelPrefix+labelNote] = readyNote(1)
+	agents = append(agents, ready)
 	f.hostMetrics.read = func(string) hostReading {
 		return hostReading{Metrics: hostMetrics{CPUCount: 4, Errors: map[string]string{}}}
 	}
@@ -140,7 +147,7 @@ func PreviewHandler(root string) (http.Handler, error) {
 // send messages, or approve a real card. ReadOnly stays enabled as a second guard.
 func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimPrefix(r.URL.Path, "/api/")
-	supported := map[string]bool{"approve": true, "send": true, "stage": true, "close": true, "archive": true, "done": true, "stop": true, "seen": true}
+	supported := map[string]bool{"approve": true, "send": true, "stage": true, "close": true, "archive": true, "done": true, "stop": true, "seen": true, "choose": true}
 	if !supported[action] || r.Header.Get("X-Factory") != "1" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "preview: only sample-card actions are simulated"})
 		return
@@ -157,10 +164,30 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := &agents[idx]
+	if action == "choose" {
+		// the board's shared buttons (choose.go): simulate the action the card's button runs
+		c, _ := f.card(a.ID)
+		ask := askFor(c, *a)
+		var ch *Choice
+		if ask != nil {
+			ch = choiceByID(ask, b.Choice)
+		}
+		if ch == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "preview: that button is not on this card"})
+			return
+		}
+		action = ch.action
+		if action == "approve" && a.L(labelAwaiting) == "" {
+			b.Stage = "landing" // Land on finished work starts landing
+		}
+	}
 	a.Labels = maps.Clone(a.Labels)
 	switch action {
 	case "approve":
 		a.Labels[labelPrefix+labelStage] = "building"
+		if b.Stage == "landing" {
+			a.Labels[labelPrefix+labelStage] = "landing"
+		}
 		delete(a.Labels, labelPrefix+labelAwaiting)
 	case "stage":
 		if !validStage(b.Stage) {

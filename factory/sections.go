@@ -183,6 +183,8 @@ func stuckFlag(c Card) string {
 			return "no activity for " + strings.TrimPrefix(fl, "stalled ")
 		case fl == "error":
 			return "stopped with an error"
+		case strings.HasPrefix(fl, stuckFlagPrefix): // automatic recovery gave up (recover.go)
+			return fl
 		}
 	}
 	return ""

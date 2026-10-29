@@ -129,3 +129,20 @@ func TestBoardAPISections(t *testing.T) {
 		t.Errorf("working = %v", got)
 	}
 }
+
+// A card that automatic recovery marked stuck stays in its column but is listed under Stuck, with why.
+func TestSectionsListRecoveryStuckCards(t *testing.T) {
+	loc, _ := time.LoadLocation("America/New_York")
+	now := time.Date(2026, 10, 28, 18, 0, 0, 0, loc)
+	cards := []Card{
+		{ID: "s1", Title: "Retries", Stage: "building", Source: "board", Flags: []string{stuckFlagPrefix + stuckAgentError}},
+		{ID: "w1", Title: "Fine", Stage: "building", Source: "board"},
+	}
+	s := BuildSections(cards, now, loc)
+	if len(s.Stuck) != 1 || s.Stuck[0].ID != "s1" || s.Stuck[0].State != "stuck: "+stuckAgentError {
+		t.Errorf("stuck = %+v", s.Stuck)
+	}
+	if len(s.Working) != 1 || s.Working[0].ID != "w1" {
+		t.Errorf("working = %+v", s.Working)
+	}
+}

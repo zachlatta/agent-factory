@@ -130,6 +130,24 @@ func TestPreviewSimulatesOnlyFabricatedCardActions(t *testing.T) {
 	if stages["preview-zach"] != "building" || stages["preview-plan"] != "review" || stages["preview-review"] != "landed" {
 		t.Fatalf("fake changes not reflected: %v", stages)
 	}
+	// the board's shared buttons resolve to the same simulated actions: Land on finished work, Drop
+	if got := request("choose", `{"id":"preview-ready","choice":"land"}`, true); got != 200 {
+		t.Fatalf("choose land: %d", got)
+	}
+	if got := request("choose", `{"id":"preview-ready","choice":"yes"}`, true); got != 400 {
+		t.Errorf("a button the card does not have: %d", got)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+	board.Cards = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range board.Cards {
+		if c.ID == "preview-ready" && c.Stage != "landing" {
+			t.Errorf("Land on the finished-work card: stage %q", c.Stage)
+		}
+	}
 	for _, a := range []string{"new", "scout", "review", "answer", "land-review", "recommend"} {
 		if got := request(a, `{"id":"preview-plan"}`, true); got != 403 {
 			t.Errorf("unsafe %s: %d", a, got)
