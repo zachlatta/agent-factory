@@ -52,30 +52,42 @@ func TestParseQuestions(t *testing.T) {
 	}
 }
 
-func TestAskYesNo(t *testing.T) {
+// Each ask's buttons and what they run: Yes or Land only where they approve, allow or check something,
+// and none on asks whose answer is the factory's own action.
+func TestAskButtons(t *testing.T) {
 	cases := []struct {
-		name    string
-		a       Agent
-		yes, no string
+		name string
+		a    Agent
+		want string // each choice as id=action
 	}{
-		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan"}), "approve", "changes"},
-		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}), "approve", "changes"},
-		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}), "approve", "changes"},
-		{"rework cap brief", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), "arbiter", "changes"},
-		{"stuck in its column", card("c", map[string]string{labelStage: "review", labelStuck: stuckReview}), "", ""},
-		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close"}), "close", "changes"},
-		{"escalated brief", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}), "arbiter", "changes"},
-		{"agent error stuck", card("c", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), "", ""},
-		{"moved by hand", card("c", map[string]string{labelStage: "zach"}), "say", "say"},
-		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"}), "say", "say"},
-		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}}, "say", "say"},
-		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}}, "", ""},
-		{"repo picker", card("c", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelCandidates: "example/desk"}), "", ""},
+		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan"}), "yes=approve no=send drop=close"},
+		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}), "land=approve change=send drop=close"},
+		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}), "land=approve change=send drop=close"},
+		{"rework cap brief", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), "arbiter=arbiter change=send drop=close"},
+		{"stuck in its column", card("c", map[string]string{labelStage: "review", labelStuck: stuckReview}), "?"},
+		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close"}), "drop=close change=send"},
+		{"escalated brief", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}), "arbiter=arbiter change=send drop=close"},
+		{"agent error stuck", card("c", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), "?"},
+		{"landing unverified", card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"}), "change=send done=done"},
+		{"moved by hand", card("c", map[string]string{labelStage: "zach"}), "change=send done=done"},
+		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"}), "change=send done=done"},
+		{"open question", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}}, "answer=send drop=close"},
+		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}}, "done=done change=send"},
+		{"repo picker", card("c", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelCandidates: "example/desk"}),
+			"pick:example/desk=approve pick=pickrepo change=send drop=close"},
 	}
 	for _, c := range cases {
 		ask := BuildBoard([]Agent{c.a}, nil, t0)[0].Ask
-		if ask == nil || ask.Yes != c.yes || ask.No != c.no {
-			t.Errorf("%s: ask = %+v, want yes %q no %q", c.name, ask, c.yes, c.no)
+		if ask == nil {
+			t.Errorf("%s: no ask", c.name)
+			continue
+		}
+		var got []string
+		for _, ch := range ask.Choices {
+			got = append(got, ch.ID+"="+ch.action)
+		}
+		if strings.Join(got, " ") != c.want {
+			t.Errorf("%s: buttons %q, want %q", c.name, strings.Join(got, " "), c.want)
 		}
 	}
 }

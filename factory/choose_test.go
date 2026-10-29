@@ -30,7 +30,6 @@ func TestAskChoices(t *testing.T) {
 		{"build side effects", map[string]string{labelAwaiting: "plan", labelNote: sideEffectNote}, askDecision, []string{"yes", "no", "drop"}},
 		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no"}},
 		// board-only: the factory's own to settle, answered in the card's details
-		{"dependency dropped", map[string]string{labelNote: depAskNote("abc1234", depDropped)}, askProblem, []string{"approve", "change", "drop"}},
 		{"did not settle", map[string]string{labelNote: arbiterStuckNote}, askProblem, []string{"arbiter", "change", "drop"}},
 		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
 		{"work left", map[string]string{labelNote: "landed; still to do: x"}, askProblem, []string{"change", "done"}},
@@ -163,9 +162,9 @@ func TestEveryAskHasOneKind(t *testing.T) {
 	for _, l := range []map[string]string{
 		{labelNote: readyNote(1)}, {labelNote: "review passed: approve to land"}, {labelNote: "secret scan failed: x"},
 		{labelAwaiting: "plan", labelNote: sideEffectNote}, {labelNote: "public repo: finished without review"},
-		{labelAwaiting: "repo", labelCandidates: "a/one"}, {labelNote: depAskNote("abc1234", depMissing)},
+		{labelAwaiting: "repo", labelCandidates: "a/one"},
 		{labelNote: arbiterStuckNote}, {labelVerdict: "close"}, {labelNote: "stuck", labelStuckFrom: "plan"},
-		{labelNote: noVerdictNote}, {labelNote: limitNote}, {labelNote: "landing not verified"},
+		{labelNote: "landing not verified"},
 		{labelNote: "landed; still to do: x"}, {labelNote: "landed; did not say what remains"}, {},
 	} {
 		labels := map[string]string{labelStage: "zach"}

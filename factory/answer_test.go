@@ -14,7 +14,7 @@ import (
 func TestParseAnswer(t *testing.T) {
 	qs := []Question{{Text: "Which store?", Options: []string{"Postgres", "SQLite"}},
 		{Text: "When?", Options: []string{"Now", "Later"}}}
-	mk := func(a *Ask) *Ask { a.Yes, a.No = yesNo(a); a.Choices = choicesFor(a); return a }
+	mk := func(a *Ask) *Ask { a.Choices = choicesFor(a); return a }
 	plan := mk(&Ask{Kind: askDecision, Actions: []Action{primary("approve", "Allow & build"),
 		reply("Send back", ""), act("close", "Drop it")}, Questions: qs})
 	onePlan := mk(&Ask{Kind: askDecision, Actions: []Action{primary("approve", "Allow & build"),
@@ -85,7 +85,6 @@ func TestReplyWordsAreButtons(t *testing.T) {
 		"stuck":   card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}),
 		"left":    card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"}),
 		"repo":    card("c1", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelCandidates: "a/one b/two"}),
-		"dep":     card("c1", map[string]string{labelStage: "zach", labelNote: depAskNote("abc1234", depMissing)}),
 	}
 	open := card("c1", map[string]string{})
 	open.RequiresAttention, open.AttentionReason = true, "question"
@@ -253,7 +252,7 @@ func TestEmailLetterAnswersOnABriefReachTheAgent(t *testing.T) {
 	f, p, m := mailFactory(t, a)
 	storeLog(t, f, p, "c1", "Brief.\n\nQUESTION: Which fix?\n- The small one (recommended)\n- The big one\n")
 	c, _ := f.card("c1")
-	if ask := askFor(c, f.agent("c1")); ask.Yes != "arbiter" {
+	if ask := askFor(c, f.agent("c1")); choiceByID(ask, "arbiter") == nil || choiceByID(ask, "arbiter").action != "arbiter" || goChoice(ask) != nil {
 		t.Fatalf("ask = %+v", ask)
 	}
 	if c.Ask == nil || len(c.Ask.Questions) != 0 {

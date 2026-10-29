@@ -556,7 +556,7 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 		}
 		lead = append(lead, fmt.Sprintf("%d questions; I recommend %s.", len(qs), strings.Join(rec, " ")))
 		reply = append(reply, "Reply with letters like "+strings.Join(rec, " "))
-	case goChoice(ask) != nil && (goChoice(ask).action == "approve" || goChoice(ask).action == "arbiter"):
+	case goChoice(ask) != nil && goChoice(ask).action == "approve":
 		lead = append(lead, "I recommend yes.")
 	}
 	for _, w := range words {

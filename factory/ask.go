@@ -24,10 +24,6 @@ type Ask struct {
 	Questions []Question `json:"questions,omitempty"`
 	// Overview is the agent's DECISION / OVERVIEW / NEEDS FROM ZACH block (ParseOverview).
 	Overview *Overview `json:"overview,omitempty"`
-	// Yes/No retain their action meanings for API compatibility. Open asks with both set to
-	// "say" get explicit Yes/No reply choices alongside Other on the board.
-	Yes string `json:"yes,omitempty"`
-	No  string `json:"no,omitempty"`
 	// BoardOnly: the wait shows on the board but is never emailed. Problems the factory or an agent
 	// can sort out (errors, stalls, stuck steps, landing checks, duplicates) and finished or hand-moved
 	// cards are board-only; Zach is emailed only for decisions.
@@ -70,7 +66,6 @@ func askFor(c Card, a Agent) *Ask {
 	if ask == nil {
 		return nil
 	}
-	ask.Yes, ask.No = yesNo(ask)
 	ask.BoardOnly = boardOnly(c, a, ask)
 	if ask.BoardOnly || ask.Kind == "" {
 		ask.Kind = askProblem
@@ -109,33 +104,6 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 		return true
 	}
 	return false
-}
-
-// yesNo maps the board's Yes/No buttons onto the ask, by its buttons. A review that did not settle gets
-// Yes = let an agent decide; a yes/no question (primary approve or close) gets
-// that action; both send No as a change request. An open-ended ask sends Yes or No as a reply. Asks
-// whose answer is Stop, Re-run or a repo, and finished cards, get none.
-func yesNo(ask *Ask) (string, string) {
-	has := func(id string) bool {
-		for _, x := range ask.Actions {
-			if x.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case has("stop") || has("resume") || has("rerun") || has("pickrepo") || ask.Title == finishedTitle:
-		return "", ""
-	case has("arbiter"):
-		return "arbiter", "changes"
-	}
-	for _, x := range ask.Actions {
-		if x.Primary && (x.ID == "approve" || x.ID == "close") {
-			return x.ID, "changes"
-		}
-	}
-	return "say", "say"
 }
 
 const finishedTitle = "Finished: read the result"

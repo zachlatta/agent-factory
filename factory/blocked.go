@@ -43,7 +43,8 @@ const worktreeStorageRule = shellRule + "\n\n" +
 const worktreeRule = worktreeStorageRule + " " + scratchCleanupRule
 
 // permissionWait reports whether agent a is stopped on a permission prompt: one Paseo lists for it
-// (Agent.Pending), or Paseo's own attention flag for it. The factory never answers these prompts.
+// (Agent.Pending), or Paseo's own attention flag for it. The factory refuses these prompts itself
+// (denyPrompts).
 func permissionWait(a Agent) bool {
 	return a.Pending != "" || (a.RequiresAttention && a.AttentionReason == "permission")
 }
