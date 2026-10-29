@@ -145,7 +145,8 @@ func baseAsk(c Card, a Agent) *Ask {
 	case a.Status == "running" && a.Pending != "":
 		return &Ask{Label: "Agent stuck on a prompt", Title: "Waiting on a permission prompt", From: "builder",
 			Why: "Claude Code asked for permission (" + a.Pending + "), which it does even in bypass mode. The factory " +
-				"refuses every prompt and tells the agent how to do the step without one; it carries on, or stops and says what it needs.",
+				"refuses every prompt and tells the agent how to do the step without one; it carries on, or stops and says what it needs. " +
+				"If it is still on the prompt 20 minutes later, you get one email. Approve or deny it in Paseo, stop it, or message it.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case a.Status == "running" && stalledFlag(c) == "":
 		// a builder writing its brief or plan summary for Zach (sent along with the move here)

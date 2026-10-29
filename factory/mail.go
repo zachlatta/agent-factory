@@ -117,10 +117,7 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	} else if !w.IsZero() && ask.Ready != nil && !f.previewSettled(a.ID) && f.Now().Sub(w) <= writeWait {
 		return nil // Ready for you waits for the preview to load or fail, as long as for the builder
 	}
-	f.mu.Lock()
-	retry := f.mailRetry[a.ID]
-	f.mu.Unlock()
-	if f.Now().Before(retry) {
+	if f.mailWaits(a.ID) {
 		return nil
 	}
 	if lineageEmailThread(byID, a) == "" && f.cfg.ZachEmail == "" {
@@ -133,27 +130,43 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	ask.Questions, ask.Overview = qs, ov
 	refineAsk(ask)
 	f.fillReady(ask, a.ID, detail)
-	m := f.composeEmail(a, c, ask)
-	// told first: one email per wait even if the factory stops mid-send
-	if err := f.setLabels(a.ID, map[string]string{labelTold: note}); err != nil {
-		return err
+	sent, err := f.mailOnce(a, labelTold, note, f.composeEmail(a, c, ask))
+	if sent {
+		f.logf("%s waits on Zach (%s): emailed him", short(a.ID), note)
+	}
+	return err
+}
+
+// mailWaits reports whether an earlier failed send to Zach about agent id still waits out mailRetryAfter.
+func (f *Factory) mailWaits(id string) bool {
+	f.mu.Lock()
+	retry := f.mailRetry[id]
+	f.mu.Unlock()
+	return f.Now().Before(retry)
+}
+
+// mailOnce emails m to Zach in a's thread at most once: it sets label key to val on a first, so a
+// factory that stops mid-send never sends it again. A failed send clears the label and waits
+// mailRetryAfter; one that may have gone through keeps it. sent is true only for a confirmed send.
+func (f *Factory) mailOnce(a Agent, key, val string, m email) (sent bool, err error) {
+	if err := f.setLabels(a.ID, map[string]string{key: val}); err != nil {
+		return false, err
 	}
 	thread, err := f.deliver(a, m)
 	switch {
 	case errors.Is(err, ErrMailMaybeSent):
-		f.logf("%s email to Zach (%s) possibly sent: %v", short(a.ID), note, err)
-		return nil
+		f.logf("%s email to Zach (%s) possibly sent: %v", short(a.ID), val, err)
+		return false, nil
 	case err != nil:
 		f.mu.Lock()
 		f.mailRetry[a.ID] = f.Now().Add(mailRetryAfter)
 		f.mu.Unlock()
-		return errors.Join(fmt.Errorf("emailing Zach: %w", err), f.setLabels(a.ID, map[string]string{labelTold: ""}))
+		return false, errors.Join(fmt.Errorf("emailing Zach: %w", err), f.setLabels(a.ID, map[string]string{key: ""}))
 	}
-	f.logf("%s waits on Zach (%s): emailed him", short(a.ID), note)
 	if thread != "" {
-		return f.setLabels(a.ID, map[string]string{labelZachThread: thread})
+		return true, f.setLabels(a.ID, map[string]string{labelZachThread: thread})
 	}
-	return nil
+	return true, nil
 }
 
 // writeWait: how long the email waits for a builder asked to write Zach a summary before it goes

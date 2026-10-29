@@ -110,6 +110,9 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 			return "Status: Ready", nil
 		}
 	case "permit":
+		if len(args) > 1 && args[1] == "allow" {
+			panic("the factory approved a permission prompt: it must never do that")
+		}
 		if p.permitErr != nil {
 			return "", p.permitErr
 		}

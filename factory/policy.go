@@ -1063,6 +1063,7 @@ func (f *Factory) Tick() {
 	f.reconcileTimings()
 	f.denyPrompts(f.agents())
 	now := f.Now()
+	f.mailStuckPrompts(f.agents(), now)
 	p := f.beginPass()
 	defer f.endPass()
 	f.tickHot(p) // agents the watcher saw stop go first (watch.go)

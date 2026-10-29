@@ -285,7 +285,10 @@ The planner (the "Fellow") first picks a track:
   pickers and their sub-agents) with no, once per prompt, telling the agent how to do the step
   without one (`rm` only with literal absolute paths, `git -C` instead of `cd`, work in the
   worktree) or to say in its summary what it needs (`factory/blocked.go`). It never allows a prompt,
-  never answers one of an agent it did not start, and never in a dry or read-only run.
+  never answers one of an agent it did not start, and never in a dry or read-only run. An agent
+  still on a prompt 20 minutes after its last activity gets Zach one email in its card's thread, once
+  per move of the card (`factory.permit-told`, `factory/permit.go`); he approves or denies it in
+  Paseo, stops the agent or messages it.
 - A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
   the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
   or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
@@ -832,6 +835,8 @@ The email is the decision alone:
   their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
   `FACTORY_ZACH_EMAIL`. If sending with inline screenshots fails, it retries once without them.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
+- `factory.permit-told` holds the move (`<stage>@<since>`) whose stuck permission prompt was already
+  emailed (`factory/permit.go`); a later move that gets stuck again is emailed again.
   A wait where the builder was just asked for a decision or preview (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).
 - Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
