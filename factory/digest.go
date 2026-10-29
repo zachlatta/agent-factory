@@ -20,8 +20,8 @@ import (
 // digestHour still sends that evening. A day with nothing to report sends nothing. A failed send is
 // tried again after mailRetryAfter; one that may have gone out is not. Dry and read-only runs never send.
 // It is opt-in: with no DigestTo it is off and never falls back to ZachEmail. The operator sets
-// DigestTo only after the recipient mailbox's digest-only filter is verified active (README), so the
-// first digest goes out that evening (catch-up) to a mailbox where it does not alert.
+// DigestTo once the chosen delivery is ready (README: normal, or quiet with a recipient filter), and
+// the first digest goes out that evening (catch-up).
 // Done cards leave the board after Config.Window, so each pass also records the day's shipped cards in
 // digest.json (recordShipped); Sections lists them all day, and the digest has every one.
 

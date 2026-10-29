@@ -609,8 +609,8 @@ to `FACTORY_DIGEST_TO`. It is the only status email: decisions are emailed as th
 and everything else waits for it.
 
 It is opt-in. With no `FACTORY_DIGEST_TO` it is off and records nothing; it never falls back to
-`FACTORY_ZACH_EMAIL`. The operator sets `FACTORY_DIGEST_TO` only after the recipient mailbox's
-digest-only filter is verified active (below); a digest set after 6 PM still goes out that evening.
+`FACTORY_ZACH_EMAIL`. The operator sets `FACTORY_DIGEST_TO` once the delivery below is chosen and
+ready; a digest set after 6 PM still goes out that evening.
 `/api/health` reports its last state as `digest` (off, nothing to report, sent, send failed,
 possibly sent); it never fails the health check.
 
@@ -625,21 +625,28 @@ possibly sent); it never fails the health check.
   that timed out (it may have gone out) stays recorded and is not sent again. Dry and read-only
   runs never send.
 
-Quiet delivery (no phone alert) is set up on the recipient's side, never in the bot's mailbox: a
-filter in the bot's own mailbox does not change how a delivered copy alerts in another inbox. In
-this order:
+Delivery, in this order:
 
 1. Pick a recipient that is one of the mailbox's allowed recipients exactly as listed
    (`get_mailbox_info`); plus forms of an allowed address are refused. Changing that list is not
    part of this setup.
-2. In that mailbox, create one filter that matches only the digest: from the bot's address, with
+2. Normal delivery (Zach accepts a phone alert for it): set `FACTORY_DIGEST_TO` to that address in
+   the host environment file and let the factory reload. After the first digest, check that it
+   reached that address once, with the day's sections and working board links, and that
+   `/api/health` and `digest.json` show one send for that day, which a restart does not repeat.
+
+Quiet delivery (no phone alert), only when Zach asks for it, is set up on the recipient's side,
+never in the bot's mailbox: a filter in the bot's own mailbox does not change how a delivered copy
+alerts in another inbox. Then, instead of step 2:
+
+1. In the recipient mailbox, create one filter that matches only the digest: from the bot's address, with
    the subject `"Factory today:"`, adding a label, marking it read and skipping the inbox. Where the
    mailbox is one of PDW's Gmail accounts this is a reviewed `gmail.create_filter` mutation; it
    touches no other mail and applies to new mail only.
-3. Verify it is active: the filter shows in that mailbox (PDW's `base_gmail.filters` after its
+2. Verify it is active: the filter shows in that mailbox (PDW's `base_gmail.filters` after its
    sync) with exactly those criteria and actions.
-4. Only then set `FACTORY_DIGEST_TO` in the host environment file and let the factory reload.
-5. Check silence, do not assume it: after the first digest, its message in the recipient mailbox has
+3. Only then set `FACTORY_DIGEST_TO` in the host environment file and let the factory reload.
+4. Check silence, do not assume it: after the first digest, its message in the recipient mailbox has
    the label and neither `INBOX` nor `UNREAD`, the phone's notification log shows no mail alert for
    its subject, and `/api/health` and `digest.json` show exactly one send for that day. If it
    alerted, report it rather than calling the setup done.
@@ -1009,7 +1016,7 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
-| `FACTORY_DIGEST_TO` | `-digest-to` | where the 6 PM daily digest goes (none: no digest; it never falls back to `FACTORY_ZACH_EMAIL`). Set it only after that mailbox's digest-only filter is verified active |
+| `FACTORY_DIGEST_TO` | `-digest-to` | where the 6 PM daily digest goes (none: no digest; it never falls back to `FACTORY_ZACH_EMAIL`). An exactly allowed recipient, set once its delivery is ready (Daily digest) |
 | `FACTORY_PREVIEW_PORTS` | `-preview-ports` | `lo-hi` ports Ready for you previews run and are published on (default `7700-7799`) |
 | `FACTORY_PREVIEW_MAX` | `-preview-max` | previews running at once (default 8) |
 | `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |
