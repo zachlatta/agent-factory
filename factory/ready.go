@@ -73,7 +73,7 @@ func readyAsk(why string) *Ask {
 	if why != "" {
 		w += " It comes to you because " + why + "."
 	}
-	return &Ask{Kind: askReady, Title: readyTitle, From: "builder",
+	return &Ask{Kind: askReady, Label: "Ready: try it, then land", Title: readyTitle, From: "builder",
 		Why:     w + " Try the preview, then land it, ask for a change, or drop it.",
 		Actions: []Action{primary("approve", "Land"), reply("Change", "What should change?"), act("close", "Drop")},
 		Ready:   &Ready{}}

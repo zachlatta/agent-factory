@@ -131,6 +131,7 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	}
 	detail, qs, ov := f.askDetail(c, ask)
 	ask.Questions, ask.Overview = qs, ov
+	refineAsk(ask)
 	f.fillReady(ask, a.ID, detail)
 	m := f.composeEmail(a, c, ask)
 	// told first: one email per wait even if the factory stops mid-send
@@ -331,7 +332,7 @@ func replyWords(ask *Ask) []replyWord {
 	if choiceByID(ask, "no") != nil {
 		out = append(out, replyWord{"no", "decline"})
 	}
-	if choiceByID(ask, "done") != nil {
+	if doneChoice(ask) != nil {
 		out = append(out, replyWord{"done", "mark it done"})
 	}
 	if dropOf(ask) != nil {
@@ -559,7 +560,7 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 		}
 		lead = append(lead, fmt.Sprintf("%d questions; I recommend %s.", len(qs), strings.Join(rec, " ")))
 		reply = append(reply, "Reply with letters like "+strings.Join(rec, " "))
-	case goChoice(ask) != nil && goChoice(ask).action == "approve":
+	case goChoice(ask) != nil && goChoice(ask).action == "approve" && goChoice(ask).Primary:
 		lead = append(lead, "I recommend yes.")
 	}
 	for _, w := range words {

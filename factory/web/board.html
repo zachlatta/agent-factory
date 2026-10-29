@@ -153,11 +153,16 @@ body.inboxv #grid,body.inboxv .colctl,body.inboxv #activity,body:not(.inboxv) #i
 .sec:first-child{margin-top:4px}
 .none{color:var(--mute);font-size:13px;padding:6px 2px 10px}
 .fy{background:#fff;border:1px solid #e7d38a;border-radius:10px;padding:12px;margin-bottom:10px;overflow-wrap:anywhere}
-.fy .ft{font-size:12px;color:var(--mute)}.fy .ft .repo{color:var(--ink);font-weight:600}.fy .ft .fk{color:var(--ink)}
+.fy .ft{font-size:12px;color:var(--mute)}.fy .ft .repo{color:var(--ink);font-weight:600}
+/* what kind of input an ask wants (ask.go Label), and the one thing to do (its NEEDS FROM ZACH) */
+.fk{display:inline-block;margin-top:6px;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:#fff1c2;color:#7d4e00}
+.fk.k-try{background:#dafbe1;color:#116329}.fk.k-problem{background:#eef1f4;color:#424a53}
+.todo{font-size:14px;line-height:1.4;background:#fff8c5;border-left:3px solid #d4a72c;border-radius:4px;padding:5px 9px;margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.kind.k-try ~ .todo{background:#dafbe1;border-color:#1a7f37}
 .fq{display:block;font-size:16px;font-weight:700;line-height:1.35;margin:3px 0 6px;overflow-wrap:anywhere;color:inherit;text-decoration:none}
 .fy a.ft{display:block;color:var(--mute);text-decoration:none}.fy a.ft:hover .ttl,.fy a.fq:hover{text-decoration:underline}
 .choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.choices button{flex:1 1 0;min-width:84px;padding:10px 12px;font-weight:600;border-radius:8px}
+.choices button{flex:1 1 0;min-width:min-content;padding:10px 12px;font-weight:600;border-radius:8px;overflow-wrap:normal}
 .choices button.drop{color:var(--red)}
 .choices button.on{outline:2px solid var(--blue)}
 .choices button.confirm{background:var(--red);border-color:var(--red);color:#fff}
@@ -536,10 +541,9 @@ function forYouHtml(c){
   const repo = repoTag(c);
   // the title and the question open the card (its ask, preview and details)
   const open = `href="?card=${encodeURIComponent(c.id)}" onclick="event.preventDefault();openPanel('${c.id}')"`;
-  // what kind of stop it is ("Ready to try", "Allow this build?") stays visible when the agent's own question replaces it
-  const kind = c.ask.title && c.ask.title!==askQuestion(c.ask) ? `<span class="fk">${esc(c.ask.title)}</span> · ` : '';
-  return `<div class="fy" data-id="${c.id}"><a class="ft" ${open}>${repo}${repo?' · ':''}${kind}<span class="ttl">${esc(c.title)}</span></a>
-    <a class="fq" ${open}>${esc(askQuestion(c.ask))}</a>${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
+  // what kind of input it wants (its label) stays visible above the agent's own question, then the one thing to do
+  return `<div class="fy" data-id="${c.id}"><a class="ft" ${open}>${repo}${repo?' · ':''}<span class="ttl">${esc(c.title)}</span></a>
+    ${askKind(c.ask)}<a class="fq" ${open}>${esc(askQuestion(c.ask))}</a>${askTodo(c.ask)}${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
     <button class="link" onclick="openPanel('${c.id}')">Details</button></div>`;
 }
 function inboxHtml(S, q){
@@ -707,7 +711,7 @@ function cardHtml(c){
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
     <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
-    ${c.ask?`<div class="ask" onclick="event.stopPropagation()"><div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
+    ${c.ask?`<div class="ask" onclick="event.stopPropagation()">${askKind(c.ask)}<div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?askTodo(c.ask)+evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
   </div>`;
 }
 
@@ -735,6 +739,8 @@ const recommended = q => q.options.findIndex(o=>/\(recommended\)/i.test(o));
 function pickOf(c, qi){ const p=(askPicks[c.id]||{})[qi]; return p!==undefined ? p : c.ask.kind==='ready' ? -1 : recommended(c.ask.questions[qi]); }
 // question is the ask's one-line question: the agent's DECISION line, else the ask's title
 function askQuestion(a){ return (a.overview&&a.overview.decision) || a.title; }
+function askKind(a){ return a.label ? `<div class="kind k-${esc(a.kind)}"><span class="fk k-${esc(a.kind)}">${esc(a.label)}</span></div>` : ''; }
+function askTodo(a){ const n = a.overview && a.overview.needs; return n ? `<div class="todo">${esc(n)}</div>` : ''; }
 function evidenceHtml(c){
   const a=c.ask||{}, ev=['before','after'].filter(slot=>(a.evidence||{})[slot]).map(slot=>`<figure><figcaption>${slot==='before'?'Before':'After'}</figcaption>
     <a href="${evidencePath(c.id,slot)}" target="_blank" rel="noopener"><img src="${evidencePath(c.id,slot)}" alt="${slot==='before'?'Before':'After'} screenshot" onerror="this.closest('figure').querySelector('.unavailable').hidden=false;this.parentNode.hidden=true"></a><div class="unavailable" hidden>Image unavailable</div></figure>`).join('');
@@ -940,7 +946,7 @@ function fillAsk(c){
   } else h += req ? `<div class="sub">Not available. <a href="t/${c.id}">Open the conversation</a></div>` : '<div class="sub">loading…</div>';
   if(a){
     const ov = a.overview||{};
-    h += `<h4>${a.kind==='problem'?'What happened':'What it needs from you'}</h4><div class="fq">${esc(askQuestion(a))}</div>`
+    h += `${askKind(a)||`<h4>${a.kind==='problem'?'What happened':'What it needs from you'}</h4>`}<div class="fq">${esc(askQuestion(a))}</div>${askTodo(a)}`
       + (ov.overview ? `<div class="gist">${esc(ov.overview)}</div>` : `<div class="sub">${esc(a.why)}</div>`)
       + evidenceHtml(c) + questionsHtml(c,'p') + choicesHtml(c,'p')
       + ((a.report||a.detail) ? `<details class="report"><summary>Full report</summary><div class="detail">${askMarkdown(a.report||a.detail, c.id)}</div></details>` : '');

@@ -110,7 +110,8 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
         if (questionCard) {
           if (await page.locator('#panel.open').count()) await page.locator('#panel > .x').click();
           const question = page.locator(`.fy[data-id="${questionCard.id}"] .qq`).first();
-          await question.scrollIntoViewIfNeeded();
+          // centred, not just inside the edge, so the choices show whole above and below
+          await question.evaluate(q => q.scrollIntoView({ block: 'center' }));
           const visible = await question.locator('.opt').evaluateAll(options => options.every(o => {
             const r = o.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight;
           }));

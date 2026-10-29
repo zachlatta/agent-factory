@@ -38,7 +38,7 @@ test('For you and card links render at exact widths and preserve navigation', as
         assert.equal(await page.locator('.tabs').count(), 0);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         // the decision is the one asked before building: allow a side effect, with its plain reason in the card
-        assert.equal(await page.locator('.fy[data-id="preview-zach"] .fk').innerText(), 'Allow this build?');
+        assert.equal(await page.locator('.fy[data-id="preview-zach"] .fk').innerText(), 'Allow the build');
         assert.match(await page.locator('.fy[data-id="preview-zach"] a.fq').innerText(), /restart the test board service/);
         // tapping a For you card's title opens it; a working card's line opens it too
         await page.locator('.fy[data-id="preview-zach"] a.ft').click();
@@ -88,8 +88,19 @@ test('For you and card links render at exact widths and preserve navigation', as
         // the sample is marked as one on the page itself, not only in the tab title
         assert.match(await page.locator('#previewNote').innerText(), /sample cards/i);
         assert.equal(await page.locator('#previewNote').isVisible(), true);
-        // each For you card names its kind of stop: finished work to try, a build to allow
-        assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready to try');
+        // each For you card names the kind of input it wants: finished work to try, a build to allow
+        assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready: try it, then land');
+        // work that landed with one thing to try: its label, the thing to do, the test buttons, and no "None"
+        const tryCard = page.locator('.fy[data-id="preview-try"]');
+        assert.equal(await tryCard.locator('.fk').innerText(), 'Work landed. Try it:');
+        assert.equal(await tryCard.locator('a.fq').innerText(), 'Try it, then say if it works');
+        assert.match(await tryCard.locator('.todo').innerText(), /usage page on your phone/);
+        // the thing to try is in a green box, as its label is
+        assert.equal(await tryCard.locator('.todo').evaluate(e => getComputedStyle(e).backgroundColor), 'rgb(218, 251, 225)');
+        assert.deepEqual(await tryCard.locator('.choices button').allInnerTexts(), ['It works, mark done', "It's broken", 'Skip testing, mark done']);
+        assert.doesNotMatch(await tryCard.innerText(), /\bNone\b/);
+        // a button's words fit inside it at phone width: none is wider than its button
+        assert.equal(await tryCard.locator('.choices button').evaluateAll(bs => bs.every(b => b.scrollWidth <= b.clientWidth)), true);
         // finished work starts with no option picked: Land sends no answers; its options say they are optional
         assert.equal(await page.locator('.fy[data-id="preview-ready"] .opt.on').count(), 0);
         assert.match(await page.locator('.fy[data-id="preview-ready"] .opthint').innerText(), /Optional.*Change.*Land/);

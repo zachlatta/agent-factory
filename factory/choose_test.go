@@ -27,13 +27,14 @@ func TestAskChoices(t *testing.T) {
 	}{
 		{"preview", map[string]string{labelNote: readyNote(1)}, askReady, []string{"land", "change", "drop"}},
 		{"review passed", map[string]string{labelNote: "review passed: approve to land"}, askReady, []string{"land", "change", "drop"}},
-		{"secret scan", map[string]string{labelNote: "secret scan failed: email in x.go:1"}, askReady, []string{"land", "change", "drop"}},
+		{"secret scan", map[string]string{labelNote: "secret scan failed: email in x.go:1"}, askDecision, []string{"fix", "scan", "drop"}},
 		{"build side effects", map[string]string{labelAwaiting: "plan", labelNote: sideEffectNote}, askDecision, []string{"yes", "no", "change", "drop"}},
 		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no", "change"}},
 		// board-only: the factory's own to settle, answered in the card's details
 		{"did not settle", map[string]string{labelNote: arbiterStuckNote}, askProblem, []string{"arbiter", "change", "drop"}},
 		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
-		{"work left", map[string]string{labelNote: "landed; still to do: x"}, askProblem, []string{"change", "done"}},
+		{"work left", map[string]string{labelNote: "landed; still to do: x"}, askProblem, []string{"finish", "done", "drop"}},
+		{"work left for Zach", map[string]string{labelNote: "landed; still to do: Zach: tap the button"}, askTry, []string{"works", "broken", "skip"}},
 	} {
 		labels := map[string]string{labelStage: "zach"}
 		for k, v := range tc.labels {

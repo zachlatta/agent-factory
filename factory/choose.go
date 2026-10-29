@@ -107,12 +107,22 @@ func choiceByID(ask *Ask, id string) *Choice {
 	return nil
 }
 
-// goChoice is the ask's Land or Yes, the choice the approve reply words stand for, or nil.
+// goChoice is the ask's Land, Yes, It works or Scan again, the choice the approve reply words stand for, or nil.
 func goChoice(ask *Ask) *Choice {
-	if c := choiceByID(ask, "land"); c != nil {
+	for _, id := range []string{"land", "yes", "works", "scan"} {
+		if c := choiceByID(ask, id); c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// doneChoice is the choice the done reply words stand for: Mark done, or It works on a try ask.
+func doneChoice(ask *Ask) *Choice {
+	if c := choiceByID(ask, "done"); c != nil {
 		return c
 	}
-	return choiceByID(ask, "yes")
+	return choiceByID(ask, "works")
 }
 
 // textChoice is the choice that sends Zach's own words (Change, or his Answer), or nil.
@@ -148,7 +158,7 @@ func (f *Factory) choose(b Body) (any, error) {
 	if !ok {
 		return nil, errors.New("unknown card")
 	}
-	ask := askFor(c, a)
+	ask := f.replyAsk(c, a)
 	if ask == nil {
 		return nil, ErrNotWaiting
 	}

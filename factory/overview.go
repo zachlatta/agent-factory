@@ -22,6 +22,8 @@ he reads them on his phone, so use plain words:
 DECISION: <what Zach decides if this reaches him: one plain question, which is the email subject>
 OVERVIEW: <what it changes, why, and the main risk; at most 3 short sentences>
 NEEDS FROM ZACH: <approve, choose or answer, and what happens after>
+When you ask Zach for anything (a decision, an answer, or a thing to try or test), DECISION names that
+ask; never write None there while NEEDS FROM ZACH asks him for something.
 Then the rest of the message. QUESTION: blocks stay as they are, and TIER:, VERDICT: and TRACK:
 lines stay last. ` + plainEmailRule + evidenceRule
 

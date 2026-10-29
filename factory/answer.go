@@ -26,7 +26,7 @@ var (
 
 var (
 	approveWords = []string{"approve", "approved", "yes", "y", "ok", "okay", "lgtm", "go", "go ahead", "ship it"}
-	doneWords    = []string{"done", "mark done", "mark it done"}
+	doneWords    = []string{"done", "mark done", "mark it done", "works", "it works"}
 	dropWords    = []string{"drop", "drop it", "close", "close it", "cancel"}
 	letterReply  = regexp.MustCompile(`^\d[a-f]([ ,]+\d[a-f])*$`)
 	letterPair   = regexp.MustCompile(`(\d)([a-f])`)
@@ -82,8 +82,8 @@ func parseAnswer(text string, ask *Ask) answer {
 		return answer{Choice: goCh.ID}
 	case clean == "no" && choiceByID(ask, "no") != nil:
 		return answer{Choice: "no"}
-	case slices.Contains(doneWords, clean) && choiceByID(ask, "done") != nil:
-		return answer{Choice: "done"}
+	case slices.Contains(doneWords, clean) && doneChoice(ask) != nil:
+		return answer{Choice: doneChoice(ask).ID}
 	case slices.Contains(dropWords, clean) && dropCh != nil:
 		return answer{Choice: dropCh.ID}
 	case letterReply.MatchString(clean):
@@ -172,11 +172,10 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if !ok {
 		return nil, ErrNoCard
 	}
-	ask := askFor(c, a)
+	ask := f.replyAsk(c, a)
 	if ask == nil {
 		return nil, ErrNotWaiting
 	}
-	_, ask.Questions, _ = f.askDetail(c, ask)
 	ans := parseAnswer(b.Text, ask)
 	if ans.Choice == "" && strings.TrimSpace(replyText(b.Text)) == "" {
 		return map[string]string{"card": a.ID, "action": "none"}, nil

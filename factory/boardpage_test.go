@@ -613,3 +613,32 @@ func TestBoardPageViewLink(t *testing.T) {
 		t.Error("the board still assigns the old stage-tab global")
 	}
 }
+
+// Every ask shows its label (what kind of input it wants) and its NEEDS FROM ZACH line, wherever the board
+// shows the ask: For you, the Needs Zach column and the card panel.
+func TestBoardPageShowsAskLabelAndTodo(t *testing.T) {
+	page := boardPage(t)
+	for _, want := range []string{"function askKind(a)", "function askTodo(a)", ".fk.k-try{"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("board has no %s", want)
+		}
+	}
+	if n := strings.Count(page, "askKind(c.ask)") + strings.Count(page, "askKind(a)||"); n != 3 {
+		t.Errorf("the ask label shows in %d places, want For you, the column and the panel", n)
+	}
+	if n := strings.Count(page, "askTodo(c.ask)") + strings.Count(page, "askTodo(a)}"); n != 3 {
+		t.Errorf("the thing to do shows in %d places, want 3", n)
+	}
+	if strings.Contains(page, "Needs your input") {
+		t.Error("the board still says only \"Needs your input\"")
+	}
+}
+
+// Answer buttons share a row evenly but are never narrower than their longest word, and wrap between
+// words, never inside one: the card's overflow-wrap:anywhere must not reach them.
+func TestBoardPageAnswerButtonsKeepWordsWhole(t *testing.T) {
+	rule := regexp.MustCompile(`\.choices button\{([^}]*)\}`).FindStringSubmatch(boardPage(t))
+	if rule == nil || !strings.Contains(rule[1], "overflow-wrap:normal") || !strings.Contains(rule[1], "min-width:min-content") {
+		t.Errorf("answer buttons can split a word or squeeze it: .choices button{%v}", rule)
+	}
+}

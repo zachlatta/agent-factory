@@ -272,9 +272,10 @@ The planner (the "Fellow") first picks a track:
   again before the land prompt.
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none`. A card that lists work left (`REMAINING:` then one `-`
-  line per item), or says nothing, waits in Needs Zach with the list in its note ("Landed, with work
-  left" or "Landed: did it finish?", shown on the board and not emailed): reply to send the agent on, or
-  mark it Done. REMAINING lists only this card's own request: another card's work, a problem the
+  line per item), or says nothing, waits in Needs Zach with the list in its note, shown on the board and
+  not emailed. A `Zach:` item is a try ask in For you ("Work landed. Try it:" with It works / It's
+  broken / Skip testing); agent items left offer Send it back to finish it or Mark done; no line asks
+  "Landed: did it finish?". REMAINING lists only this card's own request: another card's work, a problem the
   change did not cause (an expired login, an unrelated failing test) and work outside the area of the
   ask go in the summary or become ideas, so they never hold a finished card. Each item starts with who
   must do it, `Zach:` or `agent:`. When the message's `NEEDS FROM ZACH:` says nothing (and names no
@@ -563,9 +564,11 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
 `/api/board`), in this order:
 
 - **For you**: the Needs Zach cards whose ask is not board-only (`Ask.BoardOnly`, the same rule that
-  decides what is emailed): finished work to try, a decision, or an agent's question. Each shows its
-  question (the agent's `DECISION:` line, else the ask's title, which then stays on the title row:
-  "Ready to try", "Allow this build?"); on Ready for you, what changed and
+  decides what is emailed): finished work to try, a decision, or an agent's question; and work that
+  landed with one thing for Zach to try (`try`, shown here though not emailed). Each shows its label
+  (what kind of input it wants: "Ready: try it, then land", "Allow the build", "Work landed. Try it:"),
+  its question (the agent's `DECISION:` line, else the ask's title) and the one thing to do (its
+  `NEEDS FROM ZACH:` line); on Ready for you, what changed and
   the factory-run Preview button (or why there is none yet); its before/after images; and its buttons.
 - **No answer yet**: requests from Zach that got no answer, from one source: the email dispatcher's
   watchdog (see "Unanswered requests"). Each says why, in the watchdog's plain words when it gives
@@ -594,11 +597,14 @@ Every ask has one fixed set of buttons (`factory/choose.go`), the same on the bo
 
 | Ask (`Ask.Kind`) | Buttons |
 | --- | --- |
-| Finished work (`ready`): Ready for you, a secret-scan stop | **Land** / **Change** / **Drop** |
+| Finished work (`ready`): Ready for you | **Land** / **Change** / **Drop** |
+| A secret-scan stop (`decision`): fix first, then scan again | **Tell it to fix** / **Scan again & ship** / **Drop it** |
 | Decision (`decision`): allow a build with side effects, check what was published without review | **Yes** / **No** / **Change** / **Drop** |
 | Which repo (`decision`) | one button per repo, Other repo, **Change**, **Drop** |
+| Work landed and Zach is asked to try or do one thing (`try`): a `Zach:` item, or a test in `NEEDS FROM ZACH` after a landing the factory does not want checked | **It works, mark done** / **It's broken** / **Skip testing, mark done** (for an action that is not a test: Done it / Something's wrong / Skip it) |
 | An agent's open question (`question`) | its options, **Answer**, **Drop**: not a yes/no question, so no Yes or No |
-| Board-only (`problem`): stuck, errors, a review that did not settle, a close suggestion, work left | its own action (Re-run, Resume, Let an agent decide, Close it, Mark done) with Change and Drop, in the card's details |
+| Board-only (`problem`): stuck, errors, a review that did not settle, a close suggestion | its own action (Re-run, Resume, Let an agent decide, Close it, Mark done) with Change and Drop, in the card's details |
+| Agent work left after landing (`problem`) | **Send it back to finish it** / **Mark done** / **Drop it**, in the card's details |
 
 One tap answers: No sends the agent a plain "No.", the same as replying `no`. Drop takes a second
 tap in place. Change, Answer and Other repo open a text box with Send, and need words. On a decision
@@ -610,8 +616,18 @@ parsed into the same button (Needs Zach email below), so both do the same thing.
 the card out of Needs Zach; the other surface then finds nothing waiting (the dispatcher gets 409)
 and does nothing.
 
+Every ask also has a label saying what kind of input it wants, shown above the question on the
+board. `factory/askcheck_test.go` builds every ask and fails when one has no label, Yes / No outside a
+decision, a Land button outside finished work, a main button that approves what its ask does not ask
+for, a reply box as the main answer to landed work, or a button nothing runs; it also counts the places
+that build an ask, so a new one must be added there first. A landing the factory wants checked (not
+what was reviewed, published without review) keeps its label and buttons even when the agent asks
+Zach to try it. Answer buttons share a row evenly, are never narrower than their longest word, and
+never split one.
+
 Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
-The decision line is the question shown; the overview is shown under it in the card; the full report
+A decision or needs line that says nothing ("None.") is dropped on a card that asks for something,
+so the ask's title leads instead. The decision line is the question shown; the overview is shown under it in the card; the full report
 is folded. Existing `QUESTION:` blocks provide up to four questions, with the recommendation first.
 
 For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`
@@ -749,9 +765,9 @@ acts:
 
 | Reply | Does |
 | --- | --- |
-| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | Yes; on an approve with questions, it takes the recommended (first) answers |
+| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | Yes (Land, It works, or Scan again & ship on a secret-scan stop); on an approve with questions, it takes the recommended (first) answers |
 | `no` | No |
-| `done`, `mark done`, `mark it done` | Mark done, when the ask has it |
+| `done`, `mark done`, `mark it done`, `works`, `it works` | Mark done (It works on a thing to try), when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
 | `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is Change) |
 | `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
@@ -992,7 +1008,8 @@ Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `bui
 (`preview-zach`, a decision with Yes / No / Change / Drop) is the one question asked before building: a
 reviewed plan whose build has a side effect (restarting a test service), with its reason;
 `preview-ready` is finished work with Land / Change / Drop, its own synthetic request and changes, and an
-optional question. Every fixture session starts with a synthetic request, so a card opens on its ask.
+optional question; `preview-try` is work that landed with one thing for Zach to try (It works / It's
+broken / Skip testing), under a "None" decision line the board drops. Every fixture session starts with a synthetic request, so a card opens on its ask.
 Their buttons are simulated through the same `choose` route the board posts, and move the card where the
 real action does: Land or Yes to landing or building, No, Change or an answer where a real message
 sends it (`answerLabels`), Drop to done. The page is served with `<html data-mode="preview">`, which

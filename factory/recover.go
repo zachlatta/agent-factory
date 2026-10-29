@@ -143,10 +143,10 @@ func stuckAsk(a Agent) *Ask {
 		if a.LastError != "" {
 			text += "\n\nProvider error: " + a.LastError
 		}
-		return &Ask{Title: stuckTitlePrefix + "the agent keeps failing", From: "builder", Why: text, BoardOnly: true,
+		return &Ask{Label: "Card stuck", Title: stuckTitlePrefix + "the agent keeps failing", From: "builder", Why: text, BoardOnly: true,
 			Actions: []Action{primary("resume", "Resume"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	}
-	return &Ask{Title: stuckTitlePrefix + why, From: "builder", BoardOnly: true,
+	return &Ask{Label: "Card stuck", Title: stuckTitlePrefix + why, From: "builder", BoardOnly: true,
 		Why: "The factory's automatic retries for this step ran out, so the card stays in its column. Re-run the " +
 			"step, send the agent a message, or drop it.",
 		Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}

@@ -37,6 +37,16 @@ type Ask struct {
 	Kind string `json:"kind"`
 	// Choices are the answers, the same on the board (POST /api/choose) and by email (answer.go).
 	Choices []Choice `json:"choices"`
+	// Label says in a few words what kind of input the ask wants ("Work landed. Try it:"), shown
+	// above the headline; every ask has one (askcheck_test.go).
+	Label string `json:"label"`
+	// landed: the card's work reached main (or the card finished), so its agent may ask Zach to try it
+	// (refineAsk); zachItem is the thing it left for Zach (a REMAINING Zach: item), if any. check: a
+	// landing the factory wants Zach to check (not what was reviewed, pushed without review), which
+	// keeps its own label and buttons whatever the agent asks
+	landed   bool
+	check    bool
+	zachItem string
 }
 
 // Question is one multiple-choice question an agent asks Zach. He can also write his own answer.
@@ -66,12 +76,23 @@ func askFor(c Card, a Agent) *Ask {
 	if ask == nil {
 		return nil
 	}
-	ask.BoardOnly = boardOnly(c, a, ask)
-	if ask.BoardOnly || ask.Kind == "" {
+	ask.BoardOnly = ask.BoardOnly || boardOnly(c, a, ask)
+	finishAsk(ask)
+	return ask
+}
+
+// finishAsk fills in what every ask has: a kind (problem when unset or board-only, except work to
+// try), the kind's label when it sets none, and its choices (unless it sets its own).
+func finishAsk(ask *Ask) {
+	if (ask.BoardOnly && ask.Kind != askTry) || ask.Kind == "" {
 		ask.Kind = askProblem
 	}
-	ask.Choices = choicesFor(ask)
-	return ask
+	if ask.Label == "" {
+		ask.Label = kindLabels[ask.Kind]
+	}
+	if ask.Choices == nil {
+		ask.Choices = choicesFor(ask)
+	}
 }
 
 // boardOnly reports whether the wait is shown on the board only, never emailed: a finished or
@@ -122,39 +143,45 @@ func baseAsk(c Card, a Agent) *Ask {
 	note := a.L(labelNote)
 	switch {
 	case a.Status == "running" && a.Pending != "":
-		return &Ask{Title: "Waiting on a permission prompt", From: "builder",
+		return &Ask{Label: "Agent stuck on a prompt", Title: "Waiting on a permission prompt", From: "builder",
 			Why: "Claude Code asked for permission (" + a.Pending + "), which it does even in bypass mode. The factory " +
 				"refuses every prompt and tells the agent how to do the step without one; it carries on, or stops and says what it needs.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case a.Status == "running" && stalledFlag(c) == "":
 		// a builder writing its brief or plan summary for Zach (sent along with the move here)
-		return &Ask{Title: "Writing a summary for you…", From: "builder",
+		return &Ask{Label: "Nothing to do yet", Title: "Writing a summary for you…", From: "builder",
 			Why:     "The agent is writing what it needs from you. It shows here when it is done.",
 			Actions: []Action{act("stop", "Stop it")}}
 	case a.Status == "running":
 		// a factory card shown here because it stalled (BuildBoard); its labels still name its column
-		return &Ask{Title: "Running, but no activity for " + strings.TrimPrefix(stalledFlag(c), "stalled "), From: "builder",
+		return &Ask{Label: "Agent may be hung", Title: "Running, but no activity for " + strings.TrimPrefix(stalledFlag(c), "stalled "), From: "builder",
 			Why:     "The agent has been quiet a long time. It may be on a slow step or hung. Stop it, or send it a message.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case strings.HasPrefix(note, "history unavailable"):
-		return &Ask{Title: "History unavailable: decision paused", From: "builder",
+		return &Ask{Label: "Card stuck", Title: "History unavailable: decision paused", From: "builder",
 			Why: "The factory could not read the session history needed for this decision within two minutes of the turn stopping. " +
 				"It has not applied a verdict or moved the work forward. Re-run the step or reply with instructions.",
 			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
 	case a.L(labelAwaiting) == "plan":
-		return &Ask{Kind: askDecision, Title: "Allow this build?", From: "builder",
+		return &Ask{Label: "Allow the build", Kind: askDecision, Title: "Allow this build?", From: "builder",
 			Why: "Other agents reviewed the plan. Building it would change something outside its own copy of the code (or that was not ruled out), so nothing is built until you allow it. A code review still runs before it lands.",
 			Actions: []Action{primary("approve", "Allow & build"),
 				reply("Send back with changes", "What should change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
-		return &Ask{Kind: askReady, Title: "Private text found before publishing: fix it?", From: "builder",
+		// a fix first, not a landing: its own buttons, never Land / Change / Drop
+		return &Ask{Label: "Publishing stopped: fix it", Kind: askDecision, Title: "Private text found before publishing: fix it?", From: "builder",
 			Why: "This repo is public. The factory's scan " + strings.TrimPrefix(note, "secret scan ") +
 				". Nothing was published. Ask the agent to remove it (rewrite its own unpushed commits), then approve to scan again.",
-			Actions: []Action{{ID: "reply", Label: "Tell it to fix", Primary: true, Hint: "e.g. remove it and rewrite your commits"}, act("approve", "Scan again & ship"), act("close", "Drop it")}}
+			Actions: []Action{{ID: "reply", Label: "Tell it to fix", Primary: true, Hint: "e.g. remove it and rewrite your commits"}, act("approve", "Scan again & ship"), act("close", "Drop it")},
+			Choices: []Choice{
+				{ID: "fix", Label: "Tell it to fix", Primary: true, Text: true, Hint: "e.g. remove it and rewrite your commits", action: "send"},
+				{ID: "scan", Label: "Scan again & ship", action: "approve"},
+				{ID: "drop", Label: "Drop it", action: "close"},
+			}}
 	case strings.HasPrefix(note, "public repo: finished without review"):
-		return &Ask{Kind: askDecision, Title: "Published without review: check it?", From: "builder",
+		return &Ask{Label: "Work landed. Check what was pushed:", landed: true, check: true, Kind: askDecision, Title: "Published without review: check it?", From: "builder",
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
 			Actions: []Action{primary("done", "Checked, mark done"), reply("Reply", "Message to the agent")}}
@@ -163,7 +190,7 @@ func baseAsk(c Card, a Agent) *Ask {
 		return readyAsk(a.L(labelAskWhy))
 	case strings.HasPrefix(note, unverifiedReviewNote):
 		// no Mark done or Approve: either would skip the review this card still needs (reviewHold)
-		return &Ask{Title: "Not landed: can't confirm it is what was reviewed", From: "builder",
+		return &Ask{Label: "Not landed: review again", Title: "Not landed: can't confirm it is what was reviewed", From: "builder",
 			Why: "Nothing was landed or published. The factory lands only the commit its code review saw, and here " +
 				strings.TrimPrefix(note, unverifiedReviewNote) + ". Re-running starts a fresh code review of what the card has now.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
@@ -171,16 +198,13 @@ func baseAsk(c Card, a Agent) *Ask {
 		// the last two are cards that waited for Zach's brief before the arbiter took over the cap
 		return settleAsk()
 	case a.L(labelVerdict) == "close":
-		return &Ask{Title: closeTitle, From: "reviewer",
+		return &Ask{Label: "Close this card?", Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
 			Actions: []Action{primary("close", "Close it"), reply("Keep going", "Why it is still needed")}}
-	case strings.HasPrefix(note, "landed; still to do: "):
-		return &Ask{Title: "Landed, with work left", From: "builder",
-			Why: "The agent landed its change but says part of this card is not done: " +
-				strings.TrimPrefix(note, "landed; still to do: ") + ". Send it on to finish, or mark it done.",
-			Actions: []Action{{ID: "reply", Label: "Send it on", Primary: true, Hint: "e.g. finish the rest"}, act("done", "Mark done")}}
+	case strings.HasPrefix(note, noteWorkLeft):
+		return workLeftAsk(strings.TrimPrefix(note, noteWorkLeft))
 	case note == "landed; did not say what remains":
-		return &Ask{Title: "Landed: did it finish?", From: "builder",
+		return &Ask{Label: "Work landed. Did it finish?", landed: true, Title: "Landed: did it finish?", From: "builder",
 			Why: "The agent landed its change but did not end with a REMAINING line, so the factory can't tell " +
 				"whether anything is left. Its last message is below.",
 			Actions: []Action{primary("done", "Mark done"), reply("Reply", "e.g. what is left?")}}
@@ -194,25 +218,25 @@ func baseAsk(c Card, a Agent) *Ask {
 				"not pass (" + strings.TrimPrefix(strings.TrimPrefix(note, landDiffNotePrefix), ": ") +
 				"). Treat anything it found as exposed."
 		}
-		return &Ask{Title: "Landed something other than what was reviewed", From: "builder",
+		return &Ask{Label: "Work landed. Check what landed:", landed: true, check: true, Title: "Landed something other than what was reviewed", From: "builder",
 			Why: why + " Its last message is below.", Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
 	case a.L(labelStage) == "zach":
-		return &Ask{Title: handTitle, From: "builder",
+		return &Ask{Label: "Moved here by hand", Title: handTitle, From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",
 			Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Mark done")}}
 	case a.RequiresAttention && a.AttentionReason != "" && a.AttentionReason != "finished":
-		return &Ask{Kind: askQuestion, Title: "Waiting on you: " + a.AttentionReason, From: "builder",
+		return &Ask{Label: "The agent asked you", Kind: askQuestion, Title: "Waiting on you: " + a.AttentionReason, From: "builder",
 			Why:     "The agent stopped and is waiting for your answer. Its question is below.",
 			Actions: []Action{{ID: "reply", Label: "Answer", Primary: true, Hint: "Your answer"}, act("close", "Drop it")}}
 	}
-	return &Ask{Title: finishedTitle, From: "builder",
+	return &Ask{Label: "Finished: read the result", landed: true, Title: finishedTitle, From: "builder",
 		Why:     "The agent finished and you haven't looked at it yet. Its final answer is below.",
 		Actions: []Action{primary("done", "Got it, mark done"), reply("Reply", "Follow-up for the agent")}}
 }
 
 // repoAsk is the question for a repo picker in Needs Zach: which repo the card starts in.
 func repoAsk(note, candidates string) *Ask {
-	ask := &Ask{Kind: askDecision, Title: repoTitle, From: "builder",
+	ask := &Ask{Label: "Pick a repo", Kind: askDecision, Title: repoTitle, From: "builder",
 		Why: "The factory could not tell which repo this belongs in. Pick one and the card starts planning there. The picker's reasoning is below."}
 	switch note {
 	case "routing failed":
@@ -243,7 +267,7 @@ func askQuestions(ask *Ask, qs []Question) []Question {
 // settleAsk is the Ask for a card whose review did not settle even with the arbiter (or that waited for
 // Zach at the review cap before the arbiter existed): another arbiter, his own instructions, or drop it.
 func settleAsk() *Ask {
-	return &Ask{Title: "Reviews didn't settle", From: "builder",
+	return &Ask{Label: "Reviews stuck", Title: "Reviews didn't settle", From: "builder",
 		Why: "The reviewers and the builder could not agree. Let an agent weigh both sides and decide, or tell the " +
 			"builder what to do. The builder's last message is below.",
 		Actions: []Action{primary("arbiter", "Let an agent decide"), reply("Tell it what to do", "e.g. ignore the second point, fix the first"),
@@ -310,6 +334,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 				f.details[cards[n].ID] = cached
 				f.mu.Unlock()
 			}
+			refineAsk(ask)
 			continue
 		}
 		if !fetch {
@@ -332,6 +357,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview, ask.Evidence, ask.Report, ask.Request}
 		f.mu.Unlock()
 		ask.Questions = askQuestions(ask, ask.Questions) // the cache keeps them: the ask can change without new activity
+		refineAsk(ask)
 	}
 }
 
