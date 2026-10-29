@@ -3,6 +3,7 @@ package factory
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"strings"
@@ -700,6 +701,12 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 		}
 		return f.setLabels(target, labels)
 	}
+	if hold := f.reviewHold(t, t.Cwd, t.Repo); hold != nil {
+		// the approval is for the reviewed commit only: what the card has now is not approved
+		maps.Copy(labels, clearHeldApproval(t, hold))
+		labels[labelVerdict] = verdict
+		return f.setLabels(target, labels)
+	}
 	fb := uiFeedback(notes)
 	scanned := ""
 	if f.guarded(t.Repo) {
@@ -808,6 +815,50 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 	return f.send(c.ID, "Before code review the worktree must be clean, so the reviewer sees exactly what lands. "+
 		"Commit everything that belongs to this work on your branch (do NOT land), "+
 		"then stop with a short summary (including the deploy steps as built, if any). "+noLiveChangesRule+" "+overviewReminder+" The review starts when you stop.\n\n"+worktreeRule+"\n\ngit status --porcelain:\n"+trunc(dirty, 1500))
+}
+
+// staleReviewNote and the unverified notes have no comma: label values cannot hold one (labelArg).
+// Every note of a card held because its reviewed commit could not be checked starts with
+// unverifiedReviewNote; its Re-run starts a fresh code review (stuck-from review).
+const (
+	staleReviewNote      = "changed since review: fresh code review"
+	unverifiedReviewNote = "reviewed commit not verified: "
+	noReviewedNote       = unverifiedReviewNote + "public repo with no reviewed commit recorded"
+)
+
+// reviewHold reports why card a may not be approved for landing or sent a land prompt yet: nil when
+// its HEAD is still the commit its code review saw (factory.reviewed), else the labels that move it.
+// A moved HEAD goes back to a fresh code review (since cleared, so it starts once the agent is
+// stopped); a HEAD that cannot be read stops the card for Zach. A card with no reviewed commit keeps
+// the older on-main checks in a private repo, but stops in a public one, where nothing unreviewed
+// may be published. Zach's approval is no review: it is checked the same way.
+func (f *Factory) reviewHold(a Agent, cwd, repo string) map[string]string {
+	zach := func(note string) map[string]string {
+		return map[string]string{labelStage: "zach", labelNote: note, labelStuckFrom: "review",
+			labelHeld: "", labelAutoReview: ""}
+	}
+	reviewed := strings.TrimSpace(a.L(labelReviewed))
+	if reviewed == "" {
+		if f.guarded(repo) {
+			return zach(noReviewedNote)
+		}
+		return nil
+	}
+	if cwd == "" {
+		return zach(unverifiedReviewNote + "could not read HEAD: no worktree")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	head, err := f.GitOut(ctx, cwd, "rev-parse", "HEAD")
+	cancel()
+	if err != nil {
+		return zach(unverifiedReviewNote + "could not read HEAD: " + trunc(err.Error(), 150))
+	}
+	if head = strings.TrimSpace(head); head != reviewed {
+		f.logf("%s HEAD %s is not the reviewed %s: fresh code review", short(a.ID), short(head), short(reviewed))
+		return map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: "", labelHeld: "",
+			labelNote: staleReviewNote}
+	}
+	return nil
 }
 
 // runReviewer starts a read-only reviewer of the given kind for c. For a landing review, why is the
@@ -939,6 +990,14 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 	}
 	f.markDepLanded(a)
 	f.tickDelegate(a, now)
+	if heldApprovedParked(a) && a.Status != "running" {
+		// Zach approved this card while its dependency was in flight, then it was parked: release it
+		// (or stop it for him) once the dependency lands. No other parked card is moved.
+		if c, ok := f.card(a.ID); ok {
+			return f.tickHeld(a, c)
+		}
+		return nil
+	}
 	if !a.stopped() {
 		return nil
 	}

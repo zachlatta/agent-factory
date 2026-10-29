@@ -24,17 +24,18 @@ const hungAfter = 15 * time.Minute
 // A Refresh error (Paseo down, ~/.paseo unreadable) shows in RefreshErr and on the board; it
 // leaves Live and OK alone, so a Paseo outage never restarts or rolls back the factory.
 type Health struct {
-	Rev            string      `json:"rev"`
-	Started        string      `json:"started,omitempty"`
-	Refreshed      bool        `json:"refreshed"`
-	RefreshErr     string      `json:"refreshErr,omitempty"`
-	TickRunningFor string      `json:"tickRunningFor,omitempty"`
-	LastLoopDone   string      `json:"lastLoopDone,omitempty"`
-	Mail           string      `json:"mail,omitempty"` // last mailbox check: "ok" or its error; never fails the check (mail.go)
-	Live           bool        `json:"live"`
-	OK             bool        `json:"ok"`
-	Agents         AgentCounts `json:"agents"`
-	PaseoCalls     PaseoCalls  `json:"paseoCalls"` // paseo CLI calls in the last 10 minutes (paseocalls.go)
+	Rev            string         `json:"rev"`
+	Started        string         `json:"started,omitempty"`
+	Refreshed      bool           `json:"refreshed"`
+	RefreshErr     string         `json:"refreshErr,omitempty"`
+	TickRunningFor string         `json:"tickRunningFor,omitempty"`
+	LastLoopDone   string         `json:"lastLoopDone,omitempty"`
+	Mail           string         `json:"mail,omitempty"` // last mailbox check: "ok" or its error; never fails the check (mail.go)
+	Live           bool           `json:"live"`
+	OK             bool           `json:"ok"`
+	Agents         AgentCounts    `json:"agents"`
+	PaseoCalls     PaseoCalls     `json:"paseoCalls"` // paseo CLI calls in the last 10 minutes (paseocalls.go)
+	Workflow       WorkflowHealth `json:"workflow"`
 }
 
 // AgentCounts is how many of this host's Paseo agents are loaded, for the idle reap (reap.go).
@@ -197,6 +198,7 @@ func (f *Factory) Health() Health {
 	}
 	h.OK = h.Live && refreshed
 	h.Agents = f.agentCounts()
+	h.Workflow = workflowHealth(f.agents())
 	h.PaseoCalls = f.calls.report(now)
 	return h
 }

@@ -59,7 +59,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				return nil, err
 			}
 		}
-		return ok, f.setLabels(c.ID, map[string]string{labelStage: b.Stage, labelSince: now})
+		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: b.Stage, labelSince: now}))
 	case "review":
 		kind := b.Kind
 		if kind != "plan" {
@@ -147,13 +147,23 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			return ok, f.setLabels(c.ID, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
 				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"})
 		}
+		// Zach approves what was reviewed: a card that moved since goes back to code review, and one whose
+		// reviewed commit cannot be checked does not land
+		if hold := f.reviewHold(f.agent(c.ID), c.Cwd, c.Repo); hold != nil {
+			hold = clearHeldApproval(f.agent(c.ID), hold)
+			if hold[labelStage] == "zach" {
+				return nil, errors.Join(errors.New(hold[labelNote]), f.setLabels(c.ID, hold))
+			}
+			return ok, f.setLabels(c.ID, hold)
+		}
 		msg := landMsg
 		if a, ok := f.agentOK(c.ID); ok {
 			if id, st := f.pendingDep(a); st == depWaiting {
 				// its plan lands it after a card still in flight: the next Tick sends the land prompt (tickHeld).
 				// A dropped or missing one is what Zach just answered, so that lands now.
+				// His approval lets the factory release it even if it is parked by then (heldApprovedParked).
 				return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelHeld: id,
-					labelNote: holdNote(id)})
+					labelNote: holdNote(id), labelHeldApproved: now})
 			}
 			msg = f.landMsgFor(a)
 		}
@@ -166,7 +176,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if err := f.sendLanding(c.ID, "Zach approved this on the factory board."+answers+" "+msg); err != nil {
 			return nil, err
 		}
-		return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelNote: "approved by Zach"})
+		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landing", labelSince: now,
+			labelNote: "approved by Zach"}))
 	case "arbiter":
 		// Zach hands a review that did not settle to an arbiter agent, even one that ruled before
 		a := f.agent(c.ID)
@@ -182,7 +193,8 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	case "rerun":
 		return ok, f.rerun(c)
 	case "done":
-		if err := f.setLabels(c.ID, map[string]string{labelStage: "landed", labelNote: "marked done by Zach"}); err != nil {
+		if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landed",
+			labelNote: "marked done by Zach"})); err != nil {
 			return nil, err
 		}
 		if c.Parked != "" {
@@ -196,11 +208,16 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		} else if keep != "" {
 			note += ": duplicate of " + keep
 		}
-		if err := f.setLabels(c.ID, map[string]string{labelNote: note}); err != nil {
+		if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelNote: note})); err != nil {
 			return nil, err
 		}
 		return ok, f.dropAgent(c.ID)
 	case "archive":
+		if a := f.agent(c.ID); a.L(labelHeldApproved) != "" {
+			if err := f.setLabels(c.ID, clearHeldApproval(a, map[string]string{})); err != nil {
+				return nil, err
+			}
+		}
 		return ok, f.dropAgent(c.ID)
 	case "stop":
 		_, err := f.paseo("stop", c.ID)
@@ -279,6 +296,13 @@ func (f *Factory) rerun(c Card) error {
 	}
 	switch from := f.agent(c.ID).L(labelStuckFrom); from {
 	case "landing":
+		if hold := f.reviewHold(f.agent(c.ID), c.Cwd, c.Repo); hold != nil {
+			hold = clearHeldApproval(f.agent(c.ID), hold)
+			if hold[labelStage] == "zach" {
+				return errors.Join(errors.New(hold[labelNote]), f.setLabels(c.ID, hold))
+			}
+			return f.setLabels(c.ID, hold)
+		}
 		guarded := f.guarded(c.Repo)
 		if guarded {
 			if note := f.scanNote(c.Cwd, ""); !scanPassed(note) {

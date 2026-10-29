@@ -2,11 +2,13 @@ package factory
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -93,156 +95,332 @@ func tokenPath(home string, a Agent) string {
 	return ""
 }
 
-// Only provider usage records are decoded. Transcript text is never retained.
-func readTokenFile(ctx context.Context, path, provider string) tokenRead {
-	r := tokenRead{status: "missing"}
-	f, err := os.Open(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			r.status = "error"
-		}
-		return r
+// tokenParser is one session file's decoding state between reads: counters, message ids, models
+// and times only. Record text is never retained.
+type tokenParser struct {
+	provider   string
+	status     string // unsupported until a usage record; error after a bad one
+	events     []tokenEvent
+	seen       map[string]int // Claude message id or Muse time+model -> index in events
+	cumulative map[TokenCounts]bool
+	prev       TokenCounts // last Codex cumulative reading
+	previous   time.Time
+	model      string
+}
+
+func newTokenParser(provider string) *tokenParser {
+	return &tokenParser{provider: provider, status: "unsupported", seen: map[string]int{}, cumulative: map[TokenCounts]bool{}}
+}
+
+// line decodes one complete record. Blank lines are skipped: a record committed without its
+// newline is followed by one.
+func (p *tokenParser) line(b []byte) {
+	if len(bytes.TrimSpace(b)) == 0 {
+		return
 	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		r.status = "error"
-		return r
+	var d struct {
+		Type, Timestamp string
+		Recorded        int64  `json:"recorded_at"`
+		PayloadType     string `json:"payload_type"`
+		Message         struct {
+			ID, Model string
+			Usage     nativeTokens
+		}
+		Payload struct {
+			Type, Model string
+			Info        *struct {
+				Total nativeTokens `json:"total_token_usage"`
+			}
+			Event struct {
+				Kind, Model string
+				Usage       nativeTokens
+			}
+		}
 	}
-	if st.Size() > tokenFileLimit {
-		r.status = "limited"
-		return r
+	if json.Unmarshal(b, &d) != nil {
+		p.status = "error"
+		return
 	}
-	r.status = "unsupported"
-	scan := bufio.NewScanner(f)
-	scan.Buffer(make([]byte, 64<<10), 4<<20)
-	seen := map[string]int{}
-	cumulative := map[TokenCounts]bool{}
-	var prev TokenCounts
-	var previous time.Time
-	model := ""
-	for scan.Scan() {
-		if ctx.Err() != nil {
-			r.status = "limited"
-			return r
+	var c TokenCounts
+	var ok bool
+	at := parseTime(d.Timestamp)
+	from := at
+	key := ""
+	switch p.provider {
+	case "claude":
+		if d.Type != "assistant" {
+			return
 		}
-		var d struct {
-			Type, Timestamp string
-			Recorded        int64  `json:"recorded_at"`
-			PayloadType     string `json:"payload_type"`
-			Message         struct {
-				ID, Model string
-				Usage     nativeTokens
-			}
-			Payload struct {
-				Type, Model string
-				Info        *struct {
-					Total nativeTokens `json:"total_token_usage"`
-				}
-				Event struct {
-					Kind, Model string
-					Usage       nativeTokens
-				}
-			}
+		c, ok = d.Message.Usage.counts(p.provider)
+		p.model = d.Message.Model
+		key = d.Message.ID
+		if key == "" {
+			ok = false
 		}
-		if json.Unmarshal(scan.Bytes(), &d) != nil {
-			r.status = "error"
-			continue
+	case "codex":
+		if d.Type == "turn_context" {
+			p.model = d.Payload.Model
+			return
 		}
-		var c TokenCounts
-		var ok bool
-		at := parseTime(d.Timestamp)
-		from := at
-		key := ""
-		switch provider {
-		case "claude":
-			if d.Type != "assistant" {
-				continue
-			}
-			c, ok = d.Message.Usage.counts(provider)
-			model = d.Message.Model
-			key = d.Message.ID
-			if key == "" {
-				ok = false
-			}
-		case "codex":
-			if d.Type == "turn_context" {
-				model = d.Payload.Model
-				continue
-			}
-			if d.Type != "event_msg" || d.Payload.Type != "token_count" || d.Payload.Info == nil {
-				continue
-			}
-			c, ok = d.Payload.Info.Total.counts(provider)
-			if !ok {
-				break
-			}
-			if r.status == "unsupported" {
-				r.status = "readable"
-			}
-			if cumulative[c] {
-				continue
-			}
-			cumulative[c] = true
-			from = previous
-			if c.Input < prev.Input || c.Output < prev.Output {
-				prev = TokenCounts{}
-				from = time.Time{}
-			}
-			total := c
-			if c.CacheRead < prev.CacheRead || c.CacheWrite < prev.CacheWrite || c.Reasoning < prev.Reasoning {
-				r.status = "error"
-			}
-			c = TokenCounts{Input: c.Input - prev.Input, Output: c.Output - prev.Output, CacheRead: c.CacheRead - prev.CacheRead, CacheWrite: c.CacheWrite - prev.CacheWrite, Reasoning: c.Reasoning - prev.Reasoning, Total: c.Total - prev.Total}
-			c.CacheRead, c.CacheWrite, c.Reasoning = max(0, c.CacheRead), max(0, c.CacheWrite), max(0, c.Reasoning)
-			prev, previous = total, at
-			if c == (TokenCounts{}) {
-				continue
-			}
-		case "muse":
-			if d.PayloadType != "runtime.session" || d.Payload.Event.Kind != "model_completed" {
-				continue
-			}
-			c, ok = d.Payload.Event.Usage.counts(provider)
-			model = d.Payload.Event.Model
-			if d.Recorded > 0 {
-				at = time.UnixMicro(d.Recorded).UTC()
-			}
-			from = at
-			if !at.IsZero() {
-				key = at.Format(time.RFC3339Nano) + model
-			}
+		if d.Type != "event_msg" || d.Payload.Type != "token_count" || d.Payload.Info == nil {
+			return
 		}
+		c, ok = d.Payload.Info.Total.counts(p.provider)
 		if !ok {
-			r.status = "error"
-			continue
+			break
 		}
-		e := tokenEvent{At: at, From: from, Model: model, Counts: c}
-		if i, exists := seen[key]; key != "" && exists {
-			// Claude repeats a message while its output grows. Keep one final reading.
-			if e.At.Before(r.events[i].At) {
-				continue
-			}
-			e.From = r.events[i].From
-			r.events[i] = e
-		} else {
-			if key != "" {
-				seen[key] = len(r.events)
-			}
-			r.events = append(r.events, e)
+		if p.status == "unsupported" {
+			p.status = "readable"
+		}
+		if p.cumulative[c] {
+			return
+		}
+		p.cumulative[c] = true
+		from = p.previous
+		if c.Input < p.prev.Input || c.Output < p.prev.Output {
+			p.prev = TokenCounts{}
+			from = time.Time{}
+		}
+		total := c
+		prev := p.prev
+		if c.CacheRead < prev.CacheRead || c.CacheWrite < prev.CacheWrite || c.Reasoning < prev.Reasoning {
+			p.status = "error"
+		}
+		c = TokenCounts{Input: c.Input - prev.Input, Output: c.Output - prev.Output, CacheRead: c.CacheRead - prev.CacheRead, CacheWrite: c.CacheWrite - prev.CacheWrite, Reasoning: c.Reasoning - prev.Reasoning, Total: c.Total - prev.Total}
+		c.CacheRead, c.CacheWrite, c.Reasoning = max(0, c.CacheRead), max(0, c.CacheWrite), max(0, c.Reasoning)
+		p.prev, p.previous = total, at
+		if c == (TokenCounts{}) {
+			return
+		}
+	case "muse":
+		if d.PayloadType != "runtime.session" || d.Payload.Event.Kind != "model_completed" {
+			return
+		}
+		c, ok = d.Payload.Event.Usage.counts(p.provider)
+		p.model = d.Payload.Event.Model
+		if d.Recorded > 0 {
+			at = time.UnixMicro(d.Recorded).UTC()
+		}
+		from = at
+		if !at.IsZero() {
+			key = at.Format(time.RFC3339Nano) + p.model
 		}
 	}
-	if scan.Err() != nil {
-		r.status = "error"
+	if !ok {
+		p.status = "error"
+		return
 	}
-	if ctx.Err() != nil {
-		r.status = "limited"
+	e := tokenEvent{At: at, From: from, Model: p.model, Counts: c}
+	if i, exists := p.seen[key]; key != "" && exists {
+		// Claude repeats a message while its output grows. Keep one final reading.
+		if e.At.Before(p.events[i].At) {
+			return
+		}
+		e.From = p.events[i].From
+		p.events[i] = e
+	} else {
+		if key != "" {
+			p.seen[key] = len(p.events)
+		}
+		p.events = append(p.events, e)
 	}
+}
+
+// result is the parse so far. Its events are shared: callers only read them.
+func (p *tokenParser) result() tokenRead {
+	r := tokenRead{status: p.status, events: p.events}
 	if r.status == "unsupported" && len(r.events) > 0 {
 		r.status = "readable"
 	}
-	sort.SliceStable(r.events, func(i, j int) bool { return r.events[i].At.Before(r.events[j].At) })
 	return r
+}
+
+// readTokenFile reads one whole session file up to tokenFileLimit, with no cache.
+func readTokenFile(ctx context.Context, path, provider string) tokenRead {
+	st, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return tokenRead{status: "missing"}
+		}
+		return tokenRead{status: "error"}
+	}
+	if st.Size() > tokenFileLimit {
+		return tokenRead{status: "limited"}
+	}
+	var tf tokenFile
+	r, _ := tf.read(ctx, path, provider, tokenFileLimit, tokenFileLimit)
+	return r
+}
+
+// Session files are read progressively: each refresh reads only bytes it has not decoded, within a
+// shared byte budget and a per-file chunk, and keeps the decoder state for the next refresh.
+const (
+	tokenLineLimit   = 4 << 20 // a longer record is skipped as an error
+	tokenCheckWindow = 4 << 10 // bytes hashed at the start and before the read offset
+)
+
+// tokenFile is the cache entry of one session file: its identity at the last read, how far it is
+// decoded (always the end of a complete record) and the decoder state. It keeps hashes of two
+// short windows of the decoded bytes, never the bytes.
+type tokenFile struct {
+	provider string
+	info     os.FileInfo // the stat behind offset: inode, size and modification time
+	offset   int64
+	skipping bool // inside an over-long record that ends past offset
+	headLen  int64
+	headSum  [sha256.Size]byte
+	tailLen  int64 // the window ends at offset
+	tailSum  [sha256.Size]byte
+	parser   *tokenParser
+}
+
+func (tf *tokenFile) reset(provider string) {
+	*tf = tokenFile{provider: provider, parser: newTokenParser(provider)}
+}
+
+// read brings tf up to date with path within budget bytes (chunk at most from this file). It returns
+// the parse with status "limited" while records are left unread (budget, chunk, a cancelled
+// context, or a record still being written), never as complete. Bytes read come back too.
+func (tf *tokenFile) read(ctx context.Context, path, provider string, budget, chunk int64) (tokenRead, int64) {
+	if tf.parser == nil || tf.provider != provider {
+		tf.reset(provider)
+	}
+	fh, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			tf.reset(provider)
+			return tokenRead{status: "missing"}, 0
+		}
+		return tokenRead{status: "error"}, 0
+	}
+	defer fh.Close()
+	st, err := fh.Stat()
+	if err != nil {
+		return tokenRead{status: "error"}, 0
+	}
+	var used int64
+	if tf.info != nil && !(os.SameFile(tf.info, st) && st.Size() == tf.info.Size() && st.ModTime().Equal(tf.info.ModTime())) {
+		switch {
+		case !os.SameFile(tf.info, st) || st.Size() < tf.offset:
+			tf.reset(provider) // replaced or truncated
+		case tf.headLen+tf.tailLen > budget:
+			return tf.partial(), 0 // cannot check it this refresh: earlier counts, flagged limited
+		default:
+			used = tf.headLen + tf.tailLen
+			if !windowMatches(fh, 0, tf.headLen, tf.headSum) || !windowMatches(fh, tf.offset-tf.tailLen, tf.tailLen, tf.tailSum) {
+				tf.reset(provider) // rewritten in place
+			}
+		}
+	}
+	tf.info = st
+	size := st.Size()
+	n := min(size-tf.offset, budget-used, chunk)
+	// A read that may end inside a record decodes nothing of it and is repeated next time, so a
+	// short budget waits for the next refresh instead of spending itself on that.
+	if n < min(size-tf.offset, tokenLineLimit+1, chunk) {
+		n = 0
+	}
+	if n <= 0 {
+		if tf.offset == size && !tf.skipping {
+			return tf.parser.result(), used
+		}
+		return tf.partial(), used
+	}
+	sec := io.NewSectionReader(fh, tf.offset, n)
+	br := bufio.NewReaderSize(sec, 64<<10)
+	toEnd := tf.offset+n == size
+	var pos int64 // bytes of sec consumed
+	var line []byte
+	var tail, headBuf []byte
+	head := tf.headLen == 0 && tf.offset == 0
+	// feed adds decoded bytes, in file order, to the check windows
+	feed := func(b []byte) {
+		if head && len(headBuf) < tokenCheckWindow {
+			headBuf = append(headBuf, b[:min(len(b), tokenCheckWindow-len(headBuf))]...)
+		}
+		tail = append(tail, b...)
+		if len(tail) > tokenCheckWindow {
+			tail = append(tail[:0], tail[len(tail)-tokenCheckWindow:]...)
+		}
+	}
+	start := tf.offset
+	for ctx.Err() == nil {
+		part, err := br.ReadSlice('\n')
+		pos += int64(len(part))
+		switch {
+		case tf.skipping:
+			feed(part) // skipped through to its end, so decoded
+		case len(line)+len(part) > tokenLineLimit:
+			tf.skipping = true
+			tf.parser.status = "error"
+			feed(line)
+			feed(part)
+			line = line[:0]
+		default:
+			line = append(line, part...)
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err == nil { // a complete record
+			if !tf.skipping {
+				tf.parser.line(bytes.TrimRight(line, "\r\n"))
+				feed(line)
+			}
+			tf.skipping = false
+			tf.offset = start + pos
+			line = line[:0]
+			continue
+		}
+		// end of the section: an over-long record is skipped through it; a finished last
+		// record without a newline counts; anything else waits for the next read
+		switch {
+		case tf.skipping:
+			tf.offset = start + pos
+		case toEnd && err == io.EOF && (len(bytes.TrimSpace(line)) == 0 || json.Valid(bytes.TrimSpace(line))):
+			tf.parser.line(line)
+			feed(line)
+			tf.offset = start + pos
+		}
+		break
+	}
+	used += pos
+	if head && len(headBuf) > 0 {
+		tf.headLen, tf.headSum = int64(len(headBuf)), sha256.Sum256(headBuf)
+	}
+	if len(tail) > 0 {
+		tf.tailLen, tf.tailSum = int64(len(tail)), sha256.Sum256(tail)
+	}
+	if tf.offset == size && !tf.skipping && ctx.Err() == nil {
+		return tf.parser.result(), used
+	}
+	return tf.partial(), used
+}
+
+// partial is the parse so far of a file with records left unread.
+func (tf *tokenFile) partial() tokenRead {
+	r := tf.parser.result()
+	r.status = "limited"
+	return r
+}
+
+// pending is how many bytes of the file are not decoded yet.
+func (tf *tokenFile) pending() int64 {
+	if tf.info == nil {
+		return 0
+	}
+	return max(0, tf.info.Size()-tf.offset)
+}
+
+func windowMatches(fh *os.File, at, n int64, sum [sha256.Size]byte) bool {
+	if n == 0 {
+		return true
+	}
+	b := make([]byte, n)
+	if _, err := fh.ReadAt(b, at); err != nil {
+		return false
+	}
+	return sha256.Sum256(b) == sum
 }
 
 // tokenStage uses the exact events behind StageSpan, with half-open spans. A

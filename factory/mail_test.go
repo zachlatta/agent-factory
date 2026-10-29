@@ -299,6 +299,8 @@ func TestWhichWaitsAreEmailed(t *testing.T) {
 		{"stuck", card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"}), nil, false},
 		{"stuck reviewer", card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "review"}), []Agent{stuckReviewer}, false},
 		{"no verdict", card("c1", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}), nil, false},
+		{"reviewed commit unverified", card("c1", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}), nil, false},
+		{"parked changed since review", card("c1", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}), nil, false},
 		{"usage limit", card("c1", map[string]string{labelStage: "zach", labelNote: limitNote}), nil, false},
 		{"history unavailable", card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused"}), nil, false},
 		{"duplicate close", card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}), nil, false},

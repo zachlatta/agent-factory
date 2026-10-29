@@ -228,10 +228,11 @@ func TestZachApproveHoldsWhileDependencyInFlight(t *testing.T) {
 }
 
 func TestGuardedReleaseScansAgain(t *testing.T) {
-	c := heldCard(nil)
+	c := heldCard(map[string]string{labelReviewed: reviewedSHA})
 	c.Repo = publicRepo
 	f, p := newTestFactory(t, c, dep("landed", false))
 	ranges := fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
+	headIs(f, reviewedSHA, nil)
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], "secret scan failed") || l[labelHeld] != "" {
 		t.Errorf("labels = %v", l)
@@ -345,7 +346,8 @@ func TestDependencyRecoveryStaysBlocked(t *testing.T) {
 
 func TestGuardedDependencyAskRecoveryScansAgain(t *testing.T) {
 	for _, clean := range []bool{false, true} {
-		c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote("d0e0001", depDropped)})
+		c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote("d0e0001", depDropped),
+			labelReviewed: reviewedSHA})
 		c.Repo = publicRepo
 		d := dep("zach", true)
 		d.Labels[labelPrefix+labelLandedVerified] = "1"
@@ -355,6 +357,7 @@ func TestGuardedDependencyAskRecoveryScansAgain(t *testing.T) {
 			hits = []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}
 		}
 		ranges := fakeScan(f, hits, nil)
+		headIs(f, reviewedSHA, nil)
 		f.Tick()
 		if len(*ranges) != 1 {
 			t.Errorf("scans = %v", *ranges)

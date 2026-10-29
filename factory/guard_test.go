@@ -49,8 +49,9 @@ func TestGuardedCardIsScannedBeforeItLandsOrReachesZach(t *testing.T) {
 		{"Zach's low", "low", "", "zach"},                     // he asked for it: he sees it finished
 	} {
 		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: tc.tier, labelSource: "board",
-			labelOrigin: tc.origin, labelPlanRounds: "1"}), reviewer("r1", "c1", "code"))
+			labelOrigin: tc.origin, labelPlanRounds: "1", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tc.tier+"\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
@@ -72,10 +73,12 @@ func TestGuardedCardIsScannedBeforeItLandsOrReachesZach(t *testing.T) {
 }
 
 func TestGuardedInboxCardComesToZachThenLandsAndReports(t *testing.T) {
-	c := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "email", labelPlanRounds: "1"})
+	c := publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "email", labelPlanRounds: "1",
+		labelReviewed: reviewedSHA})
 	c.Labels[gmailThreadLabel] = "t1"
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 	fakeScan(f, nil, nil)
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
@@ -84,6 +87,7 @@ func TestGuardedInboxCardComesToZachThenLandsAndReports(t *testing.T) {
 	}
 	f, p = newTestFactory(t, withLabels(c, l))
 	fakeScan(f, nil, nil)
+	headIs(f, reviewedSHA, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +110,10 @@ func TestGuardedFactoryCardLandsAfterCleanScan(t *testing.T) {
 		"schedule": sched,
 		"app":      publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
 	} {
+		c.Labels[labelPrefix+labelReviewed] = reviewedSHA
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		want := "landing"
@@ -134,8 +140,10 @@ func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 			labelSource: "board", labelPlanRounds: "1"}),
 		"no plan review": publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board"}),
 	} {
+		c.Labels[labelPrefix+labelReviewed] = reviewedSHA
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
 		ranges := fakeScan(f, nil, nil)
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "VERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
@@ -153,9 +161,10 @@ func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 }
 
 func TestGuardedScanHitStopsLanding(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"}),
-		reviewer("r1", "c1", "code"))
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1",
+		labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
 	fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
@@ -168,9 +177,10 @@ func TestGuardedScanHitStopsLanding(t *testing.T) {
 }
 
 func TestGuardedScanErrorFailsClosed(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1"}),
-		reviewer("r1", "c1", "code"))
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelPlanRounds: "1",
+		labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
 	fakeScan(f, nil, errors.New("gitleaks not found"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], "secret scan could not run") {
@@ -180,9 +190,10 @@ func TestGuardedScanErrorFailsClosed(t *testing.T) {
 
 func TestGuardedApproveRescans(t *testing.T) {
 	c := publicCard("c1", map[string]string{labelStage: "zach", labelVerdict: "code approve", labelCodeRounds: "1",
-		labelNote: "review passed: approve to land"})
+		labelNote: "review passed: approve to land", labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t, c)
 	fakeScan(f, []scan.Hit{{Rule: "email", File: "README.md", Line: 9}}, nil)
+	headIs(f, reviewedSHA, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err == nil {
 		t.Fatal("approve went through with a scan hit")
 	}

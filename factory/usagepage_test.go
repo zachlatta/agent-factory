@@ -26,7 +26,7 @@ func TestUsagePageRouteAndNavigation(t *testing.T) {
 	if !strings.Contains(boardPage(t), `href="/usage"`) {
 		t.Fatal("missing board link")
 	}
-	for _, want := range []string{`href="/"`, "Subscription allowances", "Recorded local tokens", "across devices", "bounded", "Historical account attribution is unknown", "Initial Codex", "built-in sub-agent", "unassigned", "Cache", "Reasoning", "input plus output", `id="filters"`, `role="status"`} {
+	for _, want := range []string{`href="/"`, "Subscription allowances", "Recorded local tokens", "across devices", "bounded", "Historical account attribution is unknown", "Initial Codex", "built-in sub-agent", "unassigned", "Cache", "Reasoning", "32 MiB per session per refresh", "15 seconds", "input plus output", `id="filters"`, `role="status"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -67,6 +67,10 @@ assert.ok(!html.includes('/t/old-agent'));
 assert.ok(!rowsHTML([{...row,title:'<img src=x onerror=bad>'}],[],new Set()).includes('<img'));
 const cov=coverageText(view.coverage);
 for(const word of ['bounded','4 errors','1 missing','3 unsupported','5 duplicate','6 timing','7 disappeared','8 limit-skipped']) assert.ok(cov.includes(word),word);
+const progress=coverageText({...view.coverage,pendingBytes:3*1048576});
+for(const word of ['Older sessions','3.0 MiB','not counted yet','LIMITED']) assert.ok(progress.includes(word),word);
+const done=coverageText({...view.coverage,limited:false,limitedSessions:0,pendingBytes:0});
+assert.ok(!done.includes('Older sessions')&&!done.includes('LIMITED'));
 const allowance={summary:'50% left',updatedAt:'2026-01-01T00:00:00Z',windows:[{label:'7d',remainingPct:50,resetsAt:'2026-01-07T00:00:00Z'}]};
 const plans=[{provider:'claude',plan:'Plan A',allowance},{provider:'claude',plan:'Plan A',allowance}];
 assert.equal((plansHTML(plans).match(/<article/g)||[]).length,1);

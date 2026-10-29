@@ -156,10 +156,11 @@ func TestEmailDoneMarksCardDone(t *testing.T) {
 
 func TestEmailApproveOnPublicRepoStillScans(t *testing.T) {
 	a := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelVerdict: "code approve",
-		labelPlanRounds: "1"})
+		labelPlanRounds: "1", labelReviewed: reviewedSHA})
 	a.Labels[gmailThreadLabel] = "t9"
 	a.Repo = "zachlatta/agent-factory"
 	f, p, m := mailFactory(t, a)
+	headIs(f, reviewedSHA, nil)
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
 		return []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, nil
 	}

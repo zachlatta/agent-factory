@@ -80,10 +80,14 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
 		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
 		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelLandedVerified: "1",
-		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelDelegated: "2026-10-25T19:00:00Z", labelArbitrated: "plan", labelWorkLeftRounds: "2", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
+		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
+		labelDelegated: "2026-10-25T19:00:00Z", labelArbitrated: "plan", labelWorkLeftRounds: "2", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
 	})
 	old.Labels[gmailThreadLabel] = "th-gmail-1"
 	copied := copyCarriedLabels(old)
+	if copied[labelPrefix+labelHeldApproved] == "" {
+		t.Error("copyCarriedLabels dropped Zach's held approval")
+	}
 	for _, k := range carriedFactoryLabels {
 		if k != labelTold && copied[labelPrefix+k] == "" {
 			t.Errorf("copyCarriedLabels missing factory.%s", k)
@@ -105,7 +109,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		for k, v := range copied {
 			cleared.Labels[k] = v
 		}
-		for _, k := range []string{labelHeld, labelPlanFix, labelWaitsOn, labelWaitsDone, labelReviewed, labelLandedVerified, labelDecided} {
+		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelReviewed, labelLandedVerified, labelDecided} {
 			if deleteKeys {
 				delete(cleared.Labels, labelPrefix+k)
 			} else {
@@ -113,7 +117,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 			}
 		}
 		gotCleared := applyLineageLabels([]Agent{old, cleared})[1]
-		for _, k := range []string{labelHeld, labelPlanFix, labelWaitsOn, labelWaitsDone, labelReviewed, labelLandedVerified, labelDecided} {
+		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelReviewed, labelLandedVerified, labelDecided} {
 			if v := gotCleared.L(k); v != "" {
 				t.Fatalf("deleteKeys=%v: cleared label %s came back from old as %q", deleteKeys, k, v)
 			}

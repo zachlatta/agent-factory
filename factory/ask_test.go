@@ -44,6 +44,13 @@ func TestAskFor(t *testing.T) {
 			"Reviews didn't settle", "builder", "arbiter,reply,close"},
 		{"no verdict", card("c", map[string]string{labelStage: "zach", labelNote: noVerdictNote, labelStuckFrom: "review"}),
 			"The review didn't finish properly", "reviewer", "rerun,reply,close"},
+		{"no reviewed commit", card("c", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}),
+			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
+		{"reviewed commit unreadable", card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
+			labelNote: unverifiedReviewNote + "could not read HEAD: git broke"}),
+			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
+		{"parked card changed since review", card("c", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}),
+			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
 		{"writing its brief", func() Agent {
 			a := card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"})
 			a.Status = "running"
@@ -259,5 +266,22 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 	got, _ = f.card("c1")
 	if !strings.Contains(got.Ask.Detail, "could not be read from the transcript") || !strings.Contains(got.Ask.Detail, "s-missing") {
 		t.Errorf("unreadable detail = %q", got.Ask.Detail)
+	}
+}
+
+// The unverified-review ask says why nothing landed, offers a fresh review first, and never offers
+// Mark done or a landing approval: both would skip the review the card still needs.
+func TestUnverifiedReviewAskReRunsTheReview(t *testing.T) {
+	a := card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
+		labelNote: unverifiedReviewNote + "could not read HEAD: git broke"})
+	ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
+	if ask == nil || !ask.Actions[0].Primary || ask.Actions[0].Label != "Re-run the review" ||
+		!strings.Contains(ask.Why, "could not read HEAD: git broke") {
+		t.Fatalf("ask = %+v", ask)
+	}
+	for _, x := range ask.Actions {
+		if x.ID == "done" || x.ID == "approve" {
+			t.Errorf("offers %s", x.ID)
+		}
 	}
 }

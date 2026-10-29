@@ -187,8 +187,19 @@ func TestDryRunActionsChangeNothing(t *testing.T) {
 
 func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 	f, p, gitCalls := newDryRunFactory(t, publicCard("c1", map[string]string{labelStage: "zach",
-		labelVerdict: "code approve", labelCodeRounds: "1", labelNote: "review passed: approve to land"}))
+		labelVerdict: "code approve", labelCodeRounds: "1", labelNote: "review passed: approve to land",
+		labelReviewed: reviewedSHA}))
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) { return nil, nil }
+	// rev-parse is a read, so the dry run passes it through: HEAD is still the reviewed commit
+	f.Git, f.GitOut = f.dryRunGit(
+		func(_ context.Context, _ string, args ...string) error { gitCalls.add(args); return nil },
+		func(_ context.Context, _ string, args ...string) (string, error) {
+			gitCalls.add(args)
+			if strings.Join(args, " ") == "rev-parse HEAD" {
+				return reviewedSHA + "\n", nil
+			}
+			return "", errors.New("no git in tests")
+		})
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}

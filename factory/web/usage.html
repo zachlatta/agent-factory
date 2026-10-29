@@ -77,9 +77,9 @@ h1{font-size:26px}
 <dt>Recorded stages</dt><dd>Stages use the same identifiers and descriptions as the board. A span identifies a recorded visit, so repeated Building visits remain distinct; a round identifies a recorded review round.</dd>
 </dl><dl id="stages"></dl>
 <p>Initial Codex cumulative readings, ambiguous intervals crossing stage boundaries, and missing or expired timing stay unassigned. Timing history is retained for 30 days. Stage attribution describes the recorded interval, not the current board column.</p>
-<p>Scans are bounded to 2,000 metadata files, 32 MiB per session, 128 MiB of session data and 20 seconds. A limit or error can leave partial counts. Coverage includes built-in Claude sub-agent files. Missing, unsupported, duplicate and limit-skipped sessions are reported separately.</p>
+<p>Each scan is bounded to 2,000 newly changed metadata files, 32 MiB per session per refresh, 128 MiB of session data and 20 seconds. Later scans read only records not counted yet, so a large history is counted over several scans; until then coverage says LIMITED and the counts are partial. Coverage includes built-in Claude sub-agent files. Missing, unsupported, duplicate and limit-skipped sessions are reported separately.</p>
 <p>Records can disappear after cleanup and totals can shrink. Disappeared sources are detected against this process's prior inventory only on scans that are not limited; restarting forgets that inventory. Timing entries without agent metadata cannot supply token records.</p>
-<p>Refreshes are cached for up to five minutes. This page polls for updated snapshots; reloading does not force a new collection. Transcript links are offered only for agents currently available through the board; older retained usage can outlive that access.</p>
+<p>Complete snapshots are cached for up to five minutes. While coverage is limited, a request after 15 seconds counts the next bounded slice; nothing is counted while no one requests usage. This page polls for updated snapshots; reloading does not force a new collection. Transcript links are offered only for agents currently available through the board; older retained usage can outlive that access.</p>
 </details>
 </main>
 <script>
@@ -101,8 +101,10 @@ function freshness(at){
   return `${minutes} min old · ${new Date(at).toLocaleString()}`;
 }
 function snapshotText(v){return v.updatedAt?`${v.refreshing?'Refreshing; showing cached snapshot. ':''}Recorded snapshot ${freshness(v.updatedAt)}.`:'Waiting for the first recorded snapshot; refreshing.';}
+const mib=n=>(Number(n||0)/1048576).toFixed(1)+' MiB';
 function coverageText(c){
-  return `Retained local records only — bounded scan${c.limited?' LIMITED; counts may be partial':''}. ${c.agents||0} agents; ${c.readableSessions||0} readable sessions; ${c.missingSessions||0} missing; ${c.unsupportedSessions||0} unsupported; ${c.errors||0} errors; ${c.duplicateSessions||0} duplicate references; ${c.timingWithoutAgent||0} timing entries without agents; ${c.disappearedSources||0} disappeared sources; ${c.limitedSessions||0} limit-skipped sessions. Not complete history.`;
+  const progress=c.limited?` Older sessions are still being counted: ${mib(c.pendingBytes)} of found session records not counted yet, plus any sessions not reached; while this page is open, another bounded slice runs about every 15 seconds until coverage is complete.`:'';
+  return `Retained local records only — bounded scan${c.limited?' LIMITED; counts are partial':''}.${progress} ${c.agents||0} agents; ${c.readableSessions||0} readable sessions; ${c.missingSessions||0} missing; ${c.unsupportedSessions||0} unsupported; ${c.errors||0} errors; ${c.duplicateSessions||0} duplicate references; ${c.timingWithoutAgent||0} timing entries without agents; ${c.disappearedSources||0} disappeared sources; ${c.limitedSessions||0} limit-skipped sessions. Not complete history.`;
 }
 function allowanceHTML(u={}){
   return `<p>${esc(u.summary||'Allowance unknown')}</p>`+(u.windows||[]).map(w=>`<p>${esc(w.label)}: <b>${esc(w.remainingPct)}% remaining</b><br><span class="muted">Resets ${esc(w.resetsAt?new Date(w.resetsAt).toLocaleString():'unknown')}</span></p>`).join('')+

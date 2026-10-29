@@ -199,6 +199,14 @@ The planner (the "Fellow") first picks a track:
   they would do.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
+- Every code approval, landing approval, landing retry and dependency release checks that HEAD
+  is still the commit captured for code review. A changed HEAD queues a fresh code review; a
+  failed read, or a public card with no captured reviewed commit, stops without landing. That
+  technical stop is board-only and offers Re-run the review, never an approval that skips it.
+- An approval for a parked card held on a dependency authorizes one release when that dependency
+  lands. The landing message wakes it only after the same review and scan checks. The approval
+  follows a replacement card and is cleared on release or cancellation; a stale snapshot cannot
+  wake a cancelled card.
 - Replaced cards (`factory/replace.go`): when a card hands off to another agent (`factory.replaces=<old-id>`
   on the replacement, `factory.replaced-by=<new-id>` on the retired predecessor), `resolveCardID`
   follows `factory.replaced-by` to the current card across board cards, ideas, `Waits on:` dependencies,
@@ -279,6 +287,13 @@ archive writes.
 `/api/health` reports live, running, idle and parked agents, per kind and per card (a card's own
 agent plus its reviewers and sub-agents), and the last reap; the `/host` page shows them.
 
+Its `workflow` summary reports active factory cards, cards in Needs Zach, held landings, held cards whose
+dependency chain reaches Needs Zach, the longest dependency chain, and cards held by
+cycles or missing or dropped dependencies. Parked cards remain counted; finished, dropped and
+replaced cards do not. These work counts are separate from process health: a dependency hold
+does not trigger the deployer's restart or rollback checks.
+Only cards with a factory stage label are counted; personal agents shown on the board are excluded.
+
 ### Repo and agent per card
 
 For the read-only completed-workspace inventory and the gates required before any
@@ -343,7 +358,9 @@ has available, so Opus can ask Codex, Gemini or Muse and the other way round (`f
 `GET /api/usage` serves recorded tokens from retained local Paseo sessions, including
 archived agents. The first request starts a background scan and returns an empty snapshot
 with `refreshing: true`; later requests serve the cached snapshot while a refresh runs,
-at most once every five minutes. It makes no agent turns or changes to sessions.
+at most once every five minutes once coverage is complete. While coverage is limited, requests
+can start the next bounded slice after 15 seconds. No collection runs without a request, and
+concurrent requests share one collection. It makes no agent turns or changes to sessions.
 
 `plans` lists remaining subscription allowances once per provider, using the existing
 allowance cache. `rows` groups tokens by plan, provider, model, role, card, agent and recorded
@@ -362,11 +379,13 @@ and missing/expired timing remain `unassigned`. Timing history is retained for 3
 Sessions shared by conflicting agent/card roles also remain unassigned and are flagged.
 
 Coverage reports missing/unsupported sessions, errors, duplicate session references, timing
-entries without agent metadata and scan limits. Scans are bounded to 2,000 metadata files,
-32 MiB per session, 128 MiB of session data and 20 seconds per refresh; newer agents are
-read first within the metadata-file cap and limit-skipped sessions are counted separately
-from errors. Partial readings
-are flagged. A process remembers previously observed sources and reports their disappearance
+entries without agent metadata and scan limits. Each refresh parses at most 2,000 new or changed
+metadata files and reads at most 32 MiB per session, 128 MiB of session data and 20 seconds in total.
+Extracted counters, file identities and read offsets stay cached in memory, without transcript text.
+Unchanged sessions need no further byte reads; appends and older unread sessions progress across
+refreshes. Larger sessions are read in slices. Limited readings remain flagged and report bytes
+read and bytes still pending; their known counts are partial totals. A restart starts collection
+again. A process remembers previously observed sources and reports their disappearance
 on subsequent complete scans. Restarting forgets that inventory. Totals can shrink after
 cleanup; they describe retained local records, not every device's activity or a subscription
 bill. Historical subscription account attribution is unknown. No prompts, session contents

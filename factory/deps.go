@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -11,6 +12,10 @@ import (
 // After code review passes, the land prompt is held while that card is in flight (factory.held,
 // stage landing) and sent by the next Tick once it lands. If it was dropped, or the factory cannot
 // find it, the card goes to Needs Zach with one question; his Approve lands it as reviewed.
+
+// labelHeldApproved marks a held card Zach approved himself (the time). Only such a card is released
+// while parked: the release's land prompt is what wakes it, after the freshness and scan gates.
+const labelHeldApproved = "held-approved"
 
 // waitsOnRe matches a "Waits on:" line, markdown bullets and bold allowed, naming one short id.
 var waitsOnRe = regexp.MustCompile("(?im)^[\\s>*_-]*waits on\\s*[*_]*:[*_\\s]*`?([0-9a-f]{7})\\b")
@@ -158,23 +163,40 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	if st == depWaiting {
 		return nil
 	}
-	if live, err := f.stillStopped(a); !live {
+	if live, err := f.heldStopped(a); !live {
 		return err
 	}
 	if st != depLanded {
 		f.logf("%s held: %s %s", short(a.ID), id, st)
-		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelHeld: "", labelNote: depAskNote(id, st)})
+		return f.setLabels(a.ID, clearHeldApproval(a, map[string]string{labelStage: "zach", labelHeld: "",
+			labelNote: depAskNote(id, st)}))
+	}
+	if hold := f.reviewHold(a, c.Cwd, c.Repo); hold != nil {
+		// the land prompt is for the reviewed commit only
+		if a.archived() && hold[labelStage] != "zach" {
+			// a parked card cannot wait archived in a working column for its fresh review: it stops for
+			// Zach, whose Re-run starts that review (stuck-from review)
+			hold = map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review",
+				labelHeld: "", labelAutoReview: ""}
+		}
+		return f.setLabels(a.ID, clearHeldApproval(a, hold))
 	}
 	if f.guarded(c.Repo) {
 		// scan again: the card may have committed since its review
 		if note := f.scanNote(c.Cwd, ""); !scanPassed(note) {
-			return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelHeld: "", labelNote: note})
+			return f.setLabels(a.ID, clearHeldApproval(a, map[string]string{labelStage: "zach", labelHeld: "", labelNote: note}))
 		}
 	}
-	labels := map[string]string{labelHeld: "", labelSince: iso(f.Now()), labelTold: "", labelWaitsDone: "1",
-		labelNote: "auto-landing: " + id + " landed"}
+	labels := clearHeldApproval(a, map[string]string{labelHeld: "", labelSince: iso(f.Now()), labelTold: "",
+		labelWaitsDone: "1", labelNote: "auto-landing: " + id + " landed"})
 	if a.L(labelStage) == "zach" {
 		labels[labelStage] = "landing"
+	}
+	if heldApprovedParked(a) {
+		// the git and scan checks above take time: confirm the approval still stands before waking it
+		if live, err := f.parkedHoldCurrent(a); !live {
+			return err
+		}
 	}
 	if err := f.setLabels(a.ID, labels); err != nil {
 		return err
@@ -182,4 +204,87 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	f.logf("%s released: %s landed", short(a.ID), id)
 	return f.sendLanding(a.ID, fmt.Sprintf("Card %s, which this card waits on, has landed: rebase on origin/main first. "+
 		"Code review passed (%s tier). %s", id, a.L(labelTier), f.landMsgFor(a)))
+}
+
+// parkedStaleNote is the note of a parked held card whose HEAD moved since its review.
+const parkedStaleNote = unverifiedReviewNote + "HEAD changed since review"
+
+// heldApprovedParked reports whether a is a parked held card Zach approved: the one archived card the
+// factory moves on by itself, since its release's land prompt (or a stop for Zach) is what he asked for.
+func heldApprovedParked(a Agent) bool {
+	return a.parked() && a.L(labelStage) == "landing" && a.L(labelHeld) != "" && a.L(labelHeldApproved) != ""
+}
+
+// heldStopped is stillStopped for a held card, except that a parked one Zach approved may be moved on
+// while archived, once parkedHoldCurrent confirms the approval still stands.
+func (f *Factory) heldStopped(a Agent) (bool, error) {
+	if !heldApprovedParked(a) {
+		return f.stillStopped(a)
+	}
+	return f.parkedHoldCurrent(a)
+}
+
+// parkedHoldCurrent re-reads a parked held card's state just before the factory moves it, because a
+// Drop, Close, Done or move after the tick's snapshot leaves the card archived and the stale snapshot
+// looks the same. It holds only while the current board snapshot, the card's Paseo agent file and
+// Paseo itself all still show the same approved, parked, archived hold, and the agent is not running.
+// Anything else moves nothing; a failed read is an error, so the next Tick tries again.
+func (f *Factory) parkedHoldCurrent(a Agent) (bool, error) {
+	same := func(l func(string) string) bool {
+		return l(labelParked) != "" && l(labelStage) == "landing" && l(labelHeld) == a.L(labelHeld) &&
+			l(labelHeldApproved) != "" && l(labelHeldApproved) == a.L(labelHeldApproved)
+	}
+	if cur, ok := f.agentOK(a.ID); !ok || !cur.parked() || !same(cur.L) {
+		f.logf("%s approved hold changed since the snapshot, no move", short(a.ID))
+		return false, nil
+	}
+	labels, err := f.agentFileLabels(a.ID)
+	if err != nil {
+		return false, err
+	}
+	if !same(func(k string) string { return labels[labelPrefix+k] }) {
+		f.logf("%s approved hold cancelled since the snapshot, no move", short(a.ID))
+		return false, nil
+	}
+	archived, running, err := f.liveState(a.ID)
+	if err != nil {
+		return false, err
+	}
+	if !archived || running {
+		// woken (or working) since: the usual stopped-card rules take it from here
+		return false, nil
+	}
+	return true, nil
+}
+
+// agentFileLabels reads agent id's labels from its Paseo agent file, which Paseo writes before a
+// label update returns: fresher than the board's snapshot.
+func (f *Factory) agentFileLabels(id string) (map[string]string, error) {
+	files, err := filepath.Glob(filepath.Join(f.cfg.Home, ".paseo/agents", "*", id+".json"))
+	if err != nil {
+		return nil, err
+	}
+	if len(files) != 1 {
+		return nil, fmt.Errorf("agent file for %s: found %d", short(id), len(files))
+	}
+	var d struct {
+		ID     string
+		Labels map[string]string
+	}
+	if err := readJSON(files[0], &d); err != nil {
+		return nil, fmt.Errorf("agent file for %s: %v", short(id), err)
+	}
+	if d.ID != id {
+		return nil, fmt.Errorf("agent file for %s names %s", short(id), short(d.ID))
+	}
+	return d.Labels, nil
+}
+
+// clearHeldApproval adds the clearing of Zach's held approval to labels, when a has one: it covers one
+// release only.
+func clearHeldApproval(a Agent, labels map[string]string) map[string]string {
+	if a.L(labelHeldApproved) != "" {
+		labels[labelHeldApproved] = ""
+	}
+	return labels
 }
