@@ -248,7 +248,7 @@ func readTokenFile(ctx context.Context, path, provider string) tokenRead {
 		return tokenRead{status: "limited"}
 	}
 	var tf tokenFile
-	r, _ := tf.read(ctx, path, provider, tokenFileLimit, tokenFileLimit)
+	r, _ := tf.read(ctx, path, provider, tokenFileLimit, tokenFileLimit, false)
 	return r
 }
 
@@ -280,8 +280,9 @@ func (tf *tokenFile) reset(provider string) {
 
 // read brings tf up to date with path within budget bytes (chunk at most from this file). It returns
 // the parse with status "limited" while records are left unread (budget, chunk, a cancelled
-// context, or a record still being written), never as complete. Bytes read come back too.
-func (tf *tokenFile) read(ctx context.Context, path, provider string, budget, chunk int64) (tokenRead, int64) {
+// context, or a record still being written), never as complete. A malformed tail with no remaining
+// writer is an error, not pending work. Bytes read come back too.
+func (tf *tokenFile) read(ctx context.Context, path, provider string, budget, chunk int64, finished bool) (tokenRead, int64) {
 	if tf.parser == nil || tf.provider != provider {
 		tf.reset(provider)
 	}
@@ -344,6 +345,7 @@ func (tf *tokenFile) read(ctx context.Context, path, provider string, budget, ch
 		}
 	}
 	start := tf.offset
+	finishedTail := false
 	for ctx.Err() == nil {
 		part, err := br.ReadSlice('\n')
 		pos += int64(len(part))
@@ -381,6 +383,10 @@ func (tf *tokenFile) read(ctx context.Context, path, provider string, budget, ch
 			tf.parser.line(line)
 			feed(line)
 			tf.offset = start + pos
+		case toEnd && err == io.EOF && finished:
+			// Keep the last complete offset: a later resume can finish this record without
+			// losing it or retaining its text in the cache. The error is only this reading's.
+			finishedTail = true
 		}
 		break
 	}
@@ -390,6 +396,11 @@ func (tf *tokenFile) read(ctx context.Context, path, provider string, budget, ch
 	}
 	if len(tail) > 0 {
 		tf.tailLen, tf.tailSum = int64(len(tail)), sha256.Sum256(tail)
+	}
+	if finishedTail && ctx.Err() == nil {
+		r := tf.parser.result()
+		r.status = "error"
+		return r, used
 	}
 	if tf.offset == size && !tf.skipping && ctx.Err() == nil {
 		return tf.parser.result(), used

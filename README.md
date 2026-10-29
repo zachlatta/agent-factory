@@ -512,7 +512,11 @@ entries without agent metadata and scan limits. Each refresh parses at most 2,00
 metadata files and reads at most 32 MiB per session, 128 MiB of session data and 20 seconds in total.
 Extracted counters, file identities and read offsets stay cached in memory, without transcript text.
 Unchanged sessions need no further byte reads; appends and older unread sessions progress across
-refreshes. Larger sessions are read in slices. Limited readings remain flagged and report bytes
+refreshes. Larger sessions are read in slices. An unfinished last record waits while any known
+session owner may still write it, or agent metadata is incomplete. A damaged tail whose owners
+are all closed or archived is reported as an error, retaining the valid counters. If that session
+later completes the record, collection counts it once and clears the tail error. Limited readings
+remain flagged and report bytes
 read and bytes still pending; their known counts are partial totals. A restart starts collection
 again. A process remembers previously observed sources and reports their disappearance
 on subsequent complete scans. Restarting forgets that inventory. Totals can shrink after

@@ -173,6 +173,85 @@ func TestUsagePartialLastLine(t *testing.T) {
 	}
 }
 
+// A finished writer cannot complete a damaged tail. Keep its good counters, report an error,
+// and still accept a later completion if that session is resumed.
+func TestUsageFinishedPartialLastLine(t *testing.T) {
+	for _, tc := range []struct {
+		name, ending string
+		finished     bool
+	}{
+		{"archived", `"archivedAt":"2026-10-25T20:00:00Z","lastStatus":"idle"`, true},
+		{"closed", `"lastStatus":"closed"`, true},
+		{"running despite archive", `"archivedAt":"2026-10-25T20:00:00Z","lastStatus":"running"`, false},
+		{"unknown", `"lastStatus":""`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := newTestFactory(t)
+			line := claudeUsageLine("m-2", 20, 2)
+			path := usageSession(t, f, "a", "sess-a", t0, claudeUsageLine("m-1", 10, 1)+line[:len(line)/2])
+			writeFile(t, agentFile(f.cfg.Home, "a"), `{"id":"a","provider":"claude",`+tc.ending+`,"persistence":{"sessionId":"sess-a"}}`)
+			wantErrors, wantPending := 0, int64(len(line)/2)
+			if tc.finished {
+				wantErrors, wantPending = 1, 0
+			}
+			for i := 0; i < 2; i++ {
+				r, _ := f.collectTokenUsage(context.Background())
+				if r.Totals.Total != 11 || r.Coverage.Limited == tc.finished || r.Coverage.PendingBytes != wantPending || r.Coverage.Errors != wantErrors {
+					t.Fatalf("finished partial pass %d = %+v %+v", i, r.Totals, r.Coverage)
+				}
+			}
+			appendFile(t, path, line[len(line)/2:])
+			r, _ := f.collectTokenUsage(context.Background())
+			if r.Totals.Total != 33 || r.Coverage.Limited || r.Coverage.Errors != 0 || r.Coverage.Readable != 1 {
+				t.Fatalf("completed later = %+v %+v", r.Totals, r.Coverage)
+			}
+			r, _ = f.collectTokenUsage(context.Background())
+			if r.Totals.Total != 33 || r.Coverage.BytesRead != 0 {
+				t.Fatalf("completed twice = %+v %+v", r.Totals, r.Coverage)
+			}
+		})
+	}
+}
+
+// Shared sessions stay open if any owner can still write. A metadata slice cannot establish
+// that every owner finished, even if the first owner it read is archived.
+func TestUsageSharedPartialTailNeedsEveryOwnerFinished(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		metaLimit       int
+		invalidMetadata bool
+	}{
+		{name: "active owner"},
+		{name: "metadata slice", metaLimit: 1},
+		{name: "unreadable owner", invalidMetadata: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := newTestFactory(t)
+			line := claudeUsageLine("m-2", 20, 2)
+			usageSession(t, f, "a", "sess-a", t0, claudeUsageLine("m-1", 10, 1)+line[:len(line)/2])
+			writeFile(t, agentFile(f.cfg.Home, "a"), `{"id":"a","provider":"claude","createdAt":"2026-10-25T20:00:00Z","archivedAt":"2026-10-25T21:00:00Z","lastStatus":"idle","persistence":{"sessionId":"sess-a"}}`)
+			usageAgentFileAt(t, f, "z", "claude", "sess-a", t0.Add(-time.Hour))
+			wantErrors := 0
+			if tc.invalidMetadata {
+				writeFile(t, agentFile(f.cfg.Home, "z"), `{"id":"z"`)
+				wantErrors = 1
+			}
+			f.tokenCache.metaLimit = tc.metaLimit
+			for i := 0; i < 2; i++ {
+				r, _ := f.collectTokenUsage(context.Background())
+				if r.Totals.Total != 11 || !r.Coverage.Limited || r.Coverage.Errors != wantErrors {
+					t.Fatalf("open owner pass %d = %+v %+v", i, r.Totals, r.Coverage)
+				}
+			}
+			writeFile(t, agentFile(f.cfg.Home, "z"), `{"id":"z","provider":"claude","lastStatus":"closed","persistence":{"sessionId":"sess-a"}}`)
+			r, _ := f.collectTokenUsage(context.Background())
+			if r.Totals.Total != 11 || r.Coverage.Limited || r.Coverage.PendingBytes != 0 || r.Coverage.Errors != 1 {
+				t.Fatalf("all owners finished = %+v %+v", r.Totals, r.Coverage)
+			}
+		})
+	}
+}
+
 // A session larger than the per-refresh chunk is read across refreshes, limited (not zero, not
 // complete) until its end, and never skipped outright.
 func TestUsageOversizedSessionProgresses(t *testing.T) {

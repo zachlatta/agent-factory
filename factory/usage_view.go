@@ -259,6 +259,8 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 	}
 	ids := make([]string, 0, len(agents))
 	sessionOwners, shared, ambiguous := map[string]string{}, map[string]bool{}, map[string]bool{}
+	unfinished := map[string]bool{}
+	metadataComplete := !v.Coverage.Limited && v.Coverage.Errors == 0
 	for id := range agents {
 		ids = append(ids, id)
 		a := agents[id]
@@ -266,6 +268,8 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 			continue
 		}
 		key := a.Provider + ":" + nativeSessionID(a.SessionID)
+		finished := a.Status == "closed" || (a.archived() && a.Status != "running")
+		unfinished[key] = unfinished[key] || !finished
 		owner := usageOwner(a, agents) + ":" + usageRole(a)
 		if previous, ok := sessionOwners[key]; ok {
 			shared[key] = true
@@ -294,7 +298,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 	}
 	var used int64
 	touched := map[string]bool{}
-	readPath := func(path, key, provider string) tokenRead {
+	readPath := func(path, key, provider string, finished bool) tokenRead {
 		if path == "" {
 			return tokenRead{status: "missing"}
 		}
@@ -304,7 +308,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 			tf = &tokenFile{}
 			c.files[path] = tf
 		}
-		r, n := tf.read(ctx, path, provider, budget-used, chunk)
+		r, n := tf.read(ctx, path, provider, budget-used, chunk, finished)
 		used += n
 		switch r.status {
 		case "missing":
@@ -330,6 +334,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 		owner := usageOwner(a, agents)
 		row := UsageTokenRow{Agent: id, Title: a.Title, Card: owner, CardTitle: agents[owner].Title, Provider: a.Provider, Plan: usagePlan(a.Provider), Model: a.Model, Role: usageRole(a), Stage: "unassigned"}
 		key := a.Provider + ":" + nativeSessionID(a.SessionID)
+		finished := metadataComplete && !unfinished[key]
 		row.SharedSession = shared[key]
 		if ambiguous[key] {
 			owner = ""
@@ -348,7 +353,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 		default:
 			seen[key] = true
 			path := tokenPath(f.cfg.Home, a)
-			read = readPath(path, key, a.Provider)
+			read = readPath(path, key, a.Provider, finished)
 			if a.Provider == "claude" {
 				dir := strings.TrimSuffix(path, ".jsonl")
 				if dir == "" {
@@ -366,7 +371,7 @@ func (f *Factory) collectTokenUsage(ctx context.Context) (UsageView, map[string]
 							break
 						}
 						if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
-							reads = append(reads, readPath(filepath.Join(dir, "subagents", entry.Name()), key+"/"+entry.Name(), a.Provider))
+							reads = append(reads, readPath(filepath.Join(dir, "subagents", entry.Name()), key+"/"+entry.Name(), a.Provider, finished))
 						}
 					}
 				}
@@ -443,15 +448,15 @@ func readUsageMeta(path string, st os.FileInfo) (usageMeta, bool) {
 	}
 	defer file.Close()
 	var d struct {
-		ID, Title, Provider, Cwd, CreatedAt string
-		Internal                            bool
-		Labels                              map[string]string
-		Config                              struct{ Model string }
-		Persistence                         struct{ SessionID string }
+		ID, Title, Provider, Cwd, CreatedAt, ArchivedAt, LastStatus string
+		Internal                                                    bool
+		Labels                                                      map[string]string
+		Config                                                      struct{ Model string }
+		Persistence                                                 struct{ SessionID string }
 	}
 	if err := json.NewDecoder(io.LimitReader(file, 1<<20)).Decode(&d); err != nil || d.ID == "" {
 		return usageMeta{}, false
 	}
 	return usageMeta{size: st.Size(), mod: st.ModTime(), internal: d.Internal,
-		agent: Agent{ID: d.ID, Title: d.Title, Provider: d.Provider, Model: d.Config.Model, Cwd: d.Cwd, CreatedAt: parseTime(d.CreatedAt), SessionID: d.Persistence.SessionID, Labels: d.Labels}}, true
+		agent: Agent{ID: d.ID, Title: d.Title, Provider: d.Provider, Model: d.Config.Model, Cwd: d.Cwd, CreatedAt: parseTime(d.CreatedAt), ArchivedAt: parseTime(d.ArchivedAt), Status: d.LastStatus, SessionID: d.Persistence.SessionID, Labels: d.Labels}}, true
 }
