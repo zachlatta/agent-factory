@@ -424,6 +424,7 @@ export async function connectToDaemon({ target }) {
       if (agentId === "drop") { set({ status: "disconnected" }); throw new Error("socket closed"); }
       if (agentId === "quietdrop") { set({ status: "disconnected" }, false); throw new Error("socket closed"); }
       if (agentId === "broken") throw new Error("boom");
+      if (agentId === "slow") { await new Promise((r) => setTimeout(r, 50)); agentId = "a1"; }
       const a = agents[agentId] ?? Object.values(agents).find((x) => x.id === agentId);
       return a ? { agent: a, project: null } : null;
     },
@@ -665,12 +666,13 @@ func TestNodeHelperExitsWhenItsInputCloses(t *testing.T) {
 	n.h.mu.Lock()
 	p := n.h.proc
 	n.h.mu.Unlock()
-	// a request read just before the input closed is still answered
+	// a request read just before the input closed is still answered, even when the daemon
+	// takes a while to reply ("slow" answers after a timer, not in the same tick)
 	ch := make(chan helperReply, 1)
 	p.mu.Lock()
 	p.pending[99] = ch
 	p.mu.Unlock()
-	p.stdin.Write([]byte(`{"id":99,"op":"inspect","agent":"a1","json":true}` + "\n"))
+	p.stdin.Write([]byte(`{"id":99,"op":"inspect","agent":"slow","json":true}` + "\n"))
 	p.stdin.Close()
 	select {
 	case <-p.done:
