@@ -6,7 +6,7 @@ import (
 )
 
 // One way to answer an ask. Every ask carries Choices: Land / Change / Drop for finished work, Yes /
-// No / Drop for a decision (a repo choice lists its repos instead), Answer / Drop for an agent's open
+// No / Change / Drop for a decision (No is one tap and sends "No."; Change takes his words) (a repo choice lists its repos instead), Answer / Drop for an agent's open
 // question (its options answer through Answer), and board-only problems keep their own action
 // (Re-run, Resume, Let an agent decide, Mark done) with Change and Drop. The board posts the
 // choice (POST /api/choose); an email reply is parsed into the same choice (answer.go). Both run
@@ -30,6 +30,7 @@ type Choice struct {
 	Hint    string `json:"hint,omitempty"` // the text box's placeholder
 	Repo    string `json:"repo,omitempty"` // pick:<repo>: start the card in this repo
 	action  string // the Act it runs
+	says    string // a send choice's fixed message (No), so it needs no text box
 }
 
 func landChoice() Choice { return Choice{ID: "land", Label: "Land", Primary: true, action: "approve"} }
@@ -62,7 +63,8 @@ func choicesFor(ask *Ask) []Choice {
 			}
 			return append(out, changeChoice("e.g. it's about the phone app"), dropChoice())
 		}
-		// Yes runs the ask's primary action (allow the build, mark a check done); No sends what to change
+		// Yes runs the ask's primary action (allow the build, mark a check done); No tells the agent no in
+		// one tap; Change sends what to change instead
 		yes := Choice{ID: "yes", Label: "Yes", Primary: true}
 		for _, x := range ask.Actions {
 			if x.Primary {
@@ -72,7 +74,7 @@ func choicesFor(ask *Ask) []Choice {
 		if yes.action == "close" {
 			yes.Label = "Close it"
 		}
-		out := []Choice{yes, {ID: "no", Label: "No", Text: true, Hint: "What should change?", action: "send"}}
+		out := []Choice{yes, {ID: "no", Label: "No", action: "send", says: "No."}, changeChoice("")}
 		if yes.action != "close" && actionFor(ask, "close") != nil {
 			out = append(out, dropChoice())
 		}
@@ -113,7 +115,7 @@ func goChoice(ask *Ask) *Choice {
 	return choiceByID(ask, "yes")
 }
 
-// textChoice is the choice that sends Zach's own words (Change, or No), or nil.
+// textChoice is the choice that sends Zach's own words (Change, or his Answer), or nil.
 func textChoice(ask *Ask) *Choice {
 	for i, c := range ask.Choices {
 		if c.Text && c.action == "send" {
@@ -164,6 +166,9 @@ func (f *Factory) runChoice(id string, ch Choice, b Body) (any, error) {
 	body := Body{ID: id, Message: text, Via: b.Via, Attachments: b.Attachments}
 	switch ch.action {
 	case "send":
+		if ch.says != "" {
+			return f.Act("send", Body{ID: id, Message: ch.says, Via: b.Via})
+		}
 		if body.Message == "" && len(b.Attachments) == 0 {
 			return nil, errors.New("write what should change first")
 		}

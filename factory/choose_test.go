@@ -2,6 +2,7 @@ package factory
 
 import (
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -27,8 +28,8 @@ func TestAskChoices(t *testing.T) {
 		{"preview", map[string]string{labelNote: readyNote(1)}, askReady, []string{"land", "change", "drop"}},
 		{"review passed", map[string]string{labelNote: "review passed: approve to land"}, askReady, []string{"land", "change", "drop"}},
 		{"secret scan", map[string]string{labelNote: "secret scan failed: email in x.go:1"}, askReady, []string{"land", "change", "drop"}},
-		{"build side effects", map[string]string{labelAwaiting: "plan", labelNote: sideEffectNote}, askDecision, []string{"yes", "no", "drop"}},
-		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no"}},
+		{"build side effects", map[string]string{labelAwaiting: "plan", labelNote: sideEffectNote}, askDecision, []string{"yes", "no", "change", "drop"}},
+		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no", "change"}},
 		// board-only: the factory's own to settle, answered in the card's details
 		{"did not settle", map[string]string{labelNote: arbiterStuckNote}, askProblem, []string{"arbiter", "change", "drop"}},
 		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
@@ -51,6 +52,8 @@ func TestAskChoices(t *testing.T) {
 	}
 }
 
+var emailWrap = regexp.MustCompile(`Zach's follow-up email \([^)]*\):\n|\n\(end of Zach's email\)`)
+
 // The board's choice runs the same action as the email reply for it.
 func TestChooseRunsTheSameActionAsEmail(t *testing.T) {
 	for _, tc := range []struct {
@@ -62,9 +65,15 @@ func TestChooseRunsTheSameActionAsEmail(t *testing.T) {
 				t.Errorf("yes: labels %v", l)
 			}
 		}},
-		{"no", "Use SQLite", "Use SQLite", func(t *testing.T, p *fakePaseo) {
-			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "Use SQLite") || !strings.Contains(s[0], "wants changes") {
+		// No is one tap: the board sends no text, and the agent reads the same plain no either way
+		{"no", "", "no", func(t *testing.T, p *fakePaseo) {
+			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "No.") {
 				t.Errorf("no: sent %v", s)
+			}
+		}},
+		{"change", "Use SQLite", "Use SQLite", func(t *testing.T, p *fakePaseo) {
+			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "Use SQLite") || !strings.Contains(s[0], "wants changes") {
+				t.Errorf("change: sent %v", s)
 			}
 		}},
 		{"drop", "", "drop", func(t *testing.T, p *fakePaseo) {
@@ -83,6 +92,14 @@ func TestChooseRunsTheSameActionAsEmail(t *testing.T) {
 			t.Fatalf("email %s: %v", tc.email, err)
 		}
 		tc.check(t, pm)
+		// the same words, the email's marked as his email
+		var unwrapped []string
+		for _, s := range pm.sent("c1") {
+			unwrapped = append(unwrapped, emailWrap.ReplaceAllString(s, ""))
+		}
+		if !slices.Equal(pb.sent("c1"), unwrapped) {
+			t.Errorf("%s: the board sent %q, the email %q", tc.choice, pb.sent("c1"), pm.sent("c1"))
+		}
 	}
 }
 

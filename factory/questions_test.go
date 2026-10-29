@@ -60,7 +60,7 @@ func TestAskButtons(t *testing.T) {
 		a    Agent
 		want string // each choice as id=action
 	}{
-		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan"}), "yes=approve no=send drop=close"},
+		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan"}), "yes=approve no=send change=send drop=close"},
 		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}), "land=approve change=send drop=close"},
 		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}), "land=approve change=send drop=close"},
 		{"rework cap brief", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), "arbiter=arbiter change=send drop=close"},

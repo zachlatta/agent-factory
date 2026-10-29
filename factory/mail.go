@@ -328,6 +328,9 @@ func replyWords(ask *Ask) []replyWord {
 		}
 		out = append(out, replyWord{"yes", does})
 	}
+	if choiceByID(ask, "no") != nil {
+		out = append(out, replyWord{"no", "decline"})
+	}
 	if choiceByID(ask, "done") != nil {
 		out = append(out, replyWord{"done", "mark it done"})
 	}

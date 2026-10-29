@@ -60,7 +60,7 @@ type answer struct{ Choice, Message string }
 
 // parseAnswer applies the reply rule to Zach's reply for ask. A reply word acts only where the ask
 // has the button it stands for (replyWords lists the same ones); anything else is the ask's text
-// choice (Change, No, or his Answer).
+// choice (Change, or his Answer).
 func parseAnswer(text string, ask *Ask) answer {
 	if ask.Ready != nil {
 		return readyAnswer(text, ask.Questions)
@@ -81,7 +81,7 @@ func parseAnswer(text string, ask *Ask) answer {
 		}
 		return answer{Choice: goCh.ID}
 	case clean == "no" && choiceByID(ask, "no") != nil:
-		return answer{Choice: "no", Message: "No."}
+		return answer{Choice: "no"}
 	case slices.Contains(doneWords, clean) && choiceByID(ask, "done") != nil:
 		return answer{Choice: "done"}
 	case slices.Contains(dropWords, clean) && dropCh != nil:

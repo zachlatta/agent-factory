@@ -34,7 +34,7 @@ func TestParseAnswer(t *testing.T) {
 		{plan, "Approve.", "yes", ""},
 		{plan, "LGTM!", "yes", ""},
 		{plan, "  go   ahead ", "yes", "1. Which store?\n   → Postgres"},
-		{plan, "no", "no", "No."},
+		{plan, "no", "no", ""},
 		{settle, "yes", "change", "yes"}, // no Yes button on a review that did not settle (it is board-only)
 		{rerun, "yes", "change", "yes"},
 		{plan, "drop it", "drop", ""},
@@ -46,19 +46,19 @@ func TestParseAnswer(t *testing.T) {
 		{open, "yes", "answer", "yes"},   // not a yes/no question: his yes is his answer
 		{open, "drop", "drop", ""},
 		{openQs, "B", "answer", "Which store?\n   → SQLite"}, // its options answer through Answer
-		{plan, "done", "no", "done"},
-		{plan, "ok, but drop step 3", "no", "ok, but drop step 3"},
-		{plan, "yes to 1A, no to 2", "no", "yes to 1A"},
-		{plan, "Please drop the second point and build", "no", "drop the second point"},
+		{plan, "done", "change", "done"},
+		{plan, "ok, but drop step 3", "change", "ok, but drop step 3"},
+		{plan, "yes to 1A, no to 2", "change", "yes to 1A"},
+		{plan, "Please drop the second point and build", "change", "drop the second point"},
 		{plan, "1B 2A", "yes", "Which store?\n   → SQLite"},
 		{plan, "1b, 2b", "yes", "When?\n   → Later"},
 		{plan, "yes", "yes", "1. Which store?\n   → Postgres\n2. When?\n   → Now"}, // yes takes the recommendations
 		{onePlan, "B", "yes", "Which store?\n   → SQLite"},                         // one question: a letter alone
 		{onePlan, "a.", "yes", "→ Postgres"},
-		{plan, "B", "no", "B"}, // two questions: a lone letter is not an answer
-		{onePlan, "G", "no", "G"},
-		{plan, "3C", "no", "3C"},
-		{plan, "wait\n\n> approve", "no", "wait"},
+		{plan, "B", "change", "B"}, // two questions: a lone letter is not an answer
+		{onePlan, "G", "change", "G"},
+		{plan, "3C", "change", "3C"},
+		{plan, "wait\n\n> approve", "change", "wait"},
 		{plan, "approve\n\nOn Sun, Oct 25, 2026 at 7:42 PM zrl bot wrote:\n> Needs you", "yes", ""},
 		{plan, "approve\n-- \nZach", "yes", ""},
 		{plan, "Approve\n\nSent from my iPhone", "yes", ""},

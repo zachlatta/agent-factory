@@ -183,7 +183,7 @@ func TestApproveWordOnlyWhenYesApproves(t *testing.T) {
 	c, _ := f.card("c1")
 	ask := askFor(c, f.agent("c1"))
 	words := replyWords(ask)
-	if len(words) != 2 || words[0].Word != "yes" || words[0].Does != "allow & build" || words[1].Word != "drop" {
+	if len(words) != 3 || words[0].Word != "yes" || words[0].Does != "allow & build" || words[1].Word != "no" || words[2].Word != "drop" {
 		t.Errorf("plan words = %+v", words)
 	}
 	stuck := card("c2", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"})

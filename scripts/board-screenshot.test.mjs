@@ -46,6 +46,23 @@ test('For you and card links render at exact widths and preserve navigation', as
         await page.locator('#panel.open').waitFor();
         assert.match(await page.locator('#pTitle').innerText(), /Building:/);
         await page.locator('#panel > .x').click();
+        await page.locator('#panel.open').waitFor({ state: 'hidden' });
+        // the same line is a link a keyboard reaches and opens with Enter
+        const line = page.locator('a.line[data-id="preview-building"]');
+        assert.equal(await line.getAttribute('href'), '?card=preview-building');
+        await line.focus();
+        await page.keyboard.press('Enter');
+        await page.locator('#panel.open').waitFor();
+        assert.match(await page.locator('#pTitle').innerText(), /Building:/);
+        await page.locator('#panel > .x').click();
+        await page.locator('#panel.open').waitFor({ state: 'hidden' });
+        // No on a decision answers in one tap, with no box and no text, as an emailed "no" does
+        const no = page.waitForRequest(r => r.url().endsWith('/api/choose'));
+        await page.locator('.fy[data-id="preview-zach"] button[data-choice="no"]').click();
+        assert.deepEqual(JSON.parse((await no).postData()), { id: 'preview-zach', choice: 'no' });
+        assert.equal(await page.locator('.fy[data-id="preview-zach"] textarea').count(), 0);
+        // finished work starts with no option picked: Land sends no answers
+        assert.equal(await page.locator('.fy[data-id="preview-ready"] .opt.on').count(), 0);
         // A periodic refresh must not reopen a query-linked card after it is closed.
         await page.goto(`${url}/?card=preview-zach`);
         await page.locator('#panel.open').waitFor();

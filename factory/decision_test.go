@@ -29,9 +29,9 @@ const findCard=id=>B.cards.find(c=>c.id===id), repoTag=()=>'', clock=()=>'18:00'
 const ready={id:'r1',title:'Phone board',ask:{kind:'ready',title:'Try it?',overview:{decision:'Ship the phone board?'},
   choices:[{id:'land',label:'Land',primary:true},{id:'change',label:'Change',text:true,hint:'What should change?'},{id:'drop',label:'Drop'}]}};
 const dec={id:'d1',title:'Store',ask:{kind:'decision',title:'Approve?',questions:[{text:'Store?',options:['Postgres (recommended)','SQLite']}],
-  choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No',text:true},{id:'drop',label:'Drop'}]}};
+  choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No'},{id:'change',label:'Change',text:true},{id:'drop',label:'Drop'}]}};
 const two={id:'d2',title:'Two',ask:{kind:'decision',title:'Two?',questions:[{text:'A?',options:['x','y (recommended)']},{text:'B?',options:['p','q']}],
-  choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No',text:true}]}};
+  choices:[{id:'yes',label:'Yes',primary:true},{id:'no',label:'No'},{id:'change',label:'Change',text:true}]}};
 const repo={id:'p1',title:'Pick',ask:{kind:'decision',title:'Which repo?',choices:[{id:'pick:example/one',label:'Start in example/one',repo:'example/one'},{id:'pick',label:'Other repo…',text:true},{id:'drop',label:'Drop'}]}};
 B.cards=[ready,dec,two,repo];
 // card images come only from this card's own evidence routes: never external, data, file, another card's or a query URL
@@ -60,14 +60,22 @@ await choose('d1','yes','l'); assert.match(sent.at(-1)[1].message,/→ Postgres/
 // two questions: taps pick, Yes sends both
 const before=sent.length; askPick('d2',1,1,'l'); assert.equal(sent.length,before);
 await choose('d2','yes','l'); assert.match(sent.at(-1)[1].message,/A\?\n   → y \(recommended\)\n2\. B\?\n   → q/);
-// No on an open question may go empty; No on a plan needs words
-nodes['say-l-d1']={value:'',focus(){}}; const n0=sent.length; await choose('d1','no','l'); await choose('d1','no','l',true); assert.equal(sent.length,n0); assert.match(notices.at(-1),/Write what should change/);
-await choose('d2','no','l'); nodes['say-l-d2']={value:'Do q instead'}; await choose('d2','no','l',true); assert.equal(sent.at(-1)[1].choice,'no'); assert.match(sent.at(-1)[1].message,/Do q instead/);
+// No is one tap with no box and no text, the same as an emailed "no", even with options picked
+assert(!choicesHtml(dec,'l').includes('id="say-l-d1"'));
+await choose('d1','no','l'); assert.deepEqual(sent.at(-1),['choose',{id:'d1',choice:'no'}]); assert(!choicesHtml(dec,'l').includes('id="say-l-d1"'));
+askPick('d2',1,0,'l'); await choose('d2','no','l'); assert.deepEqual(sent.at(-1),['choose',{id:'d2',choice:'no'}]);
+// Change needs words
+nodes['say-l-d1']={value:'',focus(){}}; const n0=sent.length; await choose('d1','change','l'); assert(choicesHtml(dec,'l').includes('id="say-l-d1"'));
+await choose('d1','change','l',true); assert.equal(sent.length,n0); assert.match(notices.at(-1),/Write what should change/);
+nodes['say-l-d2']={value:'Do q instead',focus(){}}; await choose('d2','change','l'); await choose('d2','change','l',true); assert.equal(sent.at(-1)[1].choice,'change'); assert.match(sent.at(-1)[1].message,/Do q instead/);
 // finished work with a builder's question: a tapped option goes through Change (as an emailed letter
 // does) and never lands it; Land itself carries no answers
 const rq={id:'rq',title:'Colours',ask:{kind:'ready',title:'Ready to try',questions:[{text:'Which colour?',options:['Blue (recommended)','Red']}],
   choices:[{id:'land',label:'Land',primary:true},{id:'change',label:'Change',text:true},{id:'drop',label:'Drop'}]}};
 B.cards.push(rq);
+// nothing starts picked on finished work: Land sends no answers, so a picked option would be a false promise
+assert(!questionsHtml(rq,'l').includes('opt on'),questionsHtml(rq,'l')); assert.equal(decisionAnswers(rq),'');
+await choose('rq','land','l'); assert.deepEqual(sent.at(-1),['choose',{id:'rq',choice:'land'}]);
 await askPick('rq',0,1,'l'); assert.equal(sent.at(-1)[1].choice,'change'); assert.match(sent.at(-1)[1].message,/Which colour\?\n   → Red/);
 await choose('rq','land','l'); assert.deepEqual(sent.at(-1),['choose',{id:'rq',choice:'land'}]);
 // an open question has no Yes or No: tapping an option answers it, Answer opens a box, empty is refused
@@ -97,6 +105,9 @@ assert(o('No answer yet')<o('Working on it')); assert(o('Hung')<o('Retries')); a
 assert(out.html.includes('Routine runs (1)')); assert(!out.html.includes('Hourly feed'));
 showRoutine=true; assert(inboxHtml(S,'').html.includes('Hourly feed'));
 assert(inboxHtml(S,'retries').html.includes('Retries')); assert(!inboxHtml(S,'retries').html.includes('Hung'));
+// every card line (working, stuck, shipped) is a real link that opens the card; a request with no card is not
+for(const id of ['w','s','x']) assert(new RegExp('<a class="line[^"]*" data-id="'+id+'" href="\\?card='+id+'" onclick="event.preventDefault\\(\\);openPanel\\(this.dataset.id\\)">').test(out.html),id);
+assert(/<div class="line stuck"><span class="lt">Order batteries/.test(out.html),out.html);
 console.log('choices passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()

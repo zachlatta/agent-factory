@@ -565,15 +565,16 @@ Every ask has one fixed set of buttons (`factory/choose.go`), the same on the bo
 | Ask (`Ask.Kind`) | Buttons |
 | --- | --- |
 | Finished work (`ready`): Ready for you, a secret-scan stop | **Land** / **Change** / **Drop** |
-| Decision (`decision`): allow a build with side effects, check what was published without review | **Yes** / **No** / **Drop** |
+| Decision (`decision`): allow a build with side effects, check what was published without review | **Yes** / **No** / **Change** / **Drop** |
 | Which repo (`decision`) | one button per repo, Other repo, **Change**, **Drop** |
 | An agent's open question (`question`) | its options, **Answer**, **Drop**: not a yes/no question, so no Yes or No |
 | Board-only (`problem`): stuck, errors, a review that did not settle, a close suggestion, work left | its own action (Re-run, Resume, Let an agent decide, Close it, Mark done) with Change and Drop, in the card's details |
 
-One tap answers. Drop takes a second tap in place. Change, No, Answer and Other repo open a text box
-with Send, and need words. Question options start on the recommended one; with one question, tapping
-an option answers with it (through Yes, Land or Answer); otherwise Yes or Land sends the picked
-answers. The board posts `POST /api/choose` (`id`, `choice`, `message`, `repo`), and an email reply is
+One tap answers: No sends the agent a plain "No.", the same as replying `no`. Drop takes a second
+tap in place. Change, Answer and Other repo open a text box with Send, and need words. On a decision
+or an open question the options start on the recommended one, which Yes or Answer sends; on finished
+work none is picked, since Land sends no answers: picked options go through Change. With one
+question, tapping an option answers at once. The board posts `POST /api/choose` (`id`, `choice`, `message`, `repo`), and an email reply is
 parsed into the same button (Needs Zach email below), so both do the same thing. Either one moves
 the card out of Needs Zach; the other surface then finds nothing waiting (the dispatcher gets 409)
 and does nothing.
@@ -719,8 +720,7 @@ acts:
 | `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is Change) |
 | `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
 
-Anything else is the ask's text choice (Change, No with his words, or his Answer to an open
-question), written as a follow-up email block. Each reply runs through the board's buttons
+Anything else is the ask's text choice (Change, or his Answer to an open question), written as a follow-up email block. Each reply runs through the board's buttons
 (`choose.go`), so it does exactly what that button does, and a word is offered and acts only where
 its button exists; a reply with no button passes on as a follow-up. Each message is applied once
 (`factory.answered`). A reply that worked gets no email back (the board shows the new state); one
@@ -933,7 +933,7 @@ The helper owns and stops its preview server and browser, including on failure.
 
 Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `building`,
 `review`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture
-(`preview-zach`, a decision with Yes / No / Drop) includes approval content, long text, and choices;
+(`preview-zach`, a decision with Yes / No / Change / Drop) includes approval content, long text, and choices;
 `preview-ready` is finished work with Land / Change / Drop. Their buttons are simulated through the
 same `choose` route the board posts. Real API serialization and Ask/transcript parsing build the preview;
 when a UI needs a new scenario, extend the synthetic inputs in `factory/preview.go`.
