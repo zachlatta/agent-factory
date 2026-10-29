@@ -73,12 +73,16 @@ func TestPlanApprovedBuildsInAFreshAgent(t *testing.T) {
 		stageHandoffMarker, "Fellow instructions: plan, then build", "PLAN: add the widget", "abc1234 Add the widget",
 		"factory/widget.go | 12", "Plan approved by the plan reviewer", "Build it now, as planned",
 		"c1", testSession("c1"), "pdw readme agent-sessions", "marts_ai_conversations", "pdw search",
-		"/api/transcript/<agent id>?tail=1", "before=<line>", "Never run `paseo logs`",
-		"Do not start over",
+		"Never run `paseo logs`", "Do not start over",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, prompt)
 		}
+	}
+	// The transcript API resolves a replaced agent to the current one and stitches whole earlier
+	// sessions in at the start, so a handoff points only at PDW.
+	if strings.Contains(prompt, "/api/transcript") {
+		t.Errorf("prompt points at the transcript API:\n%s", prompt)
 	}
 	if n := strings.Count(prompt, "PLAN: add the widget"); n != 1 {
 		t.Errorf("the plan is in the prompt %d times, want once", n)

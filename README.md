@@ -235,8 +235,9 @@ The planner (the "Fellow") first picks a track:
   agent instead of resuming its session, whose context by then is re-read on every call. That is a
   passed plan going to build (plan reviewer, arbiter or Zach), plan-review fixes, code-review or
   arbiter fixes, the land prompt (after code review, Zach's approval, a re-run or a released hold),
-  and a failed landing, a dropped dependency or work left after a landing going back to building. The new agent runs the same
-  model (`factory.agent`, else the agent's provider and model) in the same worktree, through the same
+  and a failed landing, a dropped dependency or work left after a landing going back to building.
+  The new agent runs the same model (`factory.agent`, else the agent's provider and model) in the
+  same worktree, through the same
   steps as a model hand-off (`factory.handoff` kind `stage`), with the card's labels: reviewed commit,
   code approval, held approval, review generation (`factory.code-rounds-from`), recovery counts and
   email thread. A fresh lander is authorized like any card agent: the landing review reads its own
@@ -244,9 +245,9 @@ The planner (the "Fellow") first picks a track:
   original instructions verbatim, Zach's follow-ups, the approved plan, the branch's commits and
   diffstat, the previous agent's last message (once, not if it is the plan) and the stage message,
   plus every earlier agent's Paseo id and session id, with how to read their full transcripts
-  read-only when the handoff is not enough: PDW (`pdw readme agent-sessions`, `marts_ai_conversations`,
-  `pdw search`) or the factory's paged `/api/transcript/{id}`, never `paseo logs`, which loads (and can
-  resume) an archived agent; a lander is told to take the deploy steps from the reviewed build summary.
+  when the handoff is not enough: only in PDW (`pdw readme agent-sessions`, `marts_ai_conversations`,
+  `pdw search`), never `paseo logs`, which loads (and can resume) an archived agent, nor
+  `/api/transcript/{id}`, which shows the card's current agent and stitches whole earlier sessions in; a lander is told to take the deploy steps from the reviewed build summary.
   The prompt is kept in the state dir (`handoffs/`) until the new agent is confirmed, so a restart
   retries the same one; a swap that does not start (no known model, no readable first session, two
   failed starts) sends the stage message to the old session instead, as before, and so does a parked

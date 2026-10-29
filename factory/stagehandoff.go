@@ -15,8 +15,10 @@ import (
 // same worktree instead of resuming the card's session, which by then re-reads hundreds of thousands
 // of tokens on every call: a passed plan (plan reviewer, arbiter or Zach) going to build, plan-review
 // fixes, code-review or arbiter fixes, the land prompt (sendLanding), and a failed landing, a dropped
-// dependency or work left after a landing going back to building. The new agent gets a compact handoff (stagePrompt) and the ids of
-// the earlier agents, whose full transcripts it can read in PDW or the transcript API. The swap is a model hand-off
+// dependency or work left after a landing going back to building. The new agent gets a compact
+// handoff (stagePrompt) and the ids of the earlier agents, whose full transcripts it can read in PDW
+// (not the transcript API, which resolves a replaced agent to the current one and stitches whole
+// earlier sessions in). The swap is a model hand-off
 // of kind "stage" (handoff.go): same steps, the card's labels carried (reviewed commit, code approval,
 // held approval, review generation, recovery counts, email thread), the old agent archived once the
 // new one is confirmed. A lander is checked from its own labels by the landing review like any card
@@ -180,15 +182,10 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 		}
 		b.WriteString(")\n")
 	}
-	port := f.cfg.Port
-	if port == 0 {
-		port = 7478
-	}
-	fmt.Fprintf(&b, "Read their full transcripts only when this handoff is not enough, and only read-only: in PDW "+
-		"(`pdw readme agent-sessions`, then marts_ai_conversations.sessions and .events by session_id, or this "+
-		"worktree's cwd, or `pdw search`; PDW can lag by a few minutes), or from the factory's transcript API, newest "+
-		"page first: `curl -s 'localhost:%d/api/transcript/<agent id>?tail=1'`, then `before=<line>` for older pages. "+
-		"Never run `paseo logs` on an earlier agent: it loads that agent in Paseo and can resume an archived one.\n\n", port)
+	b.WriteString("Read their full transcripts only when this handoff is not enough, and only in PDW: `pdw readme " +
+		"agent-sessions`, then marts_ai_conversations.sessions and .events by session_id, or this worktree's cwd, or " +
+		"`pdw search`, a bounded query at a time; PDW can lag by a few minutes. Never run `paseo logs` on an earlier " +
+		"agent: it loads that agent in Paseo and can resume an archived one.\n\n")
 	b.WriteString("=== Original instructions ===\nThey still apply (rules, gates, the public-repo scan, the opening lines), " +
 		"but this step replaces their \"Step 1\".\n\n")
 	b.WriteString(strings.TrimSpace(first))
