@@ -5,23 +5,17 @@ import (
 	"strings"
 )
 
-// Asks after landing say plainly what they want. A landed card whose agent leaves Zach a thing to try
-// (a REMAINING Zach: item, or a NEEDS FROM ZACH line that asks for a test) is a try ask: It works /
-// It's broken / Skip, never Yes / No. A headline that says "None" while the card asks for something
-// is dropped (cleanOverview), so the board and email lead with the ask instead.
+// Required actions after landing keep their action choices. Optional tries close through landedNext.
 
 var (
 	// an item or sentence that asks Zach to try the change
 	tryVerb = regexp.MustCompile(`(?i)^(?:please\s+)?(?:try|test|tap|click|press|open|check|verify|use|see|run|watch|look|reply)\b`)
-	// a sentence start in a NEEDS FROM ZACH line that asks for a test
-	tryInNeeds = regexp.MustCompile(`(?i)(?:^|[.!?:;]\s+|\n\s*)(?:please\s+)?(?:try|test|tap|click|press|open|verify|use)\b`)
 	// a first sentence that says nothing is needed: "None.", "Nothing for you to decide yet."
 	saysNothing = regexp.MustCompile(`(?i)^[\s*_]*(?:none|nothing|n/?a|no action|no decision)\b[^.!?\n]*[.!?]*\s*`)
 )
 
-// askTry is the kind of a try ask: work landed and Zach is asked to try or do one thing (It works /
-// It's broken / Skip). It is For you even where the wait is board-only.
-const askTry = "try"
+// askAction is a required post-landing action.
+const askAction = "action"
 
 // kindLabels is each kind's label, for an ask that sets none of its own.
 var kindLabels = map[string]string{
@@ -29,10 +23,10 @@ var kindLabels = map[string]string{
 	askDecision: "Decision needed",
 	askQuestion: "The agent asked you",
 	askProblem:  "Something needs a look",
-	askTry:      "Work landed. Try it:",
+	askAction:   "Work landed. Do this:",
 }
 
-// workLeftAsk is the ask for a landed card with work left: a try ask for the Zach: items, else the
+// workLeftAsk is the ask for a landed card with work left: an action ask for the Zach: items, else the
 // agents' items, which their agent already stopped with (send it back, or mark it done).
 func workLeftAsk(left string) *Ask {
 	var zach, agents []string
@@ -48,7 +42,7 @@ func workLeftAsk(left string) *Ask {
 	}
 	if len(zach) > 0 {
 		ask := &Ask{From: "builder", landed: true, zachItem: strings.Join(zach, "; ")}
-		makeTry(ask, ask.zachItem)
+		makeAction(ask, ask.zachItem)
 		ask.Why = "The agent landed its change and needs you to do this: " + ask.zachItem + "."
 		if len(agents) > 0 {
 			ask.Why += " Also left for an agent: " + strings.Join(agents, "; ") + "."
@@ -68,16 +62,11 @@ func workLeftAsk(left string) *Ask {
 	return ask
 }
 
-// makeTry turns ask into a try ask for item (one thing Zach is asked to try or do). A test gets
-// It works / It's broken / Skip testing; any other action Done it / Something's wrong / Skip it.
-func makeTry(ask *Ask, item string) {
-	ask.Kind = askTry
-	works, broken, skip := "It works, mark done", "It's broken", "Skip testing, mark done"
-	ask.Label, ask.Title = "Work landed. Try it:", "Try it: "+trunc(item, 140)
-	if !tryVerb.MatchString(item) {
-		works, broken, skip = "Done it, mark done", "Something's wrong", "Skip it, mark done"
-		ask.Label, ask.Title = "Work landed. Do this:", "Do this: "+trunc(item, 140)
-	}
+// makeAction gives required actions their completion and reply choices.
+func makeAction(ask *Ask, item string) {
+	ask.Kind = askAction
+	works, broken, skip := "Done it, mark done", "Something's wrong", "Skip it, mark done"
+	ask.Label, ask.Title = "Work landed. Do this:", "Do this: "+trunc(item, 140)
 	ask.Actions = []Action{primary("done", works), reply(broken, "What went wrong?"), act("done", skip)}
 	ask.Choices = []Choice{
 		{ID: "works", Label: works, Primary: true, action: "done"},
@@ -87,24 +76,15 @@ func makeTry(ask *Ask, item string) {
 }
 
 // refineAsk applies what the agent's reply says (its overview and questions, read after askFor) to
-// ask: the headline never says "None", a landed card asking for a test gets the test buttons, and a
+// ask: the headline never says "None", and a
 // decision with QUESTION blocks says so. Run it wherever an ask meets its reply (board, email, choose).
 func refineAsk(ask *Ask) {
 	if ask == nil {
 		return
 	}
 	cleanOverview(ask)
-	if ov := ask.Overview; ask.landed && !ask.check && ask.Kind != askTry && ov != nil && tryInNeeds.MatchString(ov.Needs) {
-		why := ask.Why
-		makeTry(ask, firstLine(ov.Needs))
-		ask.Why = why
-	}
-	// the thing to try shows under the headline (its NEEDS line), so the headline does not repeat it
-	if ov := ask.Overview; ask.Kind == askTry && ov != nil && ov.Needs != "" {
-		ask.Title = "Try it, then say if it works"
-		if ask.Label == "Work landed. Do this:" {
-			ask.Title = "Do it, then mark it done"
-		}
+	if ov := ask.Overview; ask.Kind == askAction && ov != nil && ov.Needs != "" {
+		ask.Title = "Do it, then mark it done"
 	}
 	if (ask.Kind == askDecision || ask.Kind == askQuestion) && len(ask.Questions) > 0 &&
 		(ask.Label == kindLabels[askDecision] || ask.Label == kindLabels[askQuestion]) {

@@ -24,6 +24,9 @@ OVERVIEW: <what it changes, why, and the main risk; at most 3 short sentences>
 NEEDS FROM ZACH: <approve, choose or answer, and what happens after>
 When you ask Zach for anything (a decision, an answer, or a thing to try or test), DECISION names that
 ask; never write None there while NEEDS FROM ZACH asks him for something.
+For messages written after landing, optional use, feedback and observation of a future live event
+are summary prose, not asks: write DECISION: None., NEEDS FROM ZACH: Nothing., and REMAINING: none
+when only those remain. Required checks and pre-landing previews keep their asks.
 Then the rest of the message. QUESTION: blocks stay as they are, and TIER:, VERDICT: and TRACK:
 lines stay last. ` + plainEmailRule + evidenceRule
 

@@ -109,15 +109,14 @@ func PreviewHandler(root string) (http.Handler, error) {
 	// built after a reviewed plan and one code review, as real finished work is
 	ready.Labels[labelPrefix+labelPlanRounds], ready.Labels[labelPrefix+labelCodeRounds] = "1", "1"
 	agents = append(agents, ready)
-	// work that landed with one thing left for Zach to try: the try ask (asktry.go), under an agent's
-	// "None" decision that the board drops
+	// Work that landed with a required account approval.
 	try := ready
-	try.ID, try.SessionID, try.Title = "preview-try", "preview-try", "Usage page fits a phone"
-	if err := writePreviewSession(home, try.Cwd, try.ID, previewTryRequest, previewTryReply); err != nil {
+	try.ID, try.SessionID, try.Title = "preview-action", "preview-action", "Usage page fits a phone"
+	if err := writePreviewSession(home, try.Cwd, try.ID, previewActionRequest, previewActionReply); err != nil {
 		return nil, err
 	}
 	try.Labels = maps.Clone(ready.Labels)
-	try.Labels[labelPrefix+labelNote] = noteWorkLeft + "Zach: open the usage page on your phone and say whether anything is cut off"
+	try.Labels[labelPrefix+labelNote] = noteWorkLeft + "Zach: approve the required account setting"
 	agents = append(agents, try)
 	f.hostMetrics.read = func(string) hostReading {
 		return hostReading{Metrics: hostMetrics{CPUCount: 4, Errors: map[string]string{}}}
@@ -288,17 +287,17 @@ func writePreviewSession(home, cwd, id, request, reply string) error {
 
 const previewRequest = "Make the board easy to read on a phone: one column, and every card I need to answer at the top."
 
-const previewTryRequest = "Make the usage page fit a phone screen."
+const previewActionRequest = "Make the usage page fit a phone screen."
 
-// previewTryReply is a landing that leaves Zach one thing to try, under a decision line that says nothing.
-const previewTryReply = `DECISION: None. The usage page is live.
+// previewActionReply is a landing that leaves a required approval.
+const previewActionReply = `DECISION: Approve the account setting?
 OVERVIEW: The usage page now fits a phone screen.
-NEEDS FROM ZACH: Open the usage page on your phone and say whether anything is cut off.
+NEEDS FROM ZACH: Approve the required account setting.
 
 Landed.
 
 REMAINING:
-- Zach: open the usage page on your phone and say whether anything is cut off`
+- Zach: approve the required account setting`
 
 const previewReadyRequest = "Make the board's answer buttons clearer on a phone, so one tap does what it says."
 

@@ -34,7 +34,7 @@ func TestAskChoices(t *testing.T) {
 		{"did not settle", map[string]string{labelNote: arbiterStuckNote}, askProblem, []string{"arbiter", "change", "drop"}},
 		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
 		{"work left", map[string]string{labelNote: "landed; still to do: x"}, askProblem, []string{"finish", "done", "drop"}},
-		{"work left for Zach", map[string]string{labelNote: "landed; still to do: Zach: tap the button"}, askTry, []string{"works", "broken", "skip"}},
+		{"work left for Zach", map[string]string{labelNote: "landed; still to do: Zach: tap the button"}, askAction, []string{"works", "broken", "skip"}},
 	} {
 		labels := map[string]string{labelStage: "zach"}
 		for k, v := range tc.labels {

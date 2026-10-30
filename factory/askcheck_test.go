@@ -65,7 +65,7 @@ func everyAsk() map[string]*Ask {
 var choiceActions = []string{"send", "approve", "pickrepo", "arbiter", "done", "close", "stop", "rerun", "resume"}
 
 // Every ask says what kind of input it wants, and its buttons fit that kind: Yes / No only on a decision,
-// the test buttons on work to try, and no work that landed answered with a bare reply box.
+// the action buttons on required work, and no work that landed answered with a bare reply box.
 func TestEveryAskIsLabelledAndFits(t *testing.T) {
 	for name, ask := range everyAsk() {
 		if ask == nil {
@@ -117,7 +117,7 @@ func askFaults(ask *Ask) []string {
 		!strings.HasPrefix(ask.Label, "Finished") {
 		out = append(out, fmt.Sprintf("landed work labelled %q", ask.Label))
 	}
-	if ask.Kind == askTry {
+	if ask.Kind == askAction {
 		if got := choiceIDs(ask); !slices.Equal(got, []string{"works", "broken", "skip"}) || !ask.Choices[0].Primary || !ask.Choices[1].Text {
 			out = append(out, fmt.Sprintf("try choices %v", ask.Choices))
 		}
@@ -162,15 +162,14 @@ func TestSecretScanAskButtons(t *testing.T) {
 	}
 }
 
-// A landed card whose agent asks Zach to try something gets the test buttons, whether the ask is a
-// REMAINING Zach: item or only its NEEDS FROM ZACH line; and the headline never says "None" while asking.
-func TestLandedAsksToTryGetTheTestButtons(t *testing.T) {
+// Required landed actions keep action buttons; optional NEEDS text never replaces an existing ask.
+func TestLandedActionsKeepTheirButtons(t *testing.T) {
 	asks := everyAsk()
-	if a := asks["work left: test for Zach"]; a.Kind != askTry || a.Label != "Work landed. Try it:" ||
+	if a := asks["work left: test for Zach"]; a.Kind != askAction || a.Label != "Work landed. Do this:" ||
 		!strings.Contains(a.Title, "open the usage page") || !strings.Contains(a.Why, "tidy the docs") {
 		t.Errorf("Zach test item: %+v", a)
 	}
-	if a := asks["work left: action for Zach"]; a.Kind != askTry || a.Label != "Work landed. Do this:" ||
+	if a := asks["work left: action for Zach"]; a.Kind != askAction || a.Label != "Work landed. Do this:" ||
 		a.Choices[0].Label != "Done it, mark done" {
 		t.Errorf("Zach action item: %+v", a)
 	}
@@ -182,8 +181,8 @@ func TestLandedAsksToTryGetTheTestButtons(t *testing.T) {
 		ask := everyAsk()[name]
 		ask.Overview = &Overview{Decision: "None.", Needs: "Try the new button on your phone and say whether it works."}
 		refineAsk(ask)
-		if ask.Kind != askTry || ask.Label != "Work landed. Try it:" || !slices.Equal(choiceIDs(ask), []string{"works", "broken", "skip"}) {
-			t.Errorf("%s with a test in NEEDS: kind %q label %q choices %v", name, ask.Kind, ask.Label, choiceIDs(ask))
+		if ask.Kind == askAction {
+			t.Errorf("%s: optional NEEDS changed the ask", name)
 		}
 		if ask.Overview.Decision != "" {
 			t.Errorf("%s: headline %q", name, ask.Overview.Decision)
@@ -193,8 +192,8 @@ func TestLandedAsksToTryGetTheTestButtons(t *testing.T) {
 		ask := everyAsk()["landed: did it finish"]
 		ask.Overview = &Overview{Needs: needs}
 		refineAsk(ask)
-		if ask.Kind == askTry {
-			t.Errorf("NEEDS %q made a try ask", needs)
+		if ask.Kind == askAction {
+			t.Errorf("NEEDS %q replaced the existing ask", needs)
 		}
 	}
 	// a landing the factory wants checked keeps its label and buttons: the agent's "try it" cannot
@@ -204,7 +203,7 @@ func TestLandedAsksToTryGetTheTestButtons(t *testing.T) {
 		label, ids := ask.Label, choiceIDs(ask)
 		ask.Overview = &Overview{Needs: "Try the new button on your phone and say whether it works."}
 		refineAsk(ask)
-		if ask.Kind == askTry || ask.Label != label || !slices.Equal(choiceIDs(ask), ids) {
+		if ask.Kind == askAction || ask.Label != label || !slices.Equal(choiceIDs(ask), ids) {
 			t.Errorf("%s with a test in NEEDS became kind %q label %q choices %v", name, ask.Kind, ask.Label, choiceIDs(ask))
 		}
 	}
@@ -228,7 +227,7 @@ func TestNoneHeadlineIsCleaned(t *testing.T) {
 	if ov.Decision != "" || !strings.HasPrefix(ov.Overview, "The usage page fits a phone.") || !strings.HasPrefix(ov.Needs, "Open the usage page") {
 		t.Errorf("overview = %+v", ov)
 	}
-	if ask.Title != "Try it, then say if it works" {
+	if ask.Title != "Do it, then mark it done" {
 		t.Errorf("headline %q repeats or misses the thing to try", ask.Title)
 	}
 	if shared.Decision != "None. The usage page fits a phone." {
@@ -309,13 +308,13 @@ func TestEveryAskBuilderIsChecked(t *testing.T) {
 	}
 }
 
-// A landed card asking for a test in its reply answers to the test buttons on the board and by email,
+// A landed card with a required action answers to its action buttons on the board and by email,
 // and they do what they say.
-func TestTryAskChoicesRun(t *testing.T) {
+func TestActionAskChoicesRun(t *testing.T) {
 	reply := "DECISION: None. The usage page fits a phone.\nOVERVIEW: The usage table wraps.\n" +
 		"NEEDS FROM ZACH: Open the usage page on your phone and say whether the table fits.\n\nREMAINING: none"
 	landed := func() Agent {
-		return card("c1", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains", labelZachThread: "nt1"})
+		return card("c1", map[string]string{labelStage: "zach", labelNote: noteWorkLeft + "Zach: approve the account setting", labelZachThread: "nt1"})
 	}
 	f, p, _ := mailFactory(t, landed())
 	storeLog(t, f, p, "c1", reply)
@@ -323,7 +322,7 @@ func TestTryAskChoicesRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l := p.labels("c1"); l[labelStage] != "landed" {
-		t.Errorf("It works: labels %v", l)
+		t.Errorf("Done it: labels %v", l)
 	}
 	f, p, _ = mailFactory(t, landed())
 	storeLog(t, f, p, "c1", reply)

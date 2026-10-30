@@ -24,7 +24,9 @@ const remainingRule = " End that summary with a line that says what is left of t
 	"for a decision, approval, login or action only he can take, else agent:. Your NEEDS FROM ZACH names " +
 	"every Zach: item and says nothing only when there is none: when it needs nothing from Zach, its agent: " +
 	"items come back to you in this card (at most 2 rounds): you finish them, a code review runs, and you " +
-	"land again."
+	"land again. After landing, optional use and feedback and optional agent observation awaiting a future live event " +
+	"belong in summary prose, not REMAINING or NEEDS FROM ZACH. Say honestly what is unobserved. " +
+	"Required acceptance checks still count as unfinished work even when awaiting an event."
 
 var (
 	remainingRe     = regexp.MustCompile(`(?i)^[ \t>*_#-]*REMAINING[*_]*\s*:[*_]*[ \t]*(.*)$`)
@@ -84,7 +86,19 @@ func landedNext(reply string, rounds int) (stage, note string, again []string) {
 	switch {
 	case !found:
 		return "zach", "landed; did not say what remains", nil
-	case len(items) == 0:
+	}
+	if optionalLandedTries(reply) {
+		var tries []string
+		for _, item := range items {
+			tries = append(tries, strings.TrimSpace(remainingZachRe.ReplaceAllString(item, "")))
+		}
+		if len(tries) == 0 {
+			_, ov := ParseOverview(reply)
+			tries = append(tries, ov.Needs)
+		}
+		return "landed", trunc(strings.ReplaceAll("landed; Try it if you like: "+strings.Join(tries, "; "), ",", ""), 200), nil
+	}
+	if len(items) == 0 {
 		return "landed", "landed", nil
 	}
 	if needsNothing(reply) {
@@ -101,6 +115,9 @@ func landedNext(reply string, rounds int) (stage, note string, again []string) {
 // needsNothing reports whether reply asks nothing of Zach: its NEEDS FROM ZACH says nothing and names no
 // ask, it has no QUESTION block, and no REMAINING item is his. A reply with no overview asks.
 func needsNothing(reply string) bool {
+	if optionalLandedTries(reply) {
+		return true
+	}
 	rest, qs := ParseQuestions(reply)
 	if len(qs) > 0 {
 		return false
@@ -227,4 +244,38 @@ func (f *Factory) finishLanding(a Agent, c Card, reply string) error {
 		return f.send(a.ID, "Your landing was verified, but your reply omitted the completion line. Report what remains of this card's request."+remainingRule)
 	}
 	return f.landed(a, c, reply)
+}
+
+// realActionRe marks a real action that must never be dismissed as optional testing.
+var realActionRe = regexp.MustCompile(`(?i)\b(?:approve|log\s*in|sign\s*in|decide|choose|confirm|pay|buy|install|enable|rotate|migrate|migration|deploy)\b`)
+
+func optionalTry(text string) bool {
+	return tryVerb.MatchString(strings.TrimSpace(text)) && !realActionRe.MatchString(text)
+}
+
+// optionalLandedTries accepts only explicit completion reports with no real ask.
+func optionalLandedTries(reply string) bool {
+	rest, qs := ParseQuestions(reply)
+	if len(qs) != 0 {
+		return false
+	}
+	_, ov := ParseOverview(rest)
+	if ov == nil || !remainingNoneRe.MatchString(strings.TrimSpace(ov.Decision)) {
+		return false
+	}
+	needs := strings.TrimSpace(ov.Needs)
+	m := needsNothingRe.FindStringIndex(needs)
+	if !optionalTry(needs) && (m == nil || needsAskRe.MatchString(needs[m[1]:]) || realActionRe.MatchString(needs[m[1]:])) {
+		return false
+	}
+	items, found := ParseRemaining(reply)
+	if !found {
+		return false
+	}
+	for _, item := range items {
+		if !remainingZachRe.MatchString(item) || !optionalTry(remainingZachRe.ReplaceAllString(item, "")) {
+			return false
+		}
+	}
+	return len(items) > 0 || optionalTry(needs)
 }

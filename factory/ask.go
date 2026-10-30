@@ -37,7 +37,7 @@ type Ask struct {
 	Kind string `json:"kind"`
 	// Choices are the answers, the same on the board (POST /api/choose) and by email (answer.go).
 	Choices []Choice `json:"choices"`
-	// Label says in a few words what kind of input the ask wants ("Work landed. Try it:"), shown
+	// Label says in a few words what kind of input the ask wants ("Work landed. Do this:"), shown
 	// above the headline; every ask has one (askcheck_test.go).
 	Label string `json:"label"`
 	// landed: the card's work reached main (or the card finished), so its agent may ask Zach to try it
@@ -82,9 +82,9 @@ func askFor(c Card, a Agent) *Ask {
 }
 
 // finishAsk fills in what every ask has: a kind (problem when unset or board-only, except work to
-// try), the kind's label when it sets none, and its choices (unless it sets its own).
+// act on), the kind's label when it sets none, and its choices (unless it sets its own).
 func finishAsk(ask *Ask) {
-	if (ask.BoardOnly && ask.Kind != askTry) || ask.Kind == "" {
+	if (ask.BoardOnly && ask.Kind != askAction) || ask.Kind == "" {
 		ask.Kind = askProblem
 	}
 	if ask.Label == "" {

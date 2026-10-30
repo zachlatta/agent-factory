@@ -324,3 +324,63 @@ func TestErroredCardGitCheckRunsOncePerError(t *testing.T) {
 		t.Fatalf("fetches on exhausted card = %d, want 3", fetches)
 	}
 }
+
+func TestErroredCardOptionalTryGoesToDone(t *testing.T) {
+	const doneReport = optionalTryReport
+	r := newRepos(t)
+	reviewed := commitFile(t, r.wt, "feature.go", "package feature\n")
+	r.otherPushes(t, "other.txt")
+	r.land(t)
+	wantLandedAt := parseTime(gitRun(t, r.wt, "show", "-s", "--format=%cI", "HEAD"))
+
+	a := card("c1", map[string]string{
+		labelStage:        "landing",
+		labelReviewed:     reviewed,
+		labelAutoReview:   "code",
+		labelRemainingAsk: "1",
+		labelStuck:        stuckAgentError,
+		labelSince:        ago(10 * time.Minute),
+	})
+	a.Cwd = r.wt
+	a.Status = "error"
+	a.LastError = "Individual quota reached, please upgrade.\nResets in 9m22s."
+	a.LastActivityAt = t0.Add(-time.Minute)
+	a.LastUserMessageAt = t0.Add(-5 * time.Minute)
+
+	f, p := newTestFactory(t, a)
+	f.Git, f.GitOut = runGit, runGitOut
+	f.timings.cards[a.ID] = &CardTiming{RequestedAt: wantLandedAt.Add(-time.Minute)}
+	storeLog(t, f, p, a.ID, "[User] Land it.\n"+doneReport+"\n[User] "+limitResumeMessage)
+
+	if err := f.tickAgent(a, t0); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels(a.ID)
+	wantNote := "landed; Try it if you like: tap Mute thread once and reply; Individual quota reached; please upgrade. Resets in 9m22s."
+	if v, ok := l[labelStuck]; !ok || v != "" || l[labelStage] != "landed" || l[labelNote] != wantNote || l[labelLandedVerified] != "1" {
+		t.Fatalf("labels = %v", l)
+	}
+	for _, k := range []string{labelAutoReview, labelRemainingAsk, labelStuck} {
+		if v, ok := l[k]; !ok || v != "" {
+			t.Fatalf("label %s = %q (ok=%v), want empty write; labels = %v", k, v, ok, l)
+		}
+	}
+	if len(p.sent(a.ID)) != 0 || p.runs != 0 {
+		t.Fatalf("sent %v runs %d", p.sent(a.ID), p.runs)
+	}
+	if rec := readRecovery(withLabels(a, l)); rec.Phase != "complete" || !rec.UserAt.Equal(a.LastUserMessageAt) {
+		t.Fatalf("recovery = %+v", rec)
+	}
+	if got := timing(t, f, a.ID).LandedAt; !got.Equal(wantLandedAt) {
+		t.Fatalf("LandedAt = %v, want %v", got, wantLandedAt)
+	}
+
+	// A stale snapshot from before the label reload does not send a retry or write labels again.
+	callsBefore := len(p.calls)
+	if err := f.tickAgent(a, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.calls) != callsBefore || len(p.sent(a.ID)) != 0 {
+		t.Fatalf("stale snapshot acted: calls %d -> %d, sent %v", callsBefore, len(p.calls), p.sent(a.ID))
+	}
+}

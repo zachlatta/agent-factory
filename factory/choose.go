@@ -107,7 +107,7 @@ func choiceByID(ask *Ask, id string) *Choice {
 	return nil
 }
 
-// goChoice is the ask's Land, Yes, It works or Scan again, the choice the approve reply words stand for, or nil.
+// goChoice is the ask's Land, Yes, Done it or Scan again, the choice the approve reply words stand for, or nil.
 func goChoice(ask *Ask) *Choice {
 	for _, id := range []string{"land", "yes", "works", "scan"} {
 		if c := choiceByID(ask, id); c != nil {
@@ -117,7 +117,7 @@ func goChoice(ask *Ask) *Choice {
 	return nil
 }
 
-// doneChoice is the choice the done reply words stand for: Mark done, or It works on a try ask.
+// doneChoice is the choice the done reply words stand for: Mark done, or Done it on an action ask.
 func doneChoice(ask *Ask) *Choice {
 	if c := choiceByID(ask, "done"); c != nil {
 		return c
