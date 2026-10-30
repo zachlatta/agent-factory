@@ -13,7 +13,7 @@ import (
 
 // Zach's email answers to a card waiting on him. The zrl-bot dispatcher checks the sender, then POSTs
 // his reply here (/api/answer: thread, message_id, text). Only a whole reply from a closed word list
-// approves or drops; anything else goes to the agent as his instructions. A reply that worked gets no
+// approves or drops; other text is checked for relevance. A reply that worked gets no
 // email back (the board shows the new state); one that did nothing gets one plain line saying so.
 
 // ErrNoCard, ErrNotWaiting and ErrSharedThread tell the dispatcher to fall back to its own handling.
@@ -161,6 +161,17 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if b.Thread == "" || b.MessageID == "" {
 		return nil, errors.New("thread and message_id are required")
 	}
+	if len(b.Text) > 32768 {
+		return nil, errors.New("reply exceeds maximum size")
+	}
+	if f.passive() {
+		return map[string]string{"action": "none"}, nil
+	}
+	f.replies.mu.Lock()
+	defer f.replies.mu.Unlock()
+	if f.replies.done[b.Thread+"\x00"+b.MessageID] {
+		return map[string]string{"action": "duplicate"}, nil
+	}
 	a, err := f.waitingCard(b.Thread)
 	if err != nil {
 		return nil, err
@@ -176,7 +187,13 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if ask == nil {
 		return nil, ErrNotWaiting
 	}
-	ans := parseAnswer(b.Text, ask)
+	request := f.cardRequest(a)
+	c.Request = &request
+	detail, _, _ := f.askDetail(c, ask)
+	ans, result, err := f.classifyEmail(a, c, ask, b, detail)
+	if err != nil || result != nil {
+		return result, err
+	}
 	if ans.Choice == "" && strings.TrimSpace(replyText(b.Text)) == "" {
 		return map[string]string{"card": a.ID, "action": "none"}, nil
 	}
@@ -185,7 +202,7 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 		return nil, ErrNotWaiting // no button for it: the dispatcher passes the reply on as a follow-up
 	}
 	// answered first: a repeated POST of this message does nothing
-	if err := f.setLabels(a.ID, map[string]string{labelAnswered: b.MessageID}); err != nil {
+	if err := f.markReply(a, b); err != nil {
 		return nil, err
 	}
 	_, err = f.runChoice(a.ID, *ch, Body{Message: ans.Message, Via: "email"})
@@ -208,6 +225,13 @@ func (f *Factory) answerFailed(a Agent, messageID string) {
 	line := "That reply didn't go through."
 	if link := f.cardLink(a.ID); link != "" {
 		line += " Answer on the board: " + link
+	}
+	f.clarifyAnswer(a, messageID, line)
+}
+
+func (f *Factory) clarifyAnswer(a Agent, messageID, line string) {
+	if f.Mail == nil {
+		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

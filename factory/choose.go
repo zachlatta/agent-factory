@@ -166,7 +166,22 @@ func (f *Factory) choose(b Body) (any, error) {
 	if ch == nil {
 		return nil, errNoChoice
 	}
-	_, err := f.runChoice(a.ID, *ch, b)
+	// Board answers supersede any unresolved email clarification.
+	f.replies.mu.Lock()
+	defer f.replies.mu.Unlock()
+	saved, err := f.replies.read()
+	if err != nil {
+		return nil, err
+	}
+	for thread, pending := range saved {
+		if pending.Card == a.ID {
+			delete(saved, thread)
+		}
+	}
+	if err := f.replies.save(saved); err != nil {
+		return nil, err
+	}
+	_, err = f.runChoice(a.ID, *ch, b)
 	return map[string]any{"ok": err == nil, "choice": ch.ID}, err
 }
 

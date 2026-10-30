@@ -281,6 +281,7 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 		busy: map[string]int{}, stuck: map[string]bool{}, forceErr: map[string]int{}, providers: map[string]string{}, fixed: map[string]bool{},
 		cwd: map[string]string{}, unknown: map[string]bool{}}
 	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: t.TempDir(), DefaultRepo: "example/desk"}, p)
+	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "related", nil }
 	f.Now = func() time.Time { return t0 }
 	// Most lifecycle tests begin with an already provisioned quiet anchor. Anchor bootstrap and
 	// recovery tests clear this cache explicitly and exercise the production path with fake Paseo.

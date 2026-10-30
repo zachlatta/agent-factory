@@ -153,8 +153,9 @@ func TestEmailAnswerRepeatedIsIgnored(t *testing.T) {
 	}
 }
 
-func TestEmailFreeTextGoesToTheAgentAsAFollowUp(t *testing.T) {
+func TestEmailRelatedTextGoesToTheAgentAsAFollowUp(t *testing.T) {
 	f, p, m := mailFactory(t, planWaiting("c1"))
+	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "related", nil }
 	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "ok, but drop step 3\n\n> old"}); err != nil {
 		t.Fatal(err)
 	}
@@ -299,5 +300,26 @@ func TestEmailAnswerActsOnNoneWhenTwoCardsWait(t *testing.T) {
 	f.Handler().ServeHTTP(w, req)
 	if w.Code != 409 {
 		t.Errorf("status %d, want 409 so the dispatcher passes it on", w.Code)
+	}
+}
+
+func TestUnclearReplyLeavesWaitingWorkUntouched(t *testing.T) {
+	f, p, m := mailFactory(t, planWaiting("c1"))
+	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "unclear", nil }
+	res, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "Do something else"})
+	if err != nil || res["action"] != "clarify" {
+		t.Fatalf("%v %v", res, err)
+	}
+	if len(p.labels("c1")) != 0 || len(p.sent("c1")) != 0 || len(m.sends()) != 1 {
+		t.Fatal("waiting work changed")
+	}
+	f.replies = &replyStore{path: f.replies.path}
+	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) {
+		t.Fatal("clarification classified")
+		return "", nil
+	}
+	res, err = f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: "answer"})
+	if err != nil || res["action"] != "send" {
+		t.Fatalf("%v %v", res, err)
 	}
 }

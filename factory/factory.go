@@ -104,12 +104,14 @@ type Factory struct {
 	lenses     map[string]lensResult   // panel reviewer id -> its recorded result, ahead of stale snapshots
 	cardGates  sync.Map                // card ID -> *cardGate: its follow-ups and review verdicts (actions.go)
 
-	cfg       Config
-	p         Paseo
-	ideas     *IdeaStore
-	routes    *RouteStore
-	steers    *SteerStore   // closed duplicates' requests on their way to the kept card (steer.go)
-	dismissed *DismissStore // flagged requests Zach dismissed (unanswered.go)
+	cfg        Config
+	p          Paseo
+	ideas      *IdeaStore
+	routes     *RouteStore
+	replies    *replyStore
+	ReplyCheck func(context.Context, ReplyContext) (string, error)
+	steers     *SteerStore   // closed duplicates' requests on their way to the kept card (steer.go)
+	dismissed  *DismissStore // flagged requests Zach dismissed (unanswered.go)
 
 	hostMetrics hostSampler
 	fleet       *hostFleet
@@ -127,20 +129,20 @@ type Factory struct {
 	kick        chan struct{}
 	hotKick     chan struct{} // the agent watcher marked agents hot (watch.go): a hot pass runs
 
-	mu        sync.Mutex
-	list      []Agent
-	cards     []Card
-	updated   time.Time
-	readSeq   uint64 // agent-file reads started (nextRead)
-	boardSeq  uint64 // the read behind list and cards; the board never moves to an older one
-	errs      map[string]string
-	log       []string
+	mu            sync.Mutex
+	list          []Agent
+	cards         []Card
+	updated       time.Time
+	readSeq       uint64 // agent-file reads started (nextRead)
+	boardSeq      uint64 // the read behind list and cards; the board never moves to an older one
+	errs          map[string]string
+	log           []string
 	details       map[string]detailEntry      // Needs Zach card id -> fetched Ask detail
 	appDeliveries map[string]appDeliveryEntry // app card id -> cached delivery check (policy.go)
 	routing       map[string]bool             // pickers whose card is being started now (route.go)
-	mailRetry map[string]time.Time   // card id -> no Needs Zach email before this (a send failed)
-	mailProbe mailProbe              // last mailbox check, for /api/health
-	once      map[string]string      // log lines written once (noteOnce)
+	mailRetry     map[string]time.Time        // card id -> no Needs Zach email before this (a send failed)
+	mailProbe     mailProbe                   // last mailbox check, for /api/health
+	once          map[string]string           // log lines written once (noteOnce)
 	// archivedNow: agents the board archived, and when. Applied over every snapshot until Paseo's
 	// files show the archive (or archiveMarkTTL passes), so a Refresh that read an agent file before
 	// Paseo wrote the archive cannot make the card look live again.
@@ -190,6 +192,7 @@ func New(cfg Config, p Paseo) *Factory {
 	cfg.defaults()
 	f := &Factory{cfg: cfg, p: p, ideas: &IdeaStore{path: filepath.Join(cfg.StateDir, "ideas.json")},
 		routes: &RouteStore{path: filepath.Join(cfg.StateDir, "routes.json")}, routing: map[string]bool{},
+		replies:  &replyStore{path: filepath.Join(cfg.StateDir, "reply-clarifications.json")},
 		steers:   &SteerStore{path: filepath.Join(cfg.StateDir, "steers.json")},
 		previews: &PreviewStore{path: filepath.Join(cfg.StateDir, "previews.json")},
 		pv:       previews{procs: map[string]PreviewProc{}, busy: map[string]bool{}},

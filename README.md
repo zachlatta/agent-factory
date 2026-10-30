@@ -871,7 +871,19 @@ acts:
 | `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is Change) |
 | `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
 
-Anything else is the ask's text choice (Change, or his Answer to an open question), written as a follow-up email block. Each reply runs through the board's buttons
+Other free text receives a tool-free relevance check with a 12-second deadline and no retry.
+Related answers and changes use the ask's text choice, including Change on Ready for you;
+only explicit land and drop words bypass the check there.
+Unrelated requests start independently with Repo Auto, without the waiting thread.
+Unclear or mixed replies and failed checks leave the waiting work untouched. The factory saves
+the reply privately and asks for whole-reply `answer` (send the saved text) or `separate`
+(start it independently). This question is a request for clarification, not a success confirmation.
+Exact offered choices replace the saved clarification. A changed question or a board answer
+discards it, so a fresh reply receives a new check. Dry-run never invokes the checker.
+Handled replies return HTTP 200 with action `send`, `separate`, `clarify` or `duplicate`
+(exact choices keep their existing action names); unmatched threads retain the fallback statuses.
+
+Each reply runs through the board's buttons
 (`choose.go`), so it does exactly what that button does, and a word is offered and acts only where
 its button exists; a reply with no button passes on as a follow-up. Each message is applied once
 (`factory.answered`). A reply that worked gets no email back (the board shows the new state); one
@@ -1217,7 +1229,12 @@ or a progress note does not count as a failed landing. If recording the run fail
 | | `-listen` | address to serve on (default `127.0.0.1:<port>`); `host:0` picks a free port |
 | | `-dry-run` | real data, no changes: only paseo and git reads run, every write is logged to Activity, no Tick, no email, state copied to a temp dir that is deleted when it stops |
 | `FACTORY_ARCHIVE_CLI` | | separate Paseo executable for archive writes (default: `paseo` on PATH; stable version >= 0.13.0 required) |
-| `PATH` | | must reach `paseo`, `node`, `git`, `gitleaks`, `tailscale` (previews) and `pdw` (logged in) |
+| `PATH` | | must reach `claude` (authenticated for the tool-free email relevance check), `paseo`, `node`, `git`, `gitleaks`, `tailscale` (previews) and `pdw` (logged in) |
+
+Before deploying email relevance checking, verify that the factory service's PATH resolves
+`claude` and that its service account can run an authenticated, tool-free structured check.
+Missing access leaves free-text replies awaiting clarification; exact choices still work.
+Do not install or authenticate tools as part of a build.
 
 Cards can start in any checkout under `~/dev/<owner>/<repo>` (when that folder is missing, the
 factory finds the checkout under `~/dev/*/*` whose `origin` git remote matches `owner/repo`).
