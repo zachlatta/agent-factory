@@ -247,7 +247,7 @@ func (f *Factory) finishLanding(a Agent, c Card, reply string) error {
 }
 
 // realActionRe marks a real action that must never be dismissed as optional testing.
-var realActionRe = regexp.MustCompile(`(?i)\b(?:approve|log\s*in|sign\s*in|decide|choose|confirm|pay|buy|install|enable|rotate|migrate|migration|deploy)\b`)
+var realActionRe = regexp.MustCompile(`(?i)\b(?:approve|authorize|allow|grant|accept|delete|remove|merge|send|revoke|log\s*in|sign\s*in|decide|choose|confirm|pay|buy|install|enable|rotate|migrate|migration|deploy)\b`)
 
 func optionalTry(text string) bool {
 	return tryVerb.MatchString(strings.TrimSpace(text)) && !realActionRe.MatchString(text)
