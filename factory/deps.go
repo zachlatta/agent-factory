@@ -254,6 +254,49 @@ func clearHeldApproval(a Agent, labels map[string]string) map[string]string {
 	return labels
 }
 
+// heldChain describes the unresolved chain, including its first Needs Zach card.
+type heldChain struct {
+	decision string
+	depth    int
+	missing  bool
+	cyclic   bool
+}
+
+// traceHeldChain follows the held dependency before the planned dependency, just
+// as tickHeld does when deciding whether a hold can be released.
+func traceHeldChain(agents []Agent, byID map[string]Agent, a Agent) heldChain {
+	var chain heldChain
+	seen := map[string]bool{a.ID: true}
+	for {
+		id := a.L(labelHeld)
+		if id == "" {
+			id = a.L(labelWaitsOn)
+		}
+		if id == "" {
+			return chain
+		}
+		state := depState(agents, a, id)
+		if state == depLanded {
+			return chain
+		}
+		chain.depth++
+		if state == depMissing || state == depDropped {
+			chain.missing = true
+			return chain
+		}
+		target := resolveCardID(byID, id)
+		if seen[target] {
+			chain.cyclic = true
+			return chain
+		}
+		seen[target] = true
+		a = byID[target]
+		if chain.decision == "" && Derive(a) == "zach" {
+			chain.decision = target
+		}
+	}
+}
+
 // decorateDecisionWaits derives display metadata only. Dependency release and asks
 // continue to use the stored stage and labels.
 func decorateDecisionWaits(cards []Card, agents []Agent) {
@@ -273,31 +316,11 @@ func decorateDecisionWaits(cards []Card, agents []Agent) {
 		if !ok || a.L(labelStage) != "landing" || a.L(labelHeld) == "" || a.gone() || replacedPredecessor(byID, a) {
 			continue
 		}
-		seen := map[string]bool{a.ID: true}
-		for {
-			id := a.L(labelWaitsOn)
-			if id == "" {
-				id = a.L(labelHeld)
-			}
-			if id == "" || depState(agents, a, id) != depWaiting {
-				break
-			}
-			target := resolveCardID(byID, id)
-			if seen[target] {
-				break
-			}
-			seen[target] = true
-			a, ok = byID[target]
-			if !ok {
-				break
-			}
-			j, shown := visible[target]
-			if shown && cards[j].Stage == "zach" && Derive(a) == "zach" {
-				cards[i].DecisionBlocker = target
-				cards[i].DecisionWait = fmt.Sprintf("Waiting for your answer on ‘%s’. This will continue automatically after that work finishes.", cards[j].Title)
-				cards[j].WaitingCount++
-				break
-			}
+		target := traceHeldChain(agents, byID, a).decision
+		if j, shown := visible[target]; target != "" && shown && cards[j].Stage == "zach" {
+			cards[i].DecisionBlocker = target
+			cards[i].DecisionWait = fmt.Sprintf("Waiting for your answer on ‘%s’. This will continue automatically after that work finishes.", cards[j].Title)
+			cards[j].WaitingCount++
 		}
 	}
 }

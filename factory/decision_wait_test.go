@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 	"testing"
@@ -91,5 +92,34 @@ func TestDecisionWaitBoardIsReadOnly(t *testing.T) {
 	}
 	if mailable(held.Ask) {
 		t.Fatal("held card generated a mailable ask")
+	}
+}
+
+func TestDecisionWaitUsesHeldDependency(t *testing.T) {
+	for _, heldNeedsInput := range []bool{true, false} {
+		t.Run(fmt.Sprint(heldNeedsInput), func(t *testing.T) {
+			heldStage, plannedStage := "building", "zach"
+			if heldNeedsInput {
+				heldStage, plannedStage = plannedStage, heldStage
+			}
+			held := card("bbb0002", map[string]string{labelStage: heldStage})
+			planned := card("ccc0003", map[string]string{labelStage: plannedStage})
+			middle := card("ddd0004", map[string]string{labelStage: "landing", labelHeld: held.ID, labelWaitsOn: planned.ID})
+			leaf := card("aaa0001", map[string]string{labelStage: "landing", labelHeld: middle.ID, labelWaitsOn: planned.ID})
+			agents := []Agent{leaf, middle, held, planned}
+			cards := BuildBoard(agents, nil, t0)
+			wantBlocker, wantCount := "", 0
+			if heldNeedsInput {
+				wantBlocker, wantCount = held.ID, 2
+			}
+			for _, c := range cards {
+				if (c.ID == leaf.ID || c.ID == middle.ID) && c.DecisionBlocker != wantBlocker {
+					t.Fatalf("blocker = %q, want %q", c.DecisionBlocker, wantBlocker)
+				}
+			}
+			if h := workflowHealth(agents); h.HeldForInput != wantCount || h.LongestChain != 2 {
+				t.Fatalf("health = %+v, want held for input %d and depth 2", h, wantCount)
+			}
+		})
 	}
 }

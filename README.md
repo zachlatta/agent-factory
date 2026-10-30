@@ -295,6 +295,11 @@ The planner (the "Fellow") first picks a track:
   card is told and goes back to building with its `Waits on` cleared. It decides itself whether to
   rebuild without the other card's work or keep the change as is, and either way code review runs
   again before the land prompt.
+  Held work stays in Landing and Working. When its dependency chain reaches Needs Zach,
+  its tile, panel and Working line name and link to that decision. The decision shows how many
+  held cards wait on it, including indirect dependencies, matching the workflow health count.
+  These explanations clear automatically and create no extra asks or counts in Needs Zach.
+  The daily digest includes the waiting explanation; no additional emails are sent.
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none` or lists only optional tries as described below. A card that lists work left (`REMAINING:` then one `-`
   line per item), or says nothing, waits in Needs Zach with the list in its note, shown on the board and
@@ -1083,11 +1088,6 @@ Where it runs, in order:
 CI is only a backstop: it runs after the push, and without the private patterns it catches
 credentials and generic leaks only. The checks that keep a leak from being published are the
 local ones and the factory's.
-
-Held work stays in Landing and Working. When its dependency chain reaches Needs Zach,
-its tile, panel and Working line name and link to that decision. The decision shows how many
-held cards wait on it, including indirect dependencies. These explanations clear automatically;
-they create no extra asks, counts in Needs Zach, or emails.
 
 ## Board layout checks
 

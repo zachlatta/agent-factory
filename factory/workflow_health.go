@@ -32,39 +32,15 @@ func workflowHealth(agents []Agent) WorkflowHealth {
 			continue
 		}
 		h.Held++
-		seen := map[string]bool{a.ID: true}
-		cur, depth := a, 0
-		needsInput := false
-		for {
-			id := cur.L(labelHeld)
-			if id == "" {
-				id = cur.L(labelWaitsOn)
-			}
-			if id == "" {
-				break
-			}
-			state := depState(agents, cur, id)
-			if state == depLanded {
-				break
-			}
-			depth++
-			h.LongestChain = max(h.LongestChain, depth)
-			if state == depMissing || state == depDropped {
-				h.MissingDependency++
-				break
-			}
-			target := resolveCardID(byID, id)
-			if seen[target] {
-				h.Cyclic++
-				break
-			}
-			seen[target] = true
-			cur = byID[target]
-			if Derive(cur) == "zach" {
-				needsInput = true
-			}
+		chain := traceHeldChain(agents, byID, a)
+		h.LongestChain = max(h.LongestChain, chain.depth)
+		if chain.missing {
+			h.MissingDependency++
 		}
-		if needsInput {
+		if chain.cyclic {
+			h.Cyclic++
+		}
+		if chain.decision != "" {
 			h.HeldForInput++
 		}
 	}
