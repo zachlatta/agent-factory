@@ -697,7 +697,7 @@ Every ask has one fixed set of buttons (`factory/choose.go`), the same on the bo
 | A secret-scan stop (`decision`): fix first, then scan again | **Tell it to fix** / **Scan again & ship** / **Drop it** |
 | Decision (`decision`): allow a build with side effects, check what was published without review | **Yes** / **No** / **Change** / **Drop** |
 | Which repo (`decision`) | one button per repo, Other repo, **Change**, **Drop** |
-| Work landed with a required action for Zach (`action`) | **Done it, mark done** / **Something's wrong** / **Skip it, mark done** |
+| Work landed with a required action for Zach (`action`) | **Done it, mark done** / **Something's wrong** / **Skip it** |
 | An agent's open question (`question`) | its options, **Answer**, **Drop**: not a yes/no question, so no Yes or No |
 | Board-only (`problem`): stuck, errors, a review that did not settle, a close suggestion | its own action (Re-run, Resume, Let an agent decide, Close it, Mark done) with Change and Drop, in the card's details |
 | Agent work left after landing (`problem`) | **Send it back to finish it** / **Mark done** / **Drop it**, in the card's details |

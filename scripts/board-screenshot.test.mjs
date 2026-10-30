@@ -90,17 +90,24 @@ test('For you and card links render at exact widths and preserve navigation', as
         assert.equal(await page.locator('#previewNote').isVisible(), true);
         // each For you card names the kind of input it wants: finished work to try, a build to allow
         assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready: try it, then land');
-        // work that landed with a required action: its label, the thing to do, the action buttons, and no "None"
+        // work that landed with a required action: its label, the thing to do, the action buttons, no duplicate headline, and no "None"
         const actionCard = page.locator('.fy[data-id="preview-action"]');
         assert.equal(await actionCard.locator('.fk').innerText(), 'Work landed. Do this:');
-        assert.equal(await actionCard.locator('a.fq').innerText(), 'Approve the account setting?');
+        assert.equal(await actionCard.locator('a.fq').isVisible(), false);
         assert.match(await actionCard.locator('.todo').innerText(), /Approve the required account setting/);
         // the required action is in a green box, as its label is
         assert.equal(await actionCard.locator('.todo').evaluate(e => getComputedStyle(e).backgroundColor), 'rgb(218, 251, 225)');
-        assert.deepEqual(await actionCard.locator('.choices button').allInnerTexts(), ['Done it, mark done', "Something's wrong", 'Skip it, mark done']);
-        assert.doesNotMatch(await actionCard.innerText(), /\bNone\b/);
+        assert.deepEqual(await actionCard.locator('.choices button').allInnerTexts(), ['Done it, mark done', "Something's wrong", 'Skip it']);
+        assert.doesNotMatch(await actionCard.innerText(), /\bNone\b|Do it, then mark it done/);
         // a button's words fit inside it at phone width: none is wider than its button
         assert.equal(await actionCard.locator('.choices button').evaluateAll(bs => bs.every(b => b.scrollWidth <= b.clientWidth)), true);
+        // opening the action card shows the summary sentence once (the None remainder is not repeated)
+        await actionCard.locator('a.ft').click();
+        await page.locator('#panel.open').waitFor();
+        assert.equal(await page.locator('#pAsk .fq').isVisible(), false);
+        assert.equal(await page.locator('#pAsk .gist').innerText(), 'The usage page now fits a phone screen.');
+        await page.locator('#panel > .x').click();
+        await page.locator('#panel.open').waitFor({ state: 'hidden' });
         // finished work starts with no option picked: Land sends no answers; its options say they are optional
         assert.equal(await page.locator('.fy[data-id="preview-ready"] .opt.on').count(), 0);
         assert.match(await page.locator('.fy[data-id="preview-ready"] .opthint').innerText(), /Optional.*Change.*Land/);

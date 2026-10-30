@@ -162,15 +162,25 @@ func TestSecretScanAskButtons(t *testing.T) {
 	}
 }
 
+func choiceLabels(ask *Ask) []string {
+	var out []string
+	for _, c := range ask.Choices {
+		out = append(out, c.Label)
+	}
+	return out
+}
+
 // Required landed actions keep action buttons; optional NEEDS text never replaces an existing ask.
 func TestLandedActionsKeepTheirButtons(t *testing.T) {
 	asks := everyAsk()
+	wantActionLabels := []string{"Done it, mark done", "Something's wrong", "Skip it"}
 	if a := asks["work left: test for Zach"]; a.Kind != askAction || a.Label != "Work landed. Do this:" ||
-		!strings.Contains(a.Title, "open the usage page") || !strings.Contains(a.Why, "tidy the docs") {
+		!strings.Contains(a.Title, "open the usage page") || !strings.Contains(a.Why, "tidy the docs") ||
+		!slices.Equal(choiceLabels(a), wantActionLabels) {
 		t.Errorf("Zach test item: %+v", a)
 	}
 	if a := asks["work left: action for Zach"]; a.Kind != askAction || a.Label != "Work landed. Do this:" ||
-		a.Choices[0].Label != "Done it, mark done" {
+		!slices.Equal(choiceLabels(a), wantActionLabels) {
 		t.Errorf("Zach action item: %+v", a)
 	}
 	if a := asks["work left: agents only"]; a.Kind != askProblem || !slices.Equal(choiceIDs(a), []string{"finish", "done", "drop"}) ||
@@ -230,8 +240,22 @@ func TestNoneHeadlineIsCleaned(t *testing.T) {
 	if ask.Title != "Do it, then mark it done" {
 		t.Errorf("headline %q repeats or misses the thing to try", ask.Title)
 	}
+	if subj := emailQuestion(Agent{}, ask, nil); subj != "Do it, then mark it done" {
+		t.Errorf("email subject = %q", subj)
+	}
 	if shared.Decision != "None. The usage page fits a phone." {
 		t.Error("refineAsk changed the cached overview")
+	}
+	// when the summary already contains the remainder of a "None. …" headline, do not repeat it
+	dup := everyAsk()["work left: test for Zach"]
+	dup.Overview = &Overview{
+		Decision: "None. The usage page now fits a phone screen.",
+		Overview: "The usage page now fits a phone screen. Long rows wrap cleanly.",
+		Needs:    "Open the usage page on your phone and reply saying whether the table fits.",
+	}
+	refineAsk(dup)
+	if dup.Overview.Decision != "" || dup.Overview.Overview != "The usage page now fits a phone screen. Long rows wrap cleanly." {
+		t.Errorf("duplicate remainder repeated: %+v", dup.Overview)
 	}
 	for in, want := range map[string]string{
 		"None needed now.":                "",
@@ -331,6 +355,14 @@ func TestActionAskChoicesRun(t *testing.T) {
 	}
 	if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "It still pinged me") {
 		t.Errorf("It's broken: sent %v", s)
+	}
+	f, p, _ = mailFactory(t, landed())
+	storeLog(t, f, p, "c1", reply)
+	if _, err := f.Act("choose", Body{ID: "c1", Choice: "skip"}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "landed" {
+		t.Errorf("Skip it: labels %v", l)
 	}
 	for text, stage := range map[string]string{"it works": "landed", "Done.": "landed"} {
 		f, p, _ = mailFactory(t, landed())

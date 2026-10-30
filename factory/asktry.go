@@ -65,7 +65,7 @@ func workLeftAsk(left string) *Ask {
 // makeAction gives required actions their completion and reply choices.
 func makeAction(ask *Ask, item string) {
 	ask.Kind = askAction
-	works, broken, skip := "Done it, mark done", "Something's wrong", "Skip it, mark done"
+	works, broken, skip := "Done it, mark done", "Something's wrong", "Skip it"
 	ask.Label, ask.Title = "Work landed. Do this:", "Do this: "+trunc(item, 140)
 	ask.Actions = []Action{primary("done", works), reply(broken, "What went wrong?"), act("done", skip)}
 	ask.Choices = []Choice{
@@ -93,15 +93,15 @@ func refineAsk(ask *Ask) {
 }
 
 // cleanOverview drops a DECISION or NEEDS FROM ZACH line that says nothing is needed, on a card that is
-// asking for something. The rest of a "None. …" decision moves to the overview; an empty NEEDS falls
-// back to the item left for Zach. It copies the overview: the cached one stays as the agent wrote it.
+// asking for something. The rest of a "None. …" decision moves to the overview unless the overview already
+// contains it; an empty NEEDS falls back to the item left for Zach. It copies the overview: the cached one stays as the agent wrote it.
 func cleanOverview(ask *Ask) {
 	if ask.Overview == nil {
 		return
 	}
 	ov := *ask.Overview
 	if loc := saysNothing.FindStringIndex(ov.Decision); loc != nil {
-		if rest := strings.TrimSpace(ov.Decision[loc[1]:]); rest != "" {
+		if rest := strings.TrimSpace(ov.Decision[loc[1]:]); rest != "" && !overviewContains(ov.Overview, rest) {
 			ov.Overview = strings.TrimSpace(rest + " " + ov.Overview)
 		}
 		ov.Decision = ""
@@ -113,6 +113,11 @@ func cleanOverview(ask *Ask) {
 		ov.Needs = ask.zachItem
 	}
 	ask.Overview = &ov
+}
+
+func overviewContains(overview, rest string) bool {
+	stem := strings.TrimSpace(strings.TrimRight(rest, ".!?"))
+	return stem != "" && strings.Contains(strings.ToLower(overview), strings.ToLower(stem))
 }
 
 func firstLine(s string) string {

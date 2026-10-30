@@ -671,7 +671,7 @@ func TestBoardPageViewLink(t *testing.T) {
 // shows the ask: For you, the Needs Zach column and the card panel.
 func TestBoardPageShowsAskLabelAndTodo(t *testing.T) {
 	page := boardPage(t)
-	for _, want := range []string{"function askKind(a)", "function askTodo(a)", ".fk.k-action{"} {
+	for _, want := range []string{"function askKind(a)", "function askTodo(a)", ".fk.k-action{", ".fq:empty,.ask .q:empty{display:none}"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("board has no %s", want)
 		}
@@ -684,6 +684,30 @@ func TestBoardPageShowsAskLabelAndTodo(t *testing.T) {
 	}
 	if strings.Contains(page, "Needs your input") {
 		t.Error("the board still says only \"Needs your input\"")
+	}
+	fn := regexp.MustCompile(`function askQuestion\(a\)\{[^\n]*\}`).FindString(page)
+	if fn == "" {
+		t.Fatal("no askQuestion(a)")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	script := fn + `
+console.log(JSON.stringify([
+  askQuestion({kind:'action', title:'Do it, then mark it done', overview:{decision:'', needs:'Approve the required account setting.'}}),
+  askQuestion({kind:'action', title:'Do this: approve the required account setting'}),
+  askQuestion({kind:'action', title:'Do this: approve the required account setting', overview:{decision:'', needs:''}}),
+  askQuestion({kind:'action', title:'Do it, then mark it done', overview:{decision:'Approve the account setting?', needs:'Approve the required account setting.'}}),
+  askQuestion({kind:'decision', title:'Allow this build?', overview:{decision:'', needs:'Approve to build.'}}),
+]));`
+	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := `["","Do this: approve the required account setting","Do this: approve the required account setting","Approve the account setting?","Allow this build?"]`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Errorf("askQuestion = %s, want %s", got, want)
 	}
 }
 

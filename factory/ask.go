@@ -31,21 +31,18 @@ type Ask struct {
 	// Ready is set on the Ready for you stop: what changed and the preview (ready.go).
 	Ready *Ready `json:"ready,omitempty"`
 	// Kind says which buttons answer it (choose.go): ready (finished work: Land / Change / Drop),
-	// decision (Yes / No / Drop), question (an agent's open question: its options or an Answer, and Drop)
-	// or problem (a board-only wait: its own action, in the card's details). Every ask that is not
-	// board-only is For you, and is ready, a decision or a question.
+	// decision (Yes / No / Drop), question (an agent's open question: its options or an Answer, and Drop),
+	// action (a required post-landing action: Done it / Something's wrong / Skip it), or problem (a
+	// board-only wait: its own action, in the card's details).
 	Kind string `json:"kind"`
 	// Choices are the answers, the same on the board (POST /api/choose) and by email (answer.go).
 	Choices []Choice `json:"choices"`
 	// Label says in a few words what kind of input the ask wants ("Work landed. Do this:"), shown
 	// above the headline; every ask has one (askcheck_test.go).
 	Label string `json:"label"`
-	// landed: the card's work reached main (or the card finished), so its agent may ask Zach to try it
-	// (refineAsk); zachItem is the thing it left for Zach (a REMAINING Zach: item), if any. check: a
-	// landing the factory wants Zach to check (not what was reviewed, pushed without review), which
-	// keeps its own label and buttons whatever the agent asks
+	// landed: the card's work reached main (or the card finished); zachItem is the thing it left for
+	// Zach (a REMAINING Zach: item), if any.
 	landed   bool
-	check    bool
 	zachItem string
 }
 
@@ -182,7 +179,7 @@ func baseAsk(c Card, a Agent) *Ask {
 				{ID: "drop", Label: "Drop it", action: "close"},
 			}}
 	case strings.HasPrefix(note, "public repo: finished without review"):
-		return &Ask{Label: "Work landed. Check what was pushed:", landed: true, check: true, Kind: askDecision, Title: "Published without review: check it?", From: "builder",
+		return &Ask{Label: "Work landed. Check what was pushed:", landed: true, Kind: askDecision, Title: "Published without review: check it?", From: "builder",
 			Why: "The agent took the direct track in a public repo. Check what it pushed; anything private there is already public. " +
 				strings.TrimPrefix(note, "public repo: finished without review"),
 			Actions: []Action{primary("done", "Checked, mark done"), reply("Reply", "Message to the agent")}}
@@ -219,7 +216,7 @@ func baseAsk(c Card, a Agent) *Ask {
 				"not pass (" + strings.TrimPrefix(strings.TrimPrefix(note, landDiffNotePrefix), ": ") +
 				"). Treat anything it found as exposed."
 		}
-		return &Ask{Label: "Work landed. Check what landed:", landed: true, check: true, Title: "Landed something other than what was reviewed", From: "builder",
+		return &Ask{Label: "Work landed. Check what landed:", landed: true, Title: "Landed something other than what was reviewed", From: "builder",
 			Why: why + " Its last message is below.", Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
 	case a.L(labelStage) == "zach":
 		return &Ask{Label: "Moved here by hand", Title: handTitle, From: "builder",

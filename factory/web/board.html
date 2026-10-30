@@ -160,9 +160,10 @@ body.inboxv #grid,body.inboxv .colctl,body.inboxv #activity,body:not(.inboxv) #i
 /* what kind of input an ask wants (ask.go Label), and the one thing to do (its NEEDS FROM ZACH) */
 .fk{display:inline-block;margin-top:6px;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700;background:#fff1c2;color:#7d4e00}
 .fk.k-action{background:#dafbe1;color:#116329}.fk.k-problem{background:#eef1f4;color:#424a53}
-.todo{font-size:14px;line-height:1.4;background:#fff8c5;border-left:3px solid #d4a72c;border-radius:4px;padding:5px 9px;margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.todo{font-size:14px;line-height:1.4;background:#fff8c5;border-left:3px solid #d4a72c;border-radius:4px;padding:5px 9px;margin:4px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
 .kind.k-action ~ .todo{background:#dafbe1;border-color:#1a7f37}
 .fq{display:block;font-size:16px;font-weight:700;line-height:1.35;margin:3px 0 6px;overflow-wrap:anywhere;color:inherit;text-decoration:none}
+.fq:empty,.ask .q:empty{display:none}
 .fy a.ft{display:block;color:var(--mute);text-decoration:none}.fy a.ft:hover .ttl,.fy a.fq:hover{text-decoration:underline}
 .choices{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .choices button{flex:1 1 0;min-width:min-content;padding:10px 12px;font-weight:600;border-radius:8px;overflow-wrap:normal}
@@ -757,8 +758,8 @@ function askMarkdown(text, id){
 const recommended = q => q.options.findIndex(o=>/\(recommended\)/i.test(o));
 // finished work starts with nothing picked: Land sends no answers, so a preselected option would claim one
 function pickOf(c, qi){ const p=(askPicks[c.id]||{})[qi]; return p!==undefined ? p : c.ask.kind==='ready' ? -1 : recommended(c.ask.questions[qi]); }
-// question is the ask's one-line question: the agent's DECISION line, else the ask's title
-function askQuestion(a){ return (a.overview&&a.overview.decision) || a.title; }
+// question is the ask's one-line question: the agent's DECISION line, else the ask's title (omitted on an action ask when the green NEEDS box shows)
+function askQuestion(a){ return (a.overview&&a.overview.decision) || (a.kind==='action'&&a.overview&&a.overview.needs ? '' : a.title||''); }
 function askKind(a){ return a.label ? `<div class="kind k-${esc(a.kind)}"><span class="fk k-${esc(a.kind)}">${esc(a.label)}</span></div>` : ''; }
 function askTodo(a){ const n = a.overview && a.overview.needs; return n ? `<div class="todo">${esc(n)}</div>` : ''; }
 function evidenceHtml(c){

@@ -295,7 +295,7 @@ const previewRequest = "Make the board easy to read on a phone: one column, and 
 const previewActionRequest = "Make the usage page fit a phone screen."
 
 // previewActionReply is a landing that leaves a required approval.
-const previewActionReply = `DECISION: Approve the account setting?
+const previewActionReply = `DECISION: None. The usage page now fits a phone screen.
 OVERVIEW: The usage page now fits a phone screen.
 NEEDS FROM ZACH: Approve the required account setting.
 
