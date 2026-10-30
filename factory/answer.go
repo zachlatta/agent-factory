@@ -164,9 +164,6 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if len(b.Text) > 32768 {
 		return nil, errors.New("reply exceeds maximum size")
 	}
-	if f.passive() {
-		return map[string]string{"action": "none"}, nil
-	}
 	f.replies.mu.Lock()
 	defer f.replies.mu.Unlock()
 	if f.replies.done[b.Thread+"\x00"+b.MessageID] {

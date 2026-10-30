@@ -141,6 +141,9 @@ func replySnapshot(c Card, a Agent, ask *Ask, detail string) string {
 }
 
 func (f *Factory) markReply(a Agent, b Body) error {
+	if f.passive() {
+		return nil
+	}
 	if err := f.setLabels(a.ID, map[string]string{labelAnswered: b.MessageID}); err != nil {
 		return err
 	}
@@ -157,6 +160,7 @@ func (f *Factory) separateReply(a Agent, b Body, text string) (map[string]string
 	}
 	_, err := f.newCard(Body{Repo: autoRepo, Request: "This request came from an unrelated email reply. It may be an errand with no code change (direct track). Handle it independently.\n\n" + text})
 	if err != nil {
+		f.answerFailed(a, b.MessageID)
 		return nil, err
 	}
 
@@ -166,6 +170,13 @@ func (f *Factory) separateReply(a Agent, b Body, text string) (map[string]string
 // classifyEmail serializes reply handling and keeps only unresolved clarification data.
 func (f *Factory) classifyEmail(a Agent, c Card, ask *Ask, b Body, detail string) (answer, map[string]string, error) {
 	ans := parseAnswer(b.Text, ask)
+	if f.passive() {
+		if exactAnswer(b.Text, ask) || ans.Choice == "" {
+			return ans, nil, nil
+		}
+		f.clarifyAnswer(a, b.MessageID, clarifyReply)
+		return answer{}, map[string]string{"card": a.ID, "action": "clarify"}, nil
+	}
 	snapshot := replySnapshot(c, a, ask, detail)
 	saved, err := f.replies.read()
 	if err != nil {
@@ -209,7 +220,13 @@ func (f *Factory) classifyEmail(a Agent, c Card, ask *Ask, b Body, detail string
 			}
 			return answer{Choice: textChoice(ask).ID, Message: p.Text}, nil, nil
 		}
-	} else if exact || ans.Choice == "" {
+		// A fresh reply supersedes the text awaiting clarification.
+		delete(saved, b.Thread)
+		if err := f.replies.save(saved); err != nil {
+			return answer{}, nil, err
+		}
+	}
+	if exact || ans.Choice == "" {
 		return ans, nil, nil
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)

@@ -124,8 +124,16 @@ func TestReplyStoreCorruptionAndDryRun(t *testing.T) {
 		t.Fatal("ignored corruption")
 	}
 	f.cfg.DryRun = true
+	f.p = &dryRunPaseo{inner: p, logf: f.logf}
+
 	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "revise it"}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: "approve"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(f.log, "\n"), "dry run: would") {
+		t.Fatalf("missing simulated action: %s", strings.Join(f.log, "\n"))
 	}
 	if len(p.labels("c1")) != 0 {
 		t.Fatal("dry run mutated")
@@ -201,5 +209,55 @@ func TestFreshReplyAfterClarificationInvalidated(t *testing.T) {
 				t.Fatalf("%v %v checks=%d", res, err, calls)
 			}
 		})
+	}
+}
+
+func TestPendingFreshTextIsChecked(t *testing.T) {
+	for _, result := range []string{"related", "unclear"} {
+		t.Run(result, func(t *testing.T) {
+			f, p, _ := mailFactory(t, planWaiting("c1"))
+			calls := 0
+			f.ReplyCheck = func(_ context.Context, data ReplyContext) (string, error) {
+				calls++
+				if calls == 1 {
+					return "unclear", nil
+				}
+				if data.Reply != "New revision" {
+					t.Fatalf("checked %q", data.Reply)
+				}
+				return result, nil
+			}
+			f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "Old request"})
+			res, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: "New revision"})
+			if err != nil || calls != 2 {
+				t.Fatalf("%v %v checks=%d", res, err, calls)
+			}
+			if result == "unclear" {
+				saved, _ := f.replies.read()
+				if saved["nt1"].Text != "New revision" {
+					t.Fatal("kept stale text")
+				}
+				res, err = f.answerByEmail(Body{Thread: "nt1", MessageID: "m4", Text: "answer"})
+			}
+			if err != nil || res["action"] != "send" {
+				t.Fatalf("%v %v", res, err)
+			}
+			sent := strings.Join(p.sent("c1"), "\n")
+			if !strings.Contains(sent, "New revision") || strings.Contains(sent, "Old request") {
+				t.Fatalf("sent %s", sent)
+			}
+		})
+	}
+}
+
+func TestSeparateReplyFailureIsReported(t *testing.T) {
+	f, p, m := mailFactory(t, planWaiting("c1"))
+	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "unrelated", nil }
+	p.runErr = errors.New("cannot start")
+	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "Independent request"}); err == nil {
+		t.Fatal("ignored start failure")
+	}
+	if len(m.sends()) != 1 {
+		t.Fatal("failure was silent")
 	}
 }

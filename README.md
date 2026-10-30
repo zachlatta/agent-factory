@@ -878,8 +878,11 @@ Unrelated requests start independently with Repo Auto, without the waiting threa
 Unclear or mixed replies and failed checks leave the waiting work untouched. The factory saves
 the reply privately and asks for whole-reply `answer` (send the saved text) or `separate`
 (start it independently). This question is a request for clarification, not a success confirmation.
-Exact offered choices replace the saved clarification. A changed question or a board answer
-discards it, so a fresh reply receives a new check. Dry-run never invokes the checker.
+Exact offered choices replace the saved clarification. New free text replaces the saved reply
+and receives a new check. A changed question or a board answer discards the clarification.
+If starting a separate request fails, the reply gets the same failure notice as other failed answers.
+Dry-run never invokes the checker: exact choices log their intended actions, and free text
+takes the clarification path without saving it.
 Handled replies return HTTP 200 with action `send`, `separate`, `clarify` or `duplicate`
 (exact choices keep their existing action names); unmatched threads retain the fallback statuses.
 
