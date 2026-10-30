@@ -97,6 +97,8 @@ func (s *replyStore) save(m map[string]pendingReply) error {
 	return os.Rename(s.path+".tmp", s.path)
 }
 
+const changedReplyQuestion = "That question changed. Please reply again with your full answer or request."
+
 const clarifyReply = "Does your previous reply answer the waiting question, or start a separate request? Reply answer to send that reply to the waiting work, or separate to start a new request."
 
 func exactAnswer(text string, ask *Ask) bool {
@@ -192,6 +194,10 @@ func (f *Factory) classifyEmail(a Agent, c Card, ask *Ask, b Body, detail string
 		}
 		pending = false
 	}
+	if !pending && (clean == "answer" || clean == "separate") {
+		f.clarifyAnswer(a, b.MessageID, changedReplyQuestion)
+		return answer{}, map[string]string{"card": a.ID, "action": "clarify"}, nil
+	}
 	if pending {
 		for _, id := range p.Seen {
 			if id == b.MessageID {
@@ -257,6 +263,10 @@ func (f *Factory) classifyEmail(a Agent, c Card, ask *Ask, b Body, detail string
 		if checkErr == nil && result == "unrelated" {
 			res, err := f.separateReply(a, b, replyText(b.Text))
 			return answer{}, res, err
+		}
+		if !stable {
+			f.clarifyAnswer(a, b.MessageID, changedReplyQuestion)
+			return answer{}, map[string]string{"card": a.ID, "action": "clarify"}, nil
 		}
 		p = pendingReply{Card: a.ID, Snapshot: snapshot, Text: replyText(b.Text), Message: b.MessageID}
 	}

@@ -261,3 +261,59 @@ func TestSeparateReplyFailureIsReported(t *testing.T) {
 		t.Fatal("failure was silent")
 	}
 }
+
+func TestStaleClarificationCommands(t *testing.T) {
+	for _, change := range []string{"before check", "during check", "board answered", "no saved reply"} {
+		for _, command := range []string{"answer", "separate"} {
+			t.Run(change+"/"+command, func(t *testing.T) {
+				f, p, m := mailFactory(t, planWaiting("c1"))
+				f.ReplyCheck = func(context.Context, ReplyContext) (string, error) {
+					if change == "during check" {
+						f.SetAgents([]Agent{withLabels(planWaiting("c1"), map[string]string{labelNote: "new question"})})
+						return "related", nil
+					}
+					return "unclear", nil
+				}
+				if change != "no saved reply" {
+					if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "Original ambiguous reply"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if change == "during check" {
+					saved, err := f.replies.read()
+					if err != nil || len(saved) != 0 {
+						t.Fatalf("saved stale clarification: %v %v", saved, err)
+					}
+				}
+				if change == "before check" {
+					f.SetAgents([]Agent{withLabels(planWaiting("c1"), map[string]string{labelNote: "new question"})})
+				}
+				if change == "board answered" {
+					if _, err := f.choose(Body{ID: "c1", Choice: "change", Message: "Revise the approach"}); err != nil {
+						t.Fatal(err)
+					}
+					f.SetAgents([]Agent{planWaiting("c1")})
+				}
+				calls := 0
+				f.ReplyCheck = func(context.Context, ReplyContext) (string, error) {
+					calls++
+					if command == "separate" {
+						return "unrelated", nil
+					}
+					return "related", nil
+				}
+				sends, runs, mails := len(p.sent("c1")), p.runs, len(m.sends())
+				res, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: " " + command + "!\n> quoted history"})
+				if err != nil || res["action"] != "clarify" || calls != 0 {
+					t.Fatalf("%v %v checker calls=%d", res, err, calls)
+				}
+				if len(p.sent("c1")) != sends || p.runs != runs {
+					t.Fatal("stale command sent to work or started a request")
+				}
+				if got := m.sends(); len(got) != mails+1 || !strings.Contains(got[len(got)-1].Args["text"].(string), "question changed") {
+					t.Fatalf("missing changed-question notice: %+v", got)
+				}
+			})
+		}
+	}
+}
