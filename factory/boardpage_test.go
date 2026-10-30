@@ -373,7 +373,9 @@ func TestBoardPageAgentPickerFollowsSuggestedDefault(t *testing.T) {
 		`$('nAgent').dataset.picked = '1'`,
 		`($('nAgent').dataset.picked && $('nAgent').value) || AG.default`,
 		`$('pAgent').dataset.picked = '1'`,
-		`($('pAgent').dataset.picked && $('pAgent').value) || (c.idea&&c.idea.agent) || AG.default`,
+		`($('pAgent').dataset.picked && $('pAgent').value) || AG.ideaDefault`,
+		`$('pAgent')&&!fresh) ? $('pAgent').value : AG.ideaDefault`,
+		`ideas start again once a Frontier model has more`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("board page missing %q", want)

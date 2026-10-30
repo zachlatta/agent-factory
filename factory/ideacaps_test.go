@@ -180,15 +180,15 @@ func TestAutoStartHoldsAtLowWeeklyUsage(t *testing.T) {
 	if n := len(p.runsWithLabel(labelArg(labelOrigin, "idea"))); n != 0 {
 		t.Fatalf("started %d at 20%% weekly usage left", n)
 	}
-	if h := f.ideaHold(); !strings.Contains(h, "20% of its weekly usage") {
+	if h := f.ideaHold(); !strings.Contains(h, "every Frontier model has 20% or less of its weekly usage") {
 		t.Errorf("hold = %q", h)
 	}
-	// the hold checks the agent the start would use, which is the usage-balanced suggestion
-	low := all(90)
-	low["claude"] = usageAt(10)
+	// one Frontier model with usage left is enough, whatever the others and the non-Frontier models have
+	low := all(10)
+	low["codex"] = usageAt(30)
 	seedUsage(f, low)
-	if f.ideaHold() != "" {
-		t.Errorf("held although the suggested agent (%s) has usage left", f.suggestedAgent())
+	if h := f.ideaHold(); h != "" {
+		t.Errorf("held although GPT-6.1 Sol has usage left: %q", h)
 	}
 	seedUsage(f, all(21))
 	if err := f.tickIdeas(); err != nil {
@@ -277,7 +277,7 @@ func TestBoardSendsIdeaCapsAndHold(t *testing.T) {
 	rec = httptest.NewRecorder()
 	f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
 	json.Unmarshal(rec.Body.Bytes(), &b)
-	if !strings.Contains(b.IdeaHold, "3% of its weekly usage") {
+	if !strings.Contains(b.IdeaHold, "20% or less of its weekly usage") || !strings.Contains(b.IdeaHold, "Opus 5.5 3%") {
 		t.Errorf("ideaHold = %q", b.IdeaHold)
 	}
 }

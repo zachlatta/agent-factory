@@ -235,7 +235,12 @@ func rankAgentChoices(statuses map[string]string, usages map[string]AgentUsage, 
 }
 
 func (f *Factory) suggestedAgent() string {
-	usages := f.providerUsages()
+	_, def := rankAgentChoices(f.cachedProviderStatuses(), f.providerUsages(), f.Now())
+	return def
+}
+
+// cachedProviderStatuses is each provider's cached Paseo status, without waiting for a refresh.
+func (f *Factory) cachedProviderStatuses() map[string]string {
 	statuses := make(map[string]string, len(AgentChoices))
 	for _, a := range AgentChoices {
 		p := a.providerID()
@@ -243,8 +248,61 @@ func (f *Factory) suggestedAgent() string {
 			statuses[p], _ = f.cachedProviderStatus(p)
 		}
 	}
-	_, def := rankAgentChoices(statuses, usages, f.Now())
-	return def
+	return statuses
+}
+
+// ideaWeekLeft is a provider's weekly usage left, and false when it is unknown (no reading, a
+// failed refresh or an elapsed window).
+func ideaWeekLeft(u AgentUsage, now time.Time) (int, bool) {
+	for _, w := range decisionUsageWindows(u, now) {
+		if w.Label == "7d" {
+			return w.RemainingPct, true
+		}
+	}
+	return 0, false
+}
+
+// pickIdeaAgent is the model ideas start on: the best-ranked (rankAgentChoices) Frontier model
+// that is available, not exhausted and above ideaUsageFloor of its weekly usage; unknown usage
+// counts as above. hold is set only when every available Frontier model is at the floor. With no
+// Frontier model available it checks Opus alone, the model resolveAgent then starts or reports.
+func pickIdeaAgent(statuses map[string]string, usages map[string]AgentUsage, now time.Time) (AgentChoice, string) {
+	ordered, _ := rankAgentChoices(statuses, usages, now)
+	var avail []AgentChoice
+	for _, c := range ordered {
+		if c.Frontier && statuses[c.providerID()] == "available" {
+			avail = append(avail, c)
+		}
+	}
+	opus, _ := agentByID(defaultAgent)
+	if len(avail) == 0 {
+		// Opus still starts while Paseo's provider list is unknown, so its floor still holds.
+		avail = []AgentChoice{opus}
+	}
+	var low []string
+	for _, c := range avail {
+		u := usages[c.providerID()]
+		left, known := ideaWeekLeft(u, now)
+		if known && left <= ideaUsageFloor {
+			low = append(low, fmt.Sprintf("%s %d%%", c.Label, left))
+			continue
+		}
+		if usageScore(u, now).tier > 0 {
+			return c, ""
+		}
+	}
+	if len(low) < len(avail) {
+		// some are above the floor but every one of those has a short window used up
+		return avail[0], ""
+	}
+	return avail[0], fmt.Sprintf("Paused: every Frontier model has %d%% or less of its weekly usage left (%s)",
+		ideaUsageFloor, strings.Join(low, ", "))
+}
+
+// ideaAgent is the agent id ideas start on (pickIdeaAgent) and the hold on their own starts.
+func (f *Factory) ideaAgent() (string, string) {
+	a, hold := pickIdeaAgent(f.cachedProviderStatuses(), f.providerUsages(), f.Now())
+	return a.ID, hold
 }
 
 const (
@@ -415,5 +473,6 @@ func (f *Factory) handleAgents(w http.ResponseWriter, r *http.Request) {
 		st := statuses[p]
 		rows = append(rows, row{a, st == "available", st, usages[p]})
 	}
-	writeJSON(w, 200, map[string]any{"agents": rows, "default": def, "reviewer": ReviewerModel})
+	idea, _ := pickIdeaAgent(statuses, usages, f.Now())
+	writeJSON(w, 200, map[string]any{"agents": rows, "default": def, "ideaDefault": idea.ID, "reviewer": ReviewerModel})
 }

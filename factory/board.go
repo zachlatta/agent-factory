@@ -337,7 +337,7 @@ func unread(a Agent) bool {
 func ideaView(i Idea, queue int) *IdeaView {
 	return &IdeaView{ID: i.ID, Summary: i.Summary, Why: i.Why, DoneWhen: i.DoneWhen, By: i.By,
 		CreatedAt: iso(i.CreatedAt), Status: i.Status, Priority: cmp.Or(i.Priority, "normal"), Queue: queue,
-		Agent: i.Agent, Thinking: i.Thinking, Note: i.Note, Error: i.Error, ErrorAt: iso(i.ErrorAt)}
+		Note: i.Note, Error: i.Error, ErrorAt: iso(i.ErrorAt)}
 }
 
 func short(id string) string {

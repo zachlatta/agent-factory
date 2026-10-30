@@ -186,38 +186,6 @@ func TestResolveAgentWaitIsBounded(t *testing.T) {
 	close(p.lsBlock)
 }
 
-func TestIdeaCarriesItsAgent(t *testing.T) {
-	f, p := newTestFactory(t)
-	if _, err := f.Act("idea", Body{Request: "x", Title: "bad", Agent: "nope"}); err == nil {
-		t.Error("idea with unknown agent accepted")
-	}
-	i, err := f.addIdea(Body{Request: "do it", Title: "with codex", Agent: "codex-astra"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.SetAgents(nil)
-	if c, _ := f.card(i.ID); c.Idea == nil || c.Idea.Agent != "codex-astra" {
-		t.Errorf("waiting idea card = %+v, want agent codex-astra", c.Idea)
-	}
-	if _, err := f.Act("approve", Body{ID: i.ID}); err != nil {
-		t.Fatal(err)
-	}
-	r := p.runsWithLabel(labelArg(labelOrigin, "idea"))
-	if len(r) != 1 || flag(r[0], "--provider") != "codex/gpt-6-astra" {
-		t.Fatalf("idea run = %v", r)
-	}
-
-	// Zach's pick on Start overrides the idea's own agent
-	j, _ := f.addIdea(Body{Request: "do it", Title: "zach picks", Agent: "codex-astra"})
-	if _, err := f.Act("approve", Body{ID: j.ID, Agent: "opus"}); err != nil {
-		t.Fatal(err)
-	}
-	r = p.runsWithLabel(labelArg(labelOrigin, "idea"))
-	if len(r) != 2 || flag(r[1], "--provider") != ReviewerModel {
-		t.Errorf("override run = %v", r[len(r)-1])
-	}
-}
-
 func TestBoardCardShowsAgent(t *testing.T) {
 	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "plan", labelAgent: "codex-astra"}))
 	c, _ := f.card("c1")
@@ -282,25 +250,6 @@ func TestProviderListFailureKeepsOpusAndRetries(t *testing.T) {
 	p.lsErr = nil // recovers at once: a failed list is not cached
 	if _, err := f.Act("new", Body{Request: "x", Agent: "codex-astra"}); err != nil {
 		t.Errorf("codex-astra after provider ls recovered: %v", err)
-	}
-}
-
-func TestAutoStartedIdeaUsesDefaultAgent(t *testing.T) {
-	// An agent-submitted idea may suggest an agent, but auto-start uses the factory's
-	// usage-balanced suggestion (which falls back to Opus when usage is unknown).
-	f, p := newTestFactory(t)
-	if _, err := f.addIdea(Body{Request: "do it", Title: "scout wants muse", Agent: "muse-wonder", By: "scout"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.tickIdeas(); err != nil {
-		t.Fatal(err)
-	}
-	r := p.runsWithLabel(labelArg(labelOrigin, "idea"))
-	if len(r) != 1 {
-		t.Fatalf("auto-start runs = %v", p.calls)
-	}
-	if got := flag(r[0], "--provider"); got != ReviewerModel {
-		t.Errorf("auto-started idea runs %q, want the default %q", got, ReviewerModel)
 	}
 }
 
@@ -430,7 +379,7 @@ func TestNewCardAndAutoIdeaBalanceUsageAndKeepEmailOnOpus(t *testing.T) {
 		t.Fatalf("board card run = %v, want gemini-argon", runs)
 	}
 
-	// 2. Auto-started idea (tickIdeas) ignores the scout's suggested agent and uses the usage-balanced suggestion.
+	// 2. Auto-started idea (tickIdeas) ignores any agent the scout sent and uses the best-ranked Frontier model.
 	if _, err := f.addIdea(Body{Request: "idea work", Title: "auto balanced idea", Agent: "opus", By: "scout"}); err != nil {
 		t.Fatal(err)
 	}
@@ -474,5 +423,153 @@ func TestNewCardAndAutoIdeaBalanceUsageAndKeepEmailOnOpus(t *testing.T) {
 	runs = p.runsWithLabel(gmailThreadLabel + "=thread-routed")
 	if len(runs) != 1 || flag(runs[0], "--provider") != ReviewerModel || !slices.Contains(runs[0], labelArg(labelAgent, "opus")) {
 		t.Errorf("auto-routed email card = %v, want opus (%s)", runs, ReviewerModel)
+	}
+}
+
+func TestPickIdeaAgentUsesBestFrontierModelAboveFloor(t *testing.T) {
+	all := map[string]string{"claude": "available", "codex": "available", "antigravity": "available", "muse": "available"}
+	week := func(pct int, reset time.Duration) AgentUsage {
+		return AgentUsage{Windows: []UsageWindow{{Label: "7d", RemainingPct: pct, ResetsAt: iso(t0.Add(reset))}}}
+	}
+	for _, tc := range []struct {
+		name     string
+		statuses map[string]string
+		usages   map[string]AgentUsage
+		want     string
+		hold     []string // substrings of the hold; nil means no hold
+	}{
+		{"non-frontier ranked first", all, map[string]AgentUsage{
+			"claude": week(40, 72*time.Hour), "codex": week(60, 72*time.Hour), "antigravity": week(50, 72*time.Hour), "muse": week(95, 72*time.Hour)},
+			"codex-sol", nil},
+		{"top frontier at the floor is skipped", all, map[string]AgentUsage{
+			"claude": week(60, 144*time.Hour), "codex": week(50, 144*time.Hour), "antigravity": week(18, time.Hour), "muse": week(90, 144*time.Hour)},
+			"opus", nil},
+		{"every frontier model at the floor holds", all, map[string]AgentUsage{
+			"claude": week(12, 72*time.Hour), "codex": week(9, 72*time.Hour), "antigravity": week(18, 72*time.Hour), "muse": week(90, 72*time.Hour)},
+			"", []string{"every Frontier model has 20% or less", "Opus 5.5 12%", "GPT-6.1 Sol 9%", "Gemini 4 Argon 18%"}},
+		{"exhausted plan is skipped", all, map[string]AgentUsage{
+			"claude": week(0, 72*time.Hour), "codex": week(50, 72*time.Hour), "antigravity": week(40, 72*time.Hour)},
+			"codex-sol", nil},
+		{"elapsed weekly window counts as unknown", all, map[string]AgentUsage{
+			"claude": week(5, -time.Minute), "codex": week(5, -time.Minute), "antigravity": week(5, -time.Minute)},
+			"opus", nil},
+		{"failed reading counts as unknown", all, map[string]AgentUsage{
+			"claude": {RefreshError: "meter unavailable", Windows: []UsageWindow{{Label: "7d", RemainingPct: 5}}}, "codex": week(10, 72*time.Hour), "antigravity": week(10, 72*time.Hour)},
+			"opus", nil},
+		{"unknown usage", all, nil, "opus", nil},
+		{"no frontier model available", map[string]string{"muse": "available"}, map[string]AgentUsage{"muse": week(90, 72*time.Hour)}, "opus", nil},
+		{"no frontier model available and Opus at the floor", nil, map[string]AgentUsage{"claude": week(3, 72*time.Hour)}, "",
+			[]string{"every Frontier model has 20% or less", "Opus 5.5 3%"}},
+		{"unavailable frontier model at the floor is not counted", map[string]string{"claude": "available", "antigravity": "error"}, map[string]AgentUsage{
+			"claude": week(50, 72*time.Hour), "antigravity": week(5, 72*time.Hour)},
+			"opus", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, hold := pickIdeaAgent(tc.statuses, tc.usages, t0)
+			if tc.hold == nil {
+				if hold != "" || got.ID != tc.want {
+					t.Fatalf("got %s (hold %q), want %s and no hold", got.ID, hold, tc.want)
+				}
+				return
+			}
+			for _, s := range tc.hold {
+				if !strings.Contains(hold, s) {
+					t.Errorf("hold %q missing %q", hold, s)
+				}
+			}
+			if strings.Contains(hold, "Muse") || strings.Contains(hold, "Sonnet") || strings.Contains(hold, "Astra") {
+				t.Errorf("hold names a model that is not Frontier: %q", hold)
+			}
+		})
+	}
+}
+
+func TestAutoStartedIdeaUsesFrontierModelNotItsOwn(t *testing.T) {
+	f, p := newTestFactory(t)
+	if _, err := f.waitProviderStatus("claude"); err != nil { // the pick ranks listed providers
+		t.Fatal(err)
+	}
+	seedUsage(f, map[string]AgentUsage{
+		"claude":      usageAt(60),
+		"codex":       usageAt(40),
+		"antigravity": {Windows: []UsageWindow{{Label: "7d", RemainingPct: 18, ResetsAt: iso(t0.Add(time.Hour))}}},
+		"muse":        usageAt(95),
+	})
+	if h := f.ideaHold(); h != "" {
+		t.Fatalf("held with Opus at 60%%: %q", h)
+	}
+	if _, err := f.addIdea(Body{Request: "do it", Title: "scout wants muse", Agent: "muse-wonder", Thinking: "high", By: "scout"}); err != nil {
+		t.Fatalf("idea naming an agent rejected: %v", err)
+	}
+	if err := f.tickIdeas(); err != nil {
+		t.Fatal(err)
+	}
+	r := p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(r) != 1 || flag(r[0], "--provider") != ReviewerModel || flag(r[0], "--thinking") != "medium" {
+		t.Fatalf("auto-started idea runs = %v, want Opus at its default thinking", r)
+	}
+}
+
+func TestZachStartsIdeaOnHisPickElseTheFrontierPick(t *testing.T) {
+	f, p := newTestFactory(t)
+	if _, err := f.waitProviderStatus("claude"); err != nil {
+		t.Fatal(err)
+	}
+	seedUsage(f, map[string]AgentUsage{"claude": usageAt(30), "codex": usageAt(70), "antigravity": usageAt(50), "muse": usageAt(99)})
+	i, _ := f.addIdea(Body{Request: "do it", Title: "zach picks", Agent: "muse-wonder"})
+	if _, err := f.Act("approve", Body{ID: i.ID, Agent: "codex-astra"}); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := f.addIdea(Body{Request: "do it", Title: "no pick", Agent: "muse-wonder"})
+	if _, err := f.Act("approve", Body{ID: j.ID}); err != nil {
+		t.Fatal(err)
+	}
+	r := p.runsWithLabel(labelArg(labelOrigin, "idea"))
+	if len(r) != 2 || flag(r[0], "--provider") != "codex/gpt-6-astra" || flag(r[1], "--provider") != "codex/gpt-6.1-sol" {
+		t.Fatalf("idea runs = %v, want Zach's codex-astra then the Frontier pick codex-sol", r)
+	}
+}
+
+func TestIdeaViewCarriesNoAgentAndAgentsAPIHasIdeaDefault(t *testing.T) {
+	f, _ := newTestFactory(t)
+	i, err := f.addIdea(Body{Request: "do it", Title: "view", Agent: "codex-astra", Thinking: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stored := range f.ideas.List() {
+		raw, _ := json.Marshal(stored)
+		if strings.Contains(string(raw), `"agent":`) || strings.Contains(string(raw), `"thinking":`) {
+			t.Errorf("stored idea keeps an agent: %s", raw)
+		}
+	}
+	f.SetAgents(nil)
+	c, _ := f.card(i.ID)
+	if c.Idea == nil {
+		t.Fatalf("no idea view for %s", i.ID)
+	}
+	raw, _ := json.Marshal(c.Idea)
+	if strings.Contains(string(raw), `"agent":`) || strings.Contains(string(raw), `"thinking":`) {
+		t.Errorf("idea view carries an agent: %s", raw)
+	}
+	rec := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	var out struct {
+		IdeaDefault string `json:"ideaDefault"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if a, ok := agentByID(out.IdeaDefault); !ok || !a.Frontier {
+		t.Errorf("ideaDefault = %q, want a Frontier model", out.IdeaDefault)
+	}
+}
+
+func TestStoredIdeaWithAgentStillLoads(t *testing.T) {
+	var i Idea
+	if err := json.Unmarshal([]byte(`{"id":"idea-1","title":"old","agent":"codex-astra","thinking":"high","status":"waiting"}`), &i); err != nil {
+		t.Fatal(err)
+	}
+	if i.ID != "idea-1" || i.Status != "waiting" {
+		t.Errorf("old idea = %+v", i)
 	}
 }

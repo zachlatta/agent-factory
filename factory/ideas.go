@@ -93,19 +93,6 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	if name := trunc(strings.TrimSpace(b.Schedule), 80); name != "" {
 		idea.Schedule, idea.By = name, "schedule "+name
 	}
-	if err := checkAgentID(b.Agent); err != nil {
-		return Idea{}, err
-	}
-	if b.Thinking != "" {
-		a, ok := agentByID(b.Agent)
-		if !ok {
-			return Idea{}, errors.New("choose an agent before setting idea thinking")
-		}
-		if _, err := a.withThinking(b.Thinking); err != nil {
-			return Idea{}, err
-		}
-	}
-	idea.Agent, idea.Thinking = b.Agent, b.Thinking
 	err = f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for _, i := range ideas {
 			if !strings.EqualFold(i.Title, idea.Title) {
@@ -136,15 +123,21 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	return idea, nil
 }
 
-// startIdea turns a waiting idea into a planning card. When Zach starts it, repo and agent (his
-// picks in the panel) win, else the idea's own repo and suggested agent. The factory's own starts
-// (by "auto") clear the idea's suggested agent so newCard uses the usage-balanced auto-suggestion.
+// startIdea turns a waiting idea into a planning card. When Zach starts it, repo, agent and thinking
+// (his picks in the panel) win, else the idea's own repo and the Frontier pick (pickIdeaAgent). The
+// factory's own starts (by "auto") always use the idea's repo and the Frontier pick at its default thinking.
 // note is Zach's own changes typed before starting; it follows the brief and overrides it.
 func (f *Factory) startIdea(id, by, repo, agent, note, thinking string) (map[string]string, error) {
 	var res map[string]string
 	var startErr error
 	repo = strings.TrimSpace(repo)
 	note = trunc(strings.TrimSpace(note), 4000)
+	if by == "auto" {
+		repo, thinking = "", ""
+	}
+	if by == "auto" || agent == "" {
+		agent, _ = f.ideaAgent()
+	}
 	err := f.ideas.update(func(ideas []Idea) ([]Idea, error) {
 		for n := range ideas {
 			i := &ideas[n]
@@ -157,15 +150,6 @@ func (f *Factory) startIdea(id, by, repo, agent, note, thinking string) (map[str
 			}
 			if note != "" {
 				req += "\n\nZach's changes before starting (his own words; where they differ from the brief above, his win):\n" + note
-			}
-			switch {
-			case by == "auto":
-				repo, agent, thinking = i.Repo, "", ""
-			case agent == "":
-				agent = i.Agent
-				if thinking == "" {
-					thinking = i.Thinking
-				}
 			}
 			if repo == "" {
 				repo = i.Repo
@@ -261,27 +245,15 @@ func ideaOrder(ideas []Idea) {
 
 const ideaRetryBackoff = time.Hour
 
-// ideaUsageFloor: no idea starts on its own while the agent it would use has this percentage or
-// less of its weekly usage left.
+// ideaUsageFloor: ideas start on their own only on a Frontier model with more than this percentage
+// of its weekly usage left.
 const ideaUsageFloor = 20
 
-// ideaHold says why ideas are not starting on their own, or "" when they may. An auto-start runs
-// on the usage-balanced suggestion (resolveAgent with no agent), so that agent's weekly window is
-// checked. Unknown usage does not hold.
+// ideaHold says why ideas are not starting on their own, or "" when they may: pickIdeaAgent's hold,
+// set only while every available Frontier model is at ideaUsageFloor. Unknown usage does not hold.
 func (f *Factory) ideaHold() string {
-	a, ok := agentByID(f.suggestedAgent())
-	if !ok {
-		return ""
-	}
-	usage := f.providerUsages()[a.providerID()]
-	// Check the weekly window itself: an elapsed short window cannot release
-	// a current weekly floor. Failed or elapsed weekly readings do not hold.
-	for _, w := range decisionUsageWindows(usage, f.Now()) {
-		if w.Label == "7d" && w.RemainingPct <= ideaUsageFloor {
-			return fmt.Sprintf("Paused: the suggested agent (%s) has %d%% of its weekly usage left", a.Label, w.RemainingPct)
-		}
-	}
-	return ""
+	_, hold := f.ideaAgent()
+	return hold
 }
 
 // tickIdeas starts at most one waiting idea: the first in start order (ideaOrder) whose repo is

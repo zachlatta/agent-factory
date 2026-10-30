@@ -73,8 +73,10 @@ func TestThinkingSurvivesRepoAuto(t *testing.T) {
 }
 
 func TestIdeaThinkingAndOverride(t *testing.T) {
+	// An idea carries no agent or thinking: Zach's picks at start win, else the Frontier pick
+	// (Opus with unknown usage) at its default thinking.
 	for _, tc := range []struct{ agent, level, want string }{
-		{"", "", "high"}, {"codex-sol", "low", "low"}, {"sonnet", "", "medium"},
+		{"", "", "medium"}, {"", "high", "high"}, {"codex-sol", "low", "low"}, {"codex-astra", "", "high"},
 	} {
 		t.Run(tc.agent+tc.level, func(t *testing.T) {
 			f, p := newTestFactory(t)
@@ -129,22 +131,6 @@ func TestThinkingMetadataAndPreferredModels(t *testing.T) {
 		ranked, suggested := rankAgentChoices(map[string]string{provider: "available"}, nil, f.Now())
 		if suggested != want || ranked[0].ID != want {
 			t.Errorf("%s suggestion=%s, first=%s", provider, suggested, ranked[0].ID)
-		}
-	}
-}
-
-func TestIdeaRejectsUnsupportedThinkingBeforeSaving(t *testing.T) {
-	for _, raw := range []string{
-		`{"request":"test","agent":"codex-sol","thinking":"off"}`,
-		`{"request":"test","thinking":"high"}`,
-		`{"request":"test","agent":"muse-wonder","thinking":"medium"}`,
-	} {
-		f, _ := newTestFactory(t)
-		if _, err := f.addIdea(thinkingBody(t, raw)); err == nil {
-			t.Fatal("unsupported idea thinking accepted")
-		}
-		if got := f.ideas.List(); len(got) != 0 {
-			t.Fatal("invalid idea saved")
 		}
 	}
 }

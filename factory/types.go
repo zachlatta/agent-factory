@@ -148,8 +148,6 @@ type Idea struct {
 	Tier      string    `json:"tier"`
 	Priority  string    `json:"priority,omitempty"` // high, normal or low ("" = normal); ideas start by priority, then age
 	Schedule  string    `json:"schedule,omitempty"` // the Paseo schedule that filed it, by name ("" = not a schedule)
-	Agent     string    `json:"agent,omitempty"`    // AgentChoice id to build it ("" = default)
-	Thinking  string    `json:"thinking,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	Status    string    `json:"status"` // waiting, started, dismissed
 	Card      string    `json:"card,omitempty"`
@@ -172,9 +170,7 @@ type IdeaView struct {
 	Status    string `json:"status"`
 	Priority  string `json:"priority"`
 	Queue     int    `json:"queue,omitempty"` // waiting ideas: 1 = next to start in its repo
-	Agent     string `json:"agent,omitempty"` // AgentChoice id it will be built with ("" = default)
-	Thinking  string `json:"thinking,omitempty"`
-	Note      string `json:"note,omitempty"` // started ideas: Zach's changes before starting
+	Note      string `json:"note,omitempty"`  // started ideas: Zach's changes before starting
 	Error     string `json:"error,omitempty"`
 	ErrorAt   string `json:"errorAt,omitempty"`
 }
@@ -197,8 +193,8 @@ type Body struct {
 	Priority    string            `json:"priority"` // idea: high, normal or low ("" = normal)
 	Schedule    string            `json:"schedule"` // idea: the name of the Paseo schedule filing it
 	Origin      string            `json:"origin"`
-	Agent       string            `json:"agent"`      // AgentChoice id for a new card, an idea, or starting an idea
-	Thinking    string            `json:"thinking"`   // optional model-specific effort for new cards and ideas
+	Agent       string            `json:"agent"`      // AgentChoice id for a new card or starting an idea
+	Thinking    string            `json:"thinking"`   // optional model-specific effort for a new card or starting an idea
 	Thread      string            `json:"thread"`     // new card: zrl-bot Gmail thread to report in; answer: the reply's thread
 	Inbox       string            `json:"inbox"`      // new email or voice card: the dispatcher's section on reading and answering its thread
 	Labels      map[string]string `json:"labels"`     // new email or voice card: the dispatcher's own tracking labels (inboxLabels)

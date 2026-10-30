@@ -582,9 +582,12 @@ future deletion, see [Workspace retirement](docs/workspace-retirement.md).
   and auto-suggested by how far each plan's remaining weekly quota is ahead of its 7-day reset pace
   (plans with a 5-hour window at `<= 20%` or an exhausted window rank lower, and a missing reset
   time counts as a full week left; Muse's `server_sent_no_usage` state before the first use in a new
-  window counts as 100% left). Board cards with no agent picked and auto-started ideas use this
-  auto-suggested agent; cards started from an email thread always default to Opus 5.5 unless
-  another agent is explicitly named.
+  window counts as 100% left). Board cards with no agent picked use this auto-suggested agent;
+  cards started from an email thread always default to Opus 5.5 unless another agent is explicitly
+  named. Ideas carry no agent of their own: one that starts on its own runs on the best-ranked
+  Frontier model (Opus 5.5, GPT-6.1 Sol or Gemini 4 Argon) that is available, not exhausted and
+  above the idea usage floor, at its default thinking level, and the idea panel's picker defaults to
+  that same model.
 
 The model pickers prefer GPT-6.1 Sol within OpenAI and Opus 5.5 within Claude; Sonnet 5.5 is
 also available. Frontier models (`Frontier: true` in `factory/agents.go`: Opus 5.5, GPT-6.1 Sol
@@ -717,9 +720,10 @@ Start or Dismiss any idea; otherwise the factory starts them on its own:
   under both caps. Errored cards do not count toward the in-flight cap; when they resume, the count
   can temporarily exceed it. Public repos are no exception: their cards land under the
   finished-work rule and the secret scan.
-- **Usage floor.** An auto-start runs on the auto-suggested agent (see Repo and agent per card). While
-  that agent's plan has 20% or less of its 7-day window left, no idea starts on its own, the board's
-  idea panel says why, and Start still works. Unknown usage does not hold.
+- **Usage floor.** An auto-start runs on a Frontier model with more than 20% of its 7-day window
+  left (see Repo and agent per card). Only while every available Frontier model has 20% or less
+  left does no idea start on its own; the board's idea panel says why, and Start still works.
+  Unknown usage does not hold.
 - **Start errors.** If an idea fails to start, the error and time are saved on the idea and shown on
   its card, in the idea panel and under Stuck. That tick attempts no further starts; the next tick
   moves on to healthy waiting ideas, and the failed idea is retried automatically after an hour (or

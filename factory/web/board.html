@@ -388,7 +388,7 @@ if (matchMedia('(pointer:coarse)').matches) {
   }
 }
 
-let AG = {agents:[], default:'opus'}; // GET /api/agents: who can plan and build a card
+let AG = {agents:[], default:'opus', ideaDefault:'opus'}; // GET /api/agents: who can plan and build a card
 async function loadAgents(){ try{ AG = await (await fetch('api/agents')).json(); }catch(e){} }
 const agentLabel = id => (AG.agents.find(a=>a.id===id)||{}).label || id;
 function inTime(iso){ if(!iso) return ''; const h=(Date.parse(iso)-Date.now())/3600000; if(h<=0) return 'soon'; if(h<24) return Math.ceil(h)+'h'; return Math.round(h/24)+'d'; }
@@ -915,8 +915,8 @@ function fillPanel(c, fresh){
   if(isIdea){
     const curRepo = ($('pRepo')&&!fresh) ? $('pRepo').value : (c.repo||'auto');
     const picked = ($('pAgent')&&!fresh) ? $('pAgent').dataset.picked : '';
-    const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : ((c.idea&&c.idea.agent)||AG.default);
-    const curThinking = ($('pThinking')&&!fresh) ? $('pThinking').value : ((c.idea&&c.idea.thinking)||'');
+    const curAg = ($('pAgent')&&!fresh) ? $('pAgent').value : AG.ideaDefault;
+    const curThinking = ($('pThinking')&&!fresh) ? $('pThinking').value : '';
     $('pActs').innerHTML = `
     <select id="pRepo" title="Repo where this idea runs">${repoOptions(curRepo)}</select>
     <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
@@ -928,7 +928,7 @@ function fillPanel(c, fresh){
     if(picked) $('pAgent').dataset.picked = picked;
     $('pThinking').onchange = ()=>{ $('pAgent').dataset.picked = '1'; };
     $('pAgent').onchange = ()=>{ $('pAgent').dataset.picked = '1'; fillThinking('pThinking',$('pAgent').value); $('pAgentUsage').innerHTML = agentUsageHtml($('pAgent').value,'pAgent'); };
-    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v = ($('pAgent').dataset.picked && $('pAgent').value) || (c.idea&&c.idea.agent) || AG.default; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); fillThinking('pThinking',v); } });
+    if(fresh) loadAgents().then(()=>{ if(sel===c.id && $('pAgent')){ const v = ($('pAgent').dataset.picked && $('pAgent').value) || AG.ideaDefault; $('pAgent').innerHTML=agentOptions(v); $('pAgentUsage').innerHTML=agentUsageHtml(v,'pAgent'); fillThinking('pThinking',v); } });
   } else if(c.routing) $('pActs').innerHTML = `
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
@@ -996,7 +996,7 @@ function ideaStartText(c){
   const auto = cap.inFlight>0 && cap.daily>0
     ? `The factory starts this repo's ideas on its own, up to ${cap.inFlight} at a time and ${cap.daily} a day, unless you dismiss it.`
     : `Ideas in this repo never start on their own; use <b>Start now</b>.`;
-  return auto + (B.ideaHold ? ` <b>${esc(B.ideaHold)}</b>; ideas start again once it has more.` : '');
+  return auto + (B.ideaHold ? ` <b>${esc(B.ideaHold)}</b>; ideas start again once a Frontier model has more.` : '');
 }
 function ideaRetryText(errorAt){
   if(!errorAt) return 'Automatic retry runs after an hour.';
