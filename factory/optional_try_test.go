@@ -17,7 +17,7 @@ func TestOptionalLandedTry(t *testing.T) {
 	if !landedNothingRemains(optionalTryReport) {
 		t.Error("recovery rejected optional try")
 	}
-	for _, item := range []string{"approve the Stripe payout", "log in to X", "run the migration on prod", "try to approve it", "try to sign in", "try to decide", "try to choose", "try to confirm", "try to pay", "try to buy", "try to install", "try to enable", "try to rotate", "try to migrate", "try to deploy"} {
+	for _, item := range []string{"run the backfill script on prod", "use the new token to set the secret", "check production and restart the worker", "verify the data and delete old records", "approve the Stripe payout", "log in to X", "run the migration on prod", "try to approve it", "try to sign in", "try to decide", "try to choose", "try to confirm", "try to pay", "try to buy", "try to install", "try to enable", "try to rotate", "try to migrate", "try to deploy"} {
 		report := strings.ReplaceAll(optionalTryReport, "tap Mute thread once and reply", item)
 		if stage, _, _ := landedNext(report, 0); stage != "zach" {
 			t.Errorf("%q: %s", item, stage)

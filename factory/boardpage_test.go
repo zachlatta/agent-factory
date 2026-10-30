@@ -671,7 +671,7 @@ func TestBoardPageViewLink(t *testing.T) {
 // shows the ask: For you, the Needs Zach column and the card panel.
 func TestBoardPageShowsAskLabelAndTodo(t *testing.T) {
 	page := boardPage(t)
-	for _, want := range []string{"function askKind(a)", "function askTodo(a)", ".fk.k-try{"} {
+	for _, want := range []string{"function askKind(a)", "function askTodo(a)", ".fk.k-action{"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("board has no %s", want)
 		}

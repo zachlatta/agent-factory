@@ -9,7 +9,7 @@ import (
 
 var (
 	// an item or sentence that asks Zach to try the change
-	tryVerb = regexp.MustCompile(`(?i)^(?:please\s+)?(?:try|test|tap|click|press|open|check|verify|use|see|run|watch|look|reply)\b`)
+	tryVerb = regexp.MustCompile(`(?i)^(?:please\s+)?(?:try|test|tap|click|press|see|watch|look)\b`)
 	// a first sentence that says nothing is needed: "None.", "Nothing for you to decide yet."
 	saysNothing = regexp.MustCompile(`(?i)^[\s*_]*(?:none|nothing|n/?a|no action|no decision)\b[^.!?\n]*[.!?]*\s*`)
 )
