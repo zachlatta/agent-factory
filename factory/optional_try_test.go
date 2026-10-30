@@ -21,6 +21,8 @@ func TestOptionalLandedTry(t *testing.T) {
 		"tap Allow on the permission prompt", "click Authorize", "tap Grant access",
 		"tap Delete on the old records", "click Merge", "press Send to email the team",
 		"tap Accept", "click Remove", "press Revoke",
+		"try deleting the old records", "try approving the payout", "test by deploying to prod",
+		"tap Restart on the server", "click Publish", "tap Cancel subscription",
 	} {
 		report := strings.ReplaceAll(optionalTryReport, "tap Mute thread once and reply", item)
 		if stage, _, _ := landedNext(report, 0); stage != "zach" {
@@ -28,6 +30,8 @@ func TestOptionalLandedTry(t *testing.T) {
 		}
 	}
 	for _, report := range []string{
+		strings.Replace(optionalTryReport, "NEEDS FROM ZACH: Tap Mute thread once and reply", "NEEDS FROM ZACH: Tap Mute thread once. Then restart the server.", 1),
+		strings.Replace(optionalTryReport, "NEEDS FROM ZACH: Tap Mute thread once and reply", "NEEDS FROM ZACH: None. Then restart the server.", 1),
 		optionalTryReport + "\n- agent: verify the next event",
 		optionalTryReport + "\n\nQUESTION: Continue?\n- Yes\n- No",
 		strings.Replace(optionalTryReport, "DECISION: None.", "DECISION: Choose a setting.", 1),
