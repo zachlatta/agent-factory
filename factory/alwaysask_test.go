@@ -156,9 +156,10 @@ func TestFinishedWorkReason(t *testing.T) {
 
 // A factory-started card that touches a gate file stops for Zach even when its reviewer saw nothing.
 func TestIdeaTouchingAGateComesToZach(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
-	f.GitOut = gitStub(map[string]string{"diff --no-renames --name-only origin/main...HEAD": ".githooks/pre-push\n"})
+	f.GitOut = gitStub(map[string]string{"diff --no-renames --name-only origin/main...HEAD": ".githooks/pre-push\n", "status --porcelain": ""})
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)

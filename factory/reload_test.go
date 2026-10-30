@@ -107,12 +107,13 @@ func post(t *testing.T, f *Factory, action, body string) {
 
 func zachCard() Agent {
 	return card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelVerdict: "code approve",
-		labelNote: "review passed: approve to land", labelPlanRounds: "1", labelCodeRounds: "1"})
+		labelNote: "review passed: approve to land", labelPlanRounds: "1", labelCodeRounds: "1", labelReviewed: reviewedSHA})
 }
 
 // A button press shows on the next board read, not after the factory's next loop.
 func TestActionShowsOnBoardAtOnce(t *testing.T) {
 	f, _ := newDiskFactory(t, zachCard())
+	headIs(f, reviewedSHA, nil)
 	if c := boardCard(t, f, "c1"); c.Stage != "zach" {
 		t.Fatalf("before: stage %s", c.Stage)
 	}
@@ -128,6 +129,7 @@ func TestStaleRefreshKeepsActionOnBoard(t *testing.T) {
 	c := zachCard()
 	c.Status = "running" // so Refresh reads permissions
 	f, p := newDiskFactory(t, c)
+	headIs(f, reviewedSHA, nil)
 	p.permits = `[{"agentId":"c1","name":"Bash","description":"ls"}]`
 	p.permitStart, p.permitGo = make(chan struct{}), make(chan struct{})
 	done := make(chan struct{})

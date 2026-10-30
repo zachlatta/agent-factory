@@ -37,8 +37,9 @@ func TestReadyReplyWords(t *testing.T) {
 func TestReadyForYouRoundsGetOneEmailEach(t *testing.T) {
 	// a change request after the first Ready for you: the next code review pass is a new stop and a new email
 	c := card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1",
-		labelCodeRounds: "1", labelReady: "1", labelTold: readyNote(1)})
+		labelCodeRounds: "1", labelReady: "1", labelTold: readyNote(1), labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t, c, reviewer("r2", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r2", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r2"))
 	l := p.labels("c1")
@@ -182,11 +183,12 @@ func TestReadyWithoutPreviewSaysWhy(t *testing.T) {
 // as Change with the same answer, and "land" and Land both land it.
 func TestReadyBoardAndEmailParity(t *testing.T) {
 	ready := func() Agent {
-		return card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1", labelZachThread: "nt1"})
+		return card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1", labelZachThread: "nt1", labelReviewed: reviewedSHA})
 	}
 	reply := "CHANGED: Buttons say Land.\n\nQUESTION: Which colour for the button?\n- Blue (recommended)\n- Red\n"
 	setup := func() (*Factory, *fakePaseo) {
 		f, p, _ := mailFactory(t)
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "c1", "[User] go\n"+reply)
 		f.SetAgents([]Agent{ready()})
 		return f, p

@@ -72,6 +72,7 @@ func arbiterRules(t *testing.T, c Agent, kind, ruling string) (map[string]string
 	arb := reviewer("a1", c.ID, kind)
 	arb.Labels[labelPrefix+labelArbiter] = "1"
 	f, p := newTestFactory(t, c, arb)
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, c.ID, "Plan: make the requested change.\nBUILD SIDE EFFECTS: none\nTIER: low")
 	storeLog(t, f, p, "a1", ruling)
 	if err := f.ApplyVerdict(f.agent("a1")); err != nil {
@@ -141,7 +142,7 @@ func TestArbiterRulingOnAPlan(t *testing.T) {
 func TestArbiterRulingOnCode(t *testing.T) {
 	at := func(mk func(string, map[string]string) Agent) Agent {
 		return mk("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "3",
-			labelArbitrated: "code", labelNote: arbiterNote})
+			labelArbitrated: "code", labelNote: arbiterNote, labelReviewed: reviewedSHA})
 	}
 	// approve on factory-started work: it lands
 	l, msgs, _ := arbiterRules(t, at(idea), "code", "Fine.\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")

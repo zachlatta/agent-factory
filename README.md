@@ -335,7 +335,7 @@ The planner (the "Fellow") first picks a track:
 - Every code approval, landing approval, landing retry and dependency release checks that HEAD
   is still the commit captured for code review and the worktree is clean. Changed or uncommitted
   work queues a fresh code review; a
-  failed read, or a public card with no captured reviewed commit, stops without landing. That
+  failed read, or a card with no captured reviewed commit, stops without landing. That
   technical stop is board-only and offers Re-run the review, never an approval that skips it.
 - A follow-up retires the earlier plan and code reviews. A verdict for work from before the
   follow-up cannot declare the revised request ready; the builder finishes it and a new review runs.

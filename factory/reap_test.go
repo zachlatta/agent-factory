@@ -190,10 +190,12 @@ func TestReapClearsStaleParkedLabel(t *testing.T) {
 }
 
 func TestParkedTargetGetsVerdict(t *testing.T) {
-	c := card("card1", map[string]string{labelStage: "zach", labelParked: ago(time.Hour), labelPlanRounds: "1"})
+	c := card("card1", map[string]string{labelStage: "zach", labelParked: ago(time.Hour), labelPlanRounds: "1",
+		labelReviewed: reviewedSHA})
 	c.ArchivedAt = t0.Add(-time.Hour)
 	r := reviewer("rev1", "card1", "code")
 	f, p := newTestFactory(t, c, r)
+	headIs(f, reviewedSHA, nil)
 	p.archived["card1"] = true
 	storeLog(t, f, p, "rev1", "Looks good.\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("rev1")); err != nil {

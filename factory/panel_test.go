@@ -122,7 +122,8 @@ func TestUnanimousPanelLandsWithoutArbiter(t *testing.T) {
 	r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
 	r2 := lensReviewer("r2", "c1", lensArchitecture, "1")
 	r2.CreatedAt = r1.CreatedAt.Add(time.Second)
-	f, p := newTestFactory(t, panelCard(nil), r1, r2)
+	f, p := newTestFactory(t, panelCard(map[string]string{labelReviewed: reviewedSHA}), r1, r2)
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "Tests pass.\nTIER: risky\nVERDICT: approve")
 	storeLog(t, f, p, "r2", "Fits the repo.\n- nit: rename x\nTIER: risky\nVERDICT: nits")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {

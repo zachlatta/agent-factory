@@ -44,8 +44,10 @@ func TestInboxCardWithPlanGetsPlanReview(t *testing.T) {
 }
 
 func TestInboxCardComesToZachThenLandsAndEmails(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "review", labelSource: "email", labelTier: "low", labelPlanRounds: "1"})
+	c := inboxCard("c1", map[string]string{labelStage: "review", labelSource: "email", labelTier: "low", labelPlanRounds: "1",
+		labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -55,6 +57,7 @@ func TestInboxCardComesToZachThenLandsAndEmails(t *testing.T) {
 		t.Fatalf("he asked for it, so he sees it first: %v", l)
 	}
 	f, p = newTestFactory(t, withLabels(c, l))
+	headIs(f, reviewedSHA, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +68,9 @@ func TestInboxCardComesToZachThenLandsAndEmails(t *testing.T) {
 }
 
 func TestBoardCardLandMessageHasNoEmail(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
-		reviewer("r1", "c1", "code"))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
+		labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "reply_to_message") {

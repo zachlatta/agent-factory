@@ -146,13 +146,15 @@ func postLandingAnswer(text string) []byte {
 func TestNewLandingPromptsResetClarification(t *testing.T) {
 	for _, route := range []string{"approve", "rerun", "code review", "dependency"} {
 		t.Run(route, func(t *testing.T) {
-			c := idea("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1"})
+			c := idea("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1",
+				labelReviewed: reviewedSHA})
 			agents := []Agent{c, reviewer("r1", c.ID, "code")}
 			if route == "dependency" {
-				c = heldCard(map[string]string{labelRemainingAsk: "1"})
+				c = heldCard(map[string]string{labelRemainingAsk: "1", labelReviewed: reviewedSHA})
 				agents = []Agent{c, dep("landed", false)}
 			}
 			f, p := newTestFactory(t, agents...)
+			headIs(f, reviewedSHA, nil)
 			var err error
 			switch route {
 			case "approve", "rerun":

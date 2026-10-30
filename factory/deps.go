@@ -136,7 +136,7 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	if st != depLanded {
 		return f.rebuildWithoutDep(a, id, st)
 	}
-	if hold := f.reviewHold(a, c.Cwd, c.Repo); hold != nil {
+	if hold := f.reviewHold(a, c.Cwd); hold != nil {
 		// the land prompt is for the reviewed commit only
 		if a.archived() && hold[labelStage] != "zach" {
 			// a parked card cannot wait archived in a working column for its fresh review: it stops for

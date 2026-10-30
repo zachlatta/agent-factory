@@ -171,7 +171,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	oldID, newID := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
 	old := card(oldID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelPlanRounds: "1", labelReplacedBy: newID})
 	old.ArchivedAt = t0.Add(-24 * time.Hour)
-	repl := card(newID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelReplaces: oldID})
+	repl := card(newID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelReplaces: oldID, labelReviewed: reviewedSHA})
 	repl.Provider, repl.Model = "codex", "gpt-6.1-sol"
 	sub := Agent{
 		ID: "sub-old-1", Host: "host1", Title: "helper sub-agent", Status: "running", Provider: "claude", Model: "claude-opus-5-5",
@@ -185,7 +185,9 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	f.GitOut = gitStub(map[string]string{
 		"diff --no-renames --name-only origin/main...HEAD": "notes.txt\n",
 		"show origin/main:.factory.json":                   "{}",
+		"status --porcelain":                               "",
 	})
+	headIs(f, reviewedSHA, nil)
 
 	fakeScan(f, nil, nil) // replacement routing uses a synthetic clean scan, never host credentials
 

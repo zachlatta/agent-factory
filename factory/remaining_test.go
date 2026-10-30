@@ -205,6 +205,7 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 				}
 				return "", nil
 			}
+			headIs(f, reviewedSHA, nil)
 			storeLog(t, f, p, "c1", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nRan the phone-width check.\nREMAINING: none")
 			f.SetAgents([]Agent{c})
 			f.Tick()

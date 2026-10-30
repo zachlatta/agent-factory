@@ -104,8 +104,9 @@ const reviewWithUI = "Clicked through it with computer use.\n\nUI feedback:\n- t
 
 func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 	for _, verdict := range []string{"approve", "nits"} {
-		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 			reviewer("r1", "c1", "code"))
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", reviewWithUI+verdict)
 		f.ApplyVerdict(f.agent("r1"))
 		msgs := p.sent("c1")
@@ -114,8 +115,9 @@ func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 			t.Errorf("%s: sent = %v", verdict, msgs)
 		}
 	}
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "UI feedback") {
@@ -125,8 +127,9 @@ func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 
 func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
 	// no plan review, so the card waits for Zach after its code review
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board"}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelSource: "board", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", reviewWithUI+"approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")

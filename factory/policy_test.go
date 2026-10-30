@@ -105,8 +105,9 @@ func TestZachApprovesArchitecturePlan(t *testing.T) {
 func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	// work the factory started lands after the gates when nothing is on the always-ask list
 	for _, tier := range []string{"low", "risky"} {
-		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: tier, labelPlanRounds: "1"}),
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: tier, labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 			reviewer("r1", "c1", "code"))
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
@@ -121,8 +122,9 @@ func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 
 func TestAllowedBuildStillComesToZachFinished(t *testing.T) {
 	// allowing a build's side effects is not approving the finished work he asked for
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelZachPlan: "approved", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelZachPlan: "approved", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || l[labelAskWhy] != "you asked for it" {
@@ -132,8 +134,9 @@ func TestAllowedBuildStillComesToZachFinished(t *testing.T) {
 
 func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
 	// raised to architecture at code review: the same preview stop before landing
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "it swapped the database\nTIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
@@ -147,7 +150,8 @@ func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
 
 func TestUntieredCardGoesToZachAfterReview(t *testing.T) {
 	// a session sent to review by hand: no plan review, no tier; even one the factory started stops
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review"}), reviewer("r1", "c1", "code"))
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
@@ -161,8 +165,9 @@ func TestUntieredCardGoesToZachAfterReview(t *testing.T) {
 
 func TestHandReviewedCardWaitsForZachAfterRework(t *testing.T) {
 	// a hand-sent card whose first code review asked for changes now has a tier label, but no plan review
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelCodeRounds: "1"}),
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelCodeRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
@@ -395,7 +400,8 @@ func TestVerdictAndDirtyCommitClearReviewerRetries(t *testing.T) {
 }
 
 func TestApproveLandsOtherwise(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach"}))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelReviewed: reviewedSHA}))
+	headIs(f, reviewedSHA, nil)
 	f.Act("approve", Body{ID: "c1"})
 	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelNote] != "approved by Zach" {
 		t.Errorf("labels = %v", l)
@@ -755,9 +761,10 @@ func TestStoppedCardIsNudgedThenRerunThenMarkedStuck(t *testing.T) {
 	for _, stage := range []string{"building", "landing"} {
 		t.Run(stage, func(t *testing.T) {
 			since := ago(10 * time.Minute)
-			c := card("c1", map[string]string{labelStage: stage, labelSince: since})
+			c := card("c1", map[string]string{labelStage: stage, labelSince: since, labelReviewed: reviewedSHA})
 			c.LastActivityAt = t0.Add(-time.Hour)
 			f, p := newTestFactory(t, c)
+			headIs(f, reviewedSHA, nil)
 			stopAgain := func() {
 				c = withLabels(c, p.labels("c1"))
 				c.Labels[labelPrefix+labelSince] = since
@@ -1510,8 +1517,9 @@ func TestArchitectureSmallFixWithNoSideEffectsBuilds(t *testing.T) {
 }
 
 func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	l := p.labels("c1")
@@ -1526,8 +1534,9 @@ func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
 	}
 
 	// approving the preview lands it; a reply sends it back to building and code review
-	waiting := withLabels(card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1", labelCodeRounds: "1", labelSource: "board"}), l)
+	waiting := withLabels(card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1", labelCodeRounds: "1", labelSource: "board", labelReviewed: reviewedSHA}), l)
 	f, p = newTestFactory(t, waiting)
+	headIs(f, reviewedSHA, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}

@@ -126,7 +126,8 @@ func TestApproveCarriesZachsAnswers(t *testing.T) {
 		t.Errorf("plan approve sent = %v", msgs)
 	}
 
-	f, p = newTestFactory(t, card("c2", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}))
+	f, p = newTestFactory(t, card("c2", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelReviewed: reviewedSHA}))
+	headIs(f, reviewedSHA, nil)
 	if _, err := f.Act("approve", Body{ID: "c2", Message: answers}); err != nil {
 		t.Fatal(err)
 	}

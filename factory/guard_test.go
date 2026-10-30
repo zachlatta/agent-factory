@@ -268,8 +268,9 @@ func TestGuardedPromptsCarryPublicRules(t *testing.T) {
 }
 
 func TestUnguardedRepoUnchanged(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1"}),
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", "code"))
+	headIs(f, reviewedSHA, nil)
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
 		t.Fatal("scanned a repo that is not guarded")
 		return nil, nil

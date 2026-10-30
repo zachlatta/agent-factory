@@ -204,7 +204,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		// Zach approves what was reviewed: a card that moved since goes back to code review, and one whose
 		// reviewed commit cannot be checked does not land
-		if hold := f.reviewHold(f.agent(c.ID), c.Cwd, c.Repo); hold != nil {
+		if hold := f.reviewHold(f.agent(c.ID), c.Cwd); hold != nil {
 			hold = clearHeldApproval(f.agent(c.ID), hold)
 			if hold[labelStage] == "zach" {
 				return nil, errors.Join(errors.New(hold[labelNote]), f.setLabels(c.ID, hold))
@@ -487,7 +487,7 @@ func (f *Factory) rerun(c Card) error {
 func (f *Factory) rerunStep(c Card, from string) error {
 	switch from {
 	case "landing":
-		if hold := f.reviewHold(f.agent(c.ID), c.Cwd, c.Repo); hold != nil {
+		if hold := f.reviewHold(f.agent(c.ID), c.Cwd); hold != nil {
 			hold = clearHeldApproval(f.agent(c.ID), hold)
 			if hold[labelStage] == "zach" {
 				return errors.Join(errors.New(hold[labelNote]), f.setLabels(c.ID, hold))

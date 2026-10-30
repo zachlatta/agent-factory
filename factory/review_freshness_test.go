@@ -9,7 +9,7 @@ import (
 
 // Review freshness: nothing is approved for landing, and no land prompt is sent, unless the card's
 // HEAD is still the commit its code review saw (factory.reviewed). A moved HEAD goes back to a fresh
-// code review; a public-repo card whose reviewed commit is unknown or unreadable stops for Zach.
+// code review; a card whose reviewed commit is unknown or unreadable stops for Zach, in every repo.
 
 const reviewedSHA = "1111111111111111111111111111111111111111"
 const movedSHA = "2222222222222222222222222222222222222222"
@@ -124,26 +124,41 @@ func TestMovedHeadStartsAFreshReview(t *testing.T) {
 	}
 }
 
-func TestGuardedVerdictWithoutReviewedCommitFailsClosed(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", reviewLabels(map[string]string{labelReviewed: ""})), reviewer("r1", "c1", "code"))
-	fakeScan(f, nil, nil)
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "no reviewed commit") || l[labelStuckFrom] != "review" {
-		t.Errorf("labels = %v", l)
+func TestVerdictWithoutReviewedCommitFailsClosed(t *testing.T) {
+	for _, public := range []bool{false, true} {
+		name := map[bool]string{false: "private", true: "public"}[public]
+		f, p := newTestFactory(t, freshCard(public, reviewLabels(map[string]string{labelReviewed: ""})), reviewer("r1", "c1", "code"))
+		fakeScan(f, nil, nil)
+		headIs(f, reviewedSHA, nil)
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
+		f.ApplyVerdict(f.agent("r1"))
+		l := p.labels("c1")
+		if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "no reviewed commit") || l[labelStuckFrom] != "review" {
+			t.Errorf("%s: labels = %v", name, l)
+		}
+		noLandPrompt(t, name, p)
 	}
-	noLandPrompt(t, "public", p)
 }
 
-// A private card with no reviewed commit (its review could not read git) keeps the older behaviour.
-func TestPrivateVerdictWithoutReviewedCommitStillLands(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", reviewLabels(map[string]string{labelReviewed: ""})), reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "landing" {
-		t.Errorf("labels = %v", l)
+// The stage gate (reviewHold) and the final publication check (cardLandBlock) agree on every repo:
+// no reviewed commit blocks both, a fresh reviewed HEAD passes both.
+func TestReviewGateAgreesWithLandBlock(t *testing.T) {
+	for _, public := range []bool{false, true} {
+		for _, reviewed := range []string{"", reviewedSHA} {
+			name := map[bool]string{false: "private", true: "public"}[public] + " reviewed=" + short(reviewed)
+			c := freshCard(public, map[string]string{labelStage: "landing", labelVerdict: "code approve",
+				labelReviewed: reviewed})
+			f, _ := newTestFactory(t, c)
+			headIs(f, reviewedSHA, nil)
+			hold := f.reviewHold(c, c.Cwd)
+			block := cardLandBlock(c)
+			if reviewed == "" && (hold == nil || block != "no reviewed commit recorded") {
+				t.Errorf("%s: not blocked: reviewHold %v, cardLandBlock %q", name, hold, block)
+			}
+			if reviewed != "" && (hold != nil || block != "") {
+				t.Errorf("%s: blocked: reviewHold %v, cardLandBlock %q", name, hold, block)
+			}
+		}
 	}
 }
 
@@ -209,29 +224,34 @@ func TestZachApprovalWithReviewedHeadLands(t *testing.T) {
 	}
 }
 
-func TestGuardedZachApprovalFailsClosed(t *testing.T) {
-	for name, tc := range map[string]struct {
-		labels map[string]string
-		err    error
-		want   string
-	}{
-		"no reviewed commit": {map[string]string{labelReviewed: ""}, nil, "no reviewed commit"},
-		"git failure":        {nil, errors.New("git broke"), "could not read HEAD"},
-	} {
-		f, p := newTestFactory(t, publicCard("c1", approvedLabels(tc.labels)))
-		fakeScan(f, nil, nil)
-		if tc.err != nil {
-			headIs(f, "", tc.err)
-		} else {
-			headIs(f, reviewedSHA, nil)
+func TestZachApprovalFailsClosed(t *testing.T) {
+	for _, public := range []bool{false, true} {
+		for name, tc := range map[string]struct {
+			labels map[string]string
+			err    error
+			want   string
+		}{
+			"no reviewed commit": {map[string]string{labelReviewed: ""}, nil, "no reviewed commit"},
+			"git failure":        {nil, errors.New("git broke"), "could not read HEAD"},
+		} {
+			if public {
+				name = "public " + name
+			}
+			f, p := newTestFactory(t, freshCard(public, approvedLabels(tc.labels)))
+			fakeScan(f, nil, nil)
+			if tc.err != nil {
+				headIs(f, "", tc.err)
+			} else {
+				headIs(f, reviewedSHA, nil)
+			}
+			if _, err := f.Act("approve", Body{ID: "c1"}); err == nil {
+				t.Errorf("%s: approve went through", name)
+			}
+			if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], tc.want) {
+				t.Errorf("%s: labels = %v", name, l)
+			}
+			noLandPrompt(t, name, p)
 		}
-		if _, err := f.Act("approve", Body{ID: "c1"}); err == nil {
-			t.Errorf("%s: approve went through", name)
-		}
-		if l := p.labels("c1"); l[labelStage] != "zach" || !strings.Contains(l[labelNote], tc.want) {
-			t.Errorf("%s: labels = %v", name, l)
-		}
-		noLandPrompt(t, name, p)
 	}
 }
 
@@ -262,7 +282,7 @@ func TestDependencyReleaseChecksReviewFreshness(t *testing.T) {
 				label = "public " + name
 			}
 			switch {
-			case name == "unchanged" || (name == "no identity" && !public):
+			case name == "unchanged":
 				if len(msgs) != 1 || !strings.Contains(msgs[0], "Land it now") || l[labelHeld] != "" {
 					t.Errorf("%s: not released: labels %v sent %v", label, l, msgs)
 				}

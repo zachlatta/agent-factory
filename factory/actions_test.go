@@ -179,7 +179,8 @@ func TestRerunRestartsTheStuckStep(t *testing.T) {
 		{"plan", "plan", "plan-review"}, {"plan-review", "plan", "plan-review"},
 		{"building", "code", "review"}, {"review", "code", "review"}, {"landing", "", "landing"},
 	} {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: tc.from}))
+		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: tc.from, labelReviewed: reviewedSHA}))
+		headIs(f, reviewedSHA, nil)
 		if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
 			t.Fatalf("%s: %v", tc.from, err)
 		}

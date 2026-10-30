@@ -778,7 +778,7 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 		}
 		return f.setLabels(target, labels)
 	}
-	if hold := f.reviewHold(t, t.Cwd, t.Repo); hold != nil {
+	if hold := f.reviewHold(t, t.Cwd); hold != nil {
 		// the approval is for the reviewed commit only: what the card has now is not approved
 		maps.Copy(labels, clearHeldApproval(t, hold))
 		labels[labelVerdict] = verdict
@@ -874,8 +874,8 @@ func (f *Factory) startReview(g *cardGate, c Card, kind string) (string, error) 
 		cancel()
 		switch {
 		case err != nil || herr != nil:
-			// not a git checkout (or git failed): review anyway; the landing check then has no
-			// reviewed commit and keeps the older on-main check
+			// not a git checkout (or git failed): review anyway; with no reviewed commit recorded,
+			// its approval stops for Zach (reviewHold) instead of landing
 			f.logf("%s: no clean-tree check before review: %v %v", c.Short, err, herr)
 			labels[labelReviewed] = ""
 		case dirty != "":
@@ -939,27 +939,23 @@ func (f *Factory) askToCommit(c Card, dirty string) error {
 const (
 	staleReviewNote      = "changed since review: fresh code review"
 	unverifiedReviewNote = "reviewed commit not verified: "
-	noReviewedNote       = unverifiedReviewNote + "public repo with no reviewed commit recorded"
+	noReviewedNote       = unverifiedReviewNote + "no reviewed commit recorded"
 )
 
 // reviewHold reports why card a may not be approved for landing or sent a land prompt yet: nil when
 // its HEAD is still the commit its code review saw (factory.reviewed) and its worktree is clean, else
 // the labels that move it. A moved HEAD or uncommitted work goes back to a fresh code review (since
 // cleared, so it starts once the agent is stopped); a HEAD or status that cannot be read stops the
-// card for Zach. A card with no reviewed commit keeps the older on-main checks in a private repo,
-// but stops in a public one, where nothing unreviewed may be published. Zach's approval is no
-// review: it is checked the same way.
-func (f *Factory) reviewHold(a Agent, cwd, repo string) map[string]string {
+// card for Zach, and so does a card with no reviewed commit in any repo, as cardLandBlock refuses to
+// publish it. Zach's approval is no review: it is checked the same way.
+func (f *Factory) reviewHold(a Agent, cwd string) map[string]string {
 	zach := func(note string) map[string]string {
 		return map[string]string{labelStage: "zach", labelNote: note, labelStuckFrom: "review",
 			labelHeld: "", labelAutoReview: ""}
 	}
 	reviewed := strings.TrimSpace(a.L(labelReviewed))
 	if reviewed == "" {
-		if f.guarded(repo) {
-			return zach(noReviewedNote)
-		}
-		return nil
+		return zach(noReviewedNote)
 	}
 	if cwd == "" {
 		return zach(unverifiedReviewNote + "could not read HEAD: no worktree")

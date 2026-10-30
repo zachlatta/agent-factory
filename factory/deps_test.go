@@ -72,7 +72,8 @@ func heldCard(extra map[string]string) Agent {
 
 func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
 	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001"}), reviewer("r1", "c1", "code"), dep("building", false))
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"), dep("building", false))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -88,7 +89,8 @@ func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
 
 func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 	for name, d := range map[string]Agent{"landed": dep("landed", true), "marked": {}} {
-		labels := map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelWaitsOn: "d0e0001"}
+		labels := map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelWaitsOn: "d0e0001",
+			labelReviewed: reviewedSHA}
 		agents := []Agent{reviewer("r1", "c1", "code")}
 		if name == "marked" {
 			labels[labelWaitsDone] = "1" // landed long ago: no longer in the list
@@ -96,6 +98,7 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 			agents = append(agents, d)
 		}
 		f, p := newTestFactory(t, append(agents, idea("c1", labels))...)
+		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "landing" || l[labelHeld] != "" {
@@ -109,7 +112,8 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 
 func TestHeldCardWithUIFeedbackIsToldToWait(t *testing.T) {
 	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001"}), reviewer("r1", "c1", "code"), dep("review", false))
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"), dep("review", false))
+	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
@@ -143,7 +147,8 @@ func TestHeldCardIsReleasedOnceDependencyLands(t *testing.T) {
 	parked.Labels[labelPrefix+labelLandedVerified] = "1"
 	for name, d := range map[string]Agent{"done": dep("landed", false), "verified closed": verified, "verified parked": parked} {
 		t.Run(name, func(t *testing.T) {
-			f, p := newTestFactory(t, heldCard(nil), d)
+			f, p := newTestFactory(t, heldCard(map[string]string{labelReviewed: reviewedSHA}), d)
+			headIs(f, reviewedSHA, nil)
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelHeld] != "" || l[labelStage] != "" || l[labelSince] != iso(t0) || l[labelWaitsDone] != "1" {
@@ -155,7 +160,8 @@ func TestHeldCardIsReleasedOnceDependencyLands(t *testing.T) {
 				t.Fatalf("sent = %v", msgs)
 			}
 			// the next Tick sees the released card (since = now, not acted yet): nothing more is sent
-			released := heldCard(map[string]string{labelHeld: "", labelSince: iso(t0), labelWaitsDone: "1"})
+			released := heldCard(map[string]string{labelHeld: "", labelSince: iso(t0), labelWaitsDone: "1",
+				labelReviewed: reviewedSHA})
 			f.SetAgents([]Agent{released, d})
 			f.Tick()
 			if msgs := p.sent("c1"); len(msgs) != 1 {
@@ -210,7 +216,8 @@ func TestHeldCardIsNotStuck(t *testing.T) {
 
 func TestZachApproveHoldsWhileDependencyInFlight(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land",
-		labelWaitsOn: "d0e0001"}), dep("building", false))
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), dep("building", false))
+	headIs(f, reviewedSHA, nil)
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -286,8 +293,10 @@ func TestOldDependencyWaitReleasesAfterVerifiedLanding(t *testing.T) {
 		t.Run(note, func(t *testing.T) {
 			d := dep("zach", true)
 			d.Labels[labelPrefix+labelLandedVerified] = "1"
-			c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: note, labelTold: note})
+			c := heldCard(map[string]string{labelStage: "zach", labelHeld: "", labelNote: note, labelTold: note,
+				labelReviewed: reviewedSHA})
 			f, p := newTestFactory(t, c, d)
+			headIs(f, reviewedSHA, nil)
 			f.Tick()
 			l := p.labels("c1")
 			if l[labelStage] != "landing" || l[labelHeld] != "" || l[labelTold] != "" || l[labelWaitsDone] != "1" || l[labelSince] != iso(t0) || !strings.HasPrefix(l[labelNote], "auto-landing:") {
