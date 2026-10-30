@@ -304,7 +304,19 @@ func TestAutoStartedIdeaUsesDefaultAgent(t *testing.T) {
 	}
 }
 
+// seedUsage first waits for any background usage refresh to land, so a late refresh
+// cannot overwrite the seeded readings.
 func seedUsage(f *Factory, byProv map[string]AgentUsage) {
+	f.usageMu.Lock()
+	done := f.usage.refreshing
+	f.usageMu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			panic("seedUsage: timed out waiting for a usage refresh")
+		}
+	}
 	f.usageMu.Lock()
 	f.usage.byProvider = byProv
 	f.usage.fetched = f.Now()
