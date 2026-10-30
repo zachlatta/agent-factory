@@ -90,6 +90,11 @@ func PreviewHandler(root string) (http.Handler, error) {
 			a.Labels[labelPrefix+labelVerdict] = "plan side effects"
 			a.Labels[labelPrefix+labelNote] = sideEffectNote
 		}
+		if stage[0] == "landing" {
+			a.Labels[labelPrefix+labelHeld] = "preview-zach"
+			a.Labels[labelPrefix+labelWaitsOn] = "preview-zach"
+			a.Labels[labelPrefix+labelNote] = holdNote("preview-zach")
+		}
 		// A real session file exercises the normal transcript, request and Ask parsing paths.
 		if err := writePreviewSession(home, a.Cwd, id, request, reply); err != nil {
 			return nil, err

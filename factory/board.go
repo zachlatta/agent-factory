@@ -263,6 +263,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Origin: "idea", CreatedAt: iso(i.CreatedAt), LastActivityAt: iso(i.CreatedAt), Children: []Child{},
 			Idea: ideaView(i, q)})
 	}
+	decorateDecisionWaits(out, agents)
 	return out
 }
 

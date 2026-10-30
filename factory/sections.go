@@ -2,6 +2,7 @@ package factory
 
 import (
 	"cmp"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -22,11 +23,12 @@ type Sections struct {
 
 // SectionLine is one card (or request) in plain words: its title and a short state.
 type SectionLine struct {
-	ID    string `json:"id,omitempty"`  // the card; "" for a request that never became one
-	Key   string `json:"key,omitempty"` // a request that never became a card: its key, to dismiss it (unanswered.go)
-	Title string `json:"title"`
-	State string `json:"state"`
-	At    string `json:"at,omitempty"` // RFC 3339: when it shipped, or its last activity
+	ID      string `json:"id,omitempty"`  // the card; "" for a request that never became one
+	Key     string `json:"key,omitempty"` // a request that never became a card: its key, to dismiss it (unanswered.go)
+	Title   string `json:"title"`
+	State   string `json:"state"`
+	Blocker string `json:"blocker,omitempty"`
+	At      string `json:"at,omitempty"` // RFC 3339: when it shipped, or its last activity
 }
 
 // NoAnswerSource lists requests with no answer that are not cards (AddNoAnswer).
@@ -99,6 +101,9 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 			if ov := c.Ask.Overview; ov != nil && ov.Decision != "" {
 				line.State = ov.Decision
 			}
+			if c.WaitingCount > 0 {
+				line.State += " · " + waitingCountText(c.WaitingCount)
+			}
 			s.ForYou = append(s.ForYou, line)
 		case c.Stage == "zach":
 			line.State = stuckState(c)
@@ -122,6 +127,10 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 				if t := lookupTitle(titles, c.WaitsOn); t != "" {
 					line.State = "waiting on " + t
 				}
+			}
+			if c.DecisionBlocker != "" {
+				line.State = c.DecisionWait
+				line.Blocker = c.DecisionBlocker
 			}
 			s.Working = append(s.Working, line)
 		}
@@ -244,4 +253,11 @@ func lookupTitle(titles map[string]string, id string) string {
 		}
 	}
 	return ""
+}
+
+func waitingCountText(n int) string {
+	if n == 1 {
+		return "1 card waits on this"
+	}
+	return fmt.Sprintf("%d cards wait on this", n)
 }

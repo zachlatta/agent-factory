@@ -468,10 +468,11 @@ func TestFailedIdeaSurfacesOnBoardAndClearsOnManualRetry(t *testing.T) {
 	page := boardPage(t)
 	node, err := exec.LookPath("node")
 	if err == nil {
+		waitFn := regexp.MustCompile(`(?s)function decisionWaitHtml\(c\)\{.*?\n\}`).FindString(page)
 		cardFn := regexp.MustCompile(`(?s)function cardHtml\(c\)\{.*?\n\}`).FindString(page)
 		ideaStart := strings.Index(page, "// ideaHtml:")
 		ideaEnd := strings.Index(page, "async function act(")
-		if cardFn == "" || ideaStart < 0 || ideaEnd < ideaStart {
+		if waitFn == "" || cardFn == "" || ideaStart < 0 || ideaEnd < ideaStart {
 			t.Fatal("missing cardHtml or ideaHtml in board.html")
 		}
 		c1JSON, _ := json.Marshal(c1)
@@ -482,7 +483,7 @@ const latestReviews = () => [], cardKids = () => [], kidSummary = () => '', askK
 const $ = () => ({checked:false});
 const B = {ideaCaps:{}, tiers:{}};
 let sel = null;
-` + cardFn + "\n" + page[ideaStart:ideaEnd] + `
+` + waitFn + "\n" + cardFn + "\n" + page[ideaStart:ideaEnd] + `
 const c = ` + string(c1JSON) + `;
 console.log(JSON.stringify({card: cardHtml(c), panel: ideaHtml(c, true)}));
 `

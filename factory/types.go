@@ -60,42 +60,45 @@ func (a Agent) stopped() bool { return (a.Status == "idle" || a.Status == "close
 
 // Card is what the board shows: a top-level agent (or a waiting idea) with its sub-agents folded in.
 type Card struct {
-	ID             string    `json:"id"`
-	Short          string    `json:"short"`
-	Host           string    `json:"host"`
-	Title          string    `json:"title"`
-	Repo           string    `json:"repo"`
-	Project        string    `json:"project"`
-	Branch         string    `json:"branch"`
-	Cwd            string    `json:"cwd"`
-	Model          string    `json:"model"`
-	Status         string    `json:"status"`
-	Source         string    `json:"source"`
-	Stage          string    `json:"stage"`
-	Labelled       bool      `json:"labelled"`
-	Flags          []string  `json:"flags"`
-	Unread         bool      `json:"unread"`
-	Rounds         Rounds    `json:"rounds"`
-	Verdict        string    `json:"verdict"`
-	Note           string    `json:"note"`
-	Tier           string    `json:"tier"`
-	Awaiting       string    `json:"awaiting"`
-	Origin         string    `json:"origin"`
-	Agent          string    `json:"agent"`              // AgentChoice id (factory.agent label)
-	Replaces       []string  `json:"replaces,omitempty"` // replaced predecessor card agent ids, oldest first (replace.go)
-	WaitsOn        string    `json:"waitsOn,omitempty"`  // short id of the card it lands after (deps.go)
-	Routing        bool      `json:"routing"`            // a repo picker (route.go), not the card's real work
-	CreatedAt      string    `json:"createdAt"`
-	LastActivityAt string    `json:"lastActivityAt"`
-	ArchivedAt     string    `json:"archivedAt"`
-	Parked         string    `json:"parked,omitempty"` // when the idle reap archived it; ArchivedAt stays "" (reap.go)
-	Children       []Child   `json:"children"`
-	Reviewing      bool      `json:"reviewing"`
-	Ask            *Ask      `json:"ask,omitempty"`  // Needs Zach only: what he is asked and how to answer
-	Idea           *IdeaView `json:"idea,omitempty"` // waiting ideas, and cards started from one: what it proposes
-	WorkspaceID    string    `json:"-"`
-	Decided        bool      `json:"-"` // factory.zach-decided: reviews treat Zach's rulings as settled
-	PlanFix        string    `json:"-"` // factory.plan-fix: small fixes from the last plan review that code review checks
+	DecisionBlocker string    `json:"decisionBlocker,omitempty"`
+	DecisionWait    string    `json:"decisionWait,omitempty"`
+	WaitingCount    int       `json:"waitingCount,omitempty"`
+	ID              string    `json:"id"`
+	Short           string    `json:"short"`
+	Host            string    `json:"host"`
+	Title           string    `json:"title"`
+	Repo            string    `json:"repo"`
+	Project         string    `json:"project"`
+	Branch          string    `json:"branch"`
+	Cwd             string    `json:"cwd"`
+	Model           string    `json:"model"`
+	Status          string    `json:"status"`
+	Source          string    `json:"source"`
+	Stage           string    `json:"stage"`
+	Labelled        bool      `json:"labelled"`
+	Flags           []string  `json:"flags"`
+	Unread          bool      `json:"unread"`
+	Rounds          Rounds    `json:"rounds"`
+	Verdict         string    `json:"verdict"`
+	Note            string    `json:"note"`
+	Tier            string    `json:"tier"`
+	Awaiting        string    `json:"awaiting"`
+	Origin          string    `json:"origin"`
+	Agent           string    `json:"agent"`              // AgentChoice id (factory.agent label)
+	Replaces        []string  `json:"replaces,omitempty"` // replaced predecessor card agent ids, oldest first (replace.go)
+	WaitsOn         string    `json:"waitsOn,omitempty"`  // short id of the card it lands after (deps.go)
+	Routing         bool      `json:"routing"`            // a repo picker (route.go), not the card's real work
+	CreatedAt       string    `json:"createdAt"`
+	LastActivityAt  string    `json:"lastActivityAt"`
+	ArchivedAt      string    `json:"archivedAt"`
+	Parked          string    `json:"parked,omitempty"` // when the idle reap archived it; ArchivedAt stays "" (reap.go)
+	Children        []Child   `json:"children"`
+	Reviewing       bool      `json:"reviewing"`
+	Ask             *Ask      `json:"ask,omitempty"`  // Needs Zach only: what he is asked and how to answer
+	Idea            *IdeaView `json:"idea,omitempty"` // waiting ideas, and cards started from one: what it proposes
+	WorkspaceID     string    `json:"-"`
+	Decided         bool      `json:"-"` // factory.zach-decided: reviews treat Zach's rulings as settled
+	PlanFix         string    `json:"-"` // factory.plan-fix: small fixes from the last plan review that code review checks
 
 	// when Zach asked, each column, reviews, landing and reply (timing.go)
 	Timing *TimingView `json:"timing,omitempty"`

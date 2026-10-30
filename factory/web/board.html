@@ -526,6 +526,11 @@ function laneKey(c){ const g=$('group').value; return g==='none'?'All agents':g=
 
 const phone = matchMedia('(max-width:760px)');
 // inbox: begin
+function decisionWaitHtml(c){
+  const count = c.waitingCount ? `<span class="flag">${c.waitingCount===1?'1 card waits':c.waitingCount+' cards wait'} on this</span>` : '';
+  return count + (c.decisionBlocker ? `<a class="flag" href="?card=${encodeURIComponent(c.decisionBlocker)}" data-blocker="${esc(c.decisionBlocker)}" onclick="event.preventDefault();event.stopPropagation();openPanel(this.dataset.blocker)">${esc(c.decisionWait)}</a>` : '');
+}
+
 // The For you board (sections.go, the default view): what waits on Zach first, each with its question,
 // Preview and choices; then what is working (stuck first), what shipped today and requests with no
 // answer. Routine runs show only behind their filter. One column at every width; the list never
@@ -540,7 +545,7 @@ function lineHtml(l, cls){
   const inner = `<span class="lt">${esc(l.title)}</span><span class="ls">${esc([l.state, when].filter(Boolean).join(' · '))}</span>`;
   // a card's line is a link that opens it, so keyboards and screen readers reach it as For you titles
   if(!l.id) return `<div class="line ${cls||''}">${inner}</div>`;
-  return `<a class="line ${cls||''}" data-id="${esc(l.id)}" href="?card=${encodeURIComponent(l.id)}" onclick="event.preventDefault();openPanel(this.dataset.id)">${inner}</a>`;
+  return `${l.blocker?'<div>':''}<a class="line ${cls||''}" data-id="${esc(l.id)}" href="?card=${encodeURIComponent(l.id)}" onclick="event.preventDefault();openPanel(this.dataset.id)">${inner}</a>${l.blocker ? `<a class="flag" href="?card=${encodeURIComponent(l.blocker)}" onclick="event.preventDefault();openPanel('${esc(l.blocker)}')">Open blocking decision</a>` : ''}${l.blocker?'</div>':''}`;
 }
 // noAnswerHtml: a request with no answer; one that never became a card can be dismissed (unanswered.go)
 function noAnswerHtml(l){
@@ -554,7 +559,7 @@ function forYouHtml(c){
   const open = `href="?card=${encodeURIComponent(c.id)}" onclick="event.preventDefault();openPanel('${c.id}')"`;
   // what kind of input it wants (its label) stays visible above the agent's own question, then the one thing to do
   return `<div class="fy" data-id="${c.id}"><a class="ft" ${open}>${repo}${repo?' · ':''}<span class="ttl">${esc(c.title)}</span></a>
-    ${askKind(c.ask)}<a class="fq" ${open}>${esc(askQuestion(c.ask))}</a>${askTodo(c.ask)}${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
+    ${decisionWaitHtml(c)}${askKind(c.ask)}<a class="fq" ${open}>${esc(askQuestion(c.ask))}</a>${askTodo(c.ask)}${evidenceHtml(c)}${questionsHtml(c,'l')}${choicesHtml(c,'l')}
     <button class="link" onclick="openPanel('${c.id}')">Details</button></div>`;
 }
 function inboxHtml(S, q){
@@ -714,7 +719,7 @@ async function kidSend(el){ const id = kidId(el), m = (kidDraft[id]||'').trim();
 function cardHtml(c){
   const dot = c.archivedAt?'arch':c.status==='running'?'running':(c.flags.length?'attn':'');
   const v = c.verdict ? `<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>` : '';
-  const note = c.note && !c.ask ? `<span class="flag note">${esc(c.note)}</span>` : '';
+  const note = c.note && !c.ask && !c.decisionBlocker ? `<span class="flag note">${esc(c.note)}</span>` : '';
   const chip = (k, text, title) => `<span class="kid ${k.role} ${k.status==='running'&&!k.archived?'running':''} ${k.archived?'archived':''}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
   const kh = latestReviews(c.children).map(k=>chip(k, reviewLabel(k, c.rounds))).join('')
     + cardKids(c.children, $('showKids').checked).map(k=>chip(k, kidChip(k), kidLine(k))).join('');
@@ -724,7 +729,7 @@ function cardHtml(c){
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
     ${c.stage==='idea'&&c.idea&&c.idea.error?`<div class="err">${esc(c.idea.error)}</div>`:''}
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
-    <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
+    <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${decisionWaitHtml(c)}${c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?`<div class="ask" onclick="event.stopPropagation()">${askKind(c.ask)}<div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?askTodo(c.ask)+evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
   </div>`;
@@ -879,7 +884,7 @@ function fillPanel(c, fresh){
   $('pSub').textContent = `${c.short} · ${c.host} · ${c.source} · ${c.status}${c.archivedAt?' (archived)':''}`;
   const idx = B.stages.findIndex(s=>s[0]===c.stage);
   $('pBar').innerHTML = B.stages.map((s,i)=>`<span title="${esc(s[1])}" class="${i===idx?'on':i<idx?'done':''}"></span>`).join('');
-  $('pFlags').innerHTML = c.flags.map(f=>`<span class="flag">${esc(f)}</span>`).join('') + (c.verdict?`<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>`:'') + (c.note?`<span class="flag note">${esc(c.note)}</span>`:'');
+  $('pFlags').innerHTML = decisionWaitHtml(c) + c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('') + (c.verdict?`<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>`:'') + (c.note && !c.decisionBlocker?`<span class="flag note">${esc(c.note)}</span>`:'');
   const kv = [['Column', (B.stages[idx]||[])[1] + (c.labelled?'':' (from Paseo status)')],
     ['Tier', c.tier ? c.tier + ': ' + ((B.tiers||{})[c.tier]||'') : 'not set yet (the plan review sets it)'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
     ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Reviews', `plan ${c.rounds.plan} · code ${c.rounds.code} (cap 3 each)`],
@@ -968,7 +973,7 @@ function fillAsk(c){
       + evidenceHtml(c) + questionsHtml(c,'p') + choicesHtml(c,'p')
       + ((a.report||a.detail) ? `<details class="report"><summary>Full report</summary><div class="detail">${askMarkdown(a.report||a.detail, c.id)}</div></details>` : '');
   } else h += `<h4>Now</h4><div>${esc(stateOf(c))}</div>`;
-  $('pAsk').innerHTML = h;
+  $('pAsk').innerHTML = decisionWaitHtml(c) + h;
 }
 // panelTop: end
 // ideaHtml: an idea as Zach reviews it: what it proposes, why, how to tell it worked, what happens next,

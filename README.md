@@ -1084,6 +1084,11 @@ CI is only a backstop: it runs after the push, and without the private patterns 
 credentials and generic leaks only. The checks that keep a leak from being published are the
 local ones and the factory's.
 
+Held work stays in Landing and Working. When its dependency chain reaches Needs Zach,
+its tile, panel and Working line name and link to that decision. The decision shows how many
+held cards wait on it, including indirect dependencies. These explanations clear automatically;
+they create no extra asks, counts in Needs Zach, or emails.
+
 ## Board layout checks
 
 Use the checked-in headless helper for this board's layout checks. It builds the current

@@ -253,3 +253,51 @@ func clearHeldApproval(a Agent, labels map[string]string) map[string]string {
 	}
 	return labels
 }
+
+// decorateDecisionWaits derives display metadata only. Dependency release and asks
+// continue to use the stored stage and labels.
+func decorateDecisionWaits(cards []Card, agents []Agent) {
+	byID := map[string]Agent{}
+	visible := map[string]int{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	for i := range cards {
+		visible[cards[i].ID] = i
+		cards[i].DecisionBlocker = ""
+		cards[i].DecisionWait = ""
+		cards[i].WaitingCount = 0
+	}
+	for i := range cards {
+		a, ok := byID[cards[i].ID]
+		if !ok || a.L(labelStage) != "landing" || a.L(labelHeld) == "" || a.gone() || replacedPredecessor(byID, a) {
+			continue
+		}
+		seen := map[string]bool{a.ID: true}
+		for {
+			id := a.L(labelWaitsOn)
+			if id == "" {
+				id = a.L(labelHeld)
+			}
+			if id == "" || depState(agents, a, id) != depWaiting {
+				break
+			}
+			target := resolveCardID(byID, id)
+			if seen[target] {
+				break
+			}
+			seen[target] = true
+			a, ok = byID[target]
+			if !ok {
+				break
+			}
+			j, shown := visible[target]
+			if shown && cards[j].Stage == "zach" && Derive(a) == "zach" {
+				cards[i].DecisionBlocker = target
+				cards[i].DecisionWait = fmt.Sprintf("Waiting for your answer on ‘%s’. This will continue automatically after that work finishes.", cards[j].Title)
+				cards[j].WaitingCount++
+				break
+			}
+		}
+	}
+}
