@@ -456,6 +456,10 @@ func TestPickIdeaAgentUsesBestFrontierModelAboveFloor(t *testing.T) {
 		{"failed reading counts as unknown", all, map[string]AgentUsage{
 			"claude": {RefreshError: "meter unavailable", Windows: []UsageWindow{{Label: "7d", RemainingPct: 5}}}, "codex": week(10, 72*time.Hour), "antigravity": week(10, 72*time.Hour)},
 			"opus", nil},
+		{"above-floor model with its short window used up beats one at the floor", all, map[string]AgentUsage{
+			"claude": week(10, 72*time.Hour), "antigravity": week(15, 72*time.Hour),
+			"codex": {Windows: []UsageWindow{{Label: "5h", RemainingPct: 0, ResetsAt: iso(t0.Add(time.Hour))}, {Label: "7d", RemainingPct: 50, ResetsAt: iso(t0.Add(72 * time.Hour))}}}},
+			"codex-sol", nil},
 		{"unknown usage", all, nil, "opus", nil},
 		{"no frontier model available", map[string]string{"muse": "available"}, map[string]AgentUsage{"muse": week(90, 72*time.Hour)}, "opus", nil},
 		{"no frontier model available and Opus at the floor", nil, map[string]AgentUsage{"claude": week(3, 72*time.Hour)}, "",

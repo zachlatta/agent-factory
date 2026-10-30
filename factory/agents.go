@@ -280,7 +280,8 @@ func pickIdeaAgent(statuses map[string]string, usages map[string]AgentUsage, now
 		avail = []AgentChoice{opus}
 	}
 	var low []string
-	for _, c := range avail {
+	var above *AgentChoice // the best-ranked model above the floor, exhausted or not
+	for i, c := range avail {
 		u := usages[c.providerID()]
 		left, known := ideaWeekLeft(u, now)
 		if known && left <= ideaUsageFloor {
@@ -290,10 +291,13 @@ func pickIdeaAgent(statuses map[string]string, usages map[string]AgentUsage, now
 		if usageScore(u, now).tier > 0 {
 			return c, ""
 		}
+		if above == nil {
+			above = &avail[i]
+		}
 	}
-	if len(low) < len(avail) {
-		// some are above the floor but every one of those has a short window used up
-		return avail[0], ""
+	if above != nil {
+		// every model above the floor has a short window used up: wait on the best of them
+		return *above, ""
 	}
 	return avail[0], fmt.Sprintf("Paused: every Frontier model has %d%% or less of its weekly usage left (%s)",
 		ideaUsageFloor, strings.Join(low, ", "))
