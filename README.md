@@ -973,9 +973,12 @@ records its times in `timings.json` in the state directory, so a restart keeps t
 A per-record version makes the retained-state migration restart-safe. It normalizes timestamps,
 merges duplicate session rows with their attribution history, and uses the final recorded landed
 event for a verified historical landing. Missing evidence preserves uncertain history; migration
-never substitutes its current clock. Worktree checks are bounded per tick. Read-only and dry-run
-instances do not write migration state. Retained agents can supply missing app requests; removed
-agents cannot recover lost prompts or creation times. An app first observed after its start is
+never substitutes its current clock. Previously verified records use their final landed event
+without requiring a surviving agent or worktree. Unverified records inspect at most three
+worktrees per tick and remain eligible for retry when evidence is unavailable. A landing is
+cleared only when it precedes Asked or a complete worktree reflog proves there is no own commit
+after Asked. Read-only and dry-run instances do not run reconciliation. Retained agents can
+supply missing app requests; removed agents cannot recover lost prompts or creation times. An app first observed after its start is
 partial, including finished requests; no earlier stages are invented.
 
 The card panel shows it as one Timeline line. `GET /api/metrics?days=7` (1 to 30) gives the
@@ -1002,12 +1005,6 @@ their reply check. Dropped or closed cards and partial ones are only counted in 
 Query parameters (`repo`, `source`, `tier`, `role`,
 `provider`, `model`, `step`) filter the results (`?source=email`, `?repo=owner/name`,
 `?role=reviewer&step=review`).
-
-Historical timing correction clears a landing only when it precedes Asked, or a surviving,
-complete worktree reflog proves there is no own commit after Asked. All other old values stay:
-a retired worktree, expired reflog or failed read cannot erase history. The upgrade inspects at
-most three worktrees per Tick and persists its progress. Read-only and dry-run instances do
-not run the upgrade.
 
 #### Session links and transcript turn timing
 

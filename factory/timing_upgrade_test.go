@@ -50,7 +50,11 @@ func TestMigrationUsesFinalRecordedLanding(t *testing.T) {
 	final := commitAt.Add(40 * time.Minute)
 	f.Now = func() time.Time { return final.Add(time.Hour) }
 	f.timings.cards["c"] = &CardTiming{RequestedAt: commitAt.Add(-time.Minute), LandedAt: commitAt, LandingChecked: true, Events: []TimingEvent{{Stage: "landed", At: commitAt.Add(10 * time.Minute)}, {Stage: "review", At: commitAt.Add(20 * time.Minute)}, {Stage: "landed", At: final.In(time.FixedZone("local", -4*60*60))}}}
-	f.SetAgents([]Agent{{ID: "c", Cwd: r.wt}})
+	f.SetAgents(nil)
+	f.GitOut = func(context.Context, string, ...string) (string, error) {
+		t.Fatal("verified history must not require a surviving agent or worktree")
+		return "", nil
+	}
 	f.reconcileTimings()
 	got := timing(t, f, "c")
 	if !got.LandedAt.Equal(final) || got.LandedAt.Location() != time.UTC || len(got.Events) != 3 {
@@ -66,5 +70,31 @@ func TestMigrationUsesFinalRecordedLanding(t *testing.T) {
 	f.reconcileTimings()
 	if calls != 0 || !timing(t, f, "c").LandedAt.Equal(final) {
 		t.Fatal("migration not restart safe")
+	}
+}
+
+func TestMigrationRetriesMissingAgentAfterRestart(t *testing.T) {
+	r := newRepos(t)
+	commitAt := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	t.Setenv("GIT_COMMITTER_DATE", commitAt.Format(time.RFC3339))
+	commitFile(t, r.wt, "mine", "mine\n")
+	r.land(t)
+	f := realGitFactory(t)
+	final := commitAt.Add(40 * time.Minute)
+	f.Now = func() time.Time { return final.Add(time.Hour) }
+	f.timings.cards["c"] = &CardTiming{RequestedAt: commitAt.Add(-time.Minute), LandedAt: commitAt,
+		Events: []TimingEvent{{Stage: "landed", At: final}}}
+	f.timings.dirty = true
+	f.reconcileTimings()
+	got := timing(t, f, "c")
+	if got.Version != 0 || got.LandingChecked || !got.LandedAt.Equal(commitAt) {
+		t.Fatalf("missing evidence marked complete: %+v", got)
+	}
+	f.timings = newTimingStore(f.timings.path, f.Now, f.cfg.Location)
+	f.SetAgents([]Agent{{ID: "c", Cwd: r.wt}})
+	f.reconcileTimings()
+	got = timing(t, f, "c")
+	if got.Version != timingVersion || !got.LandingChecked || !got.LandedAt.Equal(final) {
+		t.Fatalf("migration was not retried: %+v", got)
 	}
 }

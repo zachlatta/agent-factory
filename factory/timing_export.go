@@ -112,7 +112,7 @@ func (t *CardTiming) observeSessions(c Card, agents []Agent, byID map[string]Age
 		}
 		l := TimingSession{AgentID: a.ID, ParentID: parent, Device: a.Host, Provider: a.Provider,
 			SessionID: id, Model: a.Model, Role: role, ReviewKind: kind, Stage: stage,
-			CreatedAt: a.CreatedAt, ObservedAt: now}
+			CreatedAt: a.CreatedAt.UTC(), ObservedAt: now.UTC()}
 		if seen {
 			l.ObservedAt = prev.ObservedAt
 			if reflect.DeepEqual(l, prev) {

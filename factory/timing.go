@@ -71,7 +71,7 @@ type CardTiming struct {
 	LandedAt       time.Time       `json:"landedAt,omitzero"` // the final verified landing time
 	RepliedAt      time.Time       `json:"repliedAt,omitzero"`
 	NoReply        bool            `json:"noReply,omitempty"`
-	LandingChecked bool            `json:"landingChecked,omitempty"`
+	LandingChecked bool            `json:"landingChecked,omitempty"` // ownership check completed; nonzero legacy landing was verified
 	ReplyChecked   bool            `json:"replyChecked,omitempty"`
 	ReplyTries     int             `json:"replyTries,omitempty"`
 	ReplyRetry     time.Time       `json:"replyRetry,omitzero"`
@@ -511,8 +511,8 @@ func (f *Factory) recordRound(id, kind string, n int, start time.Time, verdict s
 	})
 }
 
-// recordLanded records only a card-owned commit verified on its branch and main.
-// A failed read or a no-commit errand never substitutes a clock or unrelated HEAD.
+// recordLanded records the current verification time only after confirming a card-owned
+// commit on its branch and main. Failed reads and no-commit errands acquire no landing time.
 func (f *Factory) recordLanded(a Agent, cwd string) {
 	t, ok := f.timings.get(a.ID)
 	if !ok {
@@ -550,30 +550,48 @@ func (f *Factory) reconcileTimings() {
 				t.NoReply = noReply
 			})
 		}
-		if t.Version >= timingVersion || n >= 3 || f.stopping.Load() {
+		if early {
+			t.LandedAt = time.Time{}
+		}
+		if t.Version >= timingVersion || f.stopping.Load() {
 			continue
 		}
 		if t.LandedAt.IsZero() {
 			f.timings.update(id, func(t *CardTiming) { t.Version = timingVersion })
 			continue
 		}
-		n++
-		a := agents[id]
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_, own, err := f.ownLandingTime(ctx, a.Cwd, t.RequestedAt)
-		cancel()
-		f.timings.update(id, func(t *CardTiming) {
-			if err == nil && !own {
-				t.LandedAt = time.Time{}
-			} else if err == nil && own {
-				for _, e := range t.Events {
-					if e.Stage == "landed" && !e.At.IsZero() {
-						t.LandedAt = e.At.UTC()
-					}
+		complete := func(t *CardTiming) {
+			for _, e := range t.Events {
+				if e.Stage == "landed" && !e.At.IsZero() {
+					t.LandedAt = e.At.UTC()
 				}
 			}
 			t.Version = timingVersion
 			t.LandingChecked = true
+		}
+		if t.LandingChecked {
+			f.timings.update(id, complete)
+			continue
+		}
+		a := agents[id]
+		if a.Cwd == "" || n >= 3 {
+			continue // missing evidence remains eligible for a later attempt
+		}
+		n++
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, own, err := f.ownLandingTime(ctx, a.Cwd, t.RequestedAt)
+		cancel()
+		if err != nil {
+			continue // retired worktrees and failed reads do not complete migration
+		}
+		f.timings.update(id, func(t *CardTiming) {
+			if !own {
+				t.LandedAt = time.Time{}
+				t.Version = timingVersion
+				t.LandingChecked = true
+			} else {
+				complete(t)
+			}
 		})
 	}
 	if err := f.timings.save(); err != nil {

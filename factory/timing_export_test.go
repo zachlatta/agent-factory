@@ -312,3 +312,17 @@ func TestCanonicalSessionHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestTimingSessionOffsetCreationDoesNotRepeatObservation(t *testing.T) {
+	a := sessionAgent(fresh("c1"), "first")
+	a.CreatedAt = a.CreatedAt.In(time.FixedZone("offset", -4*60*60))
+	f, _ := newTestFactory(t, a)
+	for range 3 {
+		f.Now = func() time.Time { return t0.Add(time.Minute) }
+		f.SetAgents([]Agent{a})
+	}
+	got := timing(t, f, a.ID)
+	if len(got.Sessions) != 1 || len(got.Sessions[0].History) != 1 {
+		t.Fatalf("unchanged offset creation repeated observation: %+v", got.Sessions)
+	}
+}

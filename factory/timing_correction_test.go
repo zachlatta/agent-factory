@@ -192,7 +192,7 @@ func TestTimingCorrectionReadOnly(t *testing.T) {
 	}
 }
 
-func TestTimingCorrectionBoundedAndNotRepeatedAfterRestart(t *testing.T) {
+func TestTimingCorrectionBoundsRetriesAfterRestart(t *testing.T) {
 	f, _ := newTestFactory(t)
 	calls := 0
 	f.GitOut = func(context.Context, string, ...string) (string, error) { calls++; return "", errors.New("gone") }
@@ -202,18 +202,19 @@ func TestTimingCorrectionBoundedAndNotRepeatedAfterRestart(t *testing.T) {
 		agents = append(agents, Agent{ID: id, Cwd: filepath.Join(f.cfg.Home, "gone")})
 	}
 	f.SetAgents(agents)
+	f.timings.dirty = true
 	f.reconcileTimings()
 	if calls != 3 {
 		t.Fatalf("first tick inspected %d worktrees", calls)
 	}
 	f.timings = newTimingStore(f.timings.path, f.Now, f.cfg.Location)
 	f.reconcileTimings()
-	if calls != 5 {
-		t.Fatalf("restart repeated work: %d inspections", calls)
+	if calls != 6 {
+		t.Fatalf("restart must retry at most three worktrees: %d inspections", calls)
 	}
 	f.reconcileTimings()
-	if calls != 5 {
-		t.Fatal("finished upgrade repeated Git reads")
+	if calls != 9 {
+		t.Fatal("failed upgrades must remain retryable")
 	}
 }
 
