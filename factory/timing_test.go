@@ -208,7 +208,7 @@ func TestTimingReadOnlyWritesNothing(t *testing.T) {
 	}
 }
 
-func TestTimingOnlyFactoryCards(t *testing.T) {
+func TestTimingCardsExcludeHelpers(t *testing.T) {
 	app := Agent{ID: "app1", Status: "running", CreatedAt: t0, LastActivityAt: t0, Labels: map[string]string{}}
 	sched := Agent{ID: "s1", Status: "idle", CreatedAt: t0, Labels: map[string]string{"paseo.schedule-id": "x"}}
 	scout := card("sc1", map[string]string{labelRole: "scout"})
@@ -222,7 +222,7 @@ func TestTimingOnlyFactoryCards(t *testing.T) {
 	app.Status = "idle"
 	app.RequiresAttention, app.AttentionReason = true, "finished"
 	f.SetAgents([]Agent{app, sched, scout, picker, rev, mailCard, doneBefore})
-	for _, id := range []string{"app1", "s1", "sc1", "p1", "r1", "d1"} {
+	for _, id := range []string{"s1", "sc1", "p1", "r1", "d1"} {
 		if _, ok := f.timings.get(id); ok {
 			t.Errorf("%s timed", id)
 		}
@@ -307,7 +307,7 @@ func TestTimingRecordsLandingCommit(t *testing.T) {
 		f.GitOut = gitStub(landedLog)
 		storeLog(t, f, p, "c1", "Landed.\nREMAINING: none")
 		f.Tick()
-		if got := timing(t, f, "c1").LandedAt; !got.Equal(parseTime(commit)) {
+		if got := timing(t, f, "c1").LandedAt; !got.Equal(f.Now().UTC()) {
 			t.Errorf("landedAt = %v", got)
 		}
 	})
@@ -323,7 +323,7 @@ func TestTimingRecordsLandingCommit(t *testing.T) {
 		if l := p.labels("c1"); l[labelStage] != "landed" {
 			t.Fatalf("labels = %v", l)
 		}
-		if got := timing(t, f, "c1").LandedAt; !got.Equal(parseTime(commit)) {
+		if got := timing(t, f, "c1").LandedAt; !got.Equal(f.Now().UTC()) {
 			t.Errorf("landedAt = %v", got)
 		}
 	})

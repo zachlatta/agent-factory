@@ -37,8 +37,8 @@ func TestTimingSessionLinksFollowStepsAndSessions(t *testing.T) {
 	a.SessionID, a.Model = "second", "model-b"
 	f.SetAgents([]Agent{a})
 	ct := timing(t, f, a.ID)
-	if len(ct.Sessions) != 3 || ct.Sessions[1].Stage != "building" ||
-		ct.Sessions[1].SessionID != "first" || ct.Sessions[2].SessionID != "second" || ct.Sessions[2].Model != "model-b" {
+	if len(ct.Sessions) != 2 || ct.Sessions[0].Stage != "building" ||
+		len(ct.Sessions[0].History) != 2 || ct.Sessions[1].SessionID != "second" || ct.Sessions[1].Model != "model-b" {
 		t.Fatalf("session history = %+v", ct.Sessions)
 	}
 	if len(p.calls) != 0 {
@@ -46,7 +46,8 @@ func TestTimingSessionLinksFollowStepsAndSessions(t *testing.T) {
 	}
 	// A caller cannot mutate the store through a returned snapshot.
 	ct.Sessions[0].Model = "changed"
-	if timing(t, f, a.ID).Sessions[0].Model != "model-a" {
+	ct.Sessions[0].History[0].Model = "changed"
+	if got := timing(t, f, a.ID); got.Sessions[0].Model != "model-a" || got.Sessions[0].History[0].Model != "model-a" {
 		t.Fatal("session links were not copied")
 	}
 }
@@ -90,7 +91,7 @@ func TestTimingSessionLinksNestedReviewersAndArchivedChildren(t *testing.T) {
 	a = moved(a, "building", iso(f.Now()))
 	f.SetAgents([]Agent{a, r, b, c})
 	ct = timing(t, f, a.ID)
-	if len(ct.Sessions) != 5 || ct.Sessions[4].AgentID != a.ID || ct.Sessions[4].Stage != "building" {
+	if len(ct.Sessions) != 4 || ct.Sessions[0].AgentID != a.ID || ct.Sessions[0].Stage != "building" {
 		t.Fatalf("archived children relabelled: %+v", ct.Sessions)
 	}
 }
@@ -278,5 +279,36 @@ func TestTimingExportOldRecordsAndEmptyStore(t *testing.T) {
 	if len(out.Cards) != 2 || out.Cards[0].ID != "a" || !out.Cards[1].Partial || out.Cards[1].Repo != "" ||
 		len(out.Cards[1].Sessions) != 0 {
 		t.Fatalf("old records = %+v", out)
+	}
+}
+
+func TestCanonicalSessionHistory(t *testing.T) {
+	local := time.FixedZone("offset", -4*60*60)
+	first := TimingSession{SessionID: "native", AgentID: "builder", Provider: "codex", Role: "fellow", Stage: "plan", Model: "model-a", CreatedAt: t0.In(local), ObservedAt: t0.In(local)}
+	second := first
+	second.Stage, second.Model, second.ObservedAt = "building", "model-b", t0.Add(time.Minute).In(local)
+	rows := []TimingSession{first, first, second}
+	got := canonicalSessions(rows)
+	if len(got) != 1 || len(got[0].History) != 2 || got[0].Model != "model-b" || got[0].Stage != "building" {
+		t.Fatalf("canonical sessions = %+v", got)
+	}
+	if !reflect.DeepEqual(got, canonicalSessions(got)) {
+		t.Fatal("canonicalization is not idempotent")
+	}
+	for _, h := range got[0].History {
+		if h.CreatedAt.Location() != time.UTC || h.ObservedAt.Location() != time.UTC {
+			t.Fatal("session times are not UTC")
+		}
+	}
+	if !sessionLinksMatch(got, MetricsFilter{Model: "model-a", Step: "plan"}) {
+		t.Fatal("earlier association lost in filter")
+	}
+	for _, at := range []time.Time{t0.Add(30 * time.Second), t0.Add(90 * time.Second)} {
+		turn := turnSpan{start: at.Add(-time.Second), end: at}
+		oldStep, oldModel := turnStepAndModel(turn, rows, nil)
+		newStep, newModel := turnStepAndModel(turn, got, nil)
+		if oldStep != newStep || oldModel != newModel {
+			t.Fatalf("attribution changed: %s/%s to %s/%s", oldStep, oldModel, newStep, newModel)
+		}
 	}
 }

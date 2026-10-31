@@ -269,7 +269,7 @@ func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 			f.fillReady(c.Ask, c.ID, c.Ask.Report)
 		}
 	}
-	asked := map[string]CardRequest{} // first prompts of email and voice cards not yet timed (timing.go)
+	asked := map[string]CardRequest{} // first prompts still needed for request timing or app request text (timing.go)
 	for _, a := range f.timings.needsAsked(agents) {
 		asked[a.ID] = f.cardRequest(a)
 	}

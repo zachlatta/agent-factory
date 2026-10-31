@@ -105,8 +105,8 @@ func TestErroredCardWhoseWorkLandedGoesToDone(t *testing.T) {
 	if rec := readRecovery(withLabels(a, l)); rec.Phase != "complete" || !rec.UserAt.Equal(a.LastUserMessageAt) {
 		t.Fatalf("recovery = %+v", rec)
 	}
-	if got := timing(t, f, a.ID).LandedAt; !got.Equal(wantLandedAt) {
-		t.Fatalf("LandedAt = %v, want %v", got, wantLandedAt)
+	if got := timing(t, f, a.ID).LandedAt; !got.Equal(f.Now().UTC()) {
+		t.Fatalf("LandedAt = %v, want %v", got, f.Now().UTC())
 	}
 
 	// A stale snapshot from before the label reload does not send a retry or write labels again.
@@ -371,8 +371,8 @@ func TestErroredCardOptionalTryGoesToDone(t *testing.T) {
 	if rec := readRecovery(withLabels(a, l)); rec.Phase != "complete" || !rec.UserAt.Equal(a.LastUserMessageAt) {
 		t.Fatalf("recovery = %+v", rec)
 	}
-	if got := timing(t, f, a.ID).LandedAt; !got.Equal(wantLandedAt) {
-		t.Fatalf("LandedAt = %v, want %v", got, wantLandedAt)
+	if got := timing(t, f, a.ID).LandedAt; !got.Equal(f.Now().UTC()) {
+		t.Fatalf("LandedAt = %v, want %v", got, f.Now().UTC())
 	}
 
 	// A stale snapshot from before the label reload does not send a retry or write labels again.

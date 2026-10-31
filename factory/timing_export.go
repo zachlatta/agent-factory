@@ -2,6 +2,7 @@ package factory
 
 import (
 	"net/http"
+	"reflect"
 	"sort"
 	"time"
 )
@@ -10,24 +11,79 @@ import (
 // dates the association, not an execution boundary. Earlier links survive session and step
 // changes so Factory can attribute individual transcript turns without reading prompt text.
 type TimingSession struct {
-	AgentID    string    `json:"agentId"`
-	ParentID   string    `json:"parentId,omitempty"`
-	Device     string    `json:"device"`
-	Provider   string    `json:"provider"`
-	SessionID  string    `json:"sessionId"`
-	Model      string    `json:"model,omitempty"`
-	Role       string    `json:"role"`
-	ReviewKind string    `json:"reviewKind,omitempty"`
-	Stage      string    `json:"stage"`
-	CreatedAt  time.Time `json:"createdAt,omitzero"` // agent creation, not native session creation
-	ObservedAt time.Time `json:"observedAt"`
+	History    []TimingSession `json:"history,omitempty"`
+	AgentID    string          `json:"agentId"`
+	ParentID   string          `json:"parentId,omitempty"`
+	Device     string          `json:"device"`
+	Provider   string          `json:"provider"`
+	SessionID  string          `json:"sessionId"`
+	Model      string          `json:"model,omitempty"`
+	Role       string          `json:"role"`
+	ReviewKind string          `json:"reviewKind,omitempty"`
+	Stage      string          `json:"stage"`
+	CreatedAt  time.Time       `json:"createdAt,omitzero"` // agent creation, not native session creation
+	ObservedAt time.Time       `json:"observedAt"`
+}
+
+// expandSessions restores association rows for attribution consumers. History includes
+// the current association; the top-level fields are a convenient latest-value summary.
+func expandSessions(sessions []TimingSession) []TimingSession {
+	var out []TimingSession
+	for _, s := range sessions {
+		if len(s.History) != 0 {
+			out = append(out, expandSessions(s.History)...)
+		} else {
+			s.History = nil
+			out = append(out, s)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ObservedAt.Before(out[j].ObservedAt) })
+	return out
+}
+
+// canonicalSessions merges decoded session identities while retaining every distinct
+// attachment. Stable sorting preserves the original order for simultaneous observations.
+func canonicalSessions(sessions []TimingSession) []TimingSession {
+	var out []TimingSession
+	indices := map[string]int{}
+	for _, row := range expandSessions(sessions) {
+		row.SessionID = nativeSessionID(row.SessionID)
+		row.CreatedAt, row.ObservedAt = row.CreatedAt.UTC(), row.ObservedAt.UTC()
+		i, ok := indices[row.SessionID]
+		if !ok {
+			indices[row.SessionID] = len(out)
+			copy := row
+			copy.History = []TimingSession{row}
+			out = append(out, copy)
+			continue
+		}
+		prior := out[i]
+		duplicate := false
+		for _, h := range prior.History {
+			if reflect.DeepEqual(h, row) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		history := append(prior.History, row)
+		created := prior.CreatedAt
+		if created.IsZero() || (!row.CreatedAt.IsZero() && row.CreatedAt.Before(created)) {
+			created = row.CreatedAt
+		}
+		row.History, row.CreatedAt = history, created
+		out[i] = row
+	}
+	return out
 }
 
 // observeSessions runs under the timing store's lock, on accepted board reads only. Status,
 // activity timestamps and elapsed seconds are deliberately absent: unchanged polls write nothing.
 func (t *CardTiming) observeSessions(c Card, agents []Agent, byID map[string]Agent, owners map[string]string, now time.Time) bool {
 	last := make(map[string]TimingSession)
-	for _, l := range t.Sessions {
+	for _, l := range expandSessions(t.Sessions) {
 		last[l.AgentID] = l
 	}
 	changed := false
@@ -59,12 +115,12 @@ func (t *CardTiming) observeSessions(c Card, agents []Agent, byID map[string]Age
 			CreatedAt: a.CreatedAt, ObservedAt: now}
 		if seen {
 			l.ObservedAt = prev.ObservedAt
-			if l == prev {
+			if reflect.DeepEqual(l, prev) {
 				continue
 			}
 			l.ObservedAt = now
 		}
-		t.Sessions = append(t.Sessions, l)
+		t.Sessions = canonicalSessions(append(t.Sessions, l))
 		last[a.ID], changed = l, true
 	}
 	return changed

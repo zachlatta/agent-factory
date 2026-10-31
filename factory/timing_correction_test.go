@@ -38,12 +38,12 @@ func TestLandingTimeBelongsToCard(t *testing.T) {
 				gitRun(t, r.other, "commit", "-q", "-m", "squash card")
 				gitRun(t, r.other, "push", "-q", "origin", "HEAD:main")
 				gitRun(t, r.wt, "fetch", "-q", "origin", "main")
-				want = parseTime(gitRun(t, r.wt, "show", "-s", "--format=%cI", "origin/main"))
+				want = f.Now().UTC()
 			} else if mode != "unlanded" {
 				r.land(t)
 			}
 			if mode == "own commit" || mode == "rebased" {
-				want = parseTime(gitRun(t, r.wt, "show", "-s", "--format=%cI", "HEAD"))
+				want = f.Now().UTC()
 			}
 			if mode == "missing reflog" {
 				gitRun(t, r.wt, "reflog", "expire", "--expire=all", "HEAD")
@@ -88,8 +88,8 @@ func TestLandingTimeDoesNotUseNewerInheritedCommit(t *testing.T) {
 	f := realGitFactory(t)
 	f.timings.cards["c"] = &CardTiming{RequestedAt: when.Add(-time.Minute)}
 	f.recordLanded(Agent{ID: "c"}, r.wt)
-	if got := timing(t, f, "c").LandedAt; !got.Equal(when) {
-		t.Fatalf("landing = %v, want own commit %v", got, when)
+	if got := timing(t, f, "c").LandedAt; !got.Equal(f.Now().UTC()) {
+		t.Fatalf("landing = %v, want verification time %v", got, f.Now())
 	}
 }
 
@@ -284,6 +284,7 @@ func TestTimingReconciliationDoesNotRewriteUnchangedFile(t *testing.T) {
 	if err := f.timings.save(); err != nil {
 		t.Fatal(err)
 	}
+	f.reconcileTimings()
 	old := t0.Add(-24 * time.Hour)
 	if err := os.Chtimes(f.timings.path, old, old); err != nil {
 		t.Fatal(err)

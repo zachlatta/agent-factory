@@ -339,7 +339,7 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 		var groups []sessionGroup
 		bySession := map[string]int{}
 		unmatchedLinks := 0
-		for _, s := range t.Sessions {
+		for _, s := range expandSessions(t.Sessions) {
 			role := s.Role
 			if role == "" {
 				role = "fellow"
@@ -487,7 +487,7 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 }
 
 func sessionLinksMatch(links []TimingSession, filter MetricsFilter) bool {
-	for _, l := range links {
+	for _, l := range expandSessions(links) {
 		model := l.Model
 		if model == "" {
 			model = "unknown"
@@ -501,7 +501,7 @@ func sessionLinksMatch(links []TimingSession, filter MetricsFilter) bool {
 
 func cardFellowAgent(sessions []TimingSession) (provider, model string) {
 	provider, model = "unknown", "unknown"
-	for _, s := range sessions {
+	for _, s := range expandSessions(sessions) {
 		if s.Role != "" && s.Role != "fellow" {
 			continue
 		}
@@ -516,6 +516,7 @@ func cardFellowAgent(sessions []TimingSession) (provider, model string) {
 }
 
 func turnStepAndModel(turn turnSpan, links []TimingSession, events []TimingEvent) (step, model string) {
+	links = expandSessions(links)
 	model = "unknown"
 	for _, l := range links {
 		if l.Model != "" {

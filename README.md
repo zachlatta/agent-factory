@@ -944,20 +944,22 @@ here, on the board or in the digest (the watchdog flags its request); if it land
 
 ### Card timing
 
-Every factory card (one with a `factory.stage` label that is not a reviewer, Scout or repo picker)
+Every factory card and top-level request started directly in Paseo (source `app`)
 records its times in `timings.json` in the state directory, so a restart keeps them
-(`factory/timing.go`). Entries are dropped 30 days after their last event.
+(`factory/timing.go`). Reviewers, Scouts, repo pickers and anchors are excluded. Entries are dropped
+30 days after their last event. All stored and exported timestamps use UTC with `Z`.
 
 - **Asked**: the email's `- Date:` line or the voice memo's `- Recorded:` line in an email card's
-  first prompt; else the card's creation.
+  first prompt; else the card's creation. App requests use agent creation and retain the first
+  user prompt internally. Missing transcripts are retried; request text is not exported.
 - **Columns**: each column the card entered, read from the board the factory already builds, so it
   costs no paseo call. Only reads the board accepted count. A move is dated by `factory.since`
   when it set one, else when the factory saw it (within one poll).
 - **Reviews**: each round's start (the reviewer's creation), end (its verdict applied) and verdict.
-- **Landed**: the last verified commit time from the card's own linked-worktree commits made
-  after Asked. The commit must be on the card's branch and main; a rebased or squash-merged version
+- **Landed**: the time the final landing was verified, using the card's own linked-worktree commits
+  made after Asked. Earlier landed events remain in the history. The commit must be on the card's branch and main; a rebased or squash-merged version
   must match the original patch. Errands that commit nothing have no landing time. Failed Git reads never
-  substitute the clock or another card's commit.
+  acquire a landing time or substitute another card's commit.
 - **Replied** (email and voice cards): 5 minutes after Done, one read of the card's thread takes
   the last message the mailbox sent after he asked and by Done plus 5 minutes. The factory's own
   emails (Needs Zach notes, failed-answer notes) are recorded when sent and never count.
@@ -967,6 +969,14 @@ records its times in `timings.json` in the state directory, so a restart keeps t
   the original window is not attributed to that card; it remains excluded from completed metrics.
 - **Partial**: a card first seen past its start (in flight when timing began, or created while the
   factory was down) has an incomplete history.
+
+A per-record version makes the retained-state migration restart-safe. It normalizes timestamps,
+merges duplicate session rows with their attribution history, and uses the final recorded landed
+event for a verified historical landing. Missing evidence preserves uncertain history; migration
+never substitutes its current clock. Worktree checks are bounded per tick. Read-only and dry-run
+instances do not write migration state. Retained agents can supply missing app requests; removed
+agents cannot recover lost prompts or creation times. An app first observed after its start is
+partial, including finished requests; no earlier stages are invented.
 
 The card panel shows it as one Timeline line. `GET /api/metrics?days=7` (1 to 30) gives the
 count, arithmetic mean (`average`), `median` and `p90`, in seconds, for:
@@ -1000,6 +1010,12 @@ most three worktrees per Tick and persists its progress. Read-only and dry-run i
 not run the upgrade.
 
 #### Session links and transcript turn timing
+
+Each card has one session object per decoded native `sessionId`. Its `history` array retains
+distinct associations in observation order, including the current one. Top-level metadata reflects
+the latest association and the earliest known creation time. Attribution readers expand history
+so changes of step, model or agent preserve their meaning.
+
 
 The same timing records keep the repo and a history of observed agent-to-session links for the
 Fellow, reviewers and nested Paseo sub-agents. A link contains the Paseo agent and immediate

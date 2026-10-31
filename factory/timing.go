@@ -17,8 +17,8 @@ import (
 //
 // Stage changes are read from the board the factory already builds (setAgents), so they cost no
 // paseo call: only reads setAgents accepted count. Review rounds, the landing commit and the
-// factory's own emails are recorded where they happen. Only factory cards are timed: a factory.stage
-// label, no factory.role (reviewers, Scouts) and no factory.routing (repo pickers). A card first seen
+// factory's own emails are recorded where they happen. Factory cards and top-level app requests
+// are timed; helper agents are excluded. A card first seen
 // past its start (in flight when timing began, or created while the factory was down) is partial:
 // its history is incomplete, so metrics leave it out.
 
@@ -56,6 +56,8 @@ type FactoryMail struct {
 
 // CardTiming is one card's recorded times.
 type CardTiming struct {
+	Version        int             `json:"version,omitempty"`
+	Request        string          `json:"request,omitempty"`
 	Repo           string          `json:"repo,omitempty"`
 	Sessions       []TimingSession `json:"sessions,omitempty"`
 	RequestedAt    time.Time       `json:"requestedAt,omitzero"`
@@ -66,7 +68,7 @@ type CardTiming struct {
 	Partial        bool            `json:"partial,omitempty"`
 	Events         []TimingEvent   `json:"events"`
 	Rounds         []TimingRound   `json:"rounds,omitempty"`
-	LandedAt       time.Time       `json:"landedAt,omitzero"` // the last landing's commit time
+	LandedAt       time.Time       `json:"landedAt,omitzero"` // the final verified landing time
 	RepliedAt      time.Time       `json:"repliedAt,omitzero"`
 	NoReply        bool            `json:"noReply,omitempty"`
 	LandingChecked bool            `json:"landingChecked,omitempty"`
@@ -158,6 +160,10 @@ func (t *CardTiming) copy() CardTiming {
 	c.Rounds = append([]TimingRound(nil), t.Rounds...)
 	c.Mails = append([]FactoryMail(nil), t.Mails...)
 	c.Sessions = append([]TimingSession(nil), t.Sessions...)
+	for i := range c.Sessions {
+		c.Sessions[i].History = append([]TimingSession(nil), t.Sessions[i].History...)
+	}
+	normalizeTiming(&c)
 	return c
 }
 
@@ -178,6 +184,7 @@ func (s *TimingStore) update(id string, fn func(*CardTiming)) {
 	t, ok := s.cards[id]
 	if ok {
 		fn(t)
+		normalizeTiming(t)
 		s.dirty = true
 	}
 	s.mu.Unlock()
@@ -199,6 +206,9 @@ func (s *TimingStore) save() error {
 			delete(s.cards, id)
 		}
 	}
+	for _, t := range s.cards {
+		normalizeTiming(t)
+	}
 	b, err := json.Marshal(s.cards)
 	if err != nil {
 		return err
@@ -217,7 +227,7 @@ func (s *TimingStore) save() error {
 
 // timed reports whether agent a is a card the factory times.
 func timed(a Agent) bool {
-	return a.L(labelStage) != "" && a.L(labelRole) == "" && a.L(labelRouting) == ""
+	return (a.L(labelStage) != "" || isAppCard(a)) && a.L(labelRole) == "" && a.L(labelRouting) == "" && !boardAnchor(a)
 }
 
 // needsAsked lists the email and voice cards whose request time is not known yet: their first
@@ -227,10 +237,10 @@ func (s *TimingStore) needsAsked(agents []Agent) []Agent {
 	defer s.mu.Unlock()
 	var out []Agent
 	for _, a := range agents {
-		if !timed(a) || !fromInbox(a) || a.gone() {
+		if !timed(a) || (!fromInbox(a) && !isAppCard(a)) {
 			continue
 		}
-		if t, ok := s.cards[a.ID]; !ok || t.RequestedAt.IsZero() {
+		if t, ok := s.cards[a.ID]; !ok || t.RequestedAt.IsZero() || (isAppCard(a) && t.Request == "") {
 			out = append(out, a)
 		}
 	}
@@ -242,6 +252,7 @@ func (s *TimingStore) needsAsked(agents []Agent) []Agent {
 // added only when a card's column changed. asked holds the first prompts of email and voice cards
 // (needsAsked). It reports whether anything changed; save writes it.
 func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time.Time, asked map[string]CardRequest) bool {
+	now = now.UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if seq < s.highestSeq {
@@ -273,11 +284,11 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 			changed = true
 		}
 		if t == nil {
-			if a.gone() || c.Stage == "landed" {
+			if (a.gone() || c.Stage == "landed") && !isAppCard(a) {
 				continue // finished before timing saw it: nothing to time
 			}
-			t = &CardTiming{Source: timingSource(a)}
-			if c.Stage == "plan" && now.Sub(a.CreatedAt) <= timingFreshCard {
+			t = &CardTiming{Source: timingSource(a), Version: timingVersion}
+			if c.Stage == "plan" && !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) >= 0 && now.Sub(a.CreatedAt) <= timingFreshCard {
 				t.Events = []TimingEvent{{Stage: "plan", At: a.CreatedAt}}
 			} else {
 				t.Partial = true
@@ -286,6 +297,11 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 			s.cards[c.ID] = t
 			changed = true
 		} else if l := t.last(); l.Stage != c.Stage {
+			if l.Stage == "landed" && c.Stage != "landed" {
+				t.LandingChecked = false
+				t.ReplyChecked = false
+				t.NoReply = false
+			}
 			at := movedAt(a, l.At, now)
 			if c.Stage == "landed" && a.gone() && a.ArchivedAt.After(l.At) && !a.ArchivedAt.After(now) {
 				at = a.ArchivedAt
@@ -293,6 +309,11 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 			t.Events = append(t.Events, TimingEvent{Stage: c.Stage, At: at})
 			changed = true
 		}
+		if r := asked[a.ID]; isAppCard(a) && t.Request == "" && r.Base != "" {
+			t.Request = r.Base
+			changed = true
+		}
+		normalizeTiming(t)
 		if c.Tier != "" && c.Tier != t.Tier {
 			t.Tier, changed = c.Tier, true
 		}
@@ -321,9 +342,9 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 // (and not in the future), else now. Moves to Needs Zach and Done set no since: they get now.
 func movedAt(a Agent, last, now time.Time) time.Time {
 	if since := parseTime(a.L(labelSince)); since.After(last) && !since.After(now) {
-		return since
+		return since.UTC()
 	}
-	return now
+	return now.UTC()
 }
 
 // timingSource groups cards for metrics: idea, else the factory.source label (board, email, voice).
@@ -342,12 +363,12 @@ func timingSource(a Agent) string {
 // one that has none yet gives zero (for askedWait), and one whose line does not parse falls back to creation.
 func requestedAt(a Agent, asked map[string]CardRequest, loc *time.Location, now time.Time) (time.Time, string) {
 	if !fromInbox(a) {
-		return a.CreatedAt, "created"
+		return a.CreatedAt.UTC(), "created"
 	}
 	r, ok := asked[a.ID]
 	if !ok || !r.Read {
 		if now.Sub(a.CreatedAt) > askedWait {
-			return a.CreatedAt, "created" // no first prompt to read (no session file)
+			return a.CreatedAt.UTC(), "created" // no first prompt to read (no session file)
 		}
 		return time.Time{}, ""
 	}
@@ -361,7 +382,7 @@ func requestedAt(a Agent, asked map[string]CardRequest, loc *time.Location, now 
 			return t, r.AskedKind
 		}
 	}
-	return a.CreatedAt, "created"
+	return a.CreatedAt.UTC(), "created"
 }
 
 // The email dispatcher's first prompt carries when Zach asked: "- Date: <RFC 5322>" for an email,
@@ -499,12 +520,12 @@ func (f *Factory) recordLanded(a Agent, cwd string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	at, _, err := f.ownLandingTime(ctx, cwd, t.RequestedAt)
-	if err != nil {
+	at, own, err := f.ownLandingTime(ctx, cwd, t.RequestedAt)
+	if err != nil || !own || at.IsZero() {
 		f.logf("%s landing time not verified: %v", short(a.ID), err)
 		return
 	}
-	f.timings.update(a.ID, func(t *CardTiming) { t.LandedAt, t.LandingChecked = at, true })
+	f.timings.update(a.ID, func(t *CardTiming) { t.LandedAt, t.LandingChecked = f.Now().UTC(), true })
 }
 
 // reconcileTimings upgrades retained records without treating lost evidence as a contradiction.
@@ -529,7 +550,11 @@ func (f *Factory) reconcileTimings() {
 				t.NoReply = noReply
 			})
 		}
-		if t.LandingChecked || t.LandedAt.IsZero() || n >= 3 || f.stopping.Load() {
+		if t.Version >= timingVersion || n >= 3 || f.stopping.Load() {
+			continue
+		}
+		if t.LandedAt.IsZero() {
+			f.timings.update(id, func(t *CardTiming) { t.Version = timingVersion })
 			continue
 		}
 		n++
@@ -540,7 +565,14 @@ func (f *Factory) reconcileTimings() {
 		f.timings.update(id, func(t *CardTiming) {
 			if err == nil && !own {
 				t.LandedAt = time.Time{}
+			} else if err == nil && own {
+				for _, e := range t.Events {
+					if e.Stage == "landed" && !e.At.IsZero() {
+						t.LandedAt = e.At.UTC()
+					}
+				}
 			}
+			t.Version = timingVersion
 			t.LandingChecked = true
 		})
 	}
