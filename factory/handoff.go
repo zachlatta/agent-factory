@@ -361,6 +361,9 @@ func (f *Factory) tickHandoff(a Agent, s handoffState, now time.Time) error {
 		return f.archiveChecked(a.ID, false) // a failed archive after confirming
 	case "failed":
 		if handoffReleased(byID, a) {
+			if err := f.setLabels(a.ID, map[string]string{labelFinished: "1"}); err != nil {
+				return err
+			}
 			return f.archiveChecked(a.ID, false)
 		}
 	}

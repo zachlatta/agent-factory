@@ -362,3 +362,29 @@ func TestHandoffStateRoundTrip(t *testing.T) {
 		t.Fatal("parsed garbage")
 	}
 }
+
+func TestFailedHandoffArchivePersistsCompletion(t *testing.T) {
+	for _, path := range []string{"tick", "reap"} {
+		t.Run(path, func(t *testing.T) {
+			a := card("predecessor", map[string]string{labelStage: "building", labelArchiveWatch: "1",
+				labelHandoff: handoffState{Phase: "failed", New: "successor", Choice: "codex-sol", At: t0}.String()})
+			r := replacementOf(a, "successor", "idle")
+			r.Labels[labelPrefix+labelStage] = "landed"
+			f, p := newTestFactory(t, a, r)
+			if path == "tick" {
+				f.tickHandoffs(t0)
+			} else {
+				f.reap(t0)
+			}
+			if !p.called("archive", a.ID) || p.labels(a.ID)[labelFinished] != "1" {
+				t.Fatalf("archive missing durable completion: %v %v", p.calls, p.labels(a.ID))
+			}
+			a = withLabels(a, p.labels(a.ID))
+			a.ArchivedAt = t0
+			f, _ = newTestFactory(t, a)
+			if interruptedArchive(f.agent(a.ID)) || Derive(a) != "landed" {
+				t.Fatal("retired predecessor became interrupted without successor")
+			}
+		})
+	}
+}

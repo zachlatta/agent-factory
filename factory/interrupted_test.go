@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -246,6 +247,68 @@ func TestFinishedArchiveRetriesOnlyWhileLive(t *testing.T) {
 				}
 			} else if !p.called("archive", a.ID) {
 				t.Fatal("unfinished archive was not retried")
+			}
+		})
+	}
+}
+
+func TestInterruptedReplyUsesNormalSend(t *testing.T) {
+	for _, via := range []string{"board", "email"} {
+		t.Run(via, func(t *testing.T) {
+			a := card("reply", map[string]string{labelStage: "review", labelArchiveWatch: "1", labelStuck: stuckArchived,
+				labelCodeRounds: "4", labelCodeRoundsFrom: "1", labelArbitrated: "code", labelReviewerRetries: "2"})
+			a.ArchivedAt = t0
+			f, p := newTestFactory(t, a)
+			if _, err := f.Act("send", Body{ID: a.ID, Message: "Update the work", Via: via}); err != nil {
+				t.Fatal(err)
+			}
+			messages := strings.Join(p.sent(a.ID), "\n")
+			want := "Message from Zach via the factory board:"
+			if via == "email" {
+				want = "Zach answered by email while the card waited on him:"
+			}
+			if !strings.Contains(messages, want) {
+				t.Fatalf("missing reply format: %s", messages)
+			}
+			l := p.labels(a.ID)
+			if l[labelCodeRoundsFrom] != "4" || l[labelArbitrated] != "" || l[labelReviewerRetries] != "" {
+				t.Fatalf("review generation not reset: %v", l)
+			}
+		})
+	}
+}
+
+func TestArchivedPickerIsNotInterrupted(t *testing.T) {
+	a := card("picker", map[string]string{labelStage: "plan", labelRouting: "1", labelArchiveWatch: "1"})
+	a.ArchivedAt = t0
+	if archiveStage(a) || interruptedArchive(a) {
+		t.Fatal("picker enrolled in stage recovery")
+	}
+}
+
+func TestInterruptedReplyKeepsReplyInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		labels      map[string]string
+		want, stage string
+	}{
+		{"landing report", map[string]string{labelNote: "landed; did not say what remains"}, remainingRule, "landing"},
+		{"plan", map[string]string{labelStage: "plan"}, "Message from Zach via the factory board:", "plan"},
+		{"picker", map[string]string{labelRouting: "1", labelStage: "plan"}, "Pick the repo again and end with the REPO: line.", "plan"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := card("instructions", map[string]string{labelStage: "building", labelArchiveWatch: "1"})
+			a = withLabels(a, tc.labels)
+			a.ArchivedAt = t0
+			f, p := newTestFactory(t, a)
+			if _, err := f.Act("send", Body{ID: a.ID, Message: "Continue"}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(p.sent(a.ID), ""), tc.want) {
+				t.Fatal("missing reply instructions")
+			}
+			if p.labels(a.ID)[labelStage] != tc.stage {
+				t.Fatalf("wrong step: %v", p.labels(a.ID))
 			}
 		})
 	}

@@ -112,12 +112,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		return ok, f.resumeError(f.agent(c.ID), "Resume the interrupted step. Check the current worktree before continuing.", nil)
 	case "send":
-		if interruptedArchive(f.agent(c.ID)) {
-			if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
-				return nil, errors.New("message is empty")
-			}
-			return ok, f.resumeArchived(c, b.Message, b.Attachments)
-		}
+		interrupted := interruptedArchive(f.agent(c.ID))
 		if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
 			return nil, errors.New("message is empty")
 		}
@@ -187,12 +182,18 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			labels := answerLabels(c, a, now, f.guarded(c.Repo))
 			labels[labelFinished] = ""
 			labels[labelStuck] = ""
+			if interrupted && (a.L(labelStage) == "plan" || a.L(labelStage) == "plan-review") && !landingReply(a) {
+				labels[labelStage], labels[labelAutoReview] = "plan", "plan"
+			}
 			if labels[labelAutoReview] == "code" {
 				// his message is a new request: its code review is a generation of its own
 				maps.Copy(labels, newCodeGeneration(a))
 			}
 			if err := f.setLabels(c.ID, labels); err != nil {
 				return nil, err
+			}
+			if interrupted {
+				f.unmarkArchived(c.ID)
 			}
 		}
 		return map[string]any{"ok": true, "files": files}, nil

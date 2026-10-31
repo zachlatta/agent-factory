@@ -7,7 +7,7 @@ const stuckArchived = "Agent archived before this step finished."
 func archiveStage(a Agent) bool {
 	switch a.L(labelStage) {
 	case "plan", "plan-review", "building", "review":
-		return a.L(labelRole) == "" && !boardAnchor(a)
+		return a.L(labelRole) == "" && a.L(labelRouting) == "" && !boardAnchor(a)
 	}
 	return false
 }
@@ -41,32 +41,8 @@ func (f *Factory) tickArchive(a Agent) (bool, error) {
 	return false, nil
 }
 
-// Recovery is an explicit instruction. Queue the existing review gate after the new turn.
+// Recovery uses the normal reply path, including message formatting and review generation.
 func (f *Factory) resumeArchived(c Card, message string, attachments []Attachment) error {
-	g := f.gate(c.ID)
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	a := f.agent(c.ID)
-	if err := f.retireReviews(c.ID); err != nil {
-		return err
-	}
-	if _, err := f.chat(c.ID, message, attachments); err != nil {
-		return err
-	}
-	labels := answerLabels(c, a, iso(f.Now()), f.guarded(c.Repo))
-	labels[labelStuck] = ""
-	labels[labelFinished] = ""
-	labels[labelStage] = "building"
-	labels[labelAutoReview] = "code"
-	if a.L(labelStage) == "plan" || a.L(labelStage) == "plan-review" {
-		labels[labelStage] = "plan"
-		labels[labelAutoReview] = "plan"
-	}
-	if err := f.setLabels(c.ID, labels); err != nil {
-		return err
-	}
-	f.unmarkArchived(c.ID)
-	g.followUp = f.Now()
-	f.delivered(c.ID, false)
-	return nil
+	_, err := f.Act("send", Body{ID: c.ID, Message: message, Attachments: attachments})
+	return err
 }
