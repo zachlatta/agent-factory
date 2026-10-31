@@ -730,6 +730,7 @@ func TestStoppedCardsRecoverInTheirColumn(t *testing.T) {
 		{"already marked stuck", map[string]string{labelStage: "building", labelSince: since, labelStuck: stuckStopped}, nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.labels[labelArchiveWatch] = "1" // already enrolled; this test checks recovery moves
 			c := card("c1", tc.labels)
 			c.LastActivityAt = t0.Add(-time.Hour)
 			if tc.name == "building, inside the grace period" {

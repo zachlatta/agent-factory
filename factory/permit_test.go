@@ -52,7 +52,9 @@ func TestStuckPromptEmailsZachOnce(t *testing.T) {
 	if len(m3.sends()) != 0 {
 		t.Errorf("emailed twice for one move: %v", m3.sends())
 	}
-	if len(p.labels("c1")) != 0 {
+	before := p.labels("c1")
+	delete(before, labelArchiveWatch) // enrolling live work does not notify anyone
+	if len(before) != 0 {
 		t.Errorf("labels set before the timeout: %v", p.labels("c1"))
 	}
 	if p2.countCalls("permit", "deny") != 1 {

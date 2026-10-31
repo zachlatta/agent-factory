@@ -136,11 +136,19 @@ func (f *Factory) markStuck(a Agent, why string) error {
 }
 
 // stuckReason is why card a is marked stuck, or "" when it is not. The digest lists these.
-func stuckReason(a Agent) string { return a.L(labelStuck) }
+func stuckReason(a Agent) string {
+	if interruptedArchive(a) {
+		return stuckArchived
+	}
+	return a.L(labelStuck)
+}
 
 // stuckAsk is the board-only ask on a card marked stuck, in whatever column it is in.
 func stuckAsk(a Agent) *Ask {
-	why := a.L(labelStuck)
+	why := stuckReason(a)
+	if why == stuckArchived {
+		return &Ask{Label: "Card stuck", Title: stuckTitlePrefix + why, From: "builder", BoardOnly: true, Why: "The agent was archived before this step finished. Resume the work, re-run its step, send a reply, or drop it.", Actions: []Action{primary("resume", "Resume"), act("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
+	}
 	if why == stuckAgentError {
 		text := "The agent kept failing: the factory retried it on the same model (after the provider's reset when the " +
 			"error gave one, then after 2, 10 and 30 minutes). The card stays in its column. Resume makes one more " +

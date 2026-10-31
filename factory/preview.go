@@ -101,6 +101,16 @@ func PreviewHandler(root string) (http.Handler, error) {
 		}
 		agents = append(agents, a)
 	}
+	// An outside archive remains unfinished, including its board-only recovery actions.
+	interrupted := agents[slices.IndexFunc(agents, func(a Agent) bool { return a.ID == "preview-building" })]
+	interrupted.ID, interrupted.SessionID, interrupted.Title = "preview-interrupted", "preview-interrupted", "Interrupted work stays Stuck"
+	interrupted.Labels = maps.Clone(interrupted.Labels)
+	interrupted.Labels[labelPrefix+labelArchiveWatch] = "1"
+	interrupted.ArchivedAt = now
+	if err := writePreviewSession(home, interrupted.Cwd, interrupted.ID, previewRequest, previewReply); err != nil {
+		return nil, err
+	}
+	agents = append(agents, interrupted)
 	// finished work waiting on Zach: the Ready for you stop with Land / Change / Drop, on its own session
 	ready := agents[slices.IndexFunc(agents, func(a Agent) bool { return a.ID == "preview-zach" })]
 	ready.ID, ready.SessionID, ready.Title = "preview-ready", "preview-ready", "Clearer board buttons"
@@ -244,7 +254,13 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 			a.Labels[labelPrefix+labelStage] = "landing"
 		}
 		delete(a.Labels, labelPrefix+labelAwaiting)
+	case "resume", "rerun":
+		a.ArchivedAt = time.Time{}
+		a.Labels[labelPrefix+labelStuck] = ""
+		a.Labels[labelPrefix+labelAutoReview] = "code"
 	case "send":
+		a.ArchivedAt = time.Time{}
+		a.Labels[labelPrefix+labelStuck] = ""
 		// No, Change or an answer: the card moves where the real send moves it (answerLabels)
 		c, _ := f.card(a.ID)
 		for k, v := range answerLabels(c, *a, iso(f.Now()), false) {

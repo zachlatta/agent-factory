@@ -36,6 +36,7 @@ func everyAsk() map[string]*Ask {
 	add("writing", c, a)
 	c, a = running(zach(nil), "", "stalled 40m")
 	add("stalled", c, a)
+	add("stuck: archived", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckArchived}))
 	add("stuck: agent error", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}))
 	add("stuck: retries ran out", Card{ID: "c1", Stage: "review"}, card("c1", map[string]string{labelStage: "review", labelStuck: "review kept failing"}))
 	add("history unavailable", Card{}, zach(map[string]string{labelNote: "history unavailable: x"}))
@@ -294,7 +295,7 @@ var askTitleLiteral = regexp.MustCompile(`&Ask\{[^}]*?Title:\s*"([^"]+)"`)
 
 // askBuilders is how many places in factory/ build an Ask. Adding one means adding its ask to everyAsk
 // (so it gets a label and fitting buttons), then this number.
-const askBuilders = 21
+const askBuilders = 22
 
 // Every place that builds an ask is held to the rules above: a new one fails here until it is checked.
 func TestEveryAskBuilderIsChecked(t *testing.T) {

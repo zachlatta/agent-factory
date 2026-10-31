@@ -131,7 +131,7 @@ const repoTitle = "Which repo should this start in?"
 
 // baseAsk builds the Ask for a Needs Zach card from its labels and Paseo attention state.
 func baseAsk(c Card, a Agent) *Ask {
-	if a.L(labelStuck) != "" && !a.archived() {
+	if stuckReason(a) != "" && (!a.archived() || interruptedArchive(a)) {
 		return stuckAsk(a) // stays in its column: shown on the board, never emailed
 	}
 	if c.Stage != "zach" {

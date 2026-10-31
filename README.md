@@ -395,6 +395,14 @@ resuming them for silence from the first event: reconciliation cannot prevent a
 notification before the factory observes a launch or a removed label. Read-only
 and dry-run modes create no anchor or quiet-label writes.
 
+An agent archived from outside during Plan, Plan review, Building or Code review stays in its
+column marked Stuck: “Agent archived before this step finished.” It does not count as Done,
+release dependencies or free an idea slot. Automatic ticks and late reviews do not wake it.
+Resume, Re-run and Reply wake it explicitly and keep the normal review gates; Drop finishes it.
+New factory cards and stage successors are watched from creation. Existing live cards in those
+four stages are enrolled on Tick. Historical archives without the watch label stay Done; an
+external card archived before its first enrollment is outside this detection.
+
 ### Idle agents
 
 An idle agent stays loaded in Paseo until it is archived, so every Tick reaps the factory's own

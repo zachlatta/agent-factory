@@ -52,8 +52,13 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	if !found {
 		return nil, errors.New("unknown card")
 	}
+	if a := f.agent(c.ID); a.L(labelFinished) != "" && (action == "stage" && b.Stage != "landed" || action == "review" || action == "rerun") {
+		if err := f.setLabels(c.ID, map[string]string{labelFinished: ""}); err != nil {
+			return nil, err
+		}
+	}
 	now := iso(f.Now())
-	if a := f.agent(c.ID); a.L(labelStuck) != "" && (action == "stage" || action == "review" || action == "send" && !errorStuck(a)) {
+	if a := f.agent(c.ID); !interruptedArchive(a) && a.L(labelStuck) != "" && (action == "stage" || action == "review" || action == "send" && !errorStuck(a)) {
 		// Zach took the card on: its automatic recovery starts afresh (Re-run and Resume clear it themselves)
 		if err := f.setLabels(c.ID, map[string]string{labelStuck: ""}); err != nil {
 			return nil, err
@@ -73,16 +78,15 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			g := f.gate(c.ID)
 			g.mu.Lock()
 			defer g.mu.Unlock()
-			if c.ArchivedAt == "" { // archiveAgent drops a parked card's park
-				if err := f.archiveAgent(c.ID); err != nil {
-					return nil, err
-				}
-			}
 			labels[labelAutoReview] = ""
+			labels[labelStuck] = ""
 			if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), labels)); err != nil {
 				return nil, err
 			}
-			return ok, f.endReviews(g, c.ID)
+			if err := f.endReviews(g, c.ID); err != nil {
+				return nil, err
+			}
+			return ok, f.archiveAgent(c.ID)
 		}
 		f.reopen(c.ID)
 		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), labels))
@@ -103,8 +107,17 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		_, err := f.StartReview(c, kind)
 		return ok, err
 	case "resume":
+		if interruptedArchive(f.agent(c.ID)) {
+			return ok, f.resumeArchived(c, "Resume the interrupted step. Check the current worktree before continuing.", nil)
+		}
 		return ok, f.resumeError(f.agent(c.ID), "Resume the interrupted step. Check the current worktree before continuing.", nil)
 	case "send":
+		if interruptedArchive(f.agent(c.ID)) {
+			if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
+				return nil, errors.New("message is empty")
+			}
+			return ok, f.resumeArchived(c, b.Message, b.Attachments)
+		}
 		if strings.TrimSpace(b.Message) == "" && len(b.Attachments) == 0 {
 			return nil, errors.New("message is empty")
 		}
@@ -170,8 +183,10 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			return nil, err
 		}
 		f.delivered(c.ID, sub)
-		if a := f.agent(c.ID); !sub && c.ArchivedAt == "" && a.L(labelStage) != "" {
+		if a := f.agent(c.ID); !sub && a.L(labelStage) != "" {
 			labels := answerLabels(c, a, now, f.guarded(c.Repo))
+			labels[labelFinished] = ""
+			labels[labelStuck] = ""
 			if labels[labelAutoReview] == "code" {
 				// his message is a new request: its code review is a generation of its own
 				maps.Copy(labels, newCodeGeneration(a))
@@ -254,7 +269,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landed",
-			labelNote: "marked done by Zach", labelAutoReview: ""})); err != nil {
+			labelNote: "marked done by Zach", labelAutoReview: "", labelStuck: ""})); err != nil {
 			return nil, err
 		}
 		if err := f.endReviews(g, c.ID); err != nil {
@@ -294,6 +309,16 @@ var ok = map[string]bool{"ok": true}
 // dropAgent archives agent id, the agents it replaced and its running reviewers, and forgets its
 // saved picker request, if any.
 func (f *Factory) dropAgent(id string) error {
+	g := f.gate(id)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := f.setLabels(id, clearHeldApproval(f.agent(id), map[string]string{labelFinished: "1", labelStuck: "", labelAutoReview: ""})); err != nil {
+		return err
+	}
+	if err := f.endReviews(g, id); err != nil {
+		return err
+	}
+
 	if err := f.archiveAgent(id); err != nil {
 		return err
 	}
@@ -465,6 +490,10 @@ func replyLabels(a Agent, now string, guarded bool) map[string]string {
 // rerun restarts the step a stuck card left: its column when it is marked stuck there (factory.stuck),
 // else the column it left for Needs Zach (factory.stuck-from). Its automatic retries start afresh.
 func (f *Factory) rerun(c Card) error {
+	if interruptedArchive(f.agent(c.ID)) {
+		return f.resumeArchived(c, "Re-run the interrupted step. Check the current worktree and complete this step before its review.", nil)
+	}
+
 	a := f.agent(c.ID)
 	if a.L(labelRouting) != "" {
 		return f.routeFromReply(a) // a picker's step is reading its REPO line, not a plan review
@@ -574,7 +603,7 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	}
 	repoDir := f.repoDir(repo)
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
-		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelSince, iso(f.Now())),
+		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelArchiveWatch, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))
 	args = append(args, extra...)
 	if branch := f.freeBranch(repoDir, branchSlug(title)); branch != "" {

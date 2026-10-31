@@ -82,6 +82,11 @@ func refineAsk(ask *Ask) {
 	if ask == nil {
 		return
 	}
+	if ask.Title == stuckTitlePrefix+stuckArchived {
+		ask.Overview = nil // an older report cannot replace the interruption explanation
+		ask.Questions = nil
+		return
+	}
 	cleanOverview(ask)
 	if ov := ask.Overview; ask.Kind == askAction && ov != nil && ov.Needs != "" {
 		ask.Title = "Do it, then mark it done"

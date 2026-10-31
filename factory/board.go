@@ -38,7 +38,7 @@ const stallMinutes = 20 // running with no activity this long = stalled
 // finished and he has not looked yet. Email agents already answered him by email, scheduled runs
 // are routine, and closed sessions have nothing left to do, so those count as done.
 func Derive(a Agent) string {
-	if a.gone() {
+	if a.gone() || a.L(labelFinished) == "1" {
 		return "landed"
 	}
 	if st := a.L(labelStage); validStage(st) {
@@ -188,8 +188,11 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				c.Note = "Usage limit: resumes after " + r.Reset.UTC().Format(time.RFC3339)
 			}
 		}
-		if why := stuckReason(a); why != "" && !a.archived() {
+		if why := stuckReason(a); why != "" && (!a.archived() || interruptedArchive(a)) {
 			c.Flags = append(c.Flags, stuckFlagPrefix+why)
+			if interruptedArchive(a) {
+				c.Note = why
+			}
 		}
 		c.Unread = unread(a)
 		if a.RequiresAttention && a.AttentionReason != "finished" {

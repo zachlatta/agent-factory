@@ -183,7 +183,7 @@ func (f *Factory) startPicker(r Route) (map[string]string, error) {
 	prompt := fmt.Sprintf(strings.ReplaceAll(pickerPrompt, "<default repo>", def), req, dev, strings.Join(list, "\n"))
 	out, err := f.paseo("run", "--provider", ReviewerModel, "--thinking", "low", "--mode", "bypassPermissions",
 		"--cwd", dev, "--title", r.Title,
-		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"),
+		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelArchiveWatch, "1"),
 		"--label", labelArg(labelRouting, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--background", "--quiet", prompt)
 	if err != nil {

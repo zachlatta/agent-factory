@@ -174,8 +174,8 @@ func (f *Factory) reap(now time.Time) {
 	}
 }
 
-// liveGone asks Paseo (not the snapshot) whether agent a has been archived for good: archived and
-// not parked. The parked label comes from the snapshot, which the reap updates when it parks.
+// liveGone prevents verdict delivery to any physically archived, non-parked target,
+// including interrupted work. It is a send guard, not a completion classification.
 func (f *Factory) liveGone(a Agent) (bool, error) {
 	archived, _, err := f.liveState(a.ID)
 	return archived && a.L(labelParked) == "", err

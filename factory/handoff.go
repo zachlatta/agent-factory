@@ -222,6 +222,7 @@ func (f *Factory) tryHandoff(a Agent, why string) (bool, error) {
 
 func (f *Factory) startHandoff(a Agent, s handoffState, choice AgentChoice, prompt string) error {
 	labels := copyCarriedLabels(a)
+	labels[labelPrefix+labelArchiveWatch] = "1"
 	for _, k := range []string{labelAutoReview, labelVerdict} {
 		if v := a.L(k); v != "" {
 			labels[labelPrefix+k] = v
@@ -464,6 +465,10 @@ func handoffParts(evs []Event) (first, plan, notes string) {
 func (f *Factory) dropLineage(byID map[string]Agent, id string) {
 	for _, pid := range lineagePredecessorIDs(byID, id) {
 		if p, ok := byID[pid]; ok && !p.archived() {
+			if err := f.setLabels(pid, map[string]string{labelFinished: "1", labelStuck: "", labelAutoReview: ""}); err != nil {
+				f.logf("predecessor finish: %v", err)
+				continue
+			}
 			if err := f.archiveAgent(pid); err != nil {
 				f.logf("predecessor %s of dropped %s: %v", short(pid), short(id), err)
 			}

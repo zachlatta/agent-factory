@@ -52,8 +52,8 @@ func (a Agent) archived() bool { return !a.ArchivedAt.IsZero() }
 // Zach's next message unarchives it.
 func (a Agent) parked() bool { return a.archived() && a.L(labelParked) != "" }
 
-// gone: archived for good (done, dropped or closed), not parked.
-func (a Agent) gone() bool { return a.archived() && !a.parked() }
+// gone: terminal archival; parked and interrupted work remain unfinished.
+func (a Agent) gone() bool { return a.archived() && !a.parked() && !interruptedArchive(a) }
 
 // stopped: the agent is not working and not archived, so the factory may act on it.
 func (a Agent) stopped() bool { return (a.Status == "idle" || a.Status == "closed") && !a.archived() }

@@ -547,7 +547,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 	if ok {
 		// Zach may have dropped the card while it was in review: a message would revive it. A parked
 		// card is only waiting on Zach, so its verdict is sent (which wakes it).
-		gone := t.gone()
+		gone := t.gone() || interruptedArchive(t)
 		if !gone && !t.parked() {
 			if gone, err = f.liveGone(t); err != nil {
 				return err // nothing recorded yet, so the next Tick retries
@@ -1118,6 +1118,9 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			return f.deferArchive(a.ID)
 		}
 		return nil
+	}
+	if handled, err := f.tickArchive(a); handled || err != nil {
+		return err
 	}
 	if f.handoffBusy(a) {
 		return nil // tickHandoffs moves it until its replacement is confirmed
