@@ -224,3 +224,29 @@ func TestLateVerdictCannotAdvanceInterruptedWork(t *testing.T) {
 		t.Fatal("late verdict advanced interruption")
 	}
 }
+
+func TestFinishedArchiveRetriesOnlyWhileLive(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		t.Run(fmt.Sprint(archived), func(t *testing.T) {
+			a := card("finished", map[string]string{labelStage: "building", labelFinished: "1"})
+			if archived {
+				a.ArchivedAt = t0
+			}
+			f, p := newTestFactory(t, a)
+			p.archived[a.ID] = archived
+			for range 2 {
+				if err := f.tickAgent(a, t0); err != nil {
+					t.Fatal(err)
+				}
+				a = f.agent(a.ID)
+			}
+			if archived {
+				if n := p.countCalls("inspect", ""); n != 0 {
+					t.Fatalf("finished archive made %d inspect calls", n)
+				}
+			} else if !p.called("archive", a.ID) {
+				t.Fatal("unfinished archive was not retried")
+			}
+		})
+	}
+}

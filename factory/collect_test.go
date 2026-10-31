@@ -1,6 +1,8 @@
 package factory
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,5 +56,43 @@ func TestLoadAgents(t *testing.T) {
 	}
 	if by["loose"].Repo != "hackclub/merch" {
 		t.Errorf("loose repo = %q", by["loose"].Repo)
+	}
+}
+
+func TestLoadAgentsKeepsInterruptedPastWindow(t *testing.T) {
+	for _, stage := range []string{"plan", "plan-review", "building", "review"} {
+		for _, age := range []time.Duration{13 * time.Hour, 3 * 24 * time.Hour, 15 * 24 * time.Hour} {
+			t.Run(fmt.Sprintf("%s/%s", stage, age), func(t *testing.T) {
+				home := t.TempDir()
+				for _, kind := range []string{"interrupted", "finished", "historical"} {
+					labels := map[string]string{"factory.stage": stage, "factory.archive-watch": "1"}
+					if kind == "finished" {
+						labels["factory.finished"] = "1"
+					}
+					if kind == "historical" {
+						delete(labels, "factory.archive-watch")
+					}
+					b, err := json.Marshal(map[string]any{"id": kind, "lastStatus": "closed", "archivedAt": iso(t0.Add(-age)), "labels": labels})
+					if err != nil {
+						t.Fatal(err)
+					}
+					writeFile(t, filepath.Join(home, ".paseo/agents/a", kind+".json"), string(b))
+				}
+				agents, err := LoadAgents(home, "host1", 12*time.Hour, t0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := 0
+				if age < parkedKeep {
+					want = 1
+				}
+				if len(agents) != want {
+					t.Fatalf("loaded %v; want %d agents", agents, want)
+				}
+				if want == 1 && (agents[0].ID != "interrupted" || stuckReason(agents[0]) != stuckArchived) {
+					t.Fatalf("lost interrupted work: %+v", agents)
+				}
+			})
+		}
 	}
 }

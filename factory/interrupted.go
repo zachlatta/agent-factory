@@ -20,6 +20,9 @@ func interruptedArchive(a Agent) bool {
 
 func (f *Factory) tickArchive(a Agent) (bool, error) {
 	if a.L(labelFinished) == "1" {
+		if a.archived() {
+			return true, nil
+		}
 		return true, f.archiveAgent(a.ID)
 	}
 	if interruptedArchive(a) {

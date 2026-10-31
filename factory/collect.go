@@ -70,7 +70,7 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 		}
 		all = append(all, a)
 		byID[a.ID] = a
-		if a.archived() && a.ArchivedAt.Before(cutoff) && !(a.parked() && a.ArchivedAt.After(now.Add(-parkedKeep))) {
+		if a.archived() && a.ArchivedAt.Before(cutoff) && !((a.parked() || interruptedArchive(a)) && a.ArchivedAt.After(now.Add(-parkedKeep))) {
 			continue
 		}
 		if !a.archived() && a.Status == "closed" && a.LastActivityAt.Before(cutoff) {
