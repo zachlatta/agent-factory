@@ -72,12 +72,16 @@ that waits on a person.
 
 The planner (the "Fellow") first picks a track:
 
-- **Direct track**: errands that change no code (a question, research, a report). Done in one pass;
-  the factory checks the work reached `origin/main`, then moves it to Done.
+- **Direct track**: errands that change no code (a question, research, a report, an email to Zach,
+  or a PDW mutation he approves himself, including an email or message to someone else sent only
+  through a PDW review such as `gmail.send_email`, where the agent queues the mutation and replies
+  to Zach with an Approve button). Done in one pass; the factory checks the work reached
+  `origin/main`, then moves it to Done.
   Zach's message to an errand card (before its first plan, or after it finished direct) keeps it
   on the direct track: it is not sent to code review, so it never asks to approve landing work it
   already landed. Public repos have no direct track, so their cards still get a code review.
-- **Build track**: everything else. The plan ends with `TIER:`; the plan reviewer sets its own and
+- **Build track**: everything else (code, config, infra, deletes, money, bulk sends, or messages
+  sent without a PDW review). The plan ends with `TIER:`; the plan reviewer sets its own and
   the card takes the higher. A code reviewer can raise the tier, never lower it.
 - The planner names the card once, from the `TITLE:` line of its first plan or direct result; titles
   given by an idea or the email dispatcher are kept, and other titles are cut at a word. A card's

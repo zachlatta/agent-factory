@@ -1544,3 +1544,18 @@ func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
 		t.Errorf("reply on preview: %v", got)
 	}
 }
+
+func TestNewCardPromptDirectTrackPDWMutation(t *testing.T) {
+	flat := strings.Join(strings.Fields(newCardPrompt), " ")
+	for _, want := range []string{
+		"Direct track: the request is an errand that changes no code: a question, suggestions, research, a report or an email to Zach, or a PDW mutation he approves himself (including an email or message to someone other than Zach that is sent only through a PDW mutation he approves, such as gmail.send_email: write the message, queue the mutation, reply to Zach with an Approve button, and end TRACK: direct).",
+		"Anything else (code, config, infra, deletes, money, bulk sends, or messages to anyone but Zach sent without a PDW review) is the build track:",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("newCardPrompt lacks %q", want)
+		}
+	}
+	if strings.Contains(flat, "messages to anyone but Zach) is the build track") {
+		t.Error("newCardPrompt still has unqualified messages to anyone but Zach on the build track")
+	}
+}

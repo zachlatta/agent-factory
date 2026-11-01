@@ -367,8 +367,10 @@ On either track, your first reply (the plan, or the direct result) includes one 
 TITLE: <the outcome in at most 60 characters, plain words, no file names>
 
 First decide the track. Direct track: the request is an errand that changes no code: a question,
-suggestions, research, a report or an email to Zach, or a PDW mutation he approves himself. Those
-come out better from one strong pass than from plan and review agents. On the
+suggestions, research, a report or an email to Zach, or a PDW mutation he approves himself (including an
+email or message to someone other than Zach that is sent only through a PDW mutation he approves, such as
+gmail.send_email: write the message, queue the mutation, reply to Zach with an Approve button, and end
+TRACK: direct). Those come out better from one strong pass than from plan and review agents. On the
 direct track, do NOT write a plan: do the whole thing now, in one pass, as well as you can. Create your
 <errands> work item directory (work/YYYY-MM-DD-short-name/) in this worktree first and do all your work
 there, following the worktree and scratch rules below. Check
@@ -377,7 +379,7 @@ moved meeting: look at <errands> work items on origin/main from today). Deliver 
 a <errands> work item, land it (commit, then land it the way that repo's AGENTS.md says), and end your final message with the line
 TRACK: direct
 The direct track commits only its own <errands> work item (work/...): no other files, no other repo.
-Anything else (code, config, infra, deletes, money, messages to anyone but Zach) is the build track:
+Anything else (code, config, infra, deletes, money, bulk sends, or messages to anyone but Zach sent without a PDW review) is the build track:
 
 Step 1 now: write a PLAN only, then stop. No file edits yet. The plan has: goal (Zach's words),
 what you found (evidence), approach, files to change, deploy steps (if any; they run in the landing
