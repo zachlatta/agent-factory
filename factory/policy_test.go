@@ -997,146 +997,138 @@ func TestParseSmallFix(t *testing.T) {
 	}
 }
 
-func TestPlanReworkCapSmallFixGoesToBuild(t *testing.T) {
+func TestPlanSmallFixGoesToBuild(t *testing.T) {
 	reviewText := "- confirmAnswer is missing from factoryMails\n" +
 		"SMALL FIX: add confirmAnswer to factoryMails\nBUILD SIDE EFFECTS: none\nTIER: risky\nVERDICT: changes"
 
-	// Rounds 1 and 2 still go back to plan rework even with SMALL FIX.
-	for _, prev := range []string{"0", "1"} {
-		f, p := newTestFactory(t,
-			card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: prev}),
-			reviewer("r1", "c1", "plan"))
-		storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-		storeLog(t, f, p, "r1", reviewText)
-		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-			t.Fatal(err)
-		}
-		if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "plan" || l[labelPlanFix] != "" {
-			t.Fatalf("prev=%s: labels = %v", prev, l)
-		}
-	}
+	for _, prev := range []string{"0", "1", "2"} {
+		t.Run("previous rounds "+prev, func(t *testing.T) {
+			f, p := newTestFactory(t,
+				card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: prev}),
+				reviewer("r1", "c1", "plan"))
+			storeLog(t, f, p, "r1", reviewText)
+			storeLog(t, f, p, "c1", "[Assistant] Plan...\nWaits on: abc1234\nTIER: risky")
+			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+				t.Fatal(err)
+			}
+			l := p.labels("c1")
+			if l[labelStage] != "building" || l[labelVerdict] != "plan fixes" || l[labelAutoReview] != "code" ||
+				l[labelPlanRounds] != fmt.Sprint(atoi(prev)+1) || l[labelTier] != "risky" ||
+				l[labelPlanFix] != "add confirmAnswer to factoryMails" || l[labelWaitsOn] != "abc1234" {
+				t.Fatalf("with small fix: labels = %v", l)
+			}
+			msgs := p.sent("c1")
+			if len(msgs) != 1 {
+				t.Fatalf("sent = %v", msgs)
+			}
+			for _, want := range []string{"Apply these fixes, then build", "confirmAnswer is missing", "live changes", "deploy steps"} {
+				if !strings.Contains(msgs[0], want) {
+					t.Errorf("build message lacks %q:\n%s", want, msgs[0])
+				}
+			}
 
-	// Round 3 (at rework cap) with SMALL FIX goes to building, not Needs Zach, and code review checks the fix.
-	f, p := newTestFactory(t,
-		card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: "2"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", reviewText)
-	storeLog(t, f, p, "c1", "[Assistant] Plan...\nWaits on: abc1234\nTIER: risky")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelVerdict] != "plan fixes" || l[labelAutoReview] != "code" ||
-		l[labelPlanRounds] != "3" || l[labelTier] != "risky" ||
-		l[labelPlanFix] != "add confirmAnswer to factoryMails" || l[labelWaitsOn] != "abc1234" {
-		t.Fatalf("at cap with small fix: labels = %v", l)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 {
-		t.Fatalf("sent = %v", msgs)
-	}
-	for _, want := range []string{"Apply these fixes, then build", "confirmAnswer is missing", "live changes", "deploy steps"} {
-		if !strings.Contains(msgs[0], want) {
-			t.Errorf("build message lacks %q:\n%s", want, msgs[0])
-		}
-	}
+			// Once in building via plan fixes, planPending is false even if the card later visits Needs Zach.
+			built := withLabels(f.agent("c1"), l)
+			stuckInZach := withLabels(built, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
+			if planPending(stuckInZach) {
+				t.Errorf("planPending should be false after moving to build with plan fixes: %v", stuckInZach.Labels)
+			}
 
-	// Once in building via plan fixes, planPending is false even if the card later visits Needs Zach.
-	built := withLabels(f.agent("c1"), l)
-	stuckInZach := withLabels(built, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
-	if planPending(stuckInZach) {
-		t.Errorf("planPending should be false after moving to build with plan fixes: %v", stuckInZach.Labels)
-	}
+			// Code review must verify every plan fix.
+			f.SetAgents([]Agent{built})
+			cCard, _ := f.card("c1")
+			codePrompt := ReviewPrompt(cCard, "code", 7478, "unknown")
+			for _, want := range []string{"add confirmAnswer to factoryMails", "plan review", "blocking finding"} {
+				if !strings.Contains(codePrompt, want) {
+					t.Errorf("code review prompt lacks %q:\n%s", want, codePrompt)
+				}
+			}
+			planPrompt := ReviewPrompt(cCard, "plan", 7478, "unknown")
+			if !strings.Contains(planPrompt, "SMALL FIX: <") {
+				t.Errorf("plan review prompt does not teach SMALL FIX:\n%s", planPrompt)
+			}
+			if got := ParseSmallFix(planPrompt); got != "" {
+				t.Errorf("plan review prompt matched its own SMALL FIX rule: %q", got)
+			}
 
-	// Code reviewer prompt instructs the reviewer to verify the last-round plan fixes.
-	f.SetAgents([]Agent{built})
-	cCard, _ := f.card("c1")
-	codePrompt := ReviewPrompt(cCard, "code", 7478, "unknown")
-	for _, want := range []string{"add confirmAnswer to factoryMails", "last plan review", "blocking finding"} {
-		if !strings.Contains(codePrompt, want) {
-			t.Errorf("code review prompt lacks %q:\n%s", want, codePrompt)
-		}
-	}
-	planPrompt := ReviewPrompt(cCard, "plan", 7478, "unknown")
-	if !strings.Contains(planPrompt, "SMALL FIX: <") {
-		t.Errorf("plan review prompt does not teach SMALL FIX:\n%s", planPrompt)
-	}
-	if got := ParseSmallFix(planPrompt); got != "" {
-		t.Errorf("plan review prompt matched its own SMALL FIX rule: %q", got)
-	}
-
-	// Code review at the rework cap goes to the arbiter even if SMALL FIX is present.
-	f, p = newTestFactory(t,
-		card("c-code", map[string]string{labelStage: "review", labelSource: "board", labelTier: "risky", labelPlanRounds: "1", labelCodeRounds: "2"}),
-		reviewer("r-code", "c-code", "code"))
-	storeLog(t, f, p, "r-code", reviewText)
-	if err := f.ApplyVerdict(f.agent("r-code")); err != nil {
-		t.Fatal(err)
-	}
-	if l := p.labels("c-code"); l[labelNote] != arbiterNote || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
-		t.Errorf("code review at cap should go to the arbiter: %v", l)
+			// Code review at the rework cap goes to the arbiter even if SMALL FIX is present.
+			f, p = newTestFactory(t,
+				card("c-code", map[string]string{labelStage: "review", labelSource: "board", labelTier: "risky", labelPlanRounds: "1", labelCodeRounds: "2"}),
+				reviewer("r-code", "c-code", "code"))
+			storeLog(t, f, p, "r-code", reviewText)
+			if err := f.ApplyVerdict(f.agent("r-code")); err != nil {
+				t.Fatal(err)
+			}
+			if l := p.labels("c-code"); l[labelNote] != arbiterNote || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
+				t.Errorf("code review at cap should go to the arbiter: %v", l)
+			}
+		})
 	}
 }
 
-func TestPlanReworkCapSmallFixWithSideEffectsWaitsForZach(t *testing.T) {
-	// the reviewer did not rule out build side effects: Zach allows the build first, whatever the tier
-	archReview := "- missing Ordering line for overlapping card\n" +
-		"SMALL FIX: add Ordering line for overlapping card\nTIER: architecture\nVERDICT: changes"
-	base := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: "2"})
-	f, p := newTestFactory(t, base, reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", archReview)
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelVerdict] != "plan side effects" ||
-		l[labelNote] != sideEffectNote || l[labelPlanFix] != "add Ordering line for overlapping card" {
-		t.Fatalf("architecture at cap with small fix: labels = %v", l)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "add Ordering line") || !strings.Contains(msgs[0], "DECISION:") {
-		t.Errorf("summary message = %v", msgs)
-	}
+func TestPlanSmallFixWithSideEffectsWaitsForZach(t *testing.T) {
+	for _, prev := range []string{"0", "1", "2"} {
+		t.Run("previous rounds "+prev, func(t *testing.T) {
+			// the reviewer did not rule out build side effects: Zach allows the build first, whatever the tier
+			archReview := "- missing Ordering line for overlapping card\n" +
+				"SMALL FIX: add Ordering line for overlapping card\nTIER: architecture\nVERDICT: changes"
+			base := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: prev})
+			f, p := newTestFactory(t, base, reviewer("r1", "c1", "plan"))
+			storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+			storeLog(t, f, p, "r1", archReview)
+			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+				t.Fatal(err)
+			}
+			l := p.labels("c1")
+			if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelVerdict] != "plan side effects" ||
+				l[labelNote] != sideEffectNote || l[labelPlanFix] != "add Ordering line for overlapping card" {
+				t.Fatalf("architecture with small fix: labels = %v", l)
+			}
+			msgs := p.sent("c1")
+			if len(msgs) != 1 || !strings.Contains(msgs[0], "add Ordering line") || !strings.Contains(msgs[0], "DECISION:") {
+				t.Errorf("summary message = %v", msgs)
+			}
 
-	// Path A: Zach approves the architecture plan -> goes to building, keeping plan-fix for code review.
-	waiting := withLabels(base, l)
-	f, p = newTestFactory(t, waiting)
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	al := p.labels("c1")
-	if al[labelStage] != "building" || al[labelZachPlan] != "approved" || al[labelAutoReview] != "code" {
-		t.Errorf("after Zach approves: labels = %v", al)
-	}
-	if sent := p.sent("c1"); len(sent) != 1 || !strings.Contains(sent[0], "add Ordering line for overlapping card") {
-		t.Errorf("approve build message lacks small fix: %v", sent)
-	}
-	approvedCard := BuildBoard([]Agent{withLabels(waiting, al)}, nil, t0)[0]
-	if !strings.Contains(ReviewPrompt(approvedCard, "code", 7478, "unknown"), "add Ordering line for overlapping card") {
-		t.Error("code review prompt after architecture approve lacks small fix")
-	}
+			// Path A: Zach approves the architecture plan -> goes to building, keeping plan-fix for code review.
+			waiting := withLabels(base, l)
+			f, p = newTestFactory(t, waiting)
+			if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
+				t.Fatal(err)
+			}
+			al := p.labels("c1")
+			if al[labelStage] != "building" || al[labelZachPlan] != "approved" || al[labelAutoReview] != "code" {
+				t.Errorf("after Zach approves: labels = %v", al)
+			}
+			if sent := p.sent("c1"); len(sent) != 1 || !strings.Contains(sent[0], "add Ordering line for overlapping card") {
+				t.Errorf("approve build message lacks small fix: %v", sent)
+			}
+			approvedCard := BuildBoard([]Agent{withLabels(waiting, al)}, nil, t0)[0]
+			if !strings.Contains(ReviewPrompt(approvedCard, "code", 7478, "unknown"), "add Ordering line for overlapping card") {
+				t.Error("code review prompt after architecture approve lacks small fix")
+			}
 
-	// Path B: cap -> small fix -> Zach replies with changes -> stuck in plan -> approve must build, not land.
-	f, p = newTestFactory(t, waiting)
-	if _, err := f.Act("send", Body{ID: "c1", Message: "shrink the batch size"}); err != nil {
-		t.Fatal(err)
-	}
-	sl := p.labels("c1")
-	if sl[labelStage] != "plan" || sl[labelAwaiting] != "" || sl[labelPlanFix] != "" {
-		t.Fatalf("after Zach reply with changes: labels = %v", sl)
-	}
-	revising := withLabels(waiting, sl)
-	stuckPlan := withLabels(revising, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})
-	if !planPending(stuckPlan) {
-		t.Fatalf("planPending must stay true when stuck before plan approval: %v", stuckPlan.Labels)
-	}
-	f.SetAgents([]Agent{stuckPlan})
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.labels("c1"); got[labelStage] != "building" || got[labelZachPlan] != "approved" {
-		t.Errorf("approve on stuck unapproved architecture plan must build, not land: %v", got)
+			// Path B: small fix -> Zach replies with changes -> stuck in plan -> approve must build, not land.
+			f, p = newTestFactory(t, waiting)
+			if _, err := f.Act("send", Body{ID: "c1", Message: "shrink the batch size"}); err != nil {
+				t.Fatal(err)
+			}
+			sl := p.labels("c1")
+			if sl[labelStage] != "plan" || sl[labelAwaiting] != "" || sl[labelPlanFix] != "" {
+				t.Fatalf("after Zach reply with changes: labels = %v", sl)
+			}
+			revising := withLabels(waiting, sl)
+			stuckPlan := withLabels(revising, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})
+			if !planPending(stuckPlan) {
+				t.Fatalf("planPending must stay true when stuck before plan approval: %v", stuckPlan.Labels)
+			}
+			f.SetAgents([]Agent{stuckPlan})
+			if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := p.labels("c1"); got[labelStage] != "building" || got[labelZachPlan] != "approved" {
+				t.Errorf("approve on stuck unapproved architecture plan must build, not land: %v", got)
+			}
+		})
 	}
 }
 

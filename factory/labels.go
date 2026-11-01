@@ -50,7 +50,7 @@ const (
 	labelReplaces   = "replaces"     // predecessor card agent id replaced by this agent (replace.go)
 	labelReplacedBy = "replaced-by"  // replacement card agent id that took over this card (replace.go)
 	labelHandoff    = "handoff"      // on the old agent: the step of its one model hand-off (handoff.go)
-	labelPlanFix    = "plan-fix"     // small blocking fixes from the final plan-review round: code review checks them
+	labelPlanFix    = "plan-fix"     // small blocking fixes from plan review: code review checks them
 	labelTrack      = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
 	labelArbiter    = "arbiter"      // on a reviewer: it is its card's arbiter (arbiter.go)
 	labelArbitrated = "arbitrated"   // the gates ("plan", "code"; space-separated) whose arbiter already ruled

@@ -344,12 +344,13 @@ const planSmallFixRule = `- Small blocking fixes: when your verdict is changes a
   or Waits on: line, or a missed call site or test — not a design disagreement, wrong diagnosis or approach, an
   unsplit >1,000-line change, or a large blocker), add one line right before TIER:
   SMALL FIX: <one-line summary of the fixes the builder must apply>
-  At the plan-review rework cap, a plan with that line goes to build with those fixes applied and verified by
-  code review; without it, an arbiter agent decides.`
+  On every plan-review round, a plan with that line goes through the build side-effects check, then to build
+  with those fixes applied and verified by code review. Without it, ordinary rework continues until the cap,
+  when an arbiter agent decides.`
 
 func planFixRule(fix string) string {
-	return "- Last-round plan fixes: this card went to build from the final plan-review round with small blocking fixes to apply (" +
-		fix + "). The last plan review is in the builder's conversation. Verify in the diff that the builder applied every blocking fix from that review; any unapplied fix is a blocking finding."
+	return "- Plan fixes: this card went to build from plan review with small blocking fixes to apply (" +
+		fix + "). The plan review is in the builder's conversation. Verify in the diff that the builder applied every blocking fix from that review; any unapplied fix is a blocking finding."
 }
 
 const newCardPrompt = `You are the Fellow on Zach's agent factory board: you own this card from plan to landing.
@@ -448,7 +449,7 @@ func buildMsg(prefix, notes string) string {
 }
 
 func buildWithFixesMsg(notes string) string {
-	return buildMsg("The last plan review found only small, concrete blocking fixes (in Reviewer notes below). "+
+	return buildMsg("The plan review found only small, concrete blocking fixes (in Reviewer notes below). "+
 		"Apply these fixes, then build it now, as planned; do not stop for another plan review, and say in your summary how you applied them.", notes)
 }
 
@@ -683,7 +684,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	}
 	now := iso(f.Now())
 	smallFix := ""
-	if kind == "plan" && verdict == "changes" && rounds >= f.cfg.ReworkCap {
+	if kind == "plan" && verdict == "changes" {
 		smallFix = ParseSmallFix(notes)
 	}
 	switch {
@@ -691,6 +692,8 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 		err = f.passPlan(t, labels, "plan "+verdict, tier, notes, builderPlan, builderReply, "", "Plan approved by the plan reviewer.")
 	case verdict == "approve" || verdict == "nits":
 		err = f.passCode(t, labels, "code "+verdict, tier, notes, "")
+	case verdict == "changes" && kind == "plan" && smallFix != "":
+		err = f.passPlan(t, labels, "plan fixes", tier, notes, builderPlan, builderReply, smallFix, "")
 	case verdict == "changes" && gen < f.cfg.ReworkCap:
 		back := "building"
 		if kind == "plan" {
@@ -704,8 +707,6 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 				err = f.advance(labeled(t, labels), "plan-review fixes", reworkMsg(kind, gen, f.cfg.ReworkCap, notes))
 			}
 		}
-	case verdict == "changes" && kind == "plan" && smallFix != "":
-		err = f.passPlan(t, labels, "plan fixes", tier, notes, builderPlan, builderReply, smallFix, "")
 	case verdict == "close":
 		err = set(labelStage, "zach", labelVerdict, "close", labelNote, "reviewer suggests closing")
 	case arbitrated(t, kind):
@@ -723,7 +724,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	return err
 }
 
-// passPlan moves card t on from a plan that passed review (or the arbiter, or the last round with small
+// passPlan moves card t on from a plan that passed review (or the arbiter, or a review round with small
 // fixes): to building, or to Zach first when building it has side effects he has not allowed. fixes are
 // blocking fixes the builder applies while building; prefix opens the build message ("" for the
 // small-fix message).
@@ -740,7 +741,7 @@ func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, not
 	msg := buildMsg(prefix, notes)
 	switch {
 	case prefix == "":
-		labels[labelNote] = "building with last-round plan fixes"
+		labels[labelNote] = "building with plan fixes"
 		msg = buildWithFixesMsg(notes)
 	case fixes != "":
 		labels[labelNote] = "building with the arbiter's fixes"

@@ -191,10 +191,10 @@ The planner (the "Fellow") first picks a track:
     still without a verdict after that leaves its lens missing, and the panel arbiter decides from the
     others' reports, told which lens is missing and to check that area itself. Re-run the review
     replaces the whole panel. Reviews started before panels have no lens and decide as single reviews.
-- Circuit breakers: 3 review rounds per gate. At the plan-review cap, a last round whose only
-  blocking findings the reviewer marks with `SMALL FIX:` goes to Building with those fixes applied
-  and verified by code review. Otherwise, at the cap of either gate and on any reviewer's
-  `escalate`, an **arbiter** agent (the gate arbiter) rules instead of a person (`factory/arbiter.go`): a fresh Opus
+- Circuit breakers: 3 review rounds per gate. On any plan-review round, a plan whose only blocking
+  findings the reviewer marks with `SMALL FIX:` goes through the build side-effects check, then to
+  Building with those fixes applied and verified by code review. Otherwise, at the cap of either gate
+  and on any reviewer's `escalate`, an **arbiter** agent (the gate arbiter) rules instead of a person (`factory/arbiter.go`): a fresh Opus
   reviewer (`factory.arbiter`) that reads the builder's conversation and the last review and ends
   with `VERDICT: approve|changes|escalate|close`, `changes` only with `MUST FIX:` lines. On a plan,
   approve builds it and changes builds it with the fixes (code review checks each, as with
