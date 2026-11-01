@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net/mail"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -230,12 +231,59 @@ func (f *Factory) deliverOnce(ctx context.Context, a Agent, m email) (string, er
 }
 
 type threadMsg struct {
-	ID       string   `json:"id"`
-	LabelIDs []string `json:"label_ids"`
-	Date     string   `json:"date,omitempty"`
+	From     string          `json:"from,omitempty"`
+	To       string          `json:"to,omitempty"`
+	Cc       string          `json:"cc,omitempty"`
+	Headers  json.RawMessage `json:"headers,omitempty"`
+	ID       string          `json:"id"`
+	LabelIDs []string        `json:"label_ids"`
+	Date     string          `json:"date,omitempty"`
 }
 
-// sent: the mailbox sent this message.
+// onlyToSelf excludes known self-addressed mail. Incomplete or malformed metadata
+// is inconclusive; voice filing is independently excluded by its thread position.
+func (m threadMsg) onlyToSelf() bool {
+	values := map[string]string{"from": m.From, "to": m.To, "cc": m.Cc}
+	var headers map[string]string
+	if json.Unmarshal(m.Headers, &headers) == nil {
+		for k, v := range headers {
+			values[strings.ToLower(k)] = v
+		}
+	} else {
+		var list []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		}
+		if json.Unmarshal(m.Headers, &list) == nil {
+			for _, h := range list {
+				values[strings.ToLower(h.Name)] = h.Value
+			}
+		}
+	}
+	from, err := mail.ParseAddress(values["from"])
+	if err != nil {
+		return false
+	}
+	n := 0
+	for _, key := range []string{"to", "cc", "bcc"} {
+		if values[key] == "" {
+			continue
+		}
+		recipients, err := mail.ParseAddressList(values[key])
+		if err != nil {
+			return false
+		}
+		for _, r := range recipients {
+			n++
+			if !strings.EqualFold(from.Address, r.Address) {
+				return false
+			}
+		}
+	}
+	return n > 0
+}
+
+// sent reports whether the mailbox sent this message.
 func (m threadMsg) sent() bool { return slices.Contains(m.LabelIDs, "SENT") }
 
 // latestFromZach is the newest message in a thread that the mailbox did not send, and the newest

@@ -970,8 +970,14 @@ records its times in `timings.json` in the state directory, so a restart keeps t
   must match the original patch. Errands that commit nothing have no landing time. Failed Git reads never
   acquire a landing time or substitute another card's commit.
 - **Replied** (email and voice cards): 5 minutes after Done, one read of the card's thread takes
-  the last message the mailbox sent after he asked and by Done plus 5 minutes. The factory's own
+  the first eligible answer for voice cards, or the last for email cards, sent after Asked and
+  by Done plus 5 minutes. The first message of a voice thread is its filing email and never
+  counts. Messages whose known recipients are only the sending mailbox also never count.
+  Missing or malformed recipient metadata does not disable the voice filing exclusion. The factory's own
   emails (Needs Zach notes, failed-answer notes) are recorded when sent and never count.
+  A separate per-record voice reply revision clears retained voice reply results once, including
+  exhausted retries, and rechecks them through the existing bounded checker. The revision persists
+  across restarts without rerunning the landing migration. Failed reads leave the stale reply cleared.
   Reply checks also run for errands that commit nothing. A completed inbox card with no confirmed
   reply has `noReply: true` in saved timing, board timing and the timing export; the Timeline says
   “no reply”. This includes exhausted mailbox retries or a missing thread. A later reply outside

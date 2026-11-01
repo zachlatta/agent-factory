@@ -56,26 +56,27 @@ type FactoryMail struct {
 
 // CardTiming is one card's recorded times.
 type CardTiming struct {
-	Version        int             `json:"version,omitempty"`
-	Request        string          `json:"request,omitempty"`
-	Repo           string          `json:"repo,omitempty"`
-	Sessions       []TimingSession `json:"sessions,omitempty"`
-	RequestedAt    time.Time       `json:"requestedAt,omitzero"`
-	RequestedFrom  string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
-	Source         string          `json:"source"`
-	Tier           string          `json:"tier,omitempty"`
-	Thread         string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
-	Partial        bool            `json:"partial,omitempty"`
-	Events         []TimingEvent   `json:"events"`
-	Rounds         []TimingRound   `json:"rounds,omitempty"`
-	LandedAt       time.Time       `json:"landedAt,omitzero"` // the final verified landing time
-	RepliedAt      time.Time       `json:"repliedAt,omitzero"`
-	NoReply        bool            `json:"noReply,omitempty"`
-	LandingChecked bool            `json:"landingChecked,omitempty"` // ownership check completed; nonzero legacy landing was verified
-	ReplyChecked   bool            `json:"replyChecked,omitempty"`
-	ReplyTries     int             `json:"replyTries,omitempty"`
-	ReplyRetry     time.Time       `json:"replyRetry,omitzero"`
-	Mails          []FactoryMail   `json:"mails,omitempty"`
+	Version           int             `json:"version,omitempty"`
+	Request           string          `json:"request,omitempty"`
+	Repo              string          `json:"repo,omitempty"`
+	Sessions          []TimingSession `json:"sessions,omitempty"`
+	RequestedAt       time.Time       `json:"requestedAt,omitzero"`
+	RequestedFrom     string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
+	Source            string          `json:"source"`
+	Tier              string          `json:"tier,omitempty"`
+	Thread            string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
+	Partial           bool            `json:"partial,omitempty"`
+	Events            []TimingEvent   `json:"events"`
+	Rounds            []TimingRound   `json:"rounds,omitempty"`
+	LandedAt          time.Time       `json:"landedAt,omitzero"` // the final verified landing time
+	RepliedAt         time.Time       `json:"repliedAt,omitzero"`
+	NoReply           bool            `json:"noReply,omitempty"`
+	LandingChecked    bool            `json:"landingChecked,omitempty"` // ownership check completed; nonzero legacy landing was verified
+	VoiceReplyVersion int             `json:"voiceReplyVersion,omitempty"`
+	ReplyChecked      bool            `json:"replyChecked,omitempty"`
+	ReplyTries        int             `json:"replyTries,omitempty"`
+	ReplyRetry        time.Time       `json:"replyRetry,omitzero"`
+	Mails             []FactoryMail   `json:"mails,omitempty"`
 }
 
 func (t CardTiming) last() TimingEvent {
@@ -540,6 +541,14 @@ func (f *Factory) reconcileTimings() {
 	}
 	n := 0
 	for id, t := range f.timings.all() {
+		if t.Source == "voice" && t.VoiceReplyVersion < 1 {
+			f.timings.update(id, func(t *CardTiming) {
+				t.VoiceReplyVersion = 1
+				t.RepliedAt, t.ReplyRetry = time.Time{}, time.Time{}
+				t.ReplyChecked, t.NoReply, t.ReplyTries = false, false, 0
+			})
+			t, _ = f.timings.get(id)
+		}
 		early := !t.RequestedAt.IsZero() && !t.LandedAt.IsZero() && t.LandedAt.Before(t.RequestedAt)
 		noReply := t.inbox() && !t.doneAt().IsZero() && t.ReplyChecked && t.RepliedAt.IsZero()
 		if early || noReply != t.NoReply {
@@ -670,7 +679,7 @@ func (f *Factory) checkReplies(now time.Time) {
 func (f *Factory) readThread(thread string) ([]threadMsg, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	out, err := f.Mail.Call(ctx, "get_thread", map[string]any{"thread_id": thread, "max_body_chars": 1})
+	out, err := f.Mail.Call(ctx, "get_thread", map[string]any{"thread_id": thread, "max_body_chars": 1, "include_headers": true})
 	if err != nil {
 		return nil, err
 	}
@@ -683,21 +692,21 @@ func (f *Factory) readThread(thread string) ([]threadMsg, error) {
 	return th.Messages, nil
 }
 
-// replyTime is the card's reply to Zach: the last message the mailbox sent after he asked and by
+// replyTime selects the first voice answer or last email answer sent after the request and by
 // Done + replyWait that is not one of the factory's own emails; zero if none. A one-pass answer is
 // sent before its work item lands, so it is not bounded by the landing.
 func replyTime(t CardTiming, msgs []threadMsg) time.Time {
 	limit := t.doneAt().Add(replyWait)
 	var out time.Time
-	for _, m := range msgs {
-		if !m.sent() {
+	for i, m := range msgs {
+		if !m.sent() || (t.Source == "voice" && i == 0) || m.onlyToSelf() {
 			continue
 		}
 		d, err := mail.ParseDate(m.Date)
 		if err != nil || d.After(limit) || (!t.RequestedAt.IsZero() && !d.After(t.RequestedAt)) || t.factoryMail(m.ID, d) {
 			continue
 		}
-		if d.After(out) {
+		if out.IsZero() || (t.Source == "voice" && d.Before(out)) || (t.Source != "voice" && d.After(out)) {
 			out = d.UTC()
 		}
 	}
