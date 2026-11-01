@@ -143,11 +143,14 @@ The planner (the "Fellow") first picks a track:
   writes three `CHANGED:` lines in plain words and any `BEFORE:` / `AFTER:` screenshots; it starts no
   server and uploads nothing. The factory runs the repo's preview (below) and sends one email:
   subject "Ready to try: <title>", the three lines, the screenshots, a Preview button and the board
-  link. The board item shows the same with Land, Change and Drop. Email replies: `land` or `land it`
+  link. The board item shows the same with Land, Change and Drop. Email replies: `yes`, the approval words below, `land` or `land it`
   lands it; the drop words drop it; letters (`1A`, or `A` for one question) answer the builder's
   questions, cut to the decision email's lengths, and go to it; anything else is a change request,
-  which sends the card back to building and code review and then to a new Ready for you
-  (`factory.ready` counts them; each has its own note, so its own email). The email waits for the preview to load or fail, at most 10 minutes
+  which sends the card back to building and code review. If the clean reviewed revision matches
+  the revision last presented, the builder's answer is emailed once per feedback exchange without
+  another Ready summary or announcement. Land, Change and Drop remain available. Changed code
+  gets a fresh Ready presentation (`factory.ready` counts presentations). The presented revision
+  and exchange are persisted through restart and agent replacement. The email waits for the preview to load or fail, at most 10 minutes
   after the builder was asked.
 - **Previews** (`factory/tryout.go`, `previews.json`). A repo declares one in `.factory.json`, read
   from `origin/main` only, so a card cannot change what runs on the host before it lands:
@@ -899,12 +902,12 @@ acts:
 | `no` | No |
 | `done`, `mark done`, `mark it done`, `works`, `it works` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
-| `land`, `land it` | Land, on Ready for you (there, only these and the drop words act; anything else is Change) |
+| `land`, `land it` | Land, on Ready for you (approval words and drop words also act; anything else is Change) |
 | `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
 
 Other free text receives a tool-free relevance check with a 12-second deadline and no retry.
 Related answers and changes use the ask's text choice, including Change on Ready for you;
-only explicit land and drop words bypass the check there.
+whole approval, land and drop words bypass the check there.
 Unrelated requests start independently with Repo Auto, without the waiting thread.
 Unclear or mixed replies and failed checks leave the waiting work untouched. The factory saves
 the reply privately and asks for whole-reply `answer` (send the saved text) or `separate`

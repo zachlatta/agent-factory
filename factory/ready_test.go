@@ -23,8 +23,8 @@ func TestReadyReplyWords(t *testing.T) {
 		"Drop it":                       {Choice: "drop"},
 		"close":                         {Choice: "drop"},
 		"cancel":                        {Choice: "drop"},
-		"ok":                            {Choice: "change", Message: "ok"},
-		"yes":                           {Choice: "change", Message: "yes"},
+		"ok":                            {Choice: "land"},
+		"yes":                           {Choice: "land"},
 		"make the button blue":          {Choice: "change", Message: "make the button blue"},
 		"land\n\nOn Mon someone wrote:": {Choice: "land"},
 	} {
@@ -71,7 +71,7 @@ func TestReadyEmail(t *testing.T) {
 		t.Errorf("subject = %v", a["subject"])
 	}
 	for _, want := range []string{"- The board groups cards by repo.", "- Each group folds.", "- Counts show per group.",
-		"Try it: https://board.example:7701/", `Reply "land"`, "https://board.example/#c1"} {
+		"Try it: https://board.example:7701/", `Reply "yes" or "land"`, "https://board.example/#c1"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text lacks %q:\n%s", want, text)
 		}

@@ -377,8 +377,8 @@ type replyWord struct{ Word, Does string }
 // other reply is the ask's text choice (Change, No or his Answer).
 func replyWords(ask *Ask) []replyWord {
 	var out []replyWord
-	if ask.Ready != nil { // readyAnswer: only land and drop act there
-		return []replyWord{{"land", "land it"}, {"drop", "stop it"}}
+	if ask.Ready != nil { // readyAnswer: approval and drop words act there
+		return []replyWord{{"yes", "land it"}, {"land", "land it"}, {"drop", "stop it"}}
 	}
 	if goCh := goChoice(ask); goCh != nil {
 		does := strings.ToLower(goCh.Label)
@@ -578,6 +578,9 @@ func emailQuestion(a Agent, ask *Ask, repos []string) string {
 // composeEmail writes the decision email for card a waiting on ask: one question, under mailWordCap
 // words, answerable with one word, with any before and after screenshots inline.
 func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
+	if isFeedbackNote(a.L(labelNote)) {
+		return f.feedbackEmail(a, c, ask)
+	}
 	if ask.Ready != nil {
 		return f.readyEmail(a, c, ask)
 	}

@@ -57,7 +57,7 @@ const (
 	labelArbiter    = "arbiter"      // on a reviewer: it is its card's arbiter (arbiter.go)
 	labelArbitrated = "arbitrated"   // the gates ("plan", "code"; space-separated) whose arbiter already ruled
 	labelAskWhy     = "ask-why"      // why a card whose code review passed comes to Zach before it lands (alwaysask.go)
-	labelReady      = "ready"        // Ready for you stops so far: each gets its own note and email (ready.go)
+	labelReady      = "ready"        // Ready presentations so far; unchanged feedback answers do not increment it
 	labelPermitTold = "permit-told"  // the stage whose stuck permission prompt was already emailed to Zach (permit.go)
 )
 

@@ -108,7 +108,7 @@ func exactAnswer(text string, ask *Ask) bool {
 		return false
 	}
 	if ask.Ready != nil {
-		return c == "land" || c == "land it" || slicesWord(dropWords, c)
+		return slicesWord(landWords, c) || slicesWord(approveWords, c) || slicesWord(dropWords, c)
 	}
 	if slicesWord(approveWords, c) || slicesWord(dropWords, c) || slicesWord(doneWords, c) || c == "no" {
 		ch := choiceByID(ask, ans.Choice)

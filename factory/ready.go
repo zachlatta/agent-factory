@@ -11,8 +11,8 @@ import (
 
 // Ready for you: the one stop where Zach sees finished work before it lands. The builder writes
 // three CHANGED: lines and any before/after screenshots; the factory runs the live preview
-// (tryout.go) and sends one email. Land lands it, Drop drops it, and anything else is a change
-// request: the card goes back to building and code review, then to a new Ready for you.
+// (tryout.go) and sends one email. Whole approval replies land it, Drop drops it, and other
+// replies go back to the builder and code review. Only changed code gets a new Ready summary.
 
 // readyPrefix starts the Needs Zach note of a card at the Ready for you stop.
 const readyPrefix = "ready for you"
@@ -34,7 +34,7 @@ var olderFinishedNotes = []string{"built and reviewed: try the preview", "review
 
 // isFinishedNote reports whether note is the finished-work stop, Ready for you, in any form.
 func isFinishedNote(note string) bool {
-	if isReadyNote(note) {
+	if isReadyNote(note) || isFeedbackNote(note) {
 		return true
 	}
 	for _, p := range olderFinishedNotes {
@@ -120,7 +120,7 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 	}
 }
 
-// landWords land a card at Ready for you; dropWords drop it; any other reply is a change request.
+// landWords supplement the shared approval vocabulary at Ready for you; other replies are feedback.
 var landWords = []string{"land", "land it"}
 
 // readyAnswer applies the Ready for you reply rule to its Land / Change / Drop buttons. Letters answer
@@ -133,7 +133,7 @@ func readyAnswer(text string, qs []Question) answer {
 	switch {
 	case clean == "":
 		return answer{}
-	case slices.Contains(landWords, clean):
+	case slices.Contains(landWords, clean) || slices.Contains(approveWords, clean):
 		return answer{Choice: "land"}
 	case slices.Contains(dropWords, clean):
 		return answer{Choice: "drop"}
@@ -202,9 +202,9 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	if len(changed) == 0 && ask.Overview != nil && ask.Overview.Overview != "" {
 		changed = []string{plainText(ask.Overview.Overview, repos...)}
 	}
-	answerLine := "Reply \"land\" to ship it, \"drop\" to drop it, or say what to change."
+	answerLine := "Reply \"yes\" or \"land\" to ship it, \"drop\" to drop it, or say what to change."
 	if len(ask.Questions) > 0 { // shorter, to stay under the email word cap with the questions
-		answerLine = "Reply \"land\", \"drop\", or what to change. Letters like 1A answer the questions."
+		answerLine = "Reply \"yes\" or \"land\", \"drop\", or what to change. Letters like 1A answer the questions."
 	}
 	var qs []string                   // the builder's questions, numbered, with lettered options
 	for i, q := range ask.Questions { // cut like a decision email's (mail.go): the board has them whole

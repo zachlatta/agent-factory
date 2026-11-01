@@ -805,12 +805,16 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 	if scanned != "" && !scanPassed(scanned) {
 		// a scan hit or error stops the card; a clean public-repo card goes on like any other
 		err = set(labelStage, "zach", labelVerdict, verdict, labelNote, scanned)
-	} else if why := f.finishedWorkReason(t, tier, notes, asked); why != "" {
+	} else if t.L(labelReadyFeedback) != "" && t.L(labelReadyHead) != "" && t.L(labelReadyHead) == strings.TrimSpace(t.L(labelReviewed)) {
+		// reviewHold above established a clean HEAD matching this reviewed revision.
+		err = set(labelStage, "zach", labelVerdict, verdict, labelNote, feedbackPrefix+" "+t.L(labelReadyFeedback),
+			labelWriting, "")
+	} else if why := feedbackReadyReason(t, f.finishedWorkReason(t, tier, notes, asked)); why != "" {
 		// the one stop for Zach, Ready for you: the builder writes what changed, the factory runs the
 		// preview (tryout.go), and mailZach waits for both
 		n := readyRound(t)
 		if err = set(labelStage, "zach", labelVerdict, verdict, labelNote, readyNote(n), labelReady, fmt.Sprint(n),
-			labelAskWhy, why, labelWriting, now); err == nil {
+			labelAskWhy, why, labelWriting, now, labelReadyHead, strings.TrimSpace(t.L(labelReviewed)), labelReadyFeedback, ""); err == nil {
 			msg := readyMsg(why)
 			if fb != "" {
 				// one message: a second would interrupt the builder writing the first

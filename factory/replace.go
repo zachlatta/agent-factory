@@ -15,7 +15,7 @@ const maxReplaceHops = 16
 // applyLineageLabels after the replacement clears them; non-clearable lineage labels
 // (chainCarriedFactoryLabels) and any explicit empty value on a newer agent are read through the chain.
 var carriedFactoryLabels = []string{
-	labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
+	labelReady, labelReadyHead, labelReadyFeedback, labelAskWhy, labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
 	labelDecided, labelPlanFix, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone,
 	labelHeld, labelHeldApproved, labelArbitrated, labelWorkLeftRounds, labelRecovery,

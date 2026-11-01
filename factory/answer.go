@@ -60,7 +60,7 @@ type answer struct{ Choice, Message string }
 
 // parseAnswer applies the reply rule to Zach's reply for ask. A reply word acts only where the ask
 // has the button it stands for (replyWords lists the same ones); anything else is the ask's text
-// choice (Change, or his Answer).
+// choice (Change, or his Answer). At Ready, approval words use the guarded Land action.
 func parseAnswer(text string, ask *Ask) answer {
 	if ask.Ready != nil {
 		return readyAnswer(text, ask.Questions)

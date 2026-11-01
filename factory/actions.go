@@ -170,6 +170,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
 		}
+		if readyStop(f.agent(c.ID)) {
+			msg += "\n\nAnswer this feedback directly and describe any changes. Do not repeat the Ready summary. Commit any code changes, then stop for code review."
+		}
 		if landingReply(f.agent(c.ID)) {
 			msg += remainingRule
 		}
@@ -180,6 +183,10 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		f.delivered(c.ID, sub)
 		if a := f.agent(c.ID); !sub && a.L(labelStage) != "" {
 			labels := answerLabels(c, a, now, f.guarded(c.Repo))
+			if readyStop(a) {
+				labels[labelReadyFeedback] = now
+				labels[labelWriting] = ""
+			}
 			labels[labelFinished] = ""
 			labels[labelStuck] = ""
 			if interrupted && (a.L(labelStage) == "plan" || a.L(labelStage) == "plan-review") && !landingReply(a) {
