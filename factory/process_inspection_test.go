@@ -92,13 +92,15 @@ func TestProcessInspectionUncertain(t *testing.T) {
 	}
 }
 func TestProcessInspectionRaces(t *testing.T) {
-	for _, kind := range []string{"runner exit", "child exit", "pid reuse", "new child", "command change", "ownership change", "user change", "reparent"} {
+	for _, kind := range []string{"runner exit", "child exit", "pid reuse", "new child", "command change", "ownership change", "user change", "reparent", "ancestor identity"} {
 		t.Run(kind, func(t *testing.T) {
 			a := processFixture()
 			a.Processes = append(a.Processes, childFixture(20, 10, "fixture-tool"))
 			b := processFixture()
 			b.Processes = append(b.Processes, childFixture(20, 10, "fixture-tool"))
 			switch kind {
+			case "ancestor identity":
+				b.Processes[0].StartTime = "replacement-start"
 			case "runner exit":
 				b.Processes = b.Processes[:1]
 			case "child exit":
@@ -187,5 +189,58 @@ func TestProcessInspectionUnreadableSystemAncestor(t *testing.T) {
 	got := InspectAgentProcesses(context.Background(), r, ProcessTarget{AgentID: "agent-fixture", Locality: ProcessHostLocal})
 	if got.State != ProcessIdle {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestProcessInspectionOlderUnreadableProcesses(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		order  uint64
+		parent int
+		want   ProcessState
+	}{
+		{"older unrelated manager", 10, 1, ProcessIdle},
+		{"older unrelated helper", 11, 50, ProcessIdle},
+		{"possible second runner", 30, 1, ProcessUncertain},
+		{"same start tick", 20, 1, ProcessUncertain},
+		{"unknown start order", 0, 1, ProcessUncertain},
+		{"older descendant", 10, 10, ProcessUncertain},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := processFixture()
+			s.Processes[1].ParentPID = 5
+			s.Processes = append(s.Processes, ProcessInfo{PID: 5, ParentPID: 1, UserID: "fixture-user", StartTime: "daemon-start", StartOrder: 20, EnvironmentReadable: true},
+				ProcessInfo{PID: 50, ParentPID: 1, UserID: "fixture-user", StartTime: "manager-start", StartOrder: 9},
+				ProcessInfo{PID: 60, ParentPID: tt.parent, UserID: "fixture-user", StartTime: "helper-start", StartOrder: tt.order})
+			r := &fakeProcessReader{snapshots: []ProcessSnapshot{s, s}}
+			got := InspectAgentProcesses(context.Background(), r, ProcessTarget{AgentID: "agent-fixture", Locality: ProcessHostLocal})
+			if got.State != tt.want {
+				t.Fatalf("got %+v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessInspectionParentMustBeReadable(t *testing.T) {
+	s := processFixture()
+	s.Processes[0].UserID = "system-user"
+	s.Processes[0].EnvironmentReadable = false
+	r := &fakeProcessReader{snapshots: []ProcessSnapshot{s, s}}
+	got := InspectAgentProcesses(context.Background(), r, ProcessTarget{AgentID: "agent-fixture", Locality: ProcessHostLocal})
+	if got.State != ProcessUncertain || r.calls != 1 {
+		t.Fatalf("got %+v, calls %d", got, r.calls)
+	}
+}
+
+func TestProcessInspectionRejectsTwoRunnersImmediately(t *testing.T) {
+	// Both candidates have readable parents; rejection cannot depend on iteration order.
+	s := processFixture()
+	s.Processes = append(s.Processes, childFixture(40, 1, "fixture-runner"))
+	for i := 0; i < 100; i++ {
+		r := &fakeProcessReader{snapshots: []ProcessSnapshot{s, s}}
+		got := InspectAgentProcesses(context.Background(), r, ProcessTarget{AgentID: "agent-fixture", Locality: ProcessHostLocal})
+		if got.State != ProcessUncertain || r.calls != 1 {
+			t.Fatalf("got %+v, calls %d", got, r.calls)
+		}
 	}
 }

@@ -40,6 +40,7 @@ type ProcessInfo struct {
 	PID                 int
 	ParentPID           int
 	StartTime           string
+	StartOrder          uint64 // OS start ticks since boot, comparable across this table; zero means unknown.
 	UserID              string // OS user identity; empty means unknown.
 	EnvironmentReadable bool
 	Environment         map[string]string
@@ -131,7 +132,7 @@ func InspectAgentProcesses(ctx context.Context, reader ProcessReader, target Pro
 
 // processEvidence validates the table and retains the runner tree and ancestors.
 // Unrelated processes may change between observations. Unreadable environments
-// outside the runner user are allowed only with verified OS user identities.
+// outside the runner tree require evidence ruling out another runner.
 func processEvidence(s ProcessSnapshot, agentID string) (map[int]ProcessInfo, int, bool) {
 	if !s.Complete {
 		return nil, 0, false
@@ -184,7 +185,12 @@ func processEvidence(s ProcessSnapshot, agentID string) (map[int]ProcessInfo, in
 	}
 	for _, p := range all {
 		if !p.EnvironmentReadable && (p.UserID == "" || p.UserID == all[runner].UserID) {
-			return nil, 0, false
+			// A process predating the runner's parent cannot have inherited
+			// this launch's agent id. Unknown or equal start ticks prove nothing.
+			parent := all[all[runner].ParentPID]
+			if p.UserID == "" || p.StartOrder == 0 || parent.StartOrder == 0 || p.StartOrder >= parent.StartOrder {
+				return nil, 0, false
+			}
 		}
 	}
 	relevant := map[int]ProcessInfo{}
