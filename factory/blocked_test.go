@@ -250,6 +250,23 @@ func TestPromptsCarryRmRule(t *testing.T) {
 	}
 }
 
+func TestSubagentPreambleCarriesZshQuotingRule(t *testing.T) {
+	for _, reviewer := range []bool{false, true} {
+		txt := delegateText(delegateOpts(), reviewer)
+		for _, want := range []string{
+			"The shell is zsh",
+			"curl 'https://x/?id=1'",
+			"The shell is zsh: quote every URL and any word with ?, *, [ or a leading = (curl 'https://x/?id=1'); an unmatched glob aborts the whole command.",
+			"no cd earlier in the same command",
+			"Never run commands from inside .factory-scratch/.",
+		} {
+			if !strings.Contains(txt, want) {
+				t.Errorf("delegateText(reviewer=%v) lacks %q:\n%s", reviewer, want, txt)
+			}
+		}
+	}
+}
+
 // The factory answers its own agents' permission prompts with no, once per prompt, with the rule that
 // avoids them; it never allows one, and never touches agents it did not start.
 func TestFactoryDeniesItsAgentsPermissionPrompts(t *testing.T) {

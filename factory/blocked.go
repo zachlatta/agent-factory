@@ -14,7 +14,8 @@ const shellRule = "Shell commands: Claude Code asks for permission before some r
 	"A factory -dry-run deletes its own temp state when you stop it. " +
 	"Wait on your original tool task handle or a verified exact process ID. Do not poll pgrep -f: " +
 	"the watcher can match itself or other agents. A watcher timeout is not a failed command; " +
-	"read the original result before retrying."
+	"read the original result before retrying. " +
+	"The shell is zsh: quote every URL and any word with ?, *, [ or a leading = (curl 'https://x/?id=1'); an unmatched glob aborts the whole command."
 
 // scratchSafetyRule applies to every agent using the card's shared worktree.
 const scratchSafetyRule = "Never run commands from inside .factory-scratch/. Keep your working directory at the worktree root. " +
