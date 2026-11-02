@@ -40,13 +40,15 @@ type ProcessInfo struct {
 	PID                 int
 	ParentPID           int
 	StartTime           string
+	UserID              string // OS user identity; empty means unknown.
 	EnvironmentReadable bool
 	Environment         map[string]string
 	Command             []string
 }
 
 // ProcessSnapshot must cover the full local process table, including runner
-// ancestors and descendants. Complete is false on any partial read or exit.
+// ancestors and descendants. Complete is false on missing table entries, identity reads or exits.
+// An unreadable environment is represented by EnvironmentReadable=false.
 // Readers must return independently owned observations, not reused mutable data.
 type ProcessSnapshot struct {
 	Complete  bool
@@ -128,15 +130,15 @@ func InspectAgentProcesses(ctx context.Context, reader ProcessReader, target Pro
 }
 
 // processEvidence validates the table and retains the runner tree and ancestors.
-// Unrelated processes may change between observations; unreadable environments
-// still prevent proving that the runner is unique.
+// Unrelated processes may change between observations. Unreadable environments
+// outside the runner user are allowed only with verified OS user identities.
 func processEvidence(s ProcessSnapshot, agentID string) (map[int]ProcessInfo, int, bool) {
 	if !s.Complete {
 		return nil, 0, false
 	}
 	all := make(map[int]ProcessInfo, len(s.Processes))
 	for _, p := range s.Processes {
-		if p.PID <= 0 || p.ParentPID < 0 || p.StartTime == "" || !p.EnvironmentReadable {
+		if p.PID <= 0 || p.ParentPID < 0 || p.StartTime == "" {
 			return nil, 0, false
 		}
 		if _, exists := all[p.PID]; exists {
@@ -158,10 +160,10 @@ func processEvidence(s ProcessSnapshot, agentID string) (map[int]ProcessInfo, in
 			}
 			seen[id] = true
 		}
-		if p.Environment["PASEO_AGENT_ID"] == agentID {
+		if p.EnvironmentReadable && p.Environment["PASEO_AGENT_ID"] == agentID {
 			// A missing parent cannot prove that its environment lacks the id.
 			parent, ok := all[p.ParentPID]
-			if !ok {
+			if !ok || !parent.EnvironmentReadable {
 				return nil, 0, false
 			}
 			if parent.Environment["PASEO_AGENT_ID"] != agentID {
@@ -175,11 +177,21 @@ func processEvidence(s ProcessSnapshot, agentID string) (map[int]ProcessInfo, in
 	if runner == 0 {
 		return nil, 0, false
 	}
+	// Only the runner user's processes can be additional runner candidates.
+	// Unknown ownership cannot establish that an unreadable process is unrelated.
+	if all[runner].UserID == "" {
+		return nil, 0, false
+	}
+	for _, p := range all {
+		if !p.EnvironmentReadable && (p.UserID == "" || p.UserID == all[runner].UserID) {
+			return nil, 0, false
+		}
+	}
 	relevant := map[int]ProcessInfo{}
 	for pid, p := range all {
 		for id := pid; id != 0; id = all[id].ParentPID {
 			if id == runner {
-				if len(p.Command) == 0 {
+				if len(p.Command) == 0 || !p.EnvironmentReadable {
 					return nil, 0, false
 				}
 				relevant[pid] = p

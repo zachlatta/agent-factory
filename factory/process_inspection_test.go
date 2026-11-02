@@ -29,12 +29,12 @@ func (r *fakeProcessReader) Snapshot(ctx context.Context, _ ProcessTarget) (Proc
 }
 func processFixture() ProcessSnapshot {
 	return ProcessSnapshot{Complete: true, Processes: []ProcessInfo{
-		{PID: 1, StartTime: "root-start", EnvironmentReadable: true},
-		{PID: 10, ParentPID: 1, StartTime: "runner-start", EnvironmentReadable: true, Environment: map[string]string{"PASEO_AGENT_ID": "agent-fixture"}, Command: []string{"fixture-runner"}},
+		{PID: 1, UserID: "fixture-user", StartTime: "root-start", EnvironmentReadable: true},
+		{PID: 10, UserID: "fixture-user", ParentPID: 1, StartTime: "runner-start", EnvironmentReadable: true, Environment: map[string]string{"PASEO_AGENT_ID": "agent-fixture"}, Command: []string{"fixture-runner"}},
 	}}
 }
 func childFixture(pid, parent int, command ...string) ProcessInfo {
-	return ProcessInfo{PID: pid, ParentPID: parent, StartTime: "child-start", EnvironmentReadable: true, Environment: map[string]string{"PASEO_AGENT_ID": "agent-fixture"}, Command: command}
+	return ProcessInfo{PID: pid, UserID: "fixture-user", ParentPID: parent, StartTime: "child-start", EnvironmentReadable: true, Environment: map[string]string{"PASEO_AGENT_ID": "agent-fixture"}, Command: command}
 }
 func TestInspectAgentProcesses(t *testing.T) {
 	tests := []struct {
@@ -50,7 +50,7 @@ func TestInspectAgentProcesses(t *testing.T) {
 		{"grandchild tool", []ProcessInfo{childFixture(20, 10, "fixture-job"), childFixture(30, 20, "fixture-tool", "serve")}, [][]string{{"fixture-tool", "serve"}}, ProcessLiveWork},
 		{"extra argument", []ProcessInfo{childFixture(20, 10, "fixture-tool", "serve", "extra")}, [][]string{{"fixture-tool", "serve"}}, ProcessLiveWork},
 		{"empty list", []ProcessInfo{childFixture(20, 10, "fixture-tool", "serve")}, nil, ProcessLiveWork},
-		{"no inherited id", []ProcessInfo{{PID: 20, ParentPID: 10, StartTime: "child-start", EnvironmentReadable: true, Command: []string{"fixture-job"}}}, nil, ProcessLiveWork},
+		{"no inherited id", []ProcessInfo{{PID: 20, UserID: "fixture-user", ParentPID: 10, StartTime: "child-start", EnvironmentReadable: true, Command: []string{"fixture-job"}}}, nil, ProcessLiveWork},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,6 +74,7 @@ func TestProcessInspectionUncertain(t *testing.T) {
 		{"unreadable environment", func(s *ProcessSnapshot) { s.Processes[0].EnvironmentReadable = false }},
 		{"partial", func(s *ProcessSnapshot) { s.Complete = false }},
 		{"missing parent", func(s *ProcessSnapshot) { s.Processes[1].ParentPID = 99 }},
+		{"missing runner owner", func(s *ProcessSnapshot) { s.Processes[1].UserID = "" }},
 		{"missing identity", func(s *ProcessSnapshot) { s.Processes[1].StartTime = "" }},
 		{"duplicate pid", func(s *ProcessSnapshot) { s.Processes = append(s.Processes, s.Processes[1]) }},
 		{"cycle", func(s *ProcessSnapshot) { s.Processes[0].ParentPID = 10 }},
@@ -91,7 +92,7 @@ func TestProcessInspectionUncertain(t *testing.T) {
 	}
 }
 func TestProcessInspectionRaces(t *testing.T) {
-	for _, kind := range []string{"runner exit", "child exit", "pid reuse", "new child", "command change", "ownership change", "reparent"} {
+	for _, kind := range []string{"runner exit", "child exit", "pid reuse", "new child", "command change", "ownership change", "user change", "reparent"} {
 		t.Run(kind, func(t *testing.T) {
 			a := processFixture()
 			a.Processes = append(a.Processes, childFixture(20, 10, "fixture-tool"))
@@ -110,6 +111,8 @@ func TestProcessInspectionRaces(t *testing.T) {
 				b.Processes[2].Command = []string{"fixture-job"}
 			case "ownership change":
 				b.Processes[1].Environment = nil
+			case "user change":
+				b.Processes[1].UserID = "replacement-user"
 			case "reparent":
 				b.Processes[2].ParentPID = 1
 			}
@@ -149,5 +152,40 @@ func TestProcessInspectionGuards(t *testing.T) {
 	}
 	if (ProcessInspection{}).State != ProcessUncertain {
 		t.Fatal("zero value must defer")
+	}
+}
+
+func TestProcessInspectionEnvironmentScope(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		user   string
+		parent int
+		want   ProcessState
+	}{
+		{"unrelated system process", "system-user", 1, ProcessIdle},
+		{"unreadable same user", "fixture-user", 1, ProcessUncertain},
+		{"unknown owner", "", 1, ProcessUncertain},
+		{"unreadable descendant", "system-user", 10, ProcessUncertain},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := processFixture()
+			s.Processes = append(s.Processes, ProcessInfo{PID: 50, ParentPID: tt.parent, UserID: tt.user, StartTime: "system-start"})
+			r := &fakeProcessReader{snapshots: []ProcessSnapshot{s, s}}
+			got := InspectAgentProcesses(context.Background(), r, ProcessTarget{AgentID: "agent-fixture", Locality: ProcessHostLocal})
+			if got.State != tt.want {
+				t.Fatalf("got %+v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessInspectionUnreadableSystemAncestor(t *testing.T) {
+	s := processFixture()
+	s.Processes[0].ParentPID = 2
+	s.Processes = append(s.Processes, ProcessInfo{PID: 2, UserID: "system-user", StartTime: "system-start"})
+	r := &fakeProcessReader{snapshots: []ProcessSnapshot{s, s}}
+	got := InspectAgentProcesses(context.Background(), r, ProcessTarget{AgentID: "agent-fixture", Locality: ProcessHostLocal})
+	if got.State != ProcessIdle {
+		t.Fatalf("got %+v", got)
 	}
 }
