@@ -37,6 +37,12 @@ func TestArchiveCLIProcess(t *testing.T) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		panic(err)
 	}
+	if strings.HasPrefix(s.Mode, "slow-") {
+		s.Mode = strings.TrimPrefix(s.Mode, "slow-")
+		if args[0] == "archive" {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
 	log, err := os.OpenFile(path+".calls", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		panic(err)
@@ -202,20 +208,14 @@ func TestArchiveCLISelectionAndCancellation(t *testing.T) {
 	if strings.Contains(archiveCalls(t, oldLog), "archive") || !strings.Contains(archiveCalls(t, fixedLog), "archive agent-425") {
 		t.Fatal("wrong executable selected")
 	}
-	for _, mode := range []string{"hang", "loop"} {
+	for _, mode := range []string{"hang", "loop", "slow-hang", "slow-loop"} {
 		cli, log := archiveCLI(t, "0.13.2", mode)
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		start := time.Now()
-		_, err := cli.Run(ctx, "archive", "agent-425")
-		cancel()
+		_, err := (archiveDeadline{Paseo: cli, t: t, log: log}).Run(context.Background(), "archive", "agent-425")
 		if err == nil || !strings.Contains(err.Error(), "deadline") {
 			t.Fatalf("%s: cancellation lost: %v", mode, err)
 		}
 		if !strings.Contains(archiveCalls(t, log), "archive agent-425") {
 			t.Fatal("deadline test never reached archive")
-		}
-		if time.Since(start) > 3*time.Second {
-			t.Fatal("CLI was not killed promptly")
 		}
 	}
 }
@@ -230,19 +230,80 @@ func TestAutomaticArchiveDoesNotStopFreshRunningAgent(t *testing.T) {
 	}
 }
 
-// Keep the same CLI execution path while shortening its production deadline in tests.
-type archiveDeadline struct{ Paseo }
+// Expire the archive context only after the subprocess records its call.
+type archiveDeadline struct {
+	Paseo
+	t   *testing.T
+	log string
+}
+
+// A manually expired context preserves the deadline error seen by CLI.Run.
+type archiveDeadlineContext struct{ context.Context }
+
+func (c archiveDeadlineContext) Err() error {
+	if context.Cause(c.Context) == context.DeadlineExceeded {
+		return context.DeadlineExceeded
+	}
+	return c.Context.Err()
+}
 
 func (p archiveDeadline) Run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-	defer cancel()
-	return p.Paseo.Run(ctx, args...)
+	if len(args) == 0 || args[0] != "archive" {
+		return p.Paseo.Run(ctx, args...)
+	}
+	p.t.Helper()
+	ctx, cancel := context.WithCancelCause(ctx)
+	done := make(chan struct{})
+	var out string
+	var err error
+	go func() {
+		defer close(done)
+		out, err = p.Paseo.Run(archiveDeadlineContext{ctx}, args...)
+	}()
+	defer func() {
+		cancel(context.Canceled)
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			p.t.Error("CLI did not stop during cleanup")
+		}
+	}()
+
+	readyLimit := time.NewTimer(10 * time.Second)
+	defer readyLimit.Stop()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		b, readErr := os.ReadFile(p.log)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			p.t.Fatal(readErr)
+		}
+		if strings.Contains(string(b), strings.Join(args, " ")+"\n") {
+			break
+		}
+		select {
+		case <-done:
+			p.t.Fatalf("CLI exited before archive readiness: %v", err)
+		case <-readyLimit.C:
+			p.t.Fatal("deadline test never reached archive")
+		case <-poll.C:
+		}
+	}
+
+	cancel(context.DeadlineExceeded)
+	select {
+	case <-done:
+		return out, err
+	case <-time.After(3 * time.Second):
+		p.t.Fatal("CLI was not killed promptly")
+		return "", nil
+	}
 }
 func TestArchiveTimeoutNeverMarksSuccess(t *testing.T) {
-	for _, mode := range []string{"hang", "loop"} {
+	for _, mode := range []string{"hang", "loop", "slow-hang", "slow-loop"} {
 		cli, log := archiveCLI(t, "0.13.2", mode)
 		f, _ := newTestFactory(t, card("agent-425", nil))
-		f.p = archiveDeadline{cli}
+		f.p = archiveDeadline{Paseo: cli, t: t, log: log}
 		if err := f.archiveStoppedAgent("agent-425"); err == nil {
 			t.Fatal("timed out archive accepted")
 		}
