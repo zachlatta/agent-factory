@@ -150,3 +150,50 @@ func TestPublishedWorkOwnershipSurvivesRebaseAndWorktreeRemoval(t *testing.T) {
 		t.Fatal("ownership reused for a different review")
 	}
 }
+
+func TestStartReviewOwnershipSurvivesWorktreeRemoval(t *testing.T) {
+	r := newRepos(t)
+	base := gitRun(t, r.wt, "rev-parse", "HEAD")
+	reviewed := commitFile(t, r.wt, "own-change", "change\n")
+	a := queuedForCode()
+	a.Cwd, a.Repo = r.wt, "example/repo"
+	a.Labels[labelPrefix+labelBase] = base
+	f, p := newTestFactory(t, a)
+	f.Git, f.GitOut = runGit, runGitOut
+	publicationAgent(t, f, r, "") // Make the main checkout discoverable after worktree removal.
+	c, _ := f.card(a.ID)
+	rid, err := f.StartReview(c, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rid == "" {
+		t.Fatal("single code reviewer was not started")
+	}
+	l := p.labels(a.ID)
+	if l[labelReviewed] != reviewed || l[labelOwnReviewed] != reviewed {
+		t.Fatalf("review did not record ownership of reviewed commit: %v", l)
+	}
+	r.land(t)
+	gitRun(t, r.main, "worktree", "remove", "--force", r.wt)
+	if _, err := os.Stat(r.wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree still exists: %v", err)
+	}
+	a = merged(a, l)
+	rev := reviewer(rid, a.ID, "code")
+	f.SetAgents([]Agent{a, rev})
+	storeLog(t, f, p, rid, "TIER: low\nVERDICT: approve")
+	if err := f.ApplyVerdict(f.agent(rid)); err != nil {
+		t.Fatal(err)
+	}
+	l = p.labels(a.ID)
+	if l[labelStage] != "landing" || l[labelLiveCompletion] != reviewed || l[labelRemainingAsk] != "1" {
+		t.Fatalf("deleted worktree did not enter live completion: %v", l)
+	}
+	msgs := p.sent(a.ID)
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "completion report") {
+		t.Fatalf("expected only a live completion request: %v", msgs)
+	}
+	if strings.Contains(strings.ToLower(strings.Join(msgs, "\n")), "ready for you") {
+		t.Fatalf("sent another approval request: %v", msgs)
+	}
+}
