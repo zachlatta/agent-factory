@@ -130,7 +130,7 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	detail, qs, ov := f.askDetail(c, ask)
 	ask.Questions, ask.Overview = qs, ov
 	refineAsk(ask)
-	f.fillReady(ask, a.ID, detail)
+	f.fillReady(ask, a.ID, detail, c.Cwd)
 	sent, err := f.mailOnce(a, labelTold, note, f.composeEmail(a, c, ask))
 	if sent {
 		f.logf("%s waits on Zach (%s): emailed him", short(a.ID), note)

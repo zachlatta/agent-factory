@@ -21,8 +21,9 @@ func TestReadyChangesDoNotBecomeTheNeedsLine(t *testing.T) {
 		if !ok || c.Ask == nil || c.Ask.Overview == nil || c.Ask.Ready == nil {
 			t.Fatalf("missing ready ask: %+v", c.Ask)
 		}
-		if c.Ask.Overview.Needs != needs {
-			t.Errorf("needs = %q, want %q", c.Ask.Overview.Needs, needs)
+		wantNeeds := "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
+		if c.Ask.Overview.Needs != wantNeeds {
+			t.Errorf("needs = %q, want %q", c.Ask.Overview.Needs, wantNeeds)
 		}
 		if len(c.Ask.Ready.Changed) != 3 || !strings.Contains(c.Ask.Report, "CHANGED: Labels are clearer.") {
 			t.Errorf("change summary lost: ready=%+v report=%q", c.Ask.Ready, c.Ask.Report)

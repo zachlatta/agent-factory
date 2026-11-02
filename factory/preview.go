@@ -335,7 +335,7 @@ const previewReadyRequest = "Make the board's answer buttons clearer on a phone,
 // previewReadyReply is finished work: built and reviewed, waiting for Zach to try it and land it.
 const previewReadyReply = `DECISION: Land the clearer board buttons?
 OVERVIEW: Each card's buttons now say what they do, and one tap answers. It is built and reviewed; nothing is live yet.
-NEEDS FROM ZACH: Try it, then land it, ask for a change or drop it.
+NEEDS FROM ZACH: Reply land to approve, ask for a change or drop it.
 
 CHANGED: Every card you answer shows its buttons in one row you can reach with your thumb.
 CHANGED: A tap answers at once, with no separate Submit.

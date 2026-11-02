@@ -55,7 +55,7 @@ func readyMsg(reason string) string {
 		reason + "). Write it for reading on a phone, in plain words. Start with three lines:\n" +
 		"DECISION: <land this change?, in one line>\n" +
 		"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
-		"NEEDS FROM ZACH: <try it, then land it, ask for a change or drop it>\n" +
+		"NEEDS FROM ZACH: <with a preview, screenshots or sample output: try it, then reply land; otherwise: reply land to approve, ask for a change or drop it>\n" +
 		"Then exactly 3 lines, each starting `CHANGED: ` with one plain sentence on what changed for him (no file names, " +
 		"ids or jargon). If it changes something he sees (a page, an email, a message), take before (origin/main) and after " +
 		"(your branch) screenshots at desktop and phone widths, on test or fake data, and name them with the evidence lines " +
@@ -104,7 +104,7 @@ func ParseChanged(text string) []string {
 }
 
 // fillReady completes a Ready for you ask of card id from the agent's reply text and its preview.
-func (f *Factory) fillReady(ask *Ask, id, text string) {
+func (f *Factory) fillReady(ask *Ask, id, text string, cwd ...string) {
 	if ask == nil || ask.Ready == nil {
 		return
 	}
@@ -118,6 +118,32 @@ func (f *Factory) fillReady(ask *Ask, id, text string) {
 	if ask.Ready.Preview == "" {
 		ask.Ready.Wait = previewReason(ask.Ready)
 	}
+	folder := ""
+	if len(cwd) > 0 {
+		folder = cwd[0]
+	}
+	if !readyHasTry(ask.Ready, len(loadEvidenceSlots(folder, ask.Evidence)) > 0) {
+		ask.Title = "Approve this change?"
+		if ask.Overview != nil {
+			decision := strings.TrimSpace(plainText(ask.Overview.Decision, f.agent(id).Repo))
+			if decision != "" && !strings.EqualFold(strings.TrimRight(decision, ".!?"), "none") {
+				ask.Title = firstWords(decision, 12)
+			}
+		}
+		if ask.Overview != nil {
+			ask.Overview.Needs = "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
+		}
+		ask.Label = "Ready: approve the change"
+		ask.Why = strings.ReplaceAll(ask.Why, " Try the preview, then land it, ask for a change, or drop it.", " Reply land to approve, ask for a change, or drop it.")
+		ask.Why += " " + readyApprovalText
+	}
+}
+
+const readyApprovalText = "Nothing is installed or changed until you reply land."
+
+// Pending previews remain something to try; failed previews need other usable evidence.
+func readyHasTry(r *Ready, screenshots bool) bool {
+	return screenshots || strings.TrimSpace(r.Sample) != "" || r.Preview != "" || r.State == previewStarting || r.State == previewQueued
 }
 
 // landWords supplement the shared approval vocabulary at Ready for you; other replies are feedback.
@@ -217,8 +243,38 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		}
 	}
 
+	heading := "Ready to try: " + title
+	noTry := !readyHasTry(r, len(slots) > 0)
+	if noTry {
+		heading = ask.Title
+	}
+	if noTry {
+		// Reserve the instructions first; share the remaining word budget with questions and changes.
+		budget := mailWordCap - wordCount(heading) - wordCount(readyApprovalText) - wordCount(answerLine) - wordCount(previewWaitText(r)) - 2 - len(changed)
+		for i := range qs {
+			n := min(max(budget, 0), wordCount(qs[i]))
+			if n > 0 {
+				qs[i] = firstWords(qs[i], n)
+			} else {
+				qs[i] = ""
+			}
+			budget -= n
+		}
+		for i := range changed {
+			n := min(max(budget, 0), wordCount(changed[i]))
+			if n > 0 {
+				changed[i] = firstWords(changed[i], n)
+			} else {
+				changed[i] = ""
+			}
+			budget -= n
+		}
+	}
 	var t strings.Builder
-	fmt.Fprintf(&t, "Ready to try: %s\n", title)
+	fmt.Fprintf(&t, "%s\n", heading)
+	if noTry {
+		fmt.Fprintf(&t, "\n%s\n", readyApprovalText)
+	}
 	if len(changed) > 0 {
 		t.WriteString("\nWhat changed:\n")
 	}
@@ -252,7 +308,11 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	buildHTML := func(includeImages bool) string {
 		var h strings.Builder
 		h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
-		fmt.Fprintf(&h, `<p style="font-size:17px"><b>Ready to try: %s</b></p><ul>`, e(title))
+		fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(heading))
+		if noTry {
+			fmt.Fprintf(&h, "<p>%s</p>", readyApprovalText)
+		}
+		h.WriteString("<ul>")
 		for _, l := range changed {
 			fmt.Fprintf(&h, "<li>%s</li>", e(l))
 		}
@@ -284,7 +344,7 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		return h.String()
 	}
 	return email{
-		Subject:     "Ready to try: " + truncWords(title, 80),
+		Subject:     truncWords(heading, 80),
 		Text:        t.String(),
 		HTML:        buildHTML(true),
 		HTMLNoImage: buildHTML(false),

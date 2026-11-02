@@ -266,7 +266,7 @@ func (f *Factory) setAgents(agents []Agent, seq uint64, fetch bool) bool {
 	f.fillAsks(cards, agents, fetch)
 	for _, c := range cards {
 		if c.Ask != nil {
-			f.fillReady(c.Ask, c.ID, c.Ask.Report)
+			f.fillReady(c.Ask, c.ID, c.Ask.Report, c.Cwd)
 		}
 	}
 	asked := map[string]CardRequest{} // first prompts still needed for request timing or app request text (timing.go)

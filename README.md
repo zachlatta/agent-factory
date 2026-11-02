@@ -142,8 +142,12 @@ The planner (the "Fellow") first picks a track:
 - **Ready for you** is the one stop where a person sees finished work before it lands. The builder
   writes three `CHANGED:` lines in plain words and any `BEFORE:` / `AFTER:` screenshots; it starts no
   server and uploads nothing. The factory runs the repo's preview (below) and sends one email:
-  subject "Ready to try: <title>", the three lines, the screenshots, a Preview button and the board
-  link. The board item shows the same with Land, Change and Drop. Email replies: `yes`, the approval words below, `land` or `land it`
+  subject "Ready to try: <title>" when a preview (including starting or queued), usable screenshot
+  or sample output exists. Otherwise the subject and board title use the builder’s decision
+  (or "Approve this change?" when absent), with "Nothing is installed or changed until you say yes or land."
+  A failed preview alone counts as nothing to try. The email includes the three lines, screenshots,
+  a Preview button when available and the board link. The board item shows the same with Land,
+  Change and Drop. Email replies: `yes`, the approval words below, `land` or `land it`
   lands it; the drop words drop it; letters (`1A`, or `A` for one question) answer the builder's
   questions, cut to the decision email's lengths, and go to it; anything else is a change request,
   which sends the card back to building and code review. If the clean reviewed revision matches

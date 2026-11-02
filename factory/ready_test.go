@@ -1,6 +1,11 @@
 package factory
 
 import (
+	"bytes"
+	stdimage "image"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -222,5 +227,97 @@ func TestReadyBoardAndEmailParity(t *testing.T) {
 	}
 	if p.labels("c1")[labelStage] != "landing" || q.labels("c1")[labelStage] != "landing" {
 		t.Errorf("land: email %q, board %q", p.labels("c1")[labelStage], q.labels("c1")[labelStage])
+	}
+}
+
+func TestReadyDecisionWithoutTry(t *testing.T) {
+	for _, state := range []string{"", previewNone, previewFailed, previewStarting, previewQueued, previewReady, previewSampled} {
+		t.Run(state, func(t *testing.T) {
+			f, _ := newTestFactory(t)
+			p := Preview{Card: "c1", State: state}
+			if state == previewReady {
+				p.URL = "https://preview.example/"
+			}
+			if state == previewSampled {
+				p.Sample = "Two checks passed."
+			}
+			if state != "" {
+				if err := f.previews.put(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ask := readyAsk("")
+			ask.Overview = &Overview{Decision: "Use clearer buttons?"}
+			f.fillReady(ask, "c1", "CHANGED: Clearer buttons.")
+			hasTry := state == previewStarting || state == previewQueued || state == previewReady || state == previewSampled
+			want := "Use clearer buttons?"
+			if hasTry {
+				want = readyTitle
+			}
+			if ask.Title != want {
+				t.Fatalf("title = %q, want %q", ask.Title, want)
+			}
+			e := f.readyEmail(Agent{}, Card{Title: "Clearer buttons"}, ask)
+			if !hasTry {
+				if e.Subject != want {
+					t.Errorf("subject = %q", e.Subject)
+				}
+				for _, body := range []string{e.Text, e.HTML, e.HTMLNoImage} {
+					if !strings.Contains(body, want) || !strings.Contains(body, "Nothing is installed or changed until you reply land.") || !strings.Contains(body, "Reply") {
+						t.Errorf("bad body: %s", body)
+					}
+				}
+				if strings.Contains(ask.Label+ask.Why, "Try the preview") {
+					t.Error("still asks to try")
+				}
+			}
+		})
+	}
+}
+
+func TestReadyEvidenceAndFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".factory-evidence"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, stdimage.NewRGBA(stdimage.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".factory-evidence", "valid.png"), b.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".factory-evidence", "bad.png"), []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"valid.png", "bad.png", "missing.png", "../valid.png", ""} {
+		for _, decision := range []string{"", "None.", "Use clearer buttons?"} {
+			f, _ := newTestFactory(t)
+			ask := readyAsk("")
+			ask.Evidence = Evidence{After: name}
+			ask.Overview = &Overview{Decision: decision}
+			f.fillReady(ask, "c1", "", dir)
+			want := "Approve this change?"
+			if decision == "Use clearer buttons?" {
+				want = decision
+			}
+			if name == "valid.png" {
+				want = readyTitle
+			}
+			if ask.Title != want {
+				t.Errorf("%q %q: title %q want %q", name, decision, ask.Title, want)
+			}
+		}
+	}
+}
+
+func TestReadyApprovalEmailWordCap(t *testing.T) {
+	f, _ := newTestFactory(t)
+	ask := readyAsk("")
+	ask.Overview = &Overview{Decision: "Use clearer buttons?"}
+	f.fillReady(ask, "c1", "CHANGED: "+strings.Repeat("clearer ", 100))
+	e := f.readyEmail(Agent{}, Card{}, ask)
+	if n := wordCount(e.Text); n > mailWordCap {
+		t.Fatalf("email has %d words: %s", n, e.Text)
 	}
 }

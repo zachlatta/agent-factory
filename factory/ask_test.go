@@ -315,3 +315,13 @@ func TestUnverifiedReviewAskReportsConfirmedAbsence(t *testing.T) {
 		t.Fatalf("confirmed absence: %+v", ask)
 	}
 }
+
+// The initial ask has no evidence yet; fillReady resolves its final title for both surfaces.
+func TestReadyAskCompletedWithoutEvidence(t *testing.T) {
+	f, _ := newTestFactory(t)
+	ask := readyAsk("")
+	f.fillReady(ask, "c1", "")
+	if ask.Title != "Approve this change?" || actionIDs(ask) != "approve,reply,close" {
+		t.Fatalf("completed ask = %+v", ask)
+	}
+}
