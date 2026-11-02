@@ -877,6 +877,9 @@ func (f *Factory) startReview(g *cardGate, c Card, kind string) (string, error) 
 		}
 	}
 	labels := map[string]string{labelAutoReview: "", labelSince: iso(f.Now()), labelCodeOK: ""}
+	if kind == "code" {
+		labels[labelOwnReviewed] = ""
+	}
 	if kind == "code" && c.Cwd != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		dirty, err := f.dirtyStatus(ctx, c.Cwd)
@@ -892,6 +895,9 @@ func (f *Factory) startReview(g *cardGate, c Card, kind string) (string, error) 
 			return "", f.askToCommit(c, dirty)
 		default:
 			labels[labelReviewed] = strings.TrimSpace(head)
+			if f.ownReviewedWork(labeled(f.agent(c.ID), labels)) {
+				labels[labelOwnReviewed] = labels[labelReviewed]
+			}
 			labels[labelDirtyAsks] = ""
 		}
 	}

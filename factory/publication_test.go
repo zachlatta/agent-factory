@@ -89,6 +89,7 @@ func TestPublishedWorkRequiresOwnCommitsOrRecordedLanding(t *testing.T) {
 	reviewed := commitFile(t, r.wt, "own-change", "change\n")
 	r.land(t)
 	a := publicationAgent(t, f, r, reviewed)
+	a.Cwd = r.wt
 	a.Labels[labelPrefix+labelBase] = base
 	if !f.hasPublishedWork(a) {
 		t.Fatal("own commits were not recognized")
@@ -100,5 +101,52 @@ func TestPublishedWorkRequiresOwnCommitsOrRecordedLanding(t *testing.T) {
 	a.Labels[labelPrefix+labelLandedVerified] = "1"
 	if !f.hasPublishedWork(a) {
 		t.Fatal("recorded landing was not recognized")
+	}
+}
+
+func TestPublishedWorkRejectsRebaseWithoutOwnCommits(t *testing.T) {
+	r := newRepos(t)
+	f := realGitFactory(t)
+	base := gitRun(t, r.wt, "rev-parse", "HEAD")
+	r.otherPushes(t, "other")
+	gitRun(t, r.wt, "fetch", "origin", "main")
+	gitRun(t, r.wt, "rebase", "origin/main")
+	reviewed := gitRun(t, r.wt, "rev-parse", "HEAD")
+	a := publicationAgent(t, f, r, reviewed)
+	a.Cwd = r.wt
+	a.Labels[labelPrefix+labelBase] = base
+	if state, why := f.reviewedPublication(a); state != publicationLanded {
+		t.Fatalf("publication=%v: %s", state, why)
+	}
+	if f.hasPublishedWork(a) {
+		t.Fatal("other requests' commits counted as own work after rebase")
+	}
+	if disposition, hold := f.assessReview(a, r.wt); disposition != reviewEligible || hold != nil {
+		t.Fatalf("normal approval path bypassed: disposition=%v hold=%v", disposition, hold)
+	}
+}
+
+func TestPublishedWorkOwnershipSurvivesRebaseAndWorktreeRemoval(t *testing.T) {
+	r := newRepos(t)
+	f := realGitFactory(t)
+	base := gitRun(t, r.wt, "rev-parse", "HEAD")
+	commitFile(t, r.wt, "own", "own change\n")
+	r.otherPushes(t, "other")
+	r.land(t)
+	reviewed := gitRun(t, r.wt, "rev-parse", "HEAD")
+	a := publicationAgent(t, f, r, reviewed)
+	a.Cwd = r.wt
+	a.Labels[labelPrefix+labelBase] = base
+	if !f.ownReviewedWork(a) {
+		t.Fatal("rebased own patch not recognized")
+	}
+	a.Labels[labelPrefix+labelOwnReviewed] = reviewed
+	gitRun(t, r.main, "worktree", "remove", "--force", r.wt)
+	if !f.hasPublishedWork(a) {
+		t.Fatal("recorded ownership lost with worktree")
+	}
+	a.Labels[labelPrefix+labelReviewed] = base
+	if f.hasPublishedWork(a) {
+		t.Fatal("ownership reused for a different review")
 	}
 }

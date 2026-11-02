@@ -59,16 +59,57 @@ func (f *Factory) hasPublishedWork(a Agent) bool {
 	if a.L(labelLandedVerified) != "" {
 		return true
 	}
+	if a.L(labelOwnReviewed) == a.L(labelReviewed) && a.L(labelReviewed) != "" {
+		return true
+	}
+	return f.ownReviewedWork(a)
+}
+
+// Only commits created in this linked worktree count. Rebase picks and fast
+// forwards can import other requests' commits and do not establish ownership.
+// Match patches as well as ids so a rebase does not discard ownership evidence.
+func (f *Factory) ownReviewedWork(a Agent) bool {
 	base, reviewed := a.L(labelBase), a.L(labelReviewed)
-	if base == "" || base == reviewed {
+	if base == "" || base == reviewed || a.Cwd == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	ancestor, err := f.GitOut(ctx, f.repoDir(a.Repo), "merge-base", base, reviewed)
-	if err != nil || strings.TrimSpace(ancestor) != base {
+	linked, err := f.isLinkedWorktree(ctx, a.Cwd)
+	if err != nil || !linked {
 		return false
 	}
-	commits, err := f.GitOut(ctx, f.repoDir(a.Repo), "rev-list", "--no-merges", base+".."+reviewed)
-	return err == nil && strings.TrimSpace(commits) != ""
+	es, err := f.headReflog(ctx, a.Cwd)
+	if err != nil {
+		return false
+	}
+	revs, err := f.GitOut(ctx, a.Cwd, "rev-list", "--no-merges", base+".."+reviewed)
+	if err != nil {
+		return false
+	}
+	commits := strings.Fields(revs)
+	for _, e := range es {
+		if e.SHA == base {
+			break
+		}
+		if !ownCommitRe.MatchString(e.Subject) {
+			continue
+		}
+		for _, c := range commits {
+			if c == e.SHA {
+				return true
+			}
+		}
+		id, err := f.patchID(ctx, a.Cwd, e.SHA)
+		if err != nil || id == "" {
+			continue
+		}
+		for _, c := range commits {
+			other, err := f.patchID(ctx, a.Cwd, c)
+			if err == nil && other == id {
+				return true
+			}
+		}
+	}
+	return false
 }

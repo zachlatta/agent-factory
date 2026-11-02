@@ -123,8 +123,9 @@ The planner (the "Fellow") first picks a track:
   requests a current completion report from the builder. Once required deployment and acceptance
   work is complete, the builder reports in the existing email thread using the normal landing
   email rules, and no new Ready for you email is sent. A shared main HEAD with no commits of
-  the request’s own does not qualify. Remaining
-  work keeps its existing routing. An unavailable worktree triggers publication checks from the
+  the request’s own does not qualify. Ownership comes from the linked worktree’s own
+  commit entries, matched by patch after rebases and recorded for the exact reviewed HEAD.
+  Remaining work keeps its existing routing. An unavailable worktree triggers publication checks from the
   main checkout; failure to verify stops an unreadable workspace without claiming nothing was
   published. A clean workspace still at its reviewed HEAD retains its normal approval path.
   `factory.live-completion` records the reviewed commit for the current published-work

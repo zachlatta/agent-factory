@@ -6,6 +6,8 @@ import "strings"
 const labelPrefix = "factory."
 
 // Factory label keys, without labelPrefix.
+const labelOwnReviewed = "own-reviewed" // reviewed HEAD with worktree-owned commit evidence
+
 const (
 	labelQuiet      = "quiet" // anchor identity used to repair detached factory roots
 	labelStage      = "stage"
