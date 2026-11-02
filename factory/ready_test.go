@@ -263,7 +263,7 @@ func TestReadyDecisionWithoutTry(t *testing.T) {
 					t.Errorf("subject = %q", e.Subject)
 				}
 				for _, body := range []string{e.Text, e.HTML, e.HTMLNoImage} {
-					if !strings.Contains(body, want) || !strings.Contains(body, "Nothing is installed or changed until you reply land.") || !strings.Contains(body, "Reply") {
+					if !strings.Contains(body, want) || !strings.Contains(body, "Nothing is installed or changed until you say yes or land.") || !strings.Contains(body, "Reply") {
 						t.Errorf("bad body: %s", body)
 					}
 				}

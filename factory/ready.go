@@ -55,7 +55,7 @@ func readyMsg(reason string) string {
 		reason + "). Write it for reading on a phone, in plain words. Start with three lines:\n" +
 		"DECISION: <land this change?, in one line>\n" +
 		"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
-		"NEEDS FROM ZACH: <with a preview, screenshots or sample output: try it, then reply land; otherwise: reply land to approve, ask for a change or drop it>\n" +
+		"NEEDS FROM ZACH: <with a preview, screenshots or sample output: try it, then reply yes or land; otherwise: reply yes or land to approve, ask for a change or drop it>\n" +
 		"Then exactly 3 lines, each starting `CHANGED: ` with one plain sentence on what changed for him (no file names, " +
 		"ids or jargon). If it changes something he sees (a page, an email, a message), take before (origin/main) and after " +
 		"(your branch) screenshots at desktop and phone widths, on test or fake data, and name them with the evidence lines " +
@@ -134,15 +134,15 @@ func (f *Factory) fillReady(ask *Ask, id, text string, cwd ...string) {
 			// The board reuses the cached builder overview across preview refreshes.
 			overview := *ask.Overview
 			ask.Overview = &overview
-			ask.Overview.Needs = "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
+			ask.Overview.Needs = "Reply yes or land to approve, ask for a change, or drop it. " + readyApprovalText
 		}
 		ask.Label = "Ready: approve the change"
-		ask.Why = strings.ReplaceAll(ask.Why, " Try the preview, then land it, ask for a change, or drop it.", " Reply land to approve, ask for a change, or drop it.")
+		ask.Why = strings.ReplaceAll(ask.Why, " Try the preview, then land it, ask for a change, or drop it.", " Reply yes or land to approve, ask for a change, or drop it.")
 		ask.Why += " " + readyApprovalText
 	}
 }
 
-const readyApprovalText = "Nothing is installed or changed until you reply land."
+const readyApprovalText = "Nothing is installed or changed until you say yes or land."
 
 // Pending previews remain something to try; failed previews need other usable evidence.
 func readyHasTry(r *Ready, screenshots bool) bool {

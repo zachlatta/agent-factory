@@ -21,7 +21,7 @@ func TestReadyChangesDoNotBecomeTheNeedsLine(t *testing.T) {
 		if !ok || c.Ask == nil || c.Ask.Overview == nil || c.Ask.Ready == nil {
 			t.Fatalf("missing ready ask: %+v", c.Ask)
 		}
-		wantNeeds := "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
+		wantNeeds := "Reply yes or land to approve, ask for a change, or drop it. " + readyApprovalText
 		if c.Ask.Overview.Needs != wantNeeds {
 			t.Errorf("needs = %q, want %q", c.Ask.Overview.Needs, wantNeeds)
 		}
@@ -52,7 +52,7 @@ func TestReadyPreviewRefreshPreservesBuilderNeeds(t *testing.T) {
 		wantTitle, wantNeeds := readyTitle, needs
 		if state == "" || state == previewFailed {
 			wantTitle = "Use clearer buttons?"
-			wantNeeds = "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
+			wantNeeds = "Reply yes or land to approve, ask for a change, or drop it. " + readyApprovalText
 		}
 		if ask.Title != wantTitle || ask.Overview.Needs != wantNeeds {
 			t.Errorf("state %q: title=%q needs=%q; want title=%q needs=%q", state, ask.Title, ask.Overview.Needs, wantTitle, wantNeeds)
