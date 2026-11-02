@@ -197,8 +197,6 @@ func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 		func(_ context.Context, _ string, args ...string) (string, error) {
 			gitCalls.add(args)
 			switch strings.Join(args, " ") {
-			case "merge-base origin/main " + reviewedSHA:
-				return reviewedSHA, nil
 			case "rev-parse HEAD":
 				return reviewedSHA + "\n", nil
 			case "status --porcelain":

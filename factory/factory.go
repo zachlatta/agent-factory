@@ -574,6 +574,10 @@ func (f *Factory) rawPaseo(args ...string) (string, error) {
 }
 
 func (f *Factory) setLabels(id string, labels map[string]string) error {
+	// A completion marker belongs only to the current landing run.
+	if stage := labels[labelStage]; stage != "" && stage != "landing" {
+		labels[labelLiveCompletion] = ""
+	}
 	args := []string{"agent", "update", id}
 	keys := make([]string, 0, len(labels))
 	for k := range labels {

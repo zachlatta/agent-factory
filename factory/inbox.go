@@ -42,6 +42,11 @@ func (f *Factory) landMsgFor(a Agent) string {
 	if readRecovery(a).LandedDiff {
 		msg = landedDiffLandNote + msg
 	}
+	return f.completionMsgFor(a, msg)
+}
+
+// completionMsgFor shares the first-completion email rules across publication paths.
+func (f *Factory) completionMsgFor(a Agent, msg string) string {
 	t := emailThread(a)
 	if t == "" || a.L(labelWorkLeftRounds) != "" {
 		return msg + remainingRule

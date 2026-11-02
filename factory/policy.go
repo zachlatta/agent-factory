@@ -1129,9 +1129,6 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		return nil
 	}
-	if a.L(labelStage) == "landed" && a.L(labelLiveMail) == "pending" {
-		return f.mailLiveDone(a)
-	}
 	if handled, err := f.tickArchive(a); handled || err != nil {
 		return err
 	}

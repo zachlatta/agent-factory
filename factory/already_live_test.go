@@ -10,7 +10,7 @@ import (
 
 func TestAlreadyLiveRequestsBuilderCompletion(t *testing.T) {
 	for _, missing := range []bool{false, true} {
-		a := freshCard(false, reviewLabels(nil))
+		a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1"}))
 		f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"))
 		f.Git = func(context.Context, string, ...string) error { return nil }
 		f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
@@ -66,9 +66,9 @@ func TestAlreadyLiveAllPrelandCallers(t *testing.T) {
 	for _, route := range []string{"review", "approve", "rerun", "held"} {
 		for _, state := range []string{"fresh", "missing", "changed", "dirty", "status failure"} {
 			t.Run(route+"/"+state, func(t *testing.T) {
-				labels := reviewLabels(nil)
+				labels := reviewLabels(map[string]string{labelLandedVerified: "1"})
 				if route == "approve" {
-					labels = approvedLabels(nil)
+					labels = approvedLabels(map[string]string{labelLandedVerified: "1"})
 				}
 				if route == "rerun" || route == "held" {
 					labels[labelStage] = "landing"
@@ -141,7 +141,7 @@ func TestAlreadyLiveCompletionRevalidatesAndRoutesRemaining(t *testing.T) {
 		{"new commits", movedSHA, report + "REMAINING: none", "building"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := freshCard(false, reviewLabels(map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelLiveCompletion: reviewedSHA, labelRemainingAsk: "1"}))
+			a := freshCard(false, reviewLabels(map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelLiveCompletion: reviewedSHA, labelLandedVerified: "1", labelRemainingAsk: "1"}))
 			f, p := newTestFactory(t, a)
 			stubPublished(f, tc.head, "", nil)
 			storeLog(t, f, p, "c1", tc.reply)
@@ -155,7 +155,7 @@ func TestAlreadyLiveCompletionRevalidatesAndRoutesRemaining(t *testing.T) {
 }
 
 func TestAlreadyLiveCompletionRequestIsOnce(t *testing.T) {
-	a := freshCard(false, reviewLabels(nil))
+	a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1"}))
 	f, p, m := mailFactory(t, a)
 	stubPublished(f, reviewedSHA, "", nil)
 	if err := f.beginLiveCompletion(a); err != nil {
@@ -179,10 +179,10 @@ func TestAlreadyLiveCompletionRequestIsOnce(t *testing.T) {
 	}
 }
 
-func TestPublicationUnknownStopsFreshWork(t *testing.T) {
+func TestPublicationUnknownPreservesFreshWork(t *testing.T) {
 	for _, name := range []string{"fetch failure", "missing object", "confirmed absent"} {
 		t.Run(name, func(t *testing.T) {
-			a := freshCard(false, reviewLabels(nil))
+			a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1"}))
 			f, _ := newTestFactory(t, a)
 			headIs(f, reviewedSHA, nil)
 			if name == "fetch failure" {
@@ -202,15 +202,15 @@ func TestPublicationUnknownStopsFreshWork(t *testing.T) {
 				if disposition != reviewEligible || hold != nil {
 					t.Fatalf("disposition=%v hold=%v", disposition, hold)
 				}
-			} else if disposition != reviewStopped || hold == nil {
+			} else if disposition != reviewEligible || hold != nil {
 				t.Fatalf("disposition=%v hold=%v", disposition, hold)
 			}
 		})
 	}
 }
 
-func TestLiveCompletionTickSendsOneNotification(t *testing.T) {
-	a := freshCard(false, reviewLabels(map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelLiveCompletion: reviewedSHA, labelRemainingAsk: "1"}))
+func TestLiveCompletionTickFinishesWithoutFactoryMail(t *testing.T) {
+	a := freshCard(false, reviewLabels(map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelLiveCompletion: reviewedSHA, labelLandedVerified: "1", labelRemainingAsk: "1"}))
 	f, p, m := mailFactory(t, a)
 	stubPublished(f, reviewedSHA, "", nil)
 	storeLog(t, f, p, "c1", "DECISION: None.\nOVERVIEW: Published work checked.\nNEEDS FROM ZACH: Nothing.\n\nREMAINING: none")
@@ -222,7 +222,59 @@ func TestLiveCompletionTickSendsOneNotification(t *testing.T) {
 	if l := p.labels("c1"); l[labelStage] != "landed" {
 		t.Fatalf("labels=%v", l)
 	}
-	if sends := m.sends(); len(sends) != 1 || sends[0].Args["subject"] != "The work is live" {
+	if sends := m.sends(); len(sends) != 0 {
 		t.Fatalf("sends=%+v", sends)
+	}
+}
+
+func TestNoOwnCommitsPreservesApproval(t *testing.T) {
+	a := freshCard(false, reviewLabels(map[string]string{labelBase: reviewedSHA}))
+	f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"))
+	stubPublished(f, reviewedSHA, "", nil)
+	storeLog(t, f, p, "r1", "TIER: risky\nVERDICT: approve")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelLiveCompletion] != "" {
+		t.Fatalf("labels=%v", l)
+	}
+}
+
+func TestPublishedCompletionUsesNormalEmailRules(t *testing.T) {
+	a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1"}))
+	a.Labels[gmailThreadLabel] = "test-thread"
+	f, p := newTestFactory(t, a)
+	if err := f.beginLiveCompletion(a); err != nil {
+		t.Fatal(err)
+	}
+	msg := strings.Join(p.sent("c1"), "")
+	if !strings.Contains(msg, strings.Join(strings.Fields(plainEmailRule), " ")) || !strings.Contains(msg, "archive the thread") {
+		t.Fatal(msg)
+	}
+}
+func TestLiveCompletionMarkerClearedOnChangedWork(t *testing.T) {
+	a := freshCard(false, reviewLabels(map[string]string{labelStage: "landing", labelLiveCompletion: reviewedSHA, labelSince: ago(10 * time.Minute)}))
+	f, p := newTestFactory(t, a)
+	stubPublished(f, movedSHA, "", nil)
+	storeLog(t, f, p, "c1", "REMAINING: none")
+	f.Tick()
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelLiveCompletion] != "" {
+		t.Fatalf("labels=%v", l)
+	}
+}
+
+func TestApproveWithFetchFailureStillStartsNormalLanding(t *testing.T) {
+	a := freshCard(false, approvedLabels(nil))
+	f, p := newTestFactory(t, a)
+	headIs(f, reviewedSHA, nil)
+	f.Git = func(context.Context, string, ...string) error { return errors.New("offline") }
+	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelLiveCompletion] != "" {
+		t.Fatalf("labels=%v", l)
+	}
+	if msg := strings.Join(p.sent("c1"), ""); !strings.Contains(msg, "Land") {
+		t.Fatal(msg)
 	}
 }

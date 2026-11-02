@@ -257,6 +257,9 @@ func (f *Factory) agentFileLabels(id string) (map[string]string, error) {
 // clearHeldApproval adds the clearing of Zach's held approval to labels, when a has one: it covers one
 // release only.
 func clearHeldApproval(a Agent, labels map[string]string) map[string]string {
+	if _, explicit := labels[labelLiveCompletion]; !explicit && labels[labelStage] != "" {
+		labels[labelLiveCompletion] = ""
+	}
 	if a.L(labelHeldApproved) != "" {
 		labels[labelHeldApproved] = ""
 	}

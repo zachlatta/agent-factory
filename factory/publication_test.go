@@ -81,3 +81,24 @@ func TestReviewedPublicationIncompleteComparison(t *testing.T) {
 		})
 	}
 }
+
+func TestPublishedWorkRequiresOwnCommitsOrRecordedLanding(t *testing.T) {
+	r := newRepos(t)
+	f := realGitFactory(t)
+	base := gitRun(t, r.wt, "rev-parse", "HEAD")
+	reviewed := commitFile(t, r.wt, "own-change", "change\n")
+	r.land(t)
+	a := publicationAgent(t, f, r, reviewed)
+	a.Labels[labelPrefix+labelBase] = base
+	if !f.hasPublishedWork(a) {
+		t.Fatal("own commits were not recognized")
+	}
+	a.Labels[labelPrefix+labelBase] = reviewed
+	if f.hasPublishedWork(a) {
+		t.Fatal("shared main HEAD counted as own work")
+	}
+	a.Labels[labelPrefix+labelLandedVerified] = "1"
+	if !f.hasPublishedWork(a) {
+		t.Fatal("recorded landing was not recognized")
+	}
+}

@@ -102,3 +102,6 @@ const labelRemainingAsk = "remaining-asked"
 
 // labelModelHandoff marks a card handed to another model once (handoff.go); stage swaps carry it.
 const labelModelHandoff = "model-handoff"
+
+// labelLiveCompletion ties a published-work completion run to its reviewed commit.
+const labelLiveCompletion = "live-completion"

@@ -121,9 +121,14 @@ The planner (the "Fellow") first picks a track:
   It stops at Ready for you (below), which says why it came to him (`factory.ask-why`).
   If the reviewed work is already on freshly fetched `origin/main`, passing review instead
   requests a current completion report from the builder. Once required deployment and acceptance
-  work is complete, it finishes with the landed email and no new Ready for you email. Remaining
+  work is complete, the builder reports in the existing email thread using the normal landing
+  email rules, and no new Ready for you email is sent. A shared main HEAD with no commits of
+  the request’s own does not qualify. Remaining
   work keeps its existing routing. An unavailable worktree triggers publication checks from the
-  main checkout; failure to verify stops progress without claiming nothing was published.
+  main checkout; failure to verify stops an unreadable workspace without claiming nothing was
+  published. A clean workspace still at its reviewed HEAD retains its normal approval path.
+  `factory.live-completion` records the reviewed commit for the current published-work
+  completion run and is cleared when that run ends or returns to building.
 - **Always-ask file check.** The factory lists the files `git diff --no-renames --name-only
   origin/main...HEAD` changes and matches them against built-in patterns (agent rules and gates:
   `AGENTS.md`, `CLAUDE.md`, `.githooks/`, CI workflows, gitleaks config, `.factory.json`; services:
