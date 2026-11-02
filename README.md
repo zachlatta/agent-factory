@@ -423,10 +423,11 @@ idle agents (`factory/reap.go`), at most 20 archives per Tick:
   parked card on its own. Close, Archive or Done on a parked card drops the park and it is Done.
   Paseo's archive keeps the worktree; nothing may remove a parked card's worktree while it is
   parked.
-- Cards in other columns are not parked or counted against the cap. Automatic recovery retries a
-  stopped card up to its caps, then leaves it in its column marked stuck (see Automatic recovery).
-  Running agents and agents the factory did not start (email agents, schedules, your own sessions)
-  are never touched, only counted, except a retired reviewer.
+- Idle factory cards in other columns count against the cap but are never parked. Only eligible
+  Needs Zach cards are parked to reduce the count, so the cap can remain exceeded. Automatic recovery
+  retries a stopped card up to its caps, then leaves it in its column marked stuck (see Automatic
+  recovery). Running agents and agents outside the factory do not count against the cap; they are
+  included in health reporting. The reap never touches them except a retired reviewer, as below.
 - A retired reviewer (its verdict applied as superseded, or given up on with none) no longer
   counts as reviewing: the board does not mark its card Reviewing or blocked by it, and recovery
   does not replace it again. It is stopped and archived when it is retired. A stop cannot settle a

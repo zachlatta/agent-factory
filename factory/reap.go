@@ -16,9 +16,11 @@ import (
 //     Config.IdleTTL, or when more than Config.IdleCap factory agents are live and idle: then the
 //     longest idle go first, none idle under capMinIdle. A parked card keeps its column, and Zach's
 //     reply (board or email) wakes it (Factory.send). The factory never wakes it on its own.
-//   - Cards in other columns are not parked. Automatic recovery retries a stopped card up to its
-//     caps, then leaves it in its column marked stuck. Running agents and agents the factory did not
-//     start are never touched, only counted.
+//   - Idle factory cards in other columns count against the cap but are never parked. Only eligible
+//     Needs Zach cards are parked to reduce the count, so the cap can remain exceeded. Automatic
+//     recovery retries a stopped card up to its caps, then leaves it in its column marked stuck.
+//     Running agents and agents outside the factory do not count against the cap; they are included
+//     in health reporting. The reap never touches them except a retired reviewer, as below.
 //   - A retired reviewer that is still running (its stop or archive failed) is stopped and archived
 //     again, backing off between tries and giving up after a few (retire.go). It is the only running
 //     agent the reap touches.

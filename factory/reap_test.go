@@ -51,7 +51,7 @@ func TestReapLeavesUnlabelledAgents(t *testing.T) {
 	f, p := newTestFactory(t, mine)
 	f.reap(t0)
 	if len(p.verbs("zach-session")) != 0 {
-		t.Errorf("agents the factory did not start are only counted: %v", p.verbs("zach-session"))
+		t.Errorf("agents the factory did not start are left untouched: %v", p.verbs("zach-session"))
 	}
 }
 
@@ -143,6 +143,37 @@ func TestReapCapParksLongestIdleFirst(t *testing.T) {
 	}
 	if p.archived["zach5"] {
 		t.Error("cards idle under 30 min are never parked by the cap")
+	}
+}
+
+func TestReapCapCountsIdleAgentsAcrossColumns(t *testing.T) {
+	for _, kind := range []string{"idle factory", "running factory", "idle non-factory"} {
+		t.Run(kind, func(t *testing.T) {
+			waiting := idleFor(card("waiting", map[string]string{labelStage: "zach"}), time.Hour)
+			agents := []Agent{waiting}
+			for i := range 3 {
+				a := idleFor(card(fmt.Sprintf("building%d", i), map[string]string{labelStage: "building"}), 2*time.Hour)
+				switch kind {
+				case "running factory":
+					a.Status = "running"
+				case "idle non-factory":
+					a.Labels = map[string]string{}
+				}
+				agents = append(agents, a)
+			}
+			f, p := newTestFactory(t, agents...)
+			f.cfg.IdleCap = 2
+			f.reap(t0)
+			wantParked := kind == "idle factory"
+			if p.archived["waiting"] != wantParked || (p.labels("waiting")[labelParked] != "") != wantParked {
+				t.Errorf("Needs Zach parked = %v, want %v; verbs: %v", p.archived["waiting"], wantParked, p.verbs("waiting"))
+			}
+			for _, a := range agents[1:] {
+				if p.called("archive", a.ID) || p.labels(a.ID)[labelParked] != "" {
+					t.Errorf("other-column or non-factory agent %s must remain unparked and unarchived", a.ID)
+				}
+			}
+		})
 	}
 }
 
