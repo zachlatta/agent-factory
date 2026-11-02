@@ -196,7 +196,10 @@ func (f *Factory) landedError(a Agent, c Card, reply, errNote string) error {
 	rounds := atoi(a.L(labelWorkLeftRounds))
 	stage, note, again := landedNext(reply, rounds)
 	labels := map[string]string{labelStage: stage, labelNote: note, labelLandedVerified: "1",
-		labelAutoReview: "", labelRemainingAsk: "", labelStuck: ""}
+		labelAutoReview: "", labelRemainingAsk: "", labelStuck: "", labelLiveCompletion: ""}
+	if a.L(labelLiveCompletion) != "" && stage == "landed" {
+		labels[labelLiveMail] = "pending"
+	}
 	if _, found := ParseRemaining(reply); !found {
 		labels[labelRemainingAsk] = a.L(labelRemainingAsk)
 	}

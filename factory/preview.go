@@ -124,6 +124,16 @@ func PreviewHandler(root string) (http.Handler, error) {
 	// built after a reviewed plan and one code review, as real finished work is
 	ready.Labels[labelPrefix+labelPlanRounds], ready.Labels[labelPrefix+labelCodeRounds] = "1", "1"
 	agents = append(agents, ready)
+	// Publication uncertainty is a technical stop, never a claim that nothing was published.
+	uncertain := ready
+	uncertain.ID, uncertain.SessionID, uncertain.Title = "preview-unverified", "preview-unverified", "Verify published work"
+	uncertain.Labels = maps.Clone(ready.Labels)
+	uncertain.Labels[labelPrefix+labelNote] = unverifiedReviewNote + "could not read HEAD. The factory could not verify whether the reviewed work was published."
+	uncertain.Labels[labelPrefix+labelStuckFrom] = "review"
+	if err := writePreviewSession(home, uncertain.Cwd, uncertain.ID, previewRequest, ""); err != nil {
+		return nil, err
+	}
+	agents = append(agents, uncertain)
 	// Work that landed with a required account approval.
 	try := ready
 	try.ID, try.SessionID, try.Title = "preview-action", "preview-action", "Usage page fits a phone"

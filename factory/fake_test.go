@@ -288,7 +288,9 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	f.quiet = quietState{id: "quiet-anchor", checked: t0}
 	p.cwd["quiet-anchor"] = filepath.Join(f.cfg.StateDir, "quiet-anchor")
 	f.Sleep = func(time.Duration) {}
-	// no git, except an empty diff for the always-ask file check (alwaysask.go), so it hits nothing
+	// Lifecycle fixtures fetch successfully and have reviewed work still absent from main.
+	f.Git = func(context.Context, string, ...string) error { return nil }
+	// An empty diff for the always-ask file check (alwaysask.go) hits nothing
 	f.GitOut = gitStub(cleanDiff)
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
 	f.runner, f.GoEnv = nil, nil // previews run only in tests that set a fake runner (tryout_test.go)

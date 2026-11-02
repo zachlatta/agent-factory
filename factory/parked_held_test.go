@@ -93,7 +93,7 @@ func TestApprovedParkedHeldCardWithMovedHeadStopsForReview(t *testing.T) {
 	headIs(f, movedSHA, nil)
 	f.Tick()
 	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelStuckFrom] != "review" || !strings.Contains(l[labelNote], "changed since review") ||
+	if l[labelStage] != "zach" || l[labelStuckFrom] != "review" || !strings.Contains(l[labelNote], "work changed after review") ||
 		l[labelAutoReview] != "" || l[labelHeld] != "" || l[labelHeldApproved] != "" {
 		t.Errorf("labels = %v", l)
 	}

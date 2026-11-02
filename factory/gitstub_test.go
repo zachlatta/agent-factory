@@ -8,7 +8,7 @@ import (
 )
 
 // gitStub answers f.GitOut from canned output keyed by the joined git args (first map wins); other
-// calls fail.
+// calls fail, except the lifecycle publication check defaults to confirmed absent.
 func gitStub(answers ...map[string]string) func(context.Context, string, ...string) (string, error) {
 	return func(_ context.Context, _ string, args ...string) (string, error) {
 		k := strings.Join(args, " ")
@@ -16,6 +16,19 @@ func gitStub(answers ...map[string]string) func(context.Context, string, ...stri
 			if out, ok := m[k]; ok {
 				return out, nil
 			}
+		}
+		// An empty reviewed patch is deliberately unmatched, never proof of publication.
+		if len(args) == 3 && args[0] == "merge-base" && args[1] == "origin/main" {
+			return "base", nil
+		}
+		if len(args) == 4 && args[0] == "rev-list" && args[1] == "--reverse" && args[2] == "--no-merges" {
+			return "reviewed", nil
+		}
+		if len(args) == 3 && args[0] == "rev-list" && args[1] == "--no-merges" && args[2] == "base..origin/main" {
+			return "", nil
+		}
+		if len(args) > 2 && args[0] == "diff" && args[len(args)-2] == "reviewed^" && args[len(args)-1] == "reviewed" {
+			return "", nil
 		}
 		return "", errors.New("unexpected git " + k)
 	}

@@ -119,6 +119,11 @@ The planner (the "Fellow") first picks a track:
   - the always-ask file check hits.
 
   It stops at Ready for you (below), which says why it came to him (`factory.ask-why`).
+  If the reviewed work is already on freshly fetched `origin/main`, passing review instead
+  requests a current completion report from the builder. Once required deployment and acceptance
+  work is complete, it finishes with the landed email and no new Ready for you email. Remaining
+  work keeps its existing routing. An unavailable worktree triggers publication checks from the
+  main checkout; failure to verify stops progress without claiming nothing was published.
 - **Always-ask file check.** The factory lists the files `git diff --no-renames --name-only
   origin/main...HEAD` changes and matches them against built-in patterns (agent rules and gates:
   `AGENTS.md`, `CLAUDE.md`, `.githooks/`, CI workflows, gitleaks config, `.factory.json`; services:
@@ -1164,6 +1169,7 @@ Fixtures use IDs `preview-<stage>` for agent stages: `plan`, `plan-review`, `bui
 reviewed plan whose build has a side effect (restarting a test service), with its reason;
 `preview-ready` is finished work with Land / Change / Drop, its own synthetic request and changes, and an
 optional question; `preview-action` is work that landed with a required approval (Done it / Something's wrong / Skip it). Every fixture session starts with a synthetic request, so a card opens on its ask.
+`preview-unverified` shows a publication verification stop with Re-run, Reply and Drop.
 Their buttons are simulated through the same `choose` route the board posts, and move the card where the
 real action does: Land or Yes to landing or building, No, Change or an answer where a real message
 sends it (`answerLabels`), Drop to done. The page is served with `<html data-mode="preview">`, which

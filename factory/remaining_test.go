@@ -203,6 +203,9 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 				if strings.Contains(strings.Join(args, " "), "origin/main..HEAD") {
 					return commits, nil
 				}
+				if len(args) > 0 && (args[0] == "merge-base" || args[0] == "rev-list" || (args[0] == "diff" && len(args) > 4)) {
+					return gitStub(cleanDiff)(context.Background(), "", args...)
+				}
 				return "", nil
 			}
 			headIs(f, reviewedSHA, nil)

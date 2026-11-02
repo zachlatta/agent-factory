@@ -45,12 +45,12 @@ func TestAskFor(t *testing.T) {
 		{"review stuck in its column", card("c", map[string]string{labelStage: "review", labelStuck: stuckReview}),
 			"Stuck: review could not finish", "builder", "rerun,reply,close"},
 		{"no reviewed commit", card("c", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}),
-			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
+			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
 		{"reviewed commit unreadable", card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
 			labelNote: unverifiedReviewNote + "could not read HEAD: git broke"}),
-			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
+			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
 		{"parked card changed since review", card("c", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}),
-			"Not landed: can't confirm it is what was reviewed", "builder", "rerun,reply,close"},
+			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
 		{"writing its brief", func() Agent {
 			a := card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"})
 			a.Status = "running"
@@ -271,7 +271,7 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 	}
 }
 
-// The unverified-review ask says why nothing landed, offers a fresh review first, and never offers
+// The unverified-review ask reports uncertainty, offers a fresh review first, and never offers
 // Mark done or a landing approval: both would skip the review the card still needs.
 func TestUnverifiedReviewAskReRunsTheReview(t *testing.T) {
 	a := card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
@@ -285,5 +285,33 @@ func TestUnverifiedReviewAskReRunsTheReview(t *testing.T) {
 		if x.ID == "done" || x.ID == "approve" {
 			t.Errorf("offers %s", x.ID)
 		}
+	}
+}
+
+func TestUnverifiedReviewAskDoesNotClaimNothingPublished(t *testing.T) {
+	for _, note := range []string{noReviewedNote, unverifiedReviewNote + "could not read HEAD", parkedStaleNote} {
+		a := card("c", map[string]string{labelStage: "zach", labelNote: note})
+		ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
+		if ask == nil {
+			t.Fatal("missing ask")
+		}
+		if strings.Contains(ask.Title, "Not landed") || strings.Contains(ask.Why, "Nothing was landed") {
+			t.Fatalf("unsupported publication claim: %+v", ask)
+		}
+		if note == parkedStaleNote {
+			if !strings.Contains(ask.Why, "The work changed after review and needs a fresh code review.") {
+				t.Fatalf("changed work: %+v", ask)
+			}
+		} else if !strings.Contains(ask.Why, "The factory could not verify whether the reviewed work was published.") {
+			t.Fatalf("unknown publication: %+v", ask)
+		}
+	}
+}
+
+func TestUnverifiedReviewAskReportsConfirmedAbsence(t *testing.T) {
+	a := card("c", map[string]string{labelStage: "zach", labelNote: unverifiedReviewNote + "could not read HEAD. The reviewed work is not on origin/main."})
+	ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
+	if ask == nil || !strings.Contains(ask.Why, "The reviewed work is not on origin/main.") || strings.Contains(ask.Why, "could not verify whether") || strings.Contains(ask.Why, "Nothing was landed") {
+		t.Fatalf("confirmed absence: %+v", ask)
 	}
 }

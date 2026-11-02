@@ -198,39 +198,8 @@ func unreviewedMoves(es []reflogEntry, reviewed string) ([]string, error) {
 func (f *Factory) landedAsReviewed(cwd, reviewed string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	base, err := f.GitOut(ctx, cwd, "merge-base", "origin/main", reviewed)
-	if err != nil {
-		return false, "git merge-base: " + err.Error()
-	}
-	base = strings.TrimSpace(base)
-	revs, err := f.GitOut(ctx, cwd, "rev-list", "--reverse", "--no-merges", base+".."+reviewed)
-	if err != nil {
-		return false, "git rev-list: " + err.Error()
-	}
-	if commits := strings.Fields(revs); len(commits) > 0 {
-		mainOut, err := f.GitOut(ctx, cwd, "rev-list", "--no-merges", base+"..origin/main")
-		if err != nil {
-			return false, "git rev-list: " + err.Error()
-		}
-		mainIDs := map[string]bool{}
-		for _, c := range strings.Fields(mainOut) {
-			id, err := f.patchID(ctx, cwd, c)
-			if err != nil {
-				return false, err.Error()
-			}
-			if id != "" {
-				mainIDs[id] = true
-			}
-		}
-		for _, c := range commits {
-			id, err := f.patchID(ctx, cwd, c)
-			if err != nil {
-				return false, err.Error()
-			}
-			if id == "" || !mainIDs[id] {
-				return false, "reviewed commit not on origin/main: " + short(c)
-			}
-		}
+	if state, why := f.reviewedPatches(ctx, cwd, reviewed); state != publicationLanded {
+		return false, why
 	}
 	es, err := f.headReflog(ctx, cwd)
 	if err != nil {

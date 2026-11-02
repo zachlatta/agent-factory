@@ -197,12 +197,14 @@ func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 		func(_ context.Context, _ string, args ...string) (string, error) {
 			gitCalls.add(args)
 			switch strings.Join(args, " ") {
+			case "merge-base origin/main " + reviewedSHA:
+				return reviewedSHA, nil
 			case "rev-parse HEAD":
 				return reviewedSHA + "\n", nil
 			case "status --porcelain":
 				return "", nil
 			}
-			return "", errors.New("no git in tests")
+			return gitStub(cleanDiff)(context.Background(), "", args...)
 		})
 	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)

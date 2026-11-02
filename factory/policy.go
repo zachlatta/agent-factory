@@ -781,7 +781,14 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 		}
 		return f.setLabels(target, labels)
 	}
-	if hold := f.reviewHold(t, t.Cwd); hold != nil {
+	disposition, hold := f.assessReview(t, t.Cwd)
+	if disposition == reviewAlreadyLanded && asked == "" {
+		if err := f.setLabels(t.ID, labels); err != nil {
+			return err
+		}
+		return f.beginLiveCompletion(labeled(t, labels))
+	}
+	if hold != nil {
 		// the approval is for the reviewed commit only: what the card has now is not approved
 		maps.Copy(labels, clearHeldApproval(t, hold))
 		labels[labelVerdict] = verdict
@@ -1122,6 +1129,9 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		return nil
 	}
+	if a.L(labelStage) == "landed" && a.L(labelLiveMail) == "pending" {
+		return f.mailLiveDone(a)
+	}
 	if handled, err := f.tickArchive(a); handled || err != nil {
 		return err
 	}
@@ -1252,6 +1262,16 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 			// the turn ended on a command or its result: a landing still running, or one that
 			// stalled, which the stopped-step recovery nudges and then re-runs
 			return f.checkStuck(a, now)
+		}
+		if a.L(labelLiveCompletion) != "" {
+			disposition, hold := f.assessReview(a, c.Cwd)
+			if hold != nil {
+				return f.setLabels(a.ID, clearHeldApproval(a, hold))
+			}
+			if disposition != reviewAlreadyLanded {
+				return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: unverifiedReviewNote + "The factory could not verify whether the reviewed work was published.", labelStuckFrom: "review"})
+			}
+			return f.finishLanding(a, c, reply)
 		}
 		switch status, why := f.checkLanding(a, c.Cwd); status {
 		case landNotOnMain:

@@ -110,7 +110,7 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 	case a.L(labelStuck) != "" || strings.HasPrefix(note, "history unavailable"):
 		return true
 	case strings.HasPrefix(note, unverifiedReviewNote):
-		// a technical stop: nothing landed, and Re-run on the board starts the fresh review
+		// a technical stop: publication is unverified, and Re-run starts a fresh review
 		return true
 	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
 		return true
@@ -188,9 +188,15 @@ func baseAsk(c Card, a Agent) *Ask {
 		return readyAsk(a.L(labelAskWhy))
 	case strings.HasPrefix(note, unverifiedReviewNote):
 		// no Mark done or Approve: either would skip the review this card still needs (reviewHold)
-		return &Ask{Label: "Not landed: review again", Title: "Not landed: can't confirm it is what was reviewed", From: "builder",
-			Why: "Nothing was landed or published. The factory lands only the commit its code review saw, and here " +
-				strings.TrimPrefix(note, unverifiedReviewNote) + ". Re-running starts a fresh code review of what the card has now.",
+		why := "The factory could not verify whether the reviewed work was published."
+		if strings.Contains(note, "The reviewed work is not on origin/main.") {
+			why = "The reviewed work is not on origin/main."
+		}
+		if note == parkedStaleNote {
+			why = "The work changed after review and needs a fresh code review."
+		}
+		return &Ask{Label: "Review needed", Title: "Review needed: could not verify reviewed work", From: "builder",
+			Why:     why + " " + strings.TrimRight(strings.ReplaceAll(strings.TrimPrefix(note, unverifiedReviewNote), why, ""), ". ") + ". Re-running starts a fresh code review of what the card has now.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
 		// the last two are cards that waited for Zach's brief before the arbiter took over the cap

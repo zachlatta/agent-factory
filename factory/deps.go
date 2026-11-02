@@ -136,7 +136,16 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	if st != depLanded {
 		return f.rebuildWithoutDep(a, id, st)
 	}
-	if hold := f.reviewHold(a, c.Cwd); hold != nil {
+	disposition, hold := f.assessReview(a, c.Cwd)
+	if disposition == reviewAlreadyLanded {
+		if heldApprovedParked(a) {
+			if live, err := f.parkedHoldCurrent(a); !live {
+				return err
+			}
+		}
+		return f.beginLiveCompletion(a)
+	}
+	if hold != nil {
 		// the land prompt is for the reviewed commit only
 		if a.archived() && hold[labelStage] != "zach" {
 			// a parked card cannot wait archived in a working column for its fresh review: it stops for
@@ -172,7 +181,7 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 }
 
 // parkedStaleNote is the note of a parked held card whose HEAD moved since its review.
-const parkedStaleNote = unverifiedReviewNote + "HEAD changed since review"
+const parkedStaleNote = unverifiedReviewNote + "work changed after review"
 
 // heldApprovedParked reports whether a is a parked held card Zach approved: the one archived card the
 // factory moves on by itself, since its release's land prompt (or a stop for Zach) is what he asked for.
