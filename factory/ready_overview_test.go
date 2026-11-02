@@ -30,3 +30,35 @@ func TestReadyChangesDoNotBecomeTheNeedsLine(t *testing.T) {
 		}
 	}
 }
+
+func TestReadyPreviewRefreshPreservesBuilderNeeds(t *testing.T) {
+	const needs = "Try the preview, then reply land."
+	f, _ := newTestFactory(t)
+	cached := &Overview{Decision: "Use clearer buttons?", Needs: needs}
+	for _, state := range []string{"", previewStarting, previewReady, previewFailed, previewStarting, previewReady} {
+		if state != "" {
+			preview := Preview{Card: "c1", State: state}
+			if state == previewReady {
+				preview.URL = "https://preview.example/"
+			}
+			if err := f.previews.put(preview); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Each board refresh creates an ask using the same cached overview.
+		ask := readyAsk("")
+		ask.Overview = cached
+		f.fillReady(ask, "c1", "")
+		wantTitle, wantNeeds := readyTitle, needs
+		if state == "" || state == previewFailed {
+			wantTitle = "Use clearer buttons?"
+			wantNeeds = "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
+		}
+		if ask.Title != wantTitle || ask.Overview.Needs != wantNeeds {
+			t.Errorf("state %q: title=%q needs=%q; want title=%q needs=%q", state, ask.Title, ask.Overview.Needs, wantTitle, wantNeeds)
+		}
+		if cached.Needs != needs {
+			t.Errorf("state %q: cached needs changed to %q", state, cached.Needs)
+		}
+	}
+}

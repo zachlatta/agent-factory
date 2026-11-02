@@ -131,6 +131,9 @@ func (f *Factory) fillReady(ask *Ask, id, text string, cwd ...string) {
 			}
 		}
 		if ask.Overview != nil {
+			// The board reuses the cached builder overview across preview refreshes.
+			overview := *ask.Overview
+			ask.Overview = &overview
 			ask.Overview.Needs = "Reply land to approve, ask for a change, or drop it. " + readyApprovalText
 		}
 		ask.Label = "Ready: approve the change"
