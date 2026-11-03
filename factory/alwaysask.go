@@ -173,7 +173,11 @@ func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string
 	if !reuse && tier == "architecture" {
 		add("it is an architecture change")
 	}
-	switch r := ParseAlwaysAsk(review); r {
+	r := ParseAlwaysAsk(review)
+	if reuse {
+		r = repairAlwaysAsk(review)
+	}
+	switch r {
 	case "none":
 	case "":
 		add("the reviewer did not say whether it needs you")

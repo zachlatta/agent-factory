@@ -132,3 +132,25 @@ func TestRepairComparisonAfterMainAdvances(t *testing.T) {
 		t.Fatal(reason)
 	}
 }
+
+func TestPanelRepairApprovalReasons(t *testing.T) {
+	for _, second := range []string{"none", "new service", ""} {
+		a := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA})
+		r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
+		r2 := lensReviewer("r2", "c1", lensArchitecture, "1")
+		f, p := newTestFactory(t, a, r1, r2)
+		storeLog(t, f, p, "r1", "ALWAYS ASK: old gate change\nREPAIR ALWAYS ASK: none\nVERDICT: approve")
+		report := "ALWAYS ASK: old architecture reason\nVERDICT: approve"
+		if second != "" {
+			report += "\nREPAIR ALWAYS ASK: " + second
+		}
+		storeLog(t, f, p, "r2", report)
+		reports, err := f.panelReports(a, "1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := repairAlwaysAsk(reports); (got == "none") != (second == "none") {
+			t.Fatalf("%q: %q", second, got)
+		}
+	}
+}

@@ -101,6 +101,6 @@ func (f *Factory) completeArchivedDirect(a Agent) (bool, error) {
 
 // Recovery uses the normal reply path, including message formatting and review generation.
 func (f *Factory) resumeArchived(c Card, message string, attachments []Attachment) error {
-	_, err := f.Act("send", Body{ID: c.ID, Message: message, Attachments: attachments})
+	_, err := f.act("send", Body{ID: c.ID, Message: message, Attachments: attachments}, true)
 	return err
 }

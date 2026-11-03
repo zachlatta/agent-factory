@@ -442,12 +442,14 @@ when landing waits on another card. If a failed landing returns to building, tha
 survives restarts and fresh agents. Every follow-up code reviewer (including panels and arbiters)
 compares against that baseline and reports `APPROVED BEHAVIOR: unchanged|changed|unsure` with evidence.
 Only an explicit unchanged finding can reuse approval. Changed, uncertain or missing findings
-retain the normal Ready rules. New user instructions invalidate the saved authorization.
+retain the normal Ready rules. New user instructions invalidate the saved authorization; factory Resume and Re-run messages do not.
 
 Reuse removes only the asked-for, architecture-tier and missing-plan-review reasons already
-answered by Land. An arbiter's decision request, new ALWAYS ASK reasons and sensitive files
+answered by Land. An arbiter's decision request, new repair-only approval reasons and sensitive files
 changed by the repair still require approval. Exact-commit code review, public-repo scans and
 dependency gates always apply; a test-only repair is not automatically behavior preserving.
+Reviewers report new approval reasons separately as `REPAIR ALWAYS ASK: none|reason`, excluding
+reasons already covered by the approved revision. Every panel lens must supply this finding.
 
 ### Idle agents
 

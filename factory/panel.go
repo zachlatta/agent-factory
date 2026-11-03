@@ -338,6 +338,11 @@ func (f *Factory) panelReports(t Agent, panel string) (string, error) {
 		}
 		if t.L(labelBehaviorApproval) != "" {
 			// Retain every classification even if truncation removes the original line.
+			repairAsk := repairAlwaysAsk(full)
+			if repairAsk == "" {
+				repairAsk = "a panel reviewer omitted the repair approval finding"
+			}
+			out = append(out, "REPAIR ALWAYS ASK: "+repairAsk)
 			out = append(out, "APPROVED BEHAVIOR: "+ParseApprovedBehavior(full)+": panel reviewer classification")
 			if ask := ParseAlwaysAsk(full); ask != "none" {
 				if ask == "" {

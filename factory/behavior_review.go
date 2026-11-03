@@ -76,7 +76,11 @@ State whether the behavior that was approved changed, with concrete evidence aga
 If the baseline or evidence is missing, or findings conflict without a resolved comparison, report unsure.
 Every reviewer, including each panel lens and either arbiter, must include one line:
 APPROVED BEHAVIOR: <unchanged|changed|unsure>: <reason and evidence>
-An unchanged finding reuses only the old finished-work approval; new ALWAYS ASK reasons and required technical gates still apply.
+An unchanged finding reuses only the old finished-work approval. ALWAYS ASK may describe the whole change.
+Also include this separate line, covering ONLY what the repair adds beyond the approved revision:
+REPAIR ALWAYS ASK: <none, or new reasons this repair needs approval>
+Do not repeat architecture, gate changes or other reasons already present in the approved revision in REPAIR ALWAYS ASK.
+New reasons and required technical gates still apply; missing repair findings cannot authorize automatic reuse.
 `, head, string(summary), diff)
 }
 
@@ -134,4 +138,23 @@ func (f *Factory) repairFiles(ctx context.Context, cwd, head string) (string, er
 		}
 	}
 	return strings.Join(changed, "\n"), nil
+}
+
+// Every panel lens must explicitly scope its approval reasons to the repair.
+// Keep all reasons, so a later "none" cannot erase an earlier lens's concern.
+func repairAlwaysAsk(text string) string {
+	matches := regexp.MustCompile(`(?im)^[ \t>*_#-]*REPAIR[ \t]+ALWAYS[ \t]+ASK[*_]*[ \t]*:[ \t]*(.*)$`).FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	for _, m := range matches {
+		reason := ParseAlwaysAsk("ALWAYS ASK: " + m[1])
+		if reason != "none" {
+			if reason == "" {
+				return "a reviewer omitted the repair approval finding"
+			}
+			return reason
+		}
+	}
+	return "none"
 }

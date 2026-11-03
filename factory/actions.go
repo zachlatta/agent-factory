@@ -15,6 +15,11 @@ import (
 
 // Act runs one board action (POST /api/<action>).
 func (f *Factory) Act(action string, b Body) (any, error) {
+	return f.act(action, b, false)
+}
+
+// recoveryMessage is internal: factory recovery adds no new user instructions.
+func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) {
 	switch action {
 	case "new":
 		return f.newCard(b)
@@ -124,6 +129,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			msg = "(see attached)"
 		}
 		via := "Message from Zach via the factory board:\n\n"
+		if recoveryMessage {
+			via = "Factory recovery:\n\n"
+		}
 		if b.Via == "email" {
 			// his email reply, as a follow-up block so the card's request and reviewer prompts show it
 			msg, via = f.emailFollowUp(msg), "Zach answered by email while the card waited on him:\n\n"
@@ -135,7 +143,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			g.mu.Lock()
 			defer g.mu.Unlock()
 			g.followUp = f.Now()
-			if f.agent(c.ID).L(labelBehaviorApproval) != "" {
+			if !recoveryMessage && f.agent(c.ID).L(labelBehaviorApproval) != "" {
 				if err := f.setLabels(c.ID, map[string]string{labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}); err != nil {
 					return nil, err
 				}
@@ -147,7 +155,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 					return nil, err
 				}
 			}
-			if !sub {
+			if !sub && !recoveryMessage {
 				a = labeled(a, map[string]string{labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""})
 			}
 			if err := f.resumeError(a, via+msg, b.Attachments); err != nil {
@@ -203,7 +211,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			if interrupted && (a.L(labelStage) == "plan" || a.L(labelStage) == "plan-review") && !landingReply(a) {
 				labels[labelStage], labels[labelAutoReview] = "plan", "plan"
 			}
-			if labels[labelAutoReview] == "code" {
+			if labels[labelAutoReview] == "code" && !recoveryMessage {
 				// his message is a new request: its code review is a generation of its own
 				maps.Copy(labels, newCodeGeneration(a))
 			}
