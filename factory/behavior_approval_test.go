@@ -146,6 +146,7 @@ func TestInterruptedRepairKeepsApproval(t *testing.T) {
 	for _, action := range []string{"resume", "rerun"} {
 		t.Run(action, func(t *testing.T) {
 			a := card("c1", map[string]string{labelCodeRounds: "4", labelCodeRoundsFrom: "1", labelReviewerRetries: "2", labelArbitrated: "plan code", labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived, labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1", labelReviewed: reviewedSHA})
+			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
 			p.archived[a.ID] = true
