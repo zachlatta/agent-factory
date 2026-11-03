@@ -1523,7 +1523,7 @@ func (f *Factory) directReply(a Agent) (bool, error) {
 // markDirect labels card a as a direct-track card, so Zach's later replies keep it on that track
 // (errandPass), then finishes it.
 func (f *Factory) markDirect(a Agent, c Card) error {
-	if err := f.setLabels(a.ID, map[string]string{labelTrack: "direct", labelAutoReview: ""}); err != nil {
+	if err := f.setLabels(a.ID, map[string]string{labelTrack: "direct", labelAutoReview: "", labelStuck: ""}); err != nil {
 		return err
 	}
 	return f.finishDirect(a, c)
@@ -1541,7 +1541,11 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 			}
 		}
 		f.logf("%s direct card in a public repo: %s", short(a.ID), note)
-		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note})
+		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: note, labelStuck: ""})
+	}
+	if a.archived() && worktreeGone(c.Cwd) {
+		f.logf("%s %s", short(a.ID), directWorktreeGoneNote)
+		return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: directWorktreeGoneNote, labelStuck: ""})
 	}
 	if ok, why := f.landedOnMain(c.Cwd, a.L(labelBase)); !ok {
 		return f.returnDirect(a, why)
@@ -1551,15 +1555,15 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 	switch {
 	case err != nil:
 		f.logf("%s direct card scope not checked: %v", short(a.ID), err)
-		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: "direct card scope not verified: " + trunc(err.Error(), 150)})
+		return f.setLabels(a.ID, map[string]string{labelStage: "zach", labelNote: "direct card scope not verified: " + trunc(err.Error(), 150), labelStuck: ""})
 	case len(outside) > 0:
 		f.logf("%s direct card changed %v", short(a.ID), outside)
 		return f.setLabels(a.ID, map[string]string{labelStage: "zach",
-			labelNote: "direct card changed files outside its work item without review: " + trunc(strings.Join(outside, ", "), 150)})
+			labelNote: "direct card changed files outside its work item without review: " + trunc(strings.Join(outside, ", "), 150), labelStuck: ""})
 	}
 	f.recordLanded(a, c.Cwd)
 	f.logf("%s done in one pass", short(a.ID))
-	return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "done in one pass"})
+	return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "done in one pass", labelStuck: ""})
 }
 
 // nameCard renames board card a once, from the TITLE line of its first plan (or direct result),

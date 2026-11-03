@@ -52,6 +52,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 	if !found {
 		return nil, errors.New("unknown card")
 	}
+	if a := f.agent(c.ID); !sub && a.archived() && worktreeGone(a.Cwd) && f.actionNeedsWorktree(a, c, action, b) {
+		return nil, errWorktreeGone
+	}
 	if a := f.agent(c.ID); a.L(labelFinished) != "" && (action == "stage" && b.Stage != "landed" || action == "review" || action == "rerun") {
 		if err := f.setLabels(c.ID, map[string]string{labelFinished: ""}); err != nil {
 			return nil, err
@@ -317,6 +320,22 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 }
 
 var ok = map[string]bool{"ok": true}
+
+func (f *Factory) actionNeedsWorktree(a Agent, c Card, action string, b Body) bool {
+	switch action {
+	case "resume", "rerun", "send", "review", "arbiter":
+		return true
+	case "approve":
+		if a.L(labelRouting) != "" || c.Awaiting == "plan" || planPending(a) {
+			return a.L(labelRouting) == ""
+		}
+		_, st := f.pendingDep(a)
+		return st != depWaiting
+	case "stage":
+		return validStage(b.Stage) && c.Parked == "" && b.Stage != "landed" && b.Stage != "zach"
+	}
+	return false
+}
 
 // dropAgent archives agent id, the agents it replaced and its running reviewers, and forgets its
 // saved picker request, if any.

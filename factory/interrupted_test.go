@@ -1,7 +1,10 @@
 package factory
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -84,6 +87,7 @@ func TestInterruptedRecoveryAndDrop(t *testing.T) {
 	for _, action := range []string{"resume", "send", "rerun", "close", "archive", "stage"} {
 		t.Run(action, func(t *testing.T) {
 			a := card("recover", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
+			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
 			p.archived[a.ID] = true
@@ -153,6 +157,7 @@ func TestFailedArchiveRecoveryStaysStuck(t *testing.T) {
 	for _, action := range []string{"resume", "send", "rerun"} {
 		t.Run(action, func(t *testing.T) {
 			a := card("failed", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
 			f.p = failSend{p}
@@ -257,6 +262,7 @@ func TestInterruptedReplyUsesNormalSend(t *testing.T) {
 		t.Run(via, func(t *testing.T) {
 			a := card("reply", map[string]string{labelStage: "review", labelArchiveWatch: "1", labelStuck: stuckArchived,
 				labelCodeRounds: "4", labelCodeRoundsFrom: "1", labelArbitrated: "code", labelReviewerRetries: "2"})
+			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
 			if _, err := f.Act("send", Body{ID: a.ID, Message: "Update the work", Via: via}); err != nil {
@@ -299,6 +305,7 @@ func TestInterruptedReplyKeepsReplyInstructions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := card("instructions", map[string]string{labelStage: "building", labelArchiveWatch: "1"})
 			a = withLabels(a, tc.labels)
+			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
 			if _, err := f.Act("send", Body{ID: a.ID, Message: "Continue"}); err != nil {
@@ -311,5 +318,196 @@ func TestInterruptedReplyKeepsReplyInstructions(t *testing.T) {
 				t.Fatalf("wrong step: %v", p.labels(a.ID))
 			}
 		})
+	}
+}
+
+func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
+	t.Run("verified on main when worktree exists", func(t *testing.T) {
+		a := card("direct-ok", map[string]string{labelStage: "plan", labelSource: "board", labelArchiveWatch: "1"})
+		a.Cwd = t.TempDir()
+		a.ArchivedAt = t0
+		f, p := newTestFactory(t, a)
+		f.GitOut = gitStub(directOK)
+		storeLog(t, f, p, a.ID, "[User] Move call to 4 PM\n[Assistant] TITLE: Moved call to 4 PM\nDone.\nTRACK: direct")
+		if err := f.tickAgent(a, t0); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels(a.ID)
+		if l[labelTrack] != "direct" || l[labelStage] != "landed" || l[labelNote] != "done in one pass" || l[labelStuck] != "" {
+			t.Fatalf("labels = %v", l)
+		}
+		if names := p.names(a.ID); len(names) != 1 || names[0] != "Moved call to 4 PM" {
+			t.Fatalf("names = %v", names)
+		}
+		if len(p.sent(a.ID)) != 0 {
+			t.Fatalf("sent = %v", p.sent(a.ID))
+		}
+	})
+
+	t.Run("already stuck with removed worktree finishes with unverified note", func(t *testing.T) {
+		a := card("direct-gone", map[string]string{
+			labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived,
+		})
+		a.Cwd = filepath.Join(t.TempDir(), "removed-worktree")
+		a.ArchivedAt = t0
+		r := reviewer("rev1", a.ID, "plan")
+		f, p := newTestFactory(t, a, r)
+		storeLog(t, f, p, a.ID, "[User] Move the call to 4 PM\n[Assistant] Queued for approval.\nTRACK: direct")
+		if err := f.tickAgent(a, t0); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels(a.ID)
+		if v, ok := l[labelStuck]; !ok || v != "" || l[labelTrack] != "direct" || l[labelStage] != "landed" || l[labelNote] != directWorktreeGoneNote {
+			t.Fatalf("labels = %v", l)
+		}
+		if !strings.Contains(strings.Join(f.log, "\n"), directWorktreeGoneNote) {
+			t.Fatalf("missing log entry: %v", f.log)
+		}
+		if p.labels(r.ID)[labelVerdict] != "superseded" {
+			t.Fatalf("reviewer labels = %v", p.labels(r.ID))
+		}
+		if len(p.sent(a.ID)) != 0 {
+			t.Fatalf("sent on removed worktree: %v", p.sent(a.ID))
+		}
+	})
+
+	t.Run("worktree exists but not on main wakes direct card", func(t *testing.T) {
+		a := card("direct-unpushed", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+		a.Cwd = t.TempDir()
+		a.ArchivedAt = t0
+		f, p := newTestFactory(t, a)
+		p.archived[a.ID] = true
+		f.GitOut = gitStub(directOK)
+		f.Git = func(_ context.Context, _ string, args ...string) error {
+			if args[0] == "merge-base" {
+				return errors.New("exit status 1")
+			}
+			return nil
+		}
+		storeLog(t, f, p, a.ID, "[User] Move call\n[Assistant] Done.\nTRACK: direct")
+		if err := f.tickAgent(a, t0); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels(a.ID)
+		if v, ok := l[labelStuck]; !ok || v != "" || l[labelTrack] != "direct" || l[labelNote] != "landing its result again" {
+			t.Fatalf("labels = %v", l)
+		}
+		if len(p.sent(a.ID)) != 1 || f.agent(a.ID).archived() {
+			t.Fatalf("sent = %v archived = %v", p.sent(a.ID), f.agent(a.ID).archived())
+		}
+	})
+
+	t.Run("guarded repo waits in Needs Zach", func(t *testing.T) {
+		a := card("direct-guarded", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+		a.Repo = "zachlatta/agent-factory"
+		a.Cwd = filepath.Join(t.TempDir(), "removed-worktree")
+		a.ArchivedAt = t0
+		f, p := newTestFactory(t, a)
+		storeLog(t, f, p, a.ID, "[User] Check something\n[Assistant] Done.\nTRACK: direct")
+		if err := f.tickAgent(a, t0); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels(a.ID)
+		if l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], "public repo: finished without review") || l[labelStuck] != "" {
+			t.Fatalf("labels = %v", l)
+		}
+	})
+
+	t.Run("plan with TIER or plan-rounds stays stuck", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			labels map[string]string
+			log    string
+		}{
+			{"has tier", map[string]string{labelStage: "plan", labelArchiveWatch: "1"}, "[User] Build it\n[Assistant] Plan.\nTIER: low\nTRACK: direct"},
+			{"has plan-rounds", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelPlanRounds: "1"}, "[User] Build it\n[Assistant] Done.\nTRACK: direct"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				a := card("not-direct", tc.labels)
+				a.ArchivedAt = t0
+				f, p := newTestFactory(t, a)
+				storeLog(t, f, p, a.ID, tc.log)
+				if err := f.tickAgent(a, t0); err != nil {
+					t.Fatal(err)
+				}
+				if got := p.labels(a.ID)[labelStuck]; got != stuckArchived {
+					t.Fatalf("stuck = %q; labels = %v", got, p.labels(a.ID))
+				}
+				// Once marked stuck and checked, later ticks do not re-read the session file.
+				a = withLabels(a, p.labels(a.ID))
+				storeLog(t, f, p, a.ID, "[User] Build it\n[Assistant] Done.\nTRACK: direct")
+				if err := f.tickAgent(a, t0); err != nil {
+					t.Fatal(err)
+				}
+				if got := p.labels(a.ID)[labelStuck]; got != stuckArchived {
+					t.Fatalf("re-read session after caching stuck check: %v", p.labels(a.ID))
+				}
+			})
+		}
+	})
+}
+
+type missingCwdSend struct{ *fakePaseo }
+
+func (p missingCwdSend) Run(ctx context.Context, args ...string) (string, error) {
+	if args[0] == "send" {
+		return "", errors.New("paseo send --no-wait: Error: Failed to send message: Working directory does not exist")
+	}
+	return p.fakePaseo.Run(ctx, args...)
+}
+
+func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
+	a := card("gone-cwd", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+	a.Cwd = filepath.Join(t.TempDir(), "missing-worktree")
+	a.ArchivedAt = t0
+	f, p := newTestFactory(t, a)
+	p.archived[a.ID] = true
+	if err := f.replies.save(map[string]pendingReply{"thr1": {Card: a.ID, Text: "clarify"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		run    func() error
+	}{
+		{"choose resume", func() error { _, err := f.choose(Body{ID: a.ID, Choice: "resume"}); return err }},
+		{"choose rerun", func() error { _, err := f.choose(Body{ID: a.ID, Choice: "rerun"}); return err }},
+		{"choose change", func() error { _, err := f.choose(Body{ID: a.ID, Choice: "change", Message: "try again"}); return err }},
+		{"act resume", func() error { _, err := f.Act("resume", Body{ID: a.ID}); return err }},
+		{"act rerun", func() error { _, err := f.Act("rerun", Body{ID: a.ID}); return err }},
+		{"act send", func() error { _, err := f.Act("send", Body{ID: a.ID, Message: "try again"}); return err }},
+		{"act approve", func() error { _, err := f.Act("approve", Body{ID: a.ID}); return err }},
+		{"act review", func() error { _, err := f.Act("review", Body{ID: a.ID, Kind: "plan"}); return err }},
+		{"act arbiter", func() error { _, err := f.Act("arbiter", Body{ID: a.ID}); return err }},
+		{"act stage building", func() error { _, err := f.Act("stage", Body{ID: a.ID, Stage: "building"}); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if !errors.Is(err, errWorktreeGone) {
+				t.Fatalf("err = %v; want %v", err, errWorktreeGone)
+			}
+			if len(p.sent(a.ID)) != 0 || len(p.labelUpdates(a.ID)) != 0 {
+				t.Fatalf("modified card on refused action: sent=%v labels=%v", p.sent(a.ID), p.labelUpdates(a.ID))
+			}
+			saved, err := f.replies.read()
+			if err != nil || saved["thr1"].Card != a.ID {
+				t.Fatalf("refused choice cleared saved clarification: %v %v", saved, err)
+			}
+		})
+	}
+
+	if _, err := f.choose(Body{ID: a.ID, Choice: "drop"}); err != nil {
+		t.Fatalf("drop failed on missing worktree: %v", err)
+	}
+	if got := Derive(withLabels(a, p.labels(a.ID))); got != "landed" {
+		t.Fatalf("stage after drop = %q; want landed", got)
+	}
+	if saved, err := f.replies.read(); err != nil || len(saved) != 0 {
+		t.Fatalf("successful drop left saved clarification: %v %v", saved, err)
+	}
+
+	f.p = missingCwdSend{p}
+	if err := f.send(a.ID, "retry"); !errors.Is(err, errWorktreeGone) {
+		t.Fatalf("send error = %v; want %v", err, errWorktreeGone)
 	}
 }

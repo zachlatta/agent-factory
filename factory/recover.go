@@ -669,12 +669,18 @@ func (f *Factory) returnDirect(a Agent, why string) error {
 	}
 	f.logf("%s direct card not on main: telling it to land again", short(a.ID))
 	if err := f.updateRecovery(a, func(r *recovery) { r.Lands++ },
-		map[string]string{labelSince: iso(f.Now()), labelNote: "landing its result again"}); err != nil {
+		map[string]string{labelSince: iso(f.Now()), labelNote: "landing its result again", labelStuck: ""}); err != nil {
 		return err
 	}
-	return f.send(a.ID, "Your result is not on origin/main: "+trunc(why, landFailMax)+"\n\nRebase on origin/main, "+
+	if err := f.send(a.ID, "Your result is not on origin/main: "+trunc(why, landFailMax)+"\n\nRebase on origin/main, "+
 		"resolve any conflicts, and land your work item again the way the repo's AGENTS.md says. Then end with "+
-		"TRACK: direct as before.")
+		"TRACK: direct as before."); err != nil {
+		return err
+	}
+	if a.archived() {
+		f.unmarkArchived(a.ID)
+	}
+	return nil
 }
 
 // rebuildWithoutDep tells a held card that the card its plan waits on was dropped or cannot be

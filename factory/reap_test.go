@@ -191,6 +191,7 @@ func TestReapLimitPerTick(t *testing.T) {
 
 func TestSendResumesParkedCard(t *testing.T) {
 	c := idleFor(card("zach1", map[string]string{labelStage: "zach"}), 4*time.Hour)
+	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	f.reap(t0)
 	if !p.archived["zach1"] {

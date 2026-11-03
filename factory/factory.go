@@ -146,8 +146,9 @@ type Factory struct {
 	// archivedNow: agents the board archived, and when. Applied over every snapshot until Paseo's
 	// files show the archive (or archiveMarkTTL passes), so a Refresh that read an agent file before
 	// Paseo wrote the archive cannot make the card look live again.
-	archivedNow map[string]time.Time
-	parkedNow   map[string]string    // agents the reap parked: their factory.parked value, applied like archivedNow
+	archivedNow          map[string]time.Time
+	directArchiveChecked map[string]string    // archived card id -> LastActivityAt key checked for directReply (interrupted.go)
+	parkedNow            map[string]string    // agents the reap parked: their factory.parked value, applied like archivedNow
 	lastReap    *ReapReport          // the last reap that changed anything, for /api/health
 	retireTries map[string]retireTry // retired reviewers' failed archive tries in this process (retire.go)
 
@@ -201,7 +202,7 @@ func New(cfg Config, p Paseo) *Factory {
 		landReviews: &LandReviewStore{path: filepath.Join(cfg.StateDir, "land-reviews.json")},
 		GitHubAPI:   "https://api.github.com", vis: map[string]visEntry{},
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
-		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, parkedNow: map[string]string{}, retireTries: map[string]retireTry{}, mailRetry: map[string]time.Time{},
+		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, directArchiveChecked: map[string]string{}, parkedNow: map[string]string{}, retireTries: map[string]retireTry{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}, denied: map[string]bool{}}
 	f.helper, _ = p.(*PaseoHelper)
 	if cfg.DryRun {
@@ -600,6 +601,9 @@ func (f *Factory) send(id, msg string, images ...string) error {
 		args = append(args, "--image", p)
 	}
 	if _, err := f.paseo(append(args, id, msg)...); err != nil {
+		if strings.Contains(err.Error(), "Working directory does not exist") {
+			return errWorktreeGone
+		}
 		return err
 	}
 	f.resume(id)

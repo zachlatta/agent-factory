@@ -173,6 +173,9 @@ func (f *Factory) choose(b Body) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := f.runChoice(a.ID, *ch, b); err != nil {
+		return map[string]any{"ok": false, "choice": ch.ID}, err
+	}
 	for thread, pending := range saved {
 		if pending.Card == a.ID {
 			delete(saved, thread)
@@ -181,8 +184,7 @@ func (f *Factory) choose(b Body) (any, error) {
 	if err := f.replies.save(saved); err != nil {
 		return nil, err
 	}
-	_, err = f.runChoice(a.ID, *ch, b)
-	return map[string]any{"ok": err == nil, "choice": ch.ID}, err
+	return map[string]any{"ok": true, "choice": ch.ID}, nil
 }
 
 // runChoice runs choice ch on card id with b's text, repo, attachments and Via.
