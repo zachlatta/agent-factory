@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestRepairApprovalReasons(t *testing.T) {
 	} {
 		f, _ := newTestFactory(t)
 		a := card("c1", map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorRepair: "1", labelBehaviorSummary: "c3VtbWFyeQ"})
-		f.GitOut = gitStub(map[string]string{"diff --no-renames --name-only " + reviewedSHA + "..HEAD": tc.files})
+		f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": tc.files, "diff --no-ext-diff --no-renames --unified=0 base.." + reviewedSHA + " -- AGENTS.md": "", "diff --no-ext-diff --no-renames --unified=0 origin/main...HEAD -- AGENTS.md": "+new rule"})
 		got := f.finishedWorkReason(a, "architecture", "ALWAYS ASK: none\nAPPROVED BEHAVIOR: "+tc.finding, tc.asked)
 		if (got == "") != (tc.want == "") || !strings.Contains(got, tc.want) {
 			t.Errorf("%+v: %q", tc, got)
@@ -60,7 +61,7 @@ func TestFinishedApprovalRecoveryAndFreshReview(t *testing.T) {
 		if carried[labelPrefix+labelBehaviorApproval] != reviewedSHA || carried[labelPrefix+labelBehaviorRepair] != "1" {
 			t.Fatalf("lost at handoff: %v", carried)
 		}
-		f.GitOut = gitStub(map[string]string{"diff --no-renames --name-only " + reviewedSHA + "..HEAD": "", "status --porcelain": ""})
+		f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": "", "status --porcelain": ""})
 		headIs(f, reviewedSHA, nil)
 		next := map[string]string{}
 		if err := f.passCode(a, next, "code approve", "architecture", "APPROVED BEHAVIOR: unchanged: output matches approved contract\nALWAYS ASK: none", ""); err != nil {
@@ -85,5 +86,58 @@ func TestEmailFinishedApproval(t *testing.T) {
 	}
 	if p.labels("c1")[labelBehaviorApproval] != reviewedSHA {
 		t.Fatalf("email lost approval: %v", p.labels("c1"))
+	}
+}
+
+func TestApprovalSummaryBounded(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelNote: readyPrefix, labelReadyHead: reviewedSHA}))
+	storeLog(t, f, p, "c1", strings.Repeat("summary ", handoffTextCap))
+	labels := f.finishedApproval(f.agent("c1"))
+	raw, err := base64.RawURLEncoding.DecodeString(labels[labelBehaviorSummary])
+	if err != nil || len(raw) > handoffTextCap+10 {
+		t.Fatalf("summary length %d: %v", len(raw), err)
+	}
+}
+
+func TestNewInstructionsCancelRepairApproval(t *testing.T) {
+	for _, via := range []string{"board", "email"} {
+		t.Run(via, func(t *testing.T) {
+			a := card("c1", map[string]string{labelStage: "zach", labelNote: readyPrefix, labelReadyHead: reviewedSHA, labelReviewed: reviewedSHA})
+			f, p := newTestFactory(t, a)
+			headIs(f, reviewedSHA, nil)
+			storeLog(t, f, p, "c1", "CHANGED: bounded output")
+			if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
+				t.Fatal(err)
+			}
+			f.cfg.NoStageHandoff = true
+			if err := f.returnToBuild(labeled(a, p.labels("c1")), "tests failed", "repair", false); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.setLabels("c1", map[string]string{labelStuck: stuckAgentError}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Act("send", Body{ID: "c1", Via: via, Message: "Change the output contract"}); err != nil {
+				t.Fatal(err)
+			}
+			a = labeled(a, p.labels("c1"))
+			if reuseBehaviorApproval(a, "APPROVED BEHAVIOR: unchanged: fixture repair") {
+				t.Fatal("new instructions retained approval")
+			}
+			if got := f.finishedWorkReason(a, "architecture", "ALWAYS ASK: none\nAPPROVED BEHAVIOR: unchanged: fixture repair", ""); got == "" {
+				t.Fatal("must ask again")
+			}
+		})
+	}
+}
+
+func TestSteerCancelsRepairApproval(t *testing.T) {
+	for _, status := range []string{"idle", "running"} {
+		f, p := dupFactory(t, "building", status, map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1"})
+		closeDup(t, f)
+		f.tickSteers()
+		a := labeled(f.agent(keepID), p.labels(keepID))
+		if reuseBehaviorApproval(a, "APPROVED BEHAVIOR: unchanged: fixture repair") {
+			t.Fatalf("%s steer kept approval", status)
+		}
 	}
 }

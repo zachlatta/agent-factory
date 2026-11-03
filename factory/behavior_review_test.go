@@ -1,6 +1,10 @@
 package factory
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,7 +54,7 @@ func TestPanelApprovedBehaviorRequiresEveryFinding(t *testing.T) {
 func TestArbiterGetsApprovedBaseline(t *testing.T) {
 	a := card("c1", map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ"})
 	f, p := newTestFactory(t, a)
-	f.GitOut = gitStub(map[string]string{"diff --no-ext-diff --no-renames " + reviewedSHA + "..HEAD": "fixture repair"})
+	f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "range-diff --no-color --no-ext-diff base.." + reviewedSHA + " origin/main..HEAD": "fixture repair"})
 	if err := f.startArbiter(a, "code", "Review findings", false); err != nil {
 		t.Fatal(err)
 	}
@@ -63,5 +67,68 @@ func TestArbiterGetsApprovedBaseline(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("missing %q", want)
 		}
+	}
+}
+
+func TestRepairComparisonAfterMainAdvances(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_COMMITTER_NAME=Test", "GIT_AUTHOR_EMAIL=test@users.noreply.github.com", "GIT_COMMITTER_EMAIL=test@users.noreply.github.com")
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(file, text string) {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-b", "main")
+	write("base", "base")
+	git("add", ".")
+	git("commit", "-m", "base")
+	git("update-ref", "refs/remotes/origin/main", "HEAD")
+	git("checkout", "-b", "card")
+	write("feature", "approved")
+	git("add", ".")
+	git("commit", "-m", "feature")
+	approved := git("rev-parse", "HEAD")
+	git("checkout", "main")
+	write("AGENTS.md", "unrelated rule")
+	git("add", ".")
+	git("commit", "-m", "other work")
+	git("update-ref", "refs/remotes/origin/main", "HEAD")
+	git("checkout", "card")
+	git("rebase", "main")
+	write("fixture_test.go", "repair")
+	git("add", ".")
+	git("commit", "-m", "repair")
+	f, _ := newTestFactory(t)
+	f.GitOut = func(ctx context.Context, cwd string, args ...string) (string, error) {
+		c := exec.CommandContext(ctx, "git", args...)
+		c.Dir = cwd
+		out, err := c.Output()
+		return string(out), err
+	}
+	files, err := f.repairFiles(context.Background(), dir, approved)
+	if err != nil || files != "fixture_test.go" {
+		t.Fatalf("repair files %q: %v", files, err)
+	}
+	diff, err := f.repairRangeDiff(context.Background(), dir, approved)
+	if err != nil || strings.Contains(diff, "unrelated rule") || !strings.Contains(diff, "repair") {
+		t.Fatalf("range diff %q: %v", diff, err)
+	}
+	if reason := f.alwaysAskFilesSince(dir, "repair:"+approved); reason != "" {
+		t.Fatal(reason)
+	}
+	write("AGENTS.md", "new repair rule")
+	git("add", ".")
+	git("commit", "-m", "repair rule")
+	if reason := f.alwaysAskFilesSince(dir, "repair:"+approved); !strings.Contains(reason, "AGENTS.md") {
+		t.Fatal(reason)
 	}
 }

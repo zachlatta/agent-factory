@@ -15,7 +15,7 @@ func (f *Factory) finishedApproval(a Agent) map[string]string {
 	}
 	summary, _ := f.storedReply(a)
 	labels[labelBehaviorApproval] = head
-	labels[labelBehaviorSummary] = base64.RawURLEncoding.EncodeToString([]byte(summary))
+	labels[labelBehaviorSummary] = base64.RawURLEncoding.EncodeToString([]byte(trunc(summary, handoffTextCap)))
 	labels[labelBehaviorRepair] = ""
 	return labels
 }

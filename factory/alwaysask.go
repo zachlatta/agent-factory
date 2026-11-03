@@ -90,7 +90,13 @@ func (f *Factory) alwaysAskFilesSince(cwd, revision string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := f.GitOut(ctx, cwd, "diff", "--no-renames", "--name-only", revision)
+	var out string
+	var err error
+	if strings.HasPrefix(revision, "repair:") {
+		out, err = f.repairFiles(ctx, cwd, strings.TrimPrefix(revision, "repair:"))
+	} else {
+		out, err = f.GitOut(ctx, cwd, "diff", "--no-renames", "--name-only", revision)
+	}
 	if err != nil {
 		return "the factory could not check which files it changes"
 	}
@@ -175,7 +181,7 @@ func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string
 		add("the reviewer says: " + r)
 	}
 	if reuse {
-		add(f.alwaysAskFilesSince(t.Cwd, t.L(labelBehaviorApproval)+"..HEAD"))
+		add(f.alwaysAskFilesSince(t.Cwd, "repair:"+t.L(labelBehaviorApproval)))
 	} else {
 		add(f.alwaysAskFiles(t.Cwd))
 	}

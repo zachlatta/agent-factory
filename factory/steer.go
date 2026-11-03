@@ -157,6 +157,9 @@ func (f *Factory) tickSteer(id string, st Steer) error {
 	case k.archived() || k.L(labelRouting) != "" || (stage != "plan" && stage != "building"):
 		return nil // under review, waiting on Zach (maybe parked) or still picking its repo: wait
 	}
+	if err := f.setLabels(k.ID, map[string]string{labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}); err != nil {
+		return err
+	}
 	if err := f.send(k.ID, steerMsg(st, f.Now().In(f.cfg.Location))); err != nil {
 		return err
 	}

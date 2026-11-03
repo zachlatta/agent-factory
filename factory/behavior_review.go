@@ -56,7 +56,7 @@ func (f *Factory) approvedBehaviorPrompt(a Agent) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	diff, err := f.GitOut(ctx, a.Cwd, "diff", "--no-ext-diff", "--no-renames", head+"..HEAD")
+	diff, err := f.repairRangeDiff(ctx, a.Cwd, head)
 	if err != nil || len(diff) > 48000 {
 		diff = "(comparison unavailable or too large; inspect the full approved-revision diff yourself; report unsure if you cannot establish it)"
 	}
@@ -78,4 +78,60 @@ Every reviewer, including each panel lens and either arbiter, must include one l
 APPROVED BEHAVIOR: <unchanged|changed|unsure>: <reason and evidence>
 An unchanged finding reuses only the old finished-work approval; new ALWAYS ASK reasons and required technical gates still apply.
 `, head, string(summary), diff)
+}
+
+// repairRangeDiff compares the two versions of this card's commits, excluding
+// changes inherited from main during landing's rebase.
+func (f *Factory) repairRangeDiff(ctx context.Context, cwd, head string) (string, error) {
+	base, err := f.GitOut(ctx, cwd, "merge-base", head, "origin/main")
+	if err != nil {
+		return "", err
+	}
+	return f.GitOut(ctx, cwd, "range-diff", "--no-color", "--no-ext-diff", strings.TrimSpace(base)+".."+head, "origin/main..HEAD")
+}
+
+// repairFiles compares each file's patch rather than the two resulting trees.
+// Context, blob IDs and line offsets belong to the base, not the repair.
+func (f *Factory) repairFiles(ctx context.Context, cwd, head string) (string, error) {
+	base, err := f.GitOut(ctx, cwd, "merge-base", head, "origin/main")
+	if err != nil {
+		return "", err
+	}
+	oldRange := strings.TrimSpace(base) + ".." + head
+	newRange := "origin/main...HEAD"
+	old, err := f.GitOut(ctx, cwd, "diff", "--no-renames", "--name-only", oldRange)
+	if err != nil {
+		return "", err
+	}
+	current, err := f.GitOut(ctx, cwd, "diff", "--no-renames", "--name-only", newRange)
+	if err != nil {
+		return "", err
+	}
+	seen := map[string]bool{}
+	var changed []string
+	for _, file := range strings.Fields(old + " " + current) {
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		patches := []string{}
+		for _, revision := range []string{oldRange, newRange} {
+			patch, e := f.GitOut(ctx, cwd, "diff", "--no-ext-diff", "--no-renames", "--unified=0", revision, "--", file)
+			if e != nil {
+				return "", e
+			}
+			var lines []string
+			for _, line := range strings.Split(patch, "\n") {
+				if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "@@") {
+					continue
+				}
+				lines = append(lines, line)
+			}
+			patches = append(patches, strings.Join(lines, "\n"))
+		}
+		if patches[0] != patches[1] {
+			changed = append(changed, file)
+		}
+	}
+	return strings.Join(changed, "\n"), nil
 }
