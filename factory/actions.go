@@ -135,12 +135,20 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			g.mu.Lock()
 			defer g.mu.Unlock()
 			g.followUp = f.Now()
+			if f.agent(c.ID).L(labelBehaviorApproval) != "" {
+				if err := f.setLabels(c.ID, map[string]string{labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}); err != nil {
+					return nil, err
+				}
+			}
 		}
 		if a := f.agent(c.ID); errorStuck(a) {
 			if !sub {
 				if err := f.retireReviews(c.ID); err != nil {
 					return nil, err
 				}
+			}
+			if !sub {
+				a = labeled(a, map[string]string{labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""})
 			}
 			if err := f.resumeError(a, via+msg, b.Attachments); err != nil {
 				return nil, err
@@ -228,6 +236,14 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 			}
 			return ok, f.setLabels(c.ID, next)
 		}
+		// Save finished-work approval before either dependency or immediate landing.
+		// A scan-stop approval is not authorization of finished behavior.
+		approval := f.finishedApproval(f.agent(c.ID))
+		if len(approval) > 0 {
+			if err := f.setLabels(c.ID, approval); err != nil {
+				return nil, err
+			}
+		}
 		// Zach approves what was reviewed: a card that moved since goes back to code review, and one whose
 		// reviewed commit cannot be checked does not land
 		disposition, hold := f.assessReview(f.agent(c.ID), c.Cwd)
@@ -247,8 +263,9 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 				// its plan lands it after a card still in flight: the next Tick sends the land prompt (tickHeld).
 				// A dropped or missing one is what Zach just answered, so that lands now.
 				// His approval lets the factory release it even if it is parked by then (heldApprovedParked).
-				return ok, f.setLabels(c.ID, map[string]string{labelStage: "landing", labelSince: now, labelHeld: id,
-					labelNote: holdNote(id), labelHeldApproved: now})
+				next := map[string]string{labelStage: "landing", labelSince: now, labelHeld: id, labelNote: holdNote(id), labelHeldApproved: now}
+				maps.Copy(next, approval)
+				return ok, f.setLabels(c.ID, next)
 			}
 			msg = f.landMsgFor(a)
 		}
@@ -260,6 +277,7 @@ func (f *Factory) Act(action string, b Body) (any, error) {
 		}
 		next := clearHeldApproval(f.agent(c.ID), map[string]string{labelStage: "landing", labelSince: now,
 			labelNote: "approved by Zach"})
+		maps.Copy(next, approval)
 		if err := f.sendLanding(labeled(f.agent(c.ID), next), "Zach approved this on the factory board."+answers+" "+msg); err != nil {
 			return nil, err
 		}
@@ -468,9 +486,9 @@ const labelCodeRoundsFrom = "code-rounds-from"
 
 // newCodeGeneration is the labels that start card a's new code review generation after Zach's
 // follow-up: the cap counts from its current round, the code arbiter may rule again and reviewer
-// replacements start fresh. Round numbers, plan state and approvals are kept.
+// replacements start fresh. Round numbers and plan state are kept; finished-work authorization is invalidated.
 func newCodeGeneration(a Agent) map[string]string {
-	labels := map[string]string{labelCodeRoundsFrom: a.L(labelCodeRounds), labelReviewerRetries: ""}
+	labels := map[string]string{labelCodeRoundsFrom: a.L(labelCodeRounds), labelReviewerRetries: "", labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}
 	if arbitrated(a, "code") {
 		var keep []string
 		for _, k := range strings.Fields(a.L(labelArbitrated)) {

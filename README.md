@@ -437,6 +437,18 @@ New factory cards and stage successors are watched from creation. Existing live 
 four stages are enrolled on Tick. Historical archives without the watch label stay Done; an
 external card archived before its first enrollment is outside this detection.
 
+A finished-work Land approval records the revision and summary shown at Ready for you, including
+when landing waits on another card. If a failed landing returns to building, that authorization
+survives restarts and fresh agents. Every follow-up code reviewer (including panels and arbiters)
+compares against that baseline and reports `APPROVED BEHAVIOR: unchanged|changed|unsure` with evidence.
+Only an explicit unchanged finding can reuse approval. Changed, uncertain or missing findings
+retain the normal Ready rules. New user instructions invalidate the saved authorization.
+
+Reuse removes only the asked-for, architecture-tier and missing-plan-review reasons already
+answered by Land. An arbiter's decision request, new ALWAYS ASK reasons and sensitive files
+changed by the repair still require approval. Exact-commit code review, public-repo scans and
+dependency gates always apply; a test-only repair is not automatically behavior preserving.
+
 ### Idle agents
 
 An idle agent stays loaded in Paseo until it is archived, so every Tick reaps the factory's own

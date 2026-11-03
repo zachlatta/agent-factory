@@ -2,6 +2,7 @@ package factory
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -197,6 +198,12 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 		b.WriteString("\n=== Zach's follow-ups (newest last; they override the request where they conflict) ===\n")
 		for _, fu := range fus {
 			fmt.Fprintf(&b, "%s:\n%s\n\n", fu.label(), trunc(strings.TrimSpace(fu.Text), reviewBlockCap))
+		}
+	}
+	if a.L(labelBehaviorApproval) != "" {
+		fmt.Fprintf(&b, "\n=== Finished-work approval ===\nApproved revision: %s. Preserve this authorization through repairs; fresh code review must explicitly confirm unchanged behavior before reuse.\n", a.L(labelBehaviorApproval))
+		if summary, err := base64.RawURLEncoding.DecodeString(a.L(labelBehaviorSummary)); err == nil {
+			fmt.Fprintf(&b, "Approved summary:\n%s\n", summary)
 		}
 	}
 	if plan != "" {

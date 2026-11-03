@@ -322,22 +322,36 @@ func (f *Factory) closePanel(t Agent) error {
 func (f *Factory) panelReports(t Agent, panel string) (string, error) {
 	lenses := f.panelLenses(t.ID, panel)
 	var out []string
+	var approvalAsks []string
 	for _, l := range []string{lensCorrectness, lensArchitecture, lensUX} {
 		r, ok := lenses[l]
 		if !ok {
 			continue
 		}
 		if res := f.lensResultOf(r); res.done && res.verdict == "" {
-			out = append(out, "## MISSING: "+lensNames[l]+"\n"+missingLensNote)
+			out = append(out, "## MISSING: "+lensNames[l]+"\n"+missingLensNote+"\nAPPROVED BEHAVIOR: unsure: this reviewer report is missing")
 			continue
 		}
 		full, err := f.storedReply(r)
 		if err != nil {
 			return "", fmt.Errorf("%s report unreadable: %w", lensNames[l], err)
 		}
+		if t.L(labelBehaviorApproval) != "" {
+			// Retain every classification even if truncation removes the original line.
+			out = append(out, "APPROVED BEHAVIOR: "+ParseApprovedBehavior(full)+": panel reviewer classification")
+			if ask := ParseAlwaysAsk(full); ask != "none" {
+				if ask == "" {
+					ask = "a panel reviewer omitted ALWAYS ASK"
+				}
+				approvalAsks = append(approvalAsks, ask)
+			}
+		}
 		name := lensNames[l]
 		out = append(out, "## "+strings.ToUpper(name[:1])+name[1:]+" ("+orDash(f.lensResultOf(r).verdict)+")\n"+
 			trunc(strings.TrimSpace(full), 6000))
+	}
+	if len(approvalAsks) > 0 {
+		out = append(out, "ALWAYS ASK: "+strings.Join(approvalAsks, "; "))
 	}
 	return strings.Join(out, "\n\n"), nil
 }

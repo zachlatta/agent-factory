@@ -107,3 +107,9 @@ const labelModelHandoff = "model-handoff"
 
 // labelLiveCompletion ties a published-work completion run to its reviewed commit.
 const labelLiveCompletion = "live-completion"
+
+const (
+	labelBehaviorApproval = "behavior-approved"
+	labelBehaviorSummary  = "behavior-summary"
+	labelBehaviorRepair   = "behavior-repair"
+)

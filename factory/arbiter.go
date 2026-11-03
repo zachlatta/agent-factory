@@ -144,6 +144,9 @@ func (f *Factory) startArbiter(t Agent, kind, last string, escalated bool) error
 	}
 	vis := f.visibility(c.Cwd)
 	prompt := strings.ReplaceAll(ArbiterPrompt(c, kind, f.cfg.Port, vis, last, escalated), "<errands>", f.errandsName())
+	if kind == "code" {
+		prompt += f.approvedBehaviorPrompt(t)
+	}
 	if f.guarded(c.Repo) {
 		prompt += publicReviewRule
 	}

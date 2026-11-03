@@ -81,12 +81,16 @@ func alwaysAskHits(files, patterns []string) []string {
 // alwaysAskFiles is the mechanical half of the always-ask check for the worktree at cwd: a reason
 // naming the files it hits, or "" when it hits none. Anything it cannot read asks.
 func (f *Factory) alwaysAskFiles(cwd string) string {
+	return f.alwaysAskFilesSince(cwd, "origin/main...HEAD")
+}
+
+func (f *Factory) alwaysAskFilesSince(cwd, revision string) string {
 	if cwd == "" {
 		return "the factory could not check which files it changes"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := f.GitOut(ctx, cwd, "diff", "--no-renames", "--name-only", "origin/main...HEAD")
+	out, err := f.GitOut(ctx, cwd, "diff", "--no-renames", "--name-only", revision)
 	if err != nil {
 		return "the factory could not check which files it changes"
 	}
@@ -154,12 +158,13 @@ func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string
 		}
 	}
 	add(asked)
-	if !factoryStarted(t) {
+	reuse := reuseBehaviorApproval(t, review)
+	if !reuse && !factoryStarted(t) {
 		add("you asked for it")
-	} else if t.L(labelPlanRounds) == "" {
+	} else if !reuse && t.L(labelPlanRounds) == "" {
 		add("it had no plan review")
 	}
-	if tier == "architecture" {
+	if !reuse && tier == "architecture" {
 		add("it is an architecture change")
 	}
 	switch r := ParseAlwaysAsk(review); r {
@@ -169,6 +174,10 @@ func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string
 	default:
 		add("the reviewer says: " + r)
 	}
-	add(f.alwaysAskFiles(t.Cwd))
+	if reuse {
+		add(f.alwaysAskFilesSince(t.Cwd, t.L(labelBehaviorApproval)+"..HEAD"))
+	} else {
+		add(f.alwaysAskFiles(t.Cwd))
+	}
 	return strings.Join(why, "; ")
 }

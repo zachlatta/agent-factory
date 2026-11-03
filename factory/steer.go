@@ -172,7 +172,7 @@ func (f *Factory) tickSteer(id string, st Steer) error {
 	if stage == "plan" {
 		kind = "plan"
 	}
-	return f.setLabels(k.ID, map[string]string{labelStage: stage, labelSince: iso(f.Now()), labelAutoReview: kind})
+	return f.setLabels(k.ID, map[string]string{labelStage: stage, labelSince: iso(f.Now()), labelAutoReview: kind, labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""})
 }
 
 // steerToIdea files a steer whose kept card can no longer take it as an idea, marked as coming from

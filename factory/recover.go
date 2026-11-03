@@ -609,7 +609,7 @@ func (f *Factory) returnToBuild(a Agent, note, msg string, landedDiff bool) erro
 	f.logf("%s %s: back to building", short(a.ID), note)
 	// saveRecovery adds the new recovery label to labels, so a fresh agent carries the raised count
 	labels := map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: iso(f.Now()),
-		labelNote: rebuildingNotePrefix + note, labelHeld: ""}
+		labelNote: rebuildingNotePrefix + note, labelHeld: "", labelBehaviorRepair: "1"}
 	if err := f.updateRecovery(a, func(r *recovery) { r.Lands++; r.LandedDiff = landedDiff }, labels); err != nil {
 		return err
 	}

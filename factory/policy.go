@@ -789,7 +789,8 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 		return f.beginLiveCompletion(labeled(t, labels))
 	}
 	if hold != nil {
-		// the approval is for the reviewed commit only: what the card has now is not approved
+		// Exact code approval and held release expire here. Finished behavior authorization
+		// survives separately and requires a fresh unchanged finding after recovery.
 		maps.Copy(labels, clearHeldApproval(t, hold))
 		labels[labelVerdict] = verdict
 		return f.setLabels(target, labels)
@@ -1012,6 +1013,9 @@ func (f *Factory) runReviewer(c Card, kind string, spec reviewSpec, vis, title, 
 		c.Request = &r
 	}
 	prompt := strings.ReplaceAll(ReviewPrompt(c, kind, f.cfg.Port, vis), "<errands>", f.errandsName())
+	if kind == "code" {
+		prompt += f.approvedBehaviorPrompt(f.agent(c.ID))
+	}
 	if f.guarded(c.Repo) {
 		prompt += publicReviewRule
 	}

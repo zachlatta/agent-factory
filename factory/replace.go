@@ -19,7 +19,7 @@ var carriedFactoryLabels = []string{
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
 	labelDecided, labelPlanFix, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone,
 	labelHeld, labelHeldApproved, labelArbitrated, labelWorkLeftRounds, labelRecovery,
-	labelReviewerRetries, labelModelHandoff,
+	labelReviewerRetries, labelModelHandoff, labelBehaviorApproval, labelBehaviorSummary, labelBehaviorRepair,
 }
 
 var chainCarriedFactoryLabels = []string{
