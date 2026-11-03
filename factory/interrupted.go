@@ -99,7 +99,7 @@ func (f *Factory) completeArchivedDirect(a Agent) (bool, error) {
 	return true, f.markDirect(a, c)
 }
 
-// Recovery uses the normal reply path, including message formatting and review generation.
+// Recovery uses the normal reply path and starts a new review generation, keeping finished-work approval.
 func (f *Factory) resumeArchived(c Card, message string, attachments []Attachment) error {
 	_, err := f.act("send", Body{ID: c.ID, Message: message, Attachments: attachments}, true)
 	return err

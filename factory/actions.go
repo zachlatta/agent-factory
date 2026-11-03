@@ -211,9 +211,15 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			if interrupted && (a.L(labelStage) == "plan" || a.L(labelStage) == "plan-review") && !landingReply(a) {
 				labels[labelStage], labels[labelAutoReview] = "plan", "plan"
 			}
-			if labels[labelAutoReview] == "code" && !recoveryMessage {
-				// his message is a new request: its code review is a generation of its own
-				maps.Copy(labels, newCodeGeneration(a))
+			if labels[labelAutoReview] == "code" {
+				generation := newCodeGeneration(a)
+				if recoveryMessage {
+					// Recovery resets review limits while keeping finished-work approval.
+					delete(generation, labelBehaviorApproval)
+					delete(generation, labelBehaviorSummary)
+					delete(generation, labelBehaviorRepair)
+				}
+				maps.Copy(labels, generation)
 			}
 			if err := f.setLabels(c.ID, labels); err != nil {
 				return nil, err

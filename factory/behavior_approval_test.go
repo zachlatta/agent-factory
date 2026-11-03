@@ -145,7 +145,7 @@ func TestSteerCancelsRepairApproval(t *testing.T) {
 func TestInterruptedRepairKeepsApproval(t *testing.T) {
 	for _, action := range []string{"resume", "rerun"} {
 		t.Run(action, func(t *testing.T) {
-			a := card("c1", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived, labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1", labelReviewed: reviewedSHA})
+			a := card("c1", map[string]string{labelCodeRounds: "4", labelCodeRoundsFrom: "1", labelReviewerRetries: "2", labelArbitrated: "plan code", labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived, labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1", labelReviewed: reviewedSHA})
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
 			p.archived[a.ID] = true
@@ -153,6 +153,14 @@ func TestInterruptedRepairKeepsApproval(t *testing.T) {
 				t.Fatal(err)
 			}
 			a = labeled(f.agent(a.ID), p.labels(a.ID))
+			for key, want := range map[string]string{
+				labelCodeRoundsFrom: "4", labelReviewerRetries: "", labelArbitrated: "plan",
+				labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
+			} {
+				if got := a.L(key); got != want {
+					t.Errorf("%s = %q, want %q", key, got, want)
+				}
+			}
 			f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": "", "status --porcelain": ""})
 			headIs(f, reviewedSHA, nil)
 			if err := f.passCode(a, map[string]string{}, "code approve", "architecture", "APPROVED BEHAVIOR: unchanged: only fixture setup changed\nALWAYS ASK: architecture and approval gate changes\nREPAIR ALWAYS ASK: none", ""); err != nil {
