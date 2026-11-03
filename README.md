@@ -38,9 +38,15 @@ and name changes, messages and archives, and the `paseo` CLI for the rest (label
   while the daemon reports that CLI's version; a changed CLI package restarts it. Its answers and
   errors are the CLI's, word for word.
   - When it cannot serve a call (cannot start, another version, stopped, crashed, or no answer
-    within 20 seconds, which stops it), the call runs the CLI; a stopped helper starts again 30
-    seconds later. A daemon error (not found, currently running, an invalid label) is returned
-    without running the CLI.
+    within 20 seconds, which stops it), the call runs the CLI. An unexpected helper exit is
+    logged and restarted in place at once; if starting fails or it exits again within 30 seconds,
+    the next try waits 30 seconds while the CLI serves. A daemon error (not found, currently
+    running, an invalid label) is returned without running the CLI.
+  - `deploy/agent-factory.service` sets `OOMPolicy=continue` and runs the board at the user-level
+    `OOMScoreAdjust` floor (`100`, since a user unit cannot go below its manager's value), while
+    each helper start on Linux writes `1000` to `/proc/<pid>/oom_score_adj` (logging and
+    continuing if the write fails), so under memory pressure the kernel kills the helper first and
+    the board stays up and restarts it in place.
   - A message runs the CLI only when it surely never reached the daemon (no helper, the request
     could not be written, or the helper was not connected). One that may have gone out returns
     an error and is not sent again.

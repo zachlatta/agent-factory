@@ -204,7 +204,9 @@ func New(cfg Config, p Paseo) *Factory {
 		Now: time.Now, Git: runGit, GitOut: runGitOut, Sleep: time.Sleep, kick: make(chan struct{}, 1), hotKick: make(chan struct{}, 1), hot: map[string]bool{}, errs: map[string]string{},
 		details: map[string]detailEntry{}, archivedNow: map[string]time.Time{}, directArchiveChecked: map[string]string{}, parkedNow: map[string]string{}, retireTries: map[string]retireTry{}, mailRetry: map[string]time.Time{},
 		once: map[string]string{}, denied: map[string]bool{}}
-	f.helper, _ = p.(*PaseoHelper)
+	if f.helper, _ = p.(*PaseoHelper); f.helper != nil {
+		f.helper.logf = f.logf
+	}
 	if cfg.DryRun {
 		f.p = &dryRunPaseo{inner: p, logf: f.logf}
 		f.Git, f.GitOut = f.dryRunGit(runGit, runGitOut)

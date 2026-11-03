@@ -17,6 +17,9 @@ EnvironmentFile=-%h/.config/agent-factory/env
 ExecStart=%h/.local/share/agent-factory/factory -port 7478
 Restart=always
 RestartSec=30
+# A user unit cannot go below its manager's value (100); OOMPolicy=continue keeps the board running when a child process is killed.
+OOMPolicy=continue
+OOMScoreAdjust=100
 # Agents run under the Paseo daemon, not this unit, so stopping the board never stops an agent.
 KillMode=mixed
 # On stop the factory finishes the card move it is on and the requests in flight.

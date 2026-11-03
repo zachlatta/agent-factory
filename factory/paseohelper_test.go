@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -268,12 +269,17 @@ func TestHelperCrashFallsBackExceptForSend(t *testing.T) {
 	if out, path, err := fx.run("inspect", "crash", "--json"); err != nil || out != "cli\n" || path != callCLI {
 		t.Errorf("inspect after a crash = %q (%s), %v; want the CLI", out, path, err)
 	}
-	waitFor(t, "the crashed helper marked down", func() bool { return fx.h.Status().State == "down" })
-	fx.advance(helperRetry + time.Second)
+	waitFor(t, "the crashed helper restarted in place", func() bool {
+		st := fx.h.Status()
+		return st.Restarts == 1 && st.State == "running"
+	})
 	_, _, err := fx.run("send", "--no-wait", "crash", "hello")
 	if err == nil || !strings.Contains(err.Error(), "may have been sent") || !strings.HasPrefix(err.Error(), "paseo send --no-wait: ") {
 		t.Errorf("send after a crash: %v; want an error that it may have been sent", err)
 	}
+	waitFor(t, "a second crash within the retry window marks the helper down", func() bool {
+		return fx.h.Status().State == "down"
+	})
 	for _, c := range fx.cli.all() {
 		if c[0] == "send" {
 			t.Errorf("a send the helper took was sent again through the CLI: %q", c)
@@ -303,7 +309,10 @@ func TestHelperTimeoutStopsItAndFallsBack(t *testing.T) {
 	if out, _, err := fx.run("agent", "update", "hang", "--label", "k=v"); err != nil || out != "cli\n" {
 		t.Errorf("update after a timeout = %q, %v; want the CLI", out, err)
 	}
-	waitFor(t, "the hung helper stopped", func() bool { return fx.h.Status().State == "down" })
+	waitFor(t, "the hung helper restarted in place", func() bool {
+		st := fx.h.Status()
+		return st.Restarts == 1 && st.State == "running"
+	})
 }
 
 func TestHelperDaemonErrorIsReturnedAsTheCLIs(t *testing.T) {
@@ -648,15 +657,133 @@ func TestNodeHelperConnectionLoss(t *testing.T) {
 	}
 	n.h.Close()
 
-	// the connection drops during a send: it is not sent again, and the helper exits
+	// the connection drops during a send: it is not sent again, and the helper exits and restarts in place
 	n = newNodeHelper(t, "0.11.4", "0.11.4")
 	n.run("inspect", "a1", "--json")
 	if _, _, err := n.run("send", "--no-wait", "drop", "hello"); err == nil || !strings.Contains(err.Error(), "may have been sent") {
 		t.Errorf("send that lost the connection: %v", err)
 	}
-	waitFor(t, "the helper exited after the connection dropped", func() bool { return n.h.Status().State == "down" })
+	waitFor(t, "the helper restarted after the connection dropped", func() bool {
+		st := n.h.Status()
+		return st.Restarts == 1 && st.State == "running"
+	})
 	if got := n.cli.all(); len(got) != 0 {
 		t.Errorf("CLI ran: %q", got)
+	}
+}
+
+func TestFactoryRestartsKilledHelperAndKeepsRunning(t *testing.T) {
+	fx := newFakeHelper(t, "ok", "0.13.2")
+	f := New(Config{Host: "host1", Home: t.TempDir(), StateDir: t.TempDir()}, fx.h)
+	f.Now = func() time.Time { fx.clockM.Lock(); defer fx.clockM.Unlock(); return *fx.clock }
+	f.Refresh()
+
+	if out, err := f.paseo("inspect", "a1", "--json"); err != nil || !strings.Contains(out, `"op":"inspect"`) {
+		t.Fatalf("first inspect = %q, %v; want the helper", out, err)
+	}
+	fx.h.mu.Lock()
+	p1 := fx.h.proc
+	fx.h.mu.Unlock()
+	if p1 == nil || p1.cmd.Process == nil {
+		t.Fatal("helper process not running")
+	}
+	pid1 := p1.cmd.Process.Pid
+	if runtime.GOOS == "linux" {
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/oom_score_adj", pid1))
+		if err != nil || strings.TrimSpace(string(b)) != "1000" {
+			t.Errorf("started helper oom_score_adj = %q, %v; want 1000", strings.TrimSpace(string(b)), err)
+		}
+	}
+
+	if err := p1.cmd.Process.Kill(); err != nil {
+		t.Fatalf("killing helper: %v", err)
+	}
+	waitFor(t, "killed helper restarted in place", func() bool {
+		st := fx.h.Status()
+		return st.Restarts == 1 && st.State == "running" && fx.starts() == 2
+	})
+
+	fx.h.mu.Lock()
+	p2 := fx.h.proc
+	fx.h.mu.Unlock()
+	if p2 == nil || p2.cmd.Process == nil || p2.cmd.Process.Pid == pid1 {
+		t.Fatalf("restarted helper process = %+v; want a new process", p2)
+	}
+	if runtime.GOOS == "linux" {
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/oom_score_adj", p2.cmd.Process.Pid))
+		if err != nil || strings.TrimSpace(string(b)) != "1000" {
+			t.Errorf("restarted helper oom_score_adj = %q, %v; want 1000", strings.TrimSpace(string(b)), err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/health", nil))
+	var h Health
+	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || !h.Live || !h.OK || h.PaseoCalls.Helper == nil ||
+		h.PaseoCalls.Helper.State != "running" || h.PaseoCalls.Helper.Restarts != 1 {
+		t.Errorf("health after kill = %d %+v helper %+v", rec.Code, h, h.PaseoCalls.Helper)
+	}
+
+	f.Tick()
+	if out, err := f.paseo("inspect", "a1", "--json"); err != nil || !strings.Contains(out, `"op":"inspect"`) {
+		t.Errorf("inspect after kill = %q, %v; want the restarted helper", out, err)
+	}
+	for _, c := range fx.cli.all() {
+		if len(c) > 0 && c[0] == "inspect" {
+			t.Errorf("inspect fell back to the CLI: %q", c)
+		}
+	}
+
+	f.mu.Lock()
+	logs := strings.Join(f.log, "\n")
+	f.mu.Unlock()
+	if !strings.Contains(logs, "the Paseo helper stopped") || !strings.Contains(logs, "; restarting") ||
+		!strings.Contains(logs, "restarted the Paseo helper (CLI 0.13.2, daemon 0.13.2)") {
+		t.Errorf("factory log missing helper stop/restart:\n%s", logs)
+	}
+
+	// A failed oom_score_adj write is logged and the helper keeps running.
+	fx.advance(helperRetry + time.Second)
+	fx.h.oomPath = func(int) string { return filepath.Join(t.TempDir(), "missing", "oom_score_adj") }
+	if err := p2.cmd.Process.Kill(); err != nil {
+		t.Fatalf("killing helper second time: %v", err)
+	}
+	waitFor(t, "helper restarted despite failed oom_score_adj write", func() bool {
+		st := fx.h.Status()
+		return st.Restarts == 2 && st.State == "running" && fx.starts() == 3
+	})
+	if out, err := f.paseo("inspect", "a1", "--json"); err != nil || !strings.Contains(out, `"op":"inspect"`) {
+		t.Errorf("inspect after failed oom_score_adj write = %q, %v; want the helper", out, err)
+	}
+	f.mu.Lock()
+	logs = strings.Join(f.log, "\n")
+	f.mu.Unlock()
+	if !strings.Contains(logs, "setting Paseo helper OOM score") {
+		t.Errorf("factory log missing OOM score error:\n%s", logs)
+	}
+}
+
+func TestAgentFactoryServiceUnitOOMSettings(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "deploy", "agent-factory.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(b), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+	}
+	for _, want := range []string{"OOMPolicy=continue", "OOMScoreAdjust=100", "KillMode=mixed"} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("deploy/agent-factory.service missing %q", want)
+		}
+	}
+	if !slices.ContainsFunc(lines, func(l string) bool {
+		return strings.HasPrefix(l, "#") && strings.Contains(l, "cannot go below its manager's value")
+	}) {
+		t.Errorf("deploy/agent-factory.service missing comment that a user unit cannot go below its manager's value")
 	}
 }
 

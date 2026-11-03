@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +25,11 @@ import (
 //   - The helper uses the client code of the paseo CLI on PATH and serves only while the daemon
 //     reports that CLI's version. A changed CLI package restarts it.
 //   - When the helper cannot serve a call (not started, wrong version, stopped, crashed, or no
-//     answer within helperTimeout, which kills it), the call runs the CLI. A stopped helper is
-//     started again helperRetry later; the CLI serves meanwhile.
+//     answer within helperTimeout, which kills it), the call runs the CLI. An unexpected helper
+//     exit is logged and restarted in place at once; if starting fails or it exits again within
+//     helperRetry, the next try waits helperRetry while the CLI serves.
+//   - On Linux, each helper start writes 1000 to /proc/<pid>/oom_score_adj so the kernel kills
+//     the helper before the board under memory pressure; a failed write is logged.
 //   - A send runs the CLI only when it surely never reached the daemon: the helper was not
 //     running, the request could not be written, or the helper answered that it was not
 //     connected. A send that may have gone out returns an error, so no message arrives twice.
@@ -38,16 +42,19 @@ type PaseoHelper struct {
 	dir     string                                // where the script is written
 	command func(script, cliDir string) *exec.Cmd // starts the helper
 	findCLI func() (string, error)                // the @getpaseo/cli package directory
+	oomPath func(pid int) string                  // /proc/<pid>/oom_score_adj on Linux
+	logf    func(format string, args ...any)
 	now     func() time.Time
 	timeout time.Duration // per call
-	retry   time.Duration // between starts after the helper stopped or failed to start
+	retry   time.Duration // between starts after the helper stopped twice or failed to start
 
-	mu       sync.Mutex
-	proc     *helperProc
-	starting bool
-	closed   bool
-	nextTry  time.Time
-	status   HelperStatus
+	mu        sync.Mutex
+	proc      *helperProc
+	startDone chan struct{}
+	closed    bool
+	lastStop  time.Time
+	nextTry   time.Time
+	status    HelperStatus
 }
 
 // HelperStatus is the helper's state for /api/health (paseoCalls.helper).
@@ -76,7 +83,32 @@ func NewPaseoHelper(cli CLI, dir string) *PaseoHelper {
 		command: func(script, cliDir string) *exec.Cmd {
 			return exec.Command("node", script, cliDir)
 		},
-		findCLI: func() (string, error) { return cliPackage(cli.Bin) }}
+		findCLI: func() (string, error) { return cliPackage(cli.Bin) },
+		oomPath: func(pid int) string {
+			if runtime.GOOS != "linux" {
+				return ""
+			}
+			return fmt.Sprintf("/proc/%d/oom_score_adj", pid)
+		}}
+}
+
+func (h *PaseoHelper) note(format string, args ...any) {
+	if h.logf != nil {
+		h.logf(format, args...)
+	}
+}
+
+func (h *PaseoHelper) setOOMScore(pid int) {
+	if h.oomPath == nil {
+		return
+	}
+	path := h.oomPath(pid)
+	if path == "" {
+		return
+	}
+	if err := os.WriteFile(path, []byte("1000\n"), 0o600); err != nil {
+		h.note("setting Paseo helper OOM score (%s): %v", path, err)
+	}
 }
 
 // cliPackage finds the @getpaseo/cli package of the paseo executable bin (default: paseo on PATH).
@@ -185,6 +217,12 @@ func (h *PaseoHelper) Run(ctx context.Context, args ...string) (string, error) {
 	}
 	verb := strings.Join(args[:min(2, len(args))], " ")
 	rep, written, err := h.call(ctx, p, req)
+	if err != nil && !written {
+		<-p.done
+		if p = h.ready(); p != nil && (req.Op != "archive" || fixedArchiveVersion(p.version)) {
+			rep, written, err = h.call(ctx, p, req)
+		}
+	}
 	switch {
 	case err == nil && rep.OK:
 		markCall(ctx, callHelper)
@@ -258,10 +296,17 @@ func (h *PaseoHelper) call(ctx context.Context, p *helperProc, req helperReq) (r
 // ready returns the running helper, starting it when it is due; nil means the CLI serves the call.
 func (h *PaseoHelper) ready() *helperProc {
 	h.mu.Lock()
-	if h.closed || h.starting {
+	for h.startDone != nil {
+		wait := h.startDone
+		h.mu.Unlock()
+		<-wait
+		h.mu.Lock()
+	}
+	if h.closed {
 		h.mu.Unlock()
 		return nil
 	}
+	var stopLog string
 	if p := h.proc; p != nil {
 		if p.alive() && p.pkgKey == statKey(p.pkgPath) {
 			h.mu.Unlock()
@@ -272,59 +317,99 @@ func (h *PaseoHelper) ready() *helperProc {
 			p.stop()
 			h.nextTry = time.Time{}
 		} else { // it stopped before its watcher below ran
-			h.stopped(p)
+			_, stopLog = h.stopped(p)
 		}
 	}
 	if h.now().Before(h.nextTry) {
 		h.mu.Unlock()
+		if stopLog != "" {
+			h.note("%s", stopLog)
+		}
 		return nil
 	}
-	h.starting = true
-	if h.status.State != "off" {
+	restarting := h.status.State != "off"
+	if restarting {
 		h.status.Restarts++
 	}
 	h.status.State = "starting"
+	done := make(chan struct{})
+	h.startDone = done
 	h.mu.Unlock()
+	if stopLog != "" {
+		h.note("%s", stopLog)
+	}
 
 	p, err := h.start()
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.starting = false
+	h.startDone = nil
+	close(done)
 	if err != nil {
 		h.status.State, h.status.LastError = "down", err.Error()
 		h.nextTry = h.now().Add(h.retry)
+		h.mu.Unlock()
+		h.note("Paseo helper start failed: %v", err)
 		return nil
 	}
 	if h.closed {
+		h.mu.Unlock()
 		p.stop()
 		return nil
 	}
 	h.proc = p
 	h.status.State, h.status.CLI, h.status.Daemon = "running", p.version, p.daemon
 	h.status.Started = h.now().UTC().Format(time.RFC3339)
+	h.mu.Unlock()
+	if restarting {
+		h.note("restarted the Paseo helper (CLI %s, daemon %s)", p.version, p.daemon)
+	}
 	go func() {
 		<-p.done
 		h.mu.Lock()
-		defer h.mu.Unlock()
-		if h.proc == p {
-			h.proc = nil
-			h.stopped(p)
+		if h.proc != p {
+			h.mu.Unlock()
+			return
+		}
+		h.proc = nil
+		restart, msg := h.stopped(p)
+		h.mu.Unlock()
+		if msg != "" {
+			h.note("%s", msg)
+		}
+		if restart {
+			h.ready()
 		}
 	}()
 	return p
 }
 
-// stopped records that helper p stopped by itself; the next one starts h.retry later.
-func (h *PaseoHelper) stopped(p *helperProc) {
-	h.nextTry = h.now().Add(h.retry)
-	if !h.closed {
-		h.status.State = "down"
-	}
+// stopped records that helper p stopped by itself. If no helper stopped within h.retry before
+// this, it reports restart=true so the caller restarts the helper in place; otherwise the next
+// try waits h.retry while the CLI serves.
+func (h *PaseoHelper) stopped(p *helperProc) (restart bool, logMsg string) {
 	p.mu.Lock()
-	if p.dead != nil {
-		h.status.LastError = p.dead.Error()
-	}
+	dead := p.dead
 	p.mu.Unlock()
+	if dead != nil {
+		h.status.LastError = dead.Error()
+	}
+	if h.closed {
+		return false, ""
+	}
+	now := h.now()
+	if h.lastStop.IsZero() || !now.Before(h.lastStop.Add(h.retry)) {
+		h.lastStop = now
+		h.nextTry = time.Time{}
+		if dead != nil {
+			logMsg = fmt.Sprintf("%v; restarting", dead)
+		}
+		return true, logMsg
+	}
+	h.status.State = "down"
+	h.nextTry = now.Add(h.retry)
+	if dead != nil {
+		logMsg = dead.Error()
+	}
+	return false, logMsg
 }
 
 // statKey is a file's size and modification time, to notice a replaced CLI package.
@@ -419,6 +504,7 @@ func (h *PaseoHelper) start() (*helperProc, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting the Paseo helper: %w", err)
 	}
+	h.setOOMScore(cmd.Process.Pid)
 	p := &helperProc{cmd: cmd, stdin: stdin, pkgPath: pkgPath, pkgKey: key, done: make(chan struct{}),
 		pending: map[int64]chan helperReply{}}
 	type hello struct {
