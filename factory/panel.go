@@ -344,6 +344,9 @@ func (f *Factory) panelReports(t Agent, panel string) (string, error) {
 		}
 		if res := f.lensResultOf(r); res.done && res.verdict == "" {
 			addAsk(l, "")
+			if t.L(labelBehaviorApproval) != "" {
+				out = append(out, "REPAIR ALWAYS ASK: "+lensNames[l]+" did not say whether it needs you")
+			}
 			out = append(out, "## MISSING: "+lensNames[l]+"\n"+missingLensNote+"\nAPPROVED BEHAVIOR: unsure: this reviewer report is missing")
 			continue
 		}

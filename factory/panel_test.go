@@ -505,6 +505,26 @@ func TestPanelArbiterRepairAsk(t *testing.T) {
 	}
 }
 
+func TestPanelArbiterMissingLensRepairAsk(t *testing.T) {
+	c := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1"})
+	r := lensReviewer("r1", c.ID, lensCorrectness, "1")
+	missing := lensReviewer("r2", c.ID, lensArchitecture, "1")
+	f, p := newTestFactory(t, c, r, missing)
+	f.GitOut = gitStub(nil)
+	f.noteLens(missing.ID, lensResult{done: true})
+	storeLog(t, f, p, r.ID, "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: unchanged: fixture repair")
+	notes, err := f.panelArbiterNotes(c, "1", "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: unchanged: fixture repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reuseBehaviorApproval(c, notes) {
+		t.Fatal("repair approval was not reused")
+	}
+	if got := f.finishedWorkReason(c, "risky", notes, ""); !strings.Contains(got, "architecture review did not say whether it needs you") {
+		t.Fatalf("missing lens repair ask lost: reason = %q", got)
+	}
+}
+
 func TestPanelArbiterUnreadableDoesNotConsume(t *testing.T) {
 	c := panelCard(nil)
 	c.LastActivityAt = t0.Add(-time.Hour)
