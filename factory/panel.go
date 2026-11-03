@@ -321,14 +321,29 @@ func (f *Factory) closePanel(t Agent) error {
 // for the builder when the factory merges them itself.
 func (f *Factory) panelReports(t Agent, panel string) (string, error) {
 	lenses := f.panelLenses(t.ID, panel)
-	var out []string
-	var approvalAsks []string
+	var out, asks []string
+	addAsk := func(lens, report string) {
+		reason := ParseAlwaysAsk(report)
+		if reason == "none" {
+			return
+		}
+		if reason == "" {
+			reason = lensNames[lens] + " did not say whether it needs you"
+		}
+		for _, existing := range asks {
+			if existing == reason {
+				return
+			}
+		}
+		asks = append(asks, reason)
+	}
 	for _, l := range []string{lensCorrectness, lensArchitecture, lensUX} {
 		r, ok := lenses[l]
 		if !ok {
 			continue
 		}
 		if res := f.lensResultOf(r); res.done && res.verdict == "" {
+			addAsk(l, "")
 			out = append(out, "## MISSING: "+lensNames[l]+"\n"+missingLensNote+"\nAPPROVED BEHAVIOR: unsure: this reviewer report is missing")
 			continue
 		}
@@ -344,20 +359,17 @@ func (f *Factory) panelReports(t Agent, panel string) (string, error) {
 			}
 			out = append(out, "REPAIR ALWAYS ASK: "+repairAsk)
 			out = append(out, "APPROVED BEHAVIOR: "+ParseApprovedBehavior(full)+": panel reviewer classification")
-			if ask := ParseAlwaysAsk(full); ask != "none" {
-				if ask == "" {
-					ask = "a panel reviewer omitted ALWAYS ASK"
-				}
-				approvalAsks = append(approvalAsks, ask)
-			}
 		}
+		addAsk(l, full)
 		name := lensNames[l]
 		out = append(out, "## "+strings.ToUpper(name[:1])+name[1:]+" ("+orDash(f.lensResultOf(r).verdict)+")\n"+
 			trunc(strings.TrimSpace(full), 6000))
 	}
-	if len(approvalAsks) > 0 {
-		out = append(out, "ALWAYS ASK: "+strings.Join(approvalAsks, "; "))
+	merged := "none"
+	if len(asks) > 0 {
+		merged = strings.Join(asks, "; ")
 	}
+	out = append(out, "ALWAYS ASK: "+merged)
 	return strings.Join(out, "\n\n"), nil
 }
 

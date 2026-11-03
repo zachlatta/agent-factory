@@ -403,3 +403,59 @@ func TestNewestRoundsReviewerGivesTheAskDetail(t *testing.T) {
 		t.Errorf("newestReviewer = %s, want the newest round's reviewer", r.ID)
 	}
 }
+
+func TestPanelReportsAlwaysAsk(t *testing.T) {
+	cases := []struct {
+		name    string
+		reports []string
+		want    string
+	}{
+		{"earlier ask", []string{"ALWAYS ASK: changes gates", "ALWAYS ASK: none"}, "changes gates"},
+		{"multiple asks", []string{"ALWAYS ASK: changes gates", "ALWAYS ASK: adds a service", "ALWAYS ASK: none"}, "changes gates; adds a service"},
+		{"duplicate asks", []string{"ALWAYS ASK: changes gates", "ALWAYS ASK: changes gates"}, "changes gates"},
+		{"missing answer", []string{"Looks good.", "ALWAYS ASK: none"}, "correctness review did not say whether it needs you"},
+		{"missing report", []string{"", "ALWAYS ASK: none"}, "correctness review did not say whether it needs you"},
+		{"no UX reviewer", []string{"ALWAYS ASK: none", "ALWAYS ASK: none"}, "none"},
+		{"three all none", []string{"ALWAYS ASK: none", "ALWAYS ASK: none", "ALWAYS ASK: none"}, "none"},
+		{"beyond truncation", []string{strings.Repeat("detail ", 1100) + "\nALWAYS ASK: changes gates", "ALWAYS ASK: none"}, "changes gates"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := panelCard(nil)
+			agents := []Agent{c}
+			for i := range tc.reports {
+				r := lensReviewer(fmt.Sprintf("r%d", i), c.ID, []string{lensCorrectness, lensArchitecture, lensUX}[i], "1")
+				agents = append(agents, r)
+			}
+			f, p := newTestFactory(t, agents...)
+			for i, report := range tc.reports {
+				f.noteLens(agents[i+1].ID, lensResult{done: true, verdict: "approve"})
+				if report == "" {
+					f.noteLens(agents[i+1].ID, lensResult{done: true})
+				} else {
+					storeLog(t, f, p, agents[i+1].ID, report)
+				}
+			}
+			got, err := f.panelReports(c, "1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "\n\nALWAYS ASK: " + tc.want; !strings.HasSuffix(got, want) {
+				t.Errorf("report must end with %q, got %q", want, got)
+			}
+			if gotAsk := ParseAlwaysAsk(got); gotAsk != tc.want {
+				t.Errorf("parsed ask = %q, want %q", gotAsk, tc.want)
+			}
+		})
+	}
+}
+
+func TestPanelReportsUnreadable(t *testing.T) {
+	c := panelCard(nil)
+	r := lensReviewer("r1", c.ID, lensCorrectness, "1")
+	f, _ := newTestFactory(t, c, r)
+	f.noteLens(r.ID, lensResult{done: true, verdict: "approve"})
+	if _, err := f.panelReports(c, "1"); err == nil || !strings.Contains(err.Error(), "report unreadable") {
+		t.Fatalf("expected unreadable report error, got %v", err)
+	}
+}

@@ -120,8 +120,8 @@ The planner (the "Fellow") first picks a track:
     board cards, cards with no source label, and those whose build he allowed;
   - it had no plan review (sent to review by hand);
   - it is architecture tier;
-  - the code reviewer's `ALWAYS ASK:` line is not `none` (architecture he did not ask for, a change
-    to the factory's own gates or rules, a new service), or the line is missing;
+  - any code reviewer’s `ALWAYS ASK:` line, including every panel reviewer’s, is missing or is not
+    `none` (architecture he did not ask for, a change to the factory's own gates or rules, a new service);
   - the always-ask file check hits.
 
   It stops at Ready for you (below), which says why it came to him (`factory.ask-why`).
