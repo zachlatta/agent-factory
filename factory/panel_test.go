@@ -323,6 +323,7 @@ func TestPanelRoundCapStillApplies(t *testing.T) {
 	r1.Labels[labelPrefix+labelApplied], r1.Labels[labelPrefix+labelVerdict] = "1", "approve"
 	a := lensReviewer("a1", "c1", lensArbiter, "3")
 	f, p := newTestFactory(t, panelCard(map[string]string{labelCodeRounds: "2", labelPanel: ""}), r1, a)
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none")
 	storeLog(t, f, p, "a1", "Still blocking.\nTIER: risky\nVERDICT: changes")
 	if err := f.ApplyVerdict(f.agent("a1")); err != nil {
 		t.Fatal(err)
@@ -457,5 +458,79 @@ func TestPanelReportsUnreadable(t *testing.T) {
 	f.noteLens(r.ID, lensResult{done: true, verdict: "approve"})
 	if _, err := f.panelReports(c, "1"); err == nil || !strings.Contains(err.Error(), "report unreadable") {
 		t.Fatalf("expected unreadable report error, got %v", err)
+	}
+}
+
+func TestPanelArbiterPreservesAsks(t *testing.T) {
+	for _, tc := range []struct{ name, lens, arbiter, want string }{
+		{"lens ask", "ALWAYS ASK: changes gates", "ALWAYS ASK: none", "changes gates"},
+		{"union", "ALWAYS ASK: changes gates; adds a service", "ALWAYS ASK: changes gates; new architecture", "changes gates; adds a service; new architecture"},
+		{"missing lens", "Looks good", "ALWAYS ASK: none", "correctness review did not say whether it needs you"},
+		{"missing arbiter", "ALWAYS ASK: none", "Looks good", "the arbiter did not say whether it needs you"},
+		{"all none", "ALWAYS ASK: none", "ALWAYS ASK: none", "none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := panelCard(map[string]string{labelSource: "idea"})
+			r := lensReviewer("r1", c.ID, lensCorrectness, "2")
+			old := lensReviewer("old", c.ID, lensArchitecture, "1")
+			f, p := newTestFactory(t, c, r, old)
+			storeLog(t, f, p, r.ID, tc.lens)
+			storeLog(t, f, p, old.ID, "ALWAYS ASK: stale concern")
+			notes, err := f.panelArbiterNotes(c, "2", tc.arbiter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ParseAlwaysAsk(notes); got != tc.want {
+				t.Fatalf("ask = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPanelArbiterRepairAsk(t *testing.T) {
+	c := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1"})
+	r := lensReviewer("r1", c.ID, lensCorrectness, "1")
+	f, p := newTestFactory(t, c, r)
+	f.GitOut = gitStub(nil)
+	storeLog(t, f, p, r.ID, "ALWAYS ASK: none\nREPAIR ALWAYS ASK: repair changes gates\nAPPROVED BEHAVIOR: unchanged: fixture repair")
+	notes, err := f.panelArbiterNotes(c, "1", "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: unchanged: fixture repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reuseBehaviorApproval(c, notes) {
+		t.Fatal("repair approval was not reused")
+	}
+	if got := f.finishedWorkReason(c, "risky", notes, ""); !strings.Contains(got, "repair changes gates") {
+		t.Fatalf("reason = %q", got)
+	}
+}
+
+func TestPanelArbiterUnreadableDoesNotConsume(t *testing.T) {
+	c := panelCard(nil)
+	c.LastActivityAt = t0.Add(-time.Hour)
+	r := lensReviewer("r1", c.ID, lensCorrectness, "1")
+	f, p := newTestFactory(t, c, r)
+	consumed := false
+	err := f.decide(c, reviewOutcome{kind: "code", lens: lensArbiter, panel: "1", verdict: "approve", notes: "ALWAYS ASK: none"}, func() error { consumed = true; return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consumed || p.labels(c.ID)[labelCodeRounds] != "" || p.labels(c.ID)[labelNote] != "history unavailable: decision paused" {
+		t.Fatalf("unreadable review advanced: consumed=%v labels=%v", consumed, p.labels(c.ID))
+	}
+}
+
+func TestPanelArbiterDecisionKeepsLensAsk(t *testing.T) {
+	c := panelCard(map[string]string{labelSource: "idea", labelReviewed: reviewedSHA})
+	r := lensReviewer("r1", c.ID, lensCorrectness, "1")
+	f, p := newTestFactory(t, c, r)
+	headIs(f, reviewedSHA, nil)
+	storeLog(t, f, p, r.ID, "ALWAYS ASK: changes gates")
+	consumed := false
+	if err := f.decide(c, reviewOutcome{kind: "code", lens: lensArbiter, panel: "1", verdict: "approve", notes: "ALWAYS ASK: none"}, func() error { consumed = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels(c.ID); !consumed || l[labelStage] != "zach" || !strings.Contains(l[labelAskWhy], "changes gates") {
+		t.Fatalf("lens ask lost: consumed=%v labels=%v", consumed, l)
 	}
 }

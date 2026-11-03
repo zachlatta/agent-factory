@@ -430,3 +430,48 @@ func (f *Factory) panelReady(a Agent) bool {
 	}
 	return true
 }
+
+// panelArbiterNotes retains panel approval findings independently of the arbiter's summary.
+func (f *Factory) panelArbiterNotes(t Agent, panel, notes string) (string, error) {
+	reports, err := f.panelReports(t, panel)
+	if err != nil {
+		return "", err
+	}
+	var asks []string
+	for i, report := range []string{reports, notes} {
+		reason := ParseAlwaysAsk(report)
+		if reason == "none" {
+			continue
+		}
+		if reason == "" {
+			reason = "a panel reviewer did not say whether it needs you"
+			if i == 1 {
+				reason = "the arbiter did not say whether it needs you"
+			}
+		}
+		for _, part := range strings.Split(reason, ";") {
+			part = strings.TrimSpace(part)
+			found := false
+			for _, existing := range asks {
+				if existing == part {
+					found = true
+					break
+				}
+			}
+			if part != "" && !found {
+				asks = append(asks, part)
+			}
+		}
+	}
+	// Repair approval checks read these scoped findings instead of ALWAYS ASK.
+	for _, line := range strings.Split(reports, "\n") {
+		if strings.HasPrefix(line, "REPAIR ALWAYS ASK:") {
+			notes += "\n" + line
+		}
+	}
+	merged := "none"
+	if len(asks) > 0 {
+		merged = strings.Join(asks, "; ")
+	}
+	return notes + "\nALWAYS ASK: " + merged, nil
+}

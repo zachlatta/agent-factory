@@ -598,7 +598,7 @@ type reviewOutcome struct {
 }
 
 // decide moves card t once per review round. consume, when set, records the deciding reviewer's
-// verdict; it runs after the plan is read, so an unreadable plan leaves the review to retry. The
+// verdict; it runs after required history is read, so unreadable reports leave the review to retry. The
 // caller holds t's gate: a round started before t's last follow-up does not cover it and moves nothing.
 func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	target, kind, verdict, notes := t.ID, r.kind, r.verdict, r.notes
@@ -633,6 +633,13 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 			return f.waitForHistory(t, src, err)
 		}
 		builderTier = ParseTier(builderPlan)
+	}
+	if r.lens == lensArbiter && !r.gate {
+		var err error
+		notes, err = f.panelArbiterNotes(t, r.panel, notes)
+		if err != nil {
+			return f.waitForHistory(t, src, err)
+		}
 	}
 	if consume != nil {
 		if err := consume(); err != nil {
