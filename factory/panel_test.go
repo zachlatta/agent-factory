@@ -510,6 +510,7 @@ func TestPanelArbiterApprovedBehavior(t *testing.T) {
 		name, lens, arbiter, want string
 		reuse                     bool
 	}{
+		{"missing arbiter", "unchanged", "", "unsure", false},
 		{"lens changed", "changed", "unchanged", "unsure", false},
 		{"arbiter changed", "unchanged", "changed", "unsure", false},
 		{"lens unsure", "unsure", "unchanged", "unsure", false},
@@ -520,7 +521,11 @@ func TestPanelArbiterApprovedBehavior(t *testing.T) {
 			r := lensReviewer("r1", c.ID, lensCorrectness, "1")
 			f, p := newTestFactory(t, c, r)
 			storeLog(t, f, p, r.ID, "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: "+tc.lens+": fixture comparison")
-			notes, err := f.panelArbiterNotes(c, "1", "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: "+tc.arbiter+": fixture comparison")
+			arbiterNotes := "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none"
+			if tc.arbiter != "" {
+				arbiterNotes += "\nAPPROVED BEHAVIOR: " + tc.arbiter + ": fixture comparison"
+			}
+			notes, err := f.panelArbiterNotes(c, "1", arbiterNotes)
 			if err != nil {
 				t.Fatal(err)
 			}

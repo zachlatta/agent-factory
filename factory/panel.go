@@ -466,6 +466,9 @@ func (f *Factory) panelArbiterNotes(t Agent, panel, notes string) (string, error
 			}
 		}
 	}
+	if !approvedBehaviorRe.MatchString(notes) {
+		notes += "\nAPPROVED BEHAVIOR: unsure: the arbiter did not report its behavior finding"
+	}
 	// Repair approval checks read these scoped findings instead of ALWAYS ASK.
 	for _, line := range strings.Split(reports, "\n") {
 		if strings.HasPrefix(line, "REPAIR ALWAYS ASK:") || strings.HasPrefix(line, "APPROVED BEHAVIOR:") {
