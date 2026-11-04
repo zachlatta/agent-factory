@@ -468,7 +468,7 @@ func (f *Factory) panelArbiterNotes(t Agent, panel, notes string) (string, error
 	}
 	// Repair approval checks read these scoped findings instead of ALWAYS ASK.
 	for _, line := range strings.Split(reports, "\n") {
-		if strings.HasPrefix(line, "REPAIR ALWAYS ASK:") {
+		if strings.HasPrefix(line, "REPAIR ALWAYS ASK:") || strings.HasPrefix(line, "APPROVED BEHAVIOR:") {
 			notes += "\n" + line
 		}
 	}

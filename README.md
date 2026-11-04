@@ -441,6 +441,7 @@ A finished-work Land approval records the revision and summary shown at Ready fo
 when landing waits on another card. If a failed landing returns to building, that authorization
 survives restarts and fresh agents. Every follow-up code reviewer (including panels and arbiters)
 compares against that baseline and reports `APPROVED BEHAVIOR: unchanged|changed|unsure` with evidence.
+The panel arbiter cannot overrule a lens's `APPROVED BEHAVIOR`; any disagreement or missing lens is unsure.
 Only an explicit unchanged finding can reuse approval. Changed, uncertain or missing findings
 retain the normal Ready rules. New user instructions invalidate the saved authorization; factory Resume and Re-run messages do not.
 

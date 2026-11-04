@@ -505,6 +505,35 @@ func TestPanelArbiterRepairAsk(t *testing.T) {
 	}
 }
 
+func TestPanelArbiterApprovedBehavior(t *testing.T) {
+	for _, tc := range []struct {
+		name, lens, arbiter, want string
+		reuse                     bool
+	}{
+		{"lens changed", "changed", "unchanged", "unsure", false},
+		{"arbiter changed", "unchanged", "changed", "unsure", false},
+		{"lens unsure", "unsure", "unchanged", "unsure", false},
+		{"unanimous unchanged", "unchanged", "unchanged", "unchanged", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1"})
+			r := lensReviewer("r1", c.ID, lensCorrectness, "1")
+			f, p := newTestFactory(t, c, r)
+			storeLog(t, f, p, r.ID, "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: "+tc.lens+": fixture comparison")
+			notes, err := f.panelArbiterNotes(c, "1", "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: "+tc.arbiter+": fixture comparison")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ParseApprovedBehavior(notes); got != tc.want {
+				t.Errorf("behavior = %q, want %q", got, tc.want)
+			}
+			if got := reuseBehaviorApproval(c, notes); got != tc.reuse {
+				t.Errorf("reuse = %v, want %v", got, tc.reuse)
+			}
+		})
+	}
+}
+
 func TestPanelArbiterMissingLensRepairAsk(t *testing.T) {
 	c := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1"})
 	r := lensReviewer("r1", c.ID, lensCorrectness, "1")
@@ -517,8 +546,11 @@ func TestPanelArbiterMissingLensRepairAsk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reuseBehaviorApproval(c, notes) {
-		t.Fatal("repair approval was not reused")
+	if got := ParseApprovedBehavior(notes); got != "unsure" {
+		t.Errorf("behavior = %q, want unsure", got)
+	}
+	if reuseBehaviorApproval(c, notes) {
+		t.Fatal("missing lens reused repair approval")
 	}
 	if got := f.finishedWorkReason(c, "risky", notes, ""); !strings.Contains(got, "architecture review did not say whether it needs you") {
 		t.Fatalf("missing lens repair ask lost: reason = %q", got)
