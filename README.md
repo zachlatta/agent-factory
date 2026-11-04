@@ -388,8 +388,8 @@ The planner (the "Fellow") first picks a track:
   deduplication (`factory.answered` and `factory.told`), timings, token usage, peers, steers, evidence,
   board `#<id>` links, and `/t/<id>` transcripts (which stitch the predecessor turns and a system
   switch divider ahead of the replacement session). Carried lifecycle, gate, and thread labels
-  (`carriedFactoryLabels`, and `carriedRawLabels`: the email dispatcher's `gmail-thread`, `source`
-  and `voice-memo`) are both copied at handoff and read through the
+  (`carriedFactoryLabels`, and `carriedRawLabels`: the card's email thread `gmail-thread`, and the
+  email dispatcher's `source` and `voice-memo`) are both copied at handoff and read through the
   replacement chain so approval, review, and public-repo scan gates survive even a partial handoff.
   Write primitives (`setLabels`, `send`, `stop`, `archiveChecked`) always act on the exact single agent ID.
   Drop and Close archive the card's predecessors too.
@@ -704,7 +704,8 @@ An email dispatcher (not in this repo) starts every card for an email or a voice
   with no thread, or one with repo `auto` is refused.
 
 Those cards report back in their email thread when they land, in plain words (see Needs Zach
-email). They never email that work started, stalled or failed: the board shows that.
+email). They never email that work started, stalled or failed: the board shows that. A board card
+answered by email reports the same way, in that thread; one answered only on the board stays quiet.
 
 ### For you board
 
@@ -906,6 +907,10 @@ The email is the decision alone:
 - Inbox cards answer in their own thread. Other cards start one thread to `FACTORY_ZACH_EMAIL` on
   their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
   `FACTORY_ZACH_EMAIL`. If sending with inline screenshots fails, it retries once without them.
+- The first email answer that acts on a card with no email thread stores the answered thread as its
+  `gmail-thread` (`factory/answer.go`), before the answer runs, so its land message tells it to report
+  there and later stages carry it. A reply that only gets a clarifying question or starts a separate
+  card stores nothing. Its later waits stay addressed to `FACTORY_ZACH_EMAIL`.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
   A wait where the builder was just asked for a decision or preview (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).

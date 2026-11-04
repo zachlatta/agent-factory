@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -322,4 +323,172 @@ func TestUnclearReplyLeavesWaitingWorkUntouched(t *testing.T) {
 	if err != nil || res["action"] != "send" {
 		t.Fatalf("%v %v", res, err)
 	}
+}
+
+// readyWaiting is a board card waiting at Ready for you, with only the thread of its approval email.
+func readyWaiting(id string) Agent {
+	return card(id, map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
+		labelZachThread: "nt1", labelReviewed: reviewedSHA})
+}
+
+// emailAnswerFactory is a mail factory whose cards pass the reviewed-commit check.
+func emailAnswerFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *fakeMail) {
+	t.Helper()
+	f, p, m := mailFactory(t, agents...)
+	headIs(f, reviewedSHA, nil)
+	return f, p, m
+}
+
+// A yes by email reports in that thread when the change lands: the land message sent by the same
+// answer already carries the email instruction.
+func TestEmailYesStoresTheThreadAndLandMessageEmails(t *testing.T) {
+	f, p, _ := emailAnswerFactory(t, readyWaiting("c1"))
+	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[gmailThreadLabel] != "nt1" || l[labelStage] != "landing" {
+		t.Fatalf("labels = %v", l)
+	}
+	msgs := p.sent("c1")
+	if len(msgs) != 1 {
+		t.Fatalf("sent = %v", msgs)
+	}
+	for _, want := range []string{"reply_to_message", "zrl-bot thread nt1", "archive the thread"} {
+		if !strings.Contains(msgs[0], want) {
+			t.Errorf("land message lacks %q:\n%s", want, msgs[0])
+		}
+	}
+}
+
+// A board approval of the same card stays quiet.
+func TestBoardLandStoresNoThreadAndSendsNoEmailInstruction(t *testing.T) {
+	f, p, _ := emailAnswerFactory(t, readyWaiting("c1"))
+	if _, err := f.Act("choose", Body{ID: "c1", Choice: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, set := p.labels("c1")[gmailThreadLabel]; set {
+		t.Errorf("a board approval stored a thread: %v", p.labels("c1"))
+	}
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || strings.Contains(msgs[0], "reply_to_message") || strings.Contains(msgs[0], "archive the thread") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
+// A plan approved by email hands the thread to the next stage's agent, whose landing then emails.
+func TestEmailPlanApprovalCarriesTheThreadToTheBuildAgent(t *testing.T) {
+	a := withLabels(planWaiting("c1"), map[string]string{labelAgent: "opus"})
+	a.WorkspaceID = "ws-1"
+	f, p, _ := emailAnswerFactory(t, a)
+	storeLog(t, f, p, "c1", planLog)
+	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if runs := p.runsWithLabel(gmailThreadLabel + "=nt1"); len(runs) != 1 {
+		t.Fatalf("the fresh build agent lacks the thread: runs = %d", len(runs))
+	}
+	build := card("new-agent-1", map[string]string{labelStage: "landing", labelReplaces: "c1"})
+	build.Labels[gmailThreadLabel] = "nt1"
+	if msg := f.landMsgFor(build); !strings.Contains(msg, "zrl-bot thread nt1") {
+		t.Errorf("land message lacks the email instruction:\n%s", msg)
+	}
+}
+
+// A card with a request thread keeps it, with no extra label write.
+func TestEmailAnswerKeepsARequestThread(t *testing.T) {
+	a := withLabels(readyWaiting("c1"), map[string]string{labelZachThread: ""})
+	a.Labels[gmailThreadLabel] = "t9"
+	f, p, _ := emailAnswerFactory(t, a)
+	if _, err := f.Act("answer", Body{Thread: "t9", MessageID: "m2", Text: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, set := p.labels("c1")[gmailThreadLabel]; set {
+		t.Errorf("rewrote the request thread: %v", p.labels("c1"))
+	}
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "zrl-bot thread t9") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
+// Only an answer that acts stores the thread: a clarifying question and a separate request do not.
+func TestEmailReplyThatDoesNotAnswerStoresNoThread(t *testing.T) {
+	for _, tc := range []struct{ verdict, action string }{{"unclear", "clarify"}, {"unrelated", "separate"}} {
+		t.Run(tc.verdict, func(t *testing.T) {
+			f, p, _ := emailAnswerFactory(t, planWaiting("c1"))
+			f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return tc.verdict, nil }
+			res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "what about lunch tomorrow"})
+			if err != nil || res.(map[string]string)["action"] != tc.action {
+				t.Fatalf("res = %v, err = %v", res, err)
+			}
+			if _, set := p.labels("c1")[gmailThreadLabel]; set {
+				t.Errorf("stored a thread: %v", p.labels("c1"))
+			}
+		})
+	}
+}
+
+func TestEmailAnswerRepeatedStoresTheThreadOnce(t *testing.T) {
+	f, p, _ := emailAnswerFactory(t, readyWaiting("c1"))
+	for range 2 {
+		if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "yes"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := 0
+	for _, c := range p.calls {
+		if slices.Contains(c, gmailThreadLabel+"=nt1") {
+			n++
+		}
+	}
+	if n != 1 || len(p.sent("c1")) != 1 {
+		t.Errorf("thread writes = %d, sent = %v", n, p.sent("c1"))
+	}
+}
+
+func TestEmailAnswerInDryRunStoresNoThread(t *testing.T) {
+	f, p, _ := emailAnswerFactory(t, readyWaiting("c1"))
+	f.cfg.DryRun = true
+	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, set := p.labels("c1")[gmailThreadLabel]; set {
+		t.Errorf("dry run stored a thread: %v", p.labels("c1"))
+	}
+}
+
+// When the thread cannot be stored or read back the answer is not marked, so a retry of the same
+// message still works; a landing that went out now would never email.
+func TestEmailAnswerFailsWhenTheThreadIsNotStored(t *testing.T) {
+	t.Run("write", func(t *testing.T) {
+		f, p, _ := emailAnswerFactory(t, readyWaiting("c1"))
+		f.p = failThreadWrite{f.p}
+		if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "yes"}); err == nil {
+			t.Fatal("no error")
+		}
+		if p.labels("c1")[labelAnswered] != "" || len(p.sent("c1")) != 0 {
+			t.Errorf("labels = %v, sent = %v", p.labels("c1"), p.sent("c1"))
+		}
+	})
+	t.Run("reload", func(t *testing.T) {
+		f, p, _ := emailAnswerFactory(t, readyWaiting("c1"))
+		f.p = p          // no agent files written
+		f.cfg.Home = "[" // the agent files cannot be listed
+		if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "yes"}); err == nil {
+			t.Fatal("no error")
+		}
+		if p.labels("c1")[labelAnswered] != "" || len(p.sent("c1")) != 0 {
+			t.Errorf("labels = %v, sent = %v", p.labels("c1"), p.sent("c1"))
+		}
+	})
+}
+
+// failThreadWrite is a paseo whose write of the email thread label fails.
+type failThreadWrite struct{ Paseo }
+
+func (p failThreadWrite) Run(ctx context.Context, args ...string) (string, error) {
+	if slices.ContainsFunc(args, func(s string) bool { return strings.HasPrefix(s, gmailThreadLabel+"=") }) {
+		return "", errors.New("paseo agent update failed")
+	}
+	return p.Paseo.Run(ctx, args...)
 }

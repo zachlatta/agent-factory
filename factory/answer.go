@@ -198,6 +198,9 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	if ch == nil {
 		return nil, ErrNotWaiting // no button for it: the dispatcher passes the reply on as a follow-up
 	}
+	if err := f.adoptAnswerThread(a, b.Thread); err != nil {
+		return nil, err
+	}
 	// answered first: a repeated POST of this message does nothing
 	if err := f.markReply(a, b); err != nil {
 		return nil, err
@@ -211,6 +214,20 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	}
 	f.logf("%s answered by email: %s", short(a.ID), ch.ID)
 	return map[string]string{"card": a.ID, "action": ch.action}, nil
+}
+
+// adoptAnswerThread makes the answered thread the email thread of a card that has none, so it reports
+// there when it lands; a card answered only on the board stays quiet. The board is reloaded because the
+// answer's own land message and stage handoff read this label from it. An error leaves the reply
+// unanswered, so the dispatcher's retry still works.
+func (f *Factory) adoptAnswerThread(a Agent, thread string) error {
+	if f.passive() || lineageEmailThread(f.byID(), a) != "" {
+		return nil
+	}
+	if _, err := f.paseo("agent", "update", a.ID, "--label", gmailThreadLabel+"="+thread); err != nil {
+		return err
+	}
+	return f.reload()
 }
 
 // answerFailed replies in the thread to Zach's answer that it did not go through, with the board

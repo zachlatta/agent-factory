@@ -13,9 +13,11 @@ import (
 // Zach's words as the request, its thread, and an Inbox section on answering there), so all three
 // get the same Fellow prompt and gates. Errands finish in one pass; code work goes through the gates.
 // The card tells Zach in its email thread when it lands; whenever it waits on him, the factory emails
-// him there itself (mail.go).
+// him there itself (mail.go). A board card answered by email reports in that thread when it lands; one
+// answered only on the board stays quiet.
 
-// gmailThreadLabel is the zrl-bot dispatcher's label (no factory. prefix) naming a card's email thread.
+// gmailThreadLabel (no factory. prefix) names the email thread a card reports in when it lands: the
+// dispatcher's on a card it started, or the thread of a board card's first email answer (answer.go).
 const gmailThreadLabel = "gmail-thread"
 
 // fromInbox: the zrl-bot dispatcher started this card for an email or a voice memo.

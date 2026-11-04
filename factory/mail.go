@@ -21,7 +21,8 @@ import (
 // why, the card, the full last message of the builder or reviewer, its questions, the reply words and
 // a board link. Inbox cards answer in their own thread (gmail-thread). Other cards get one new thread
 // to Config.ZachEmail on their first wait (factory.zach-thread); later waits reply in it. His email
-// replies reach the factory through the dispatcher's POST /api/answer (answer.go).
+// replies reach the factory through the dispatcher's POST /api/answer (answer.go); the first one that
+// acts makes that thread the card's gmail-thread too, so the card reports there when it lands.
 
 // Mailer calls one zrl_bot_email_control tool with args and returns its JSON result.
 type Mailer interface {
@@ -207,7 +208,8 @@ func (f *Factory) deliver(a Agent, m email) (string, error) {
 func (f *Factory) deliverOnce(ctx context.Context, a Agent, m email) (string, error) {
 	byID := f.byID()
 	if th := lineageEmailThread(byID, a); th != "" {
-		return "", f.replyInThread(ctx, a.ID, th, m, false)
+		// a board card answered by email: its thread is still the one the factory started to Zach
+		return "", f.replyInThread(ctx, a.ID, th, m, th == lineageLabel(byID, a, labelZachThread))
 	}
 	if th := lineageLabel(byID, a, labelZachThread); th != "" {
 		return "", f.replyInThread(ctx, a.ID, th, m, true)

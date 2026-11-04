@@ -75,6 +75,14 @@ func mailFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *fakeMail
 	f.cfg.ZachEmail = testZach
 	f.cfg.BoardURL = "https://board.example/"
 	f.mailProbe.at = t0 // no health probe in these tests
+	// an email answer reloads the board from the agent files: save the agents these tests hold in memory
+	f.p = &diskPaseo{fakePaseo: p, home: f.cfg.Home, beforeWrite: func() {
+		for _, a := range f.agents() {
+			if _, err := os.Stat(agentFile(f.cfg.Home, a.ID)); err != nil {
+				writeAgents(t, f, a)
+			}
+		}
+	}}
 	return f, p, m
 }
 
@@ -611,5 +619,21 @@ func TestEveryEmailHasTheBoardLink(t *testing.T) {
 		if h, ok := s[i].Args["html"].(string); ok && !strings.Contains(h, `href="`+want+`"`) {
 			t.Errorf("email %d html = %q", i, h)
 		}
+	}
+}
+
+// A board card answered by email keeps addressing later waits to Zach in the same thread.
+func TestLaterWaitAfterAnEmailAnswerStaysAddressedToZach(t *testing.T) {
+	c := planWait("c1", map[string]string{labelTold: "stuck", labelZachThread: "nt1"})
+	c.Labels[gmailThreadLabel] = "nt1"
+	f, _, m := mailFactory(t, c)
+	m.threads["nt1"] = []threadMsg{{ID: "m1", LabelIDs: []string{"SENT"}}, {ID: "m2", LabelIDs: []string{"INBOX"}}}
+	f.Tick()
+	s := m.sends()
+	if len(s) != 1 || s[0].Tool != "reply_to_message" || s[0].Args["message_id"] != "m2" {
+		t.Fatalf("sends = %+v", s)
+	}
+	if to, _ := s[0].Args["to"].([]any); len(to) != 1 || to[0] != testZach {
+		t.Errorf("to = %v, want %s", s[0].Args["to"], testZach)
 	}
 }

@@ -33,7 +33,7 @@ const (
 	labelBase       = "base"         // the worktree's HEAD when the card was first seen: its own commits come after
 	labelStuckFrom  = "stuck-from"   // the column a card paused for Needs Zach left (history unavailable)
 	labelTold       = "told"         // the Needs Zach note already emailed to Zach (mail.go)
-	labelZachThread = "zach-thread"  // cards with no gmail-thread: the zrl-bot thread the factory emails Zach in
+	labelZachThread = "zach-thread"  // board cards: the zrl-bot thread the factory started to email Zach in
 	labelAnswered   = "answered"     // the last email reply from Zach applied to the card (answer.go)
 	labelWriting    = "writing"      // when the builder was asked to write Zach a summary: his email waits for it
 	labelRouting    = "routing"      // a repo picker: its card starts in the repo it names (route.go)

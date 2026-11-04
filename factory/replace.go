@@ -28,8 +28,8 @@ var chainCarriedFactoryLabels = []string{
 	labelArbitrated, labelWorkLeftRounds, labelModelHandoff,
 }
 
-// carriedRawLabels are the email dispatcher's own labels on a card it started (inbox.go): its thread, its
-// source=<InboxSource> and a voice memo's recording.
+// carriedRawLabels have no factory. prefix: the card's email thread (inbox.go), and the email dispatcher's
+// source=<InboxSource> and a voice memo's recording on a card it started.
 var carriedRawLabels = []string{gmailThreadLabel, "source", "voice-memo"}
 
 func lookupAgentByPrefix(byID map[string]Agent, id string) (Agent, bool) {

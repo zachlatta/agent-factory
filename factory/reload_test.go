@@ -19,6 +19,7 @@ type diskPaseo struct {
 	home        string
 	permitStart chan struct{} // when non-nil, `permit ls` signals here, then waits for permitGo
 	permitGo    chan struct{}
+	beforeWrite func() // when non-nil, runs before an `agent update`
 	mu          sync.Mutex
 }
 
@@ -26,6 +27,9 @@ func (d *diskPaseo) Run(ctx context.Context, args ...string) (string, error) {
 	if len(args) > 1 && args[0] == "permit" && d.permitStart != nil {
 		d.permitStart <- struct{}{}
 		<-d.permitGo
+	}
+	if d.beforeWrite != nil && len(args) > 2 && args[0] == "agent" && args[1] == "update" {
+		d.beforeWrite()
 	}
 	out, err := d.fakePaseo.Run(ctx, args...)
 	if err == nil && len(args) > 2 && args[0] == "agent" && args[1] == "update" {
@@ -58,7 +62,7 @@ func writeAgents(t *testing.T, f *Factory, agents ...Agent) {
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		b, _ := json.Marshal(map[string]any{"id": a.ID, "title": a.Title, "cwd": a.Cwd, "lastStatus": a.Status,
+		b, _ := json.Marshal(map[string]any{"id": a.ID, "title": a.Title, "cwd": a.Cwd, "lastStatus": a.Status, "workspaceId": a.WorkspaceID,
 			"createdAt": iso(a.CreatedAt), "lastActivityAt": iso(a.LastActivityAt), "labels": labels,
 			"requiresAttention": a.RequiresAttention, "attentionReason": a.AttentionReason,
 			"lastUserMessageAt": iso(a.LastUserMessageAt), "provider": a.Provider,
