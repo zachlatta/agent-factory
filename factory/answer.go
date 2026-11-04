@@ -62,7 +62,11 @@ type answer struct{ Choice, Message string }
 // parseAnswer applies the reply rule to Zach's reply for ask. A reply word acts only where the ask
 // has the button it stands for (replyWords lists the same ones); anything else is the ask's text
 // choice (Change, or his Answer). At Ready, approval words use the guarded Land action.
+// An approval word does nothing when the email withheld the questions (approvesUnread).
 func parseAnswer(text string, ask *Ask) answer {
+	if approvesUnread(text, ask) {
+		return answer{}
+	}
 	if ask.Ready != nil {
 		return readyAnswer(text, ask.Questions)
 	}
@@ -101,6 +105,13 @@ func parseAnswer(text string, ask *Ask) answer {
 		return answer{}
 	}
 	return answer{Choice: textCh.ID, Message: replyText(text)}
+}
+
+// approvesUnread reports a one-word approval of questions the email did not print: a yes must not take
+// options he never read. Letters still work, since he can only have read those on the board.
+func approvesUnread(text string, ask *Ask) bool {
+	clean := cleanReply(text)
+	return ask.questionsWithheld && (slices.Contains(approveWords, clean) || slices.Contains(landWords, clean))
 }
 
 // recommendedAnswers is every question answered with its first (recommended) option.

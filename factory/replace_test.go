@@ -79,7 +79,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelTold: "architecture: approve the plan to build",
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
 		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
-		labelCodeRoundsFrom: "1", labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "reply-1", labelAskWhy: "requested",
+		labelCodeRoundsFrom: "1", labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "reply-1", labelFeedbackHold: "it is an architecture change", labelFeedbackTold: "reply-1", labelAskWhy: "requested",
 		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
 		labelLandedVerified: "1", labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
 		labelRecovery: "e30", labelReviewerRetries: "1",

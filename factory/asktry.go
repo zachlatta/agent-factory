@@ -144,5 +144,7 @@ func (f *Factory) replyAsk(c Card, a Agent) *Ask {
 	_, qs, ask.Overview = f.askDetail(c, ask)
 	ask.Questions = askQuestions(ask, qs)
 	refineAsk(ask)
+	_, whole := emailQuestions(ask.Questions, []string{c.Repo, a.Repo})
+	ask.questionsWithheld = !whole
 	return ask
 }

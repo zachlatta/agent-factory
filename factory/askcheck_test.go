@@ -242,7 +242,7 @@ func TestNoneHeadlineIsCleaned(t *testing.T) {
 	if ask.Title != "Do it, then mark it done" {
 		t.Errorf("headline %q repeats or misses the thing to try", ask.Title)
 	}
-	if subj := emailQuestion(Agent{}, ask, nil); subj != "Do it, then mark it done" {
+	if subj := emailQuestion(Agent{}, ask, nil, ""); subj != "Do it, then mark it done" {
 		t.Errorf("email subject = %q", subj)
 	}
 	if shared.Decision != "None. The usage page fits a phone." {

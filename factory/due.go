@@ -162,7 +162,11 @@ func (f *Factory) mailDueReminders(agents []Agent, now time.Time) {
 
 // dueReminderEmail is the reminder for card c: the question, when it is due and how to answer.
 func (f *Factory) dueReminderEmail(a Agent, c Card, due time.Time) email {
-	question := emailQuestion(a, f.replyAsk(c, a), []string{c.Repo, a.Repo})
+	title := c.Title
+	if title == "" {
+		title = a.Title
+	}
+	question := emailQuestion(a, f.replyAsk(c, a), []string{c.Repo, a.Repo}, title)
 	lines := []string{
 		fmt.Sprintf("Reminder: %s. This still waits on your answer.", f.dueLine(due)),
 		question,
@@ -179,5 +183,5 @@ func (f *Factory) dueReminderEmail(a Agent, c Card, due time.Time) email {
 		fmt.Fprintf(&h, `<p><a href="%s">Open the board</a></p>`, html.EscapeString(link))
 	}
 	h.WriteString("</div>")
-	return email{Subject: "Reminder: " + question, Text: t.String(), HTML: h.String()}
+	return email{Subject: "Reminder: " + truncWords(question, subjectCap), Text: t.String(), HTML: h.String()}
 }

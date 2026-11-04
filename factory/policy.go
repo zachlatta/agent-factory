@@ -45,7 +45,9 @@ const questionRule = `When Zach must decide something, ask it as a block he can 
 QUESTION: <one short question>
 - <option (recommended)>
 - <option>
-Use 2 to 6 options, one line each, not in a code block. A yes/no question needs no block.`
+Use 2 to 6 options, one line each, not in a code block. A yes/no question needs no block.
+Keep all the questions and their options to 60 words together. An email prints them whole or not at all:
+past that it sends him to the board, and a one-word yes does nothing.`
 
 // ideaRule lets a card's Fellow or reviewer hand out-of-scope work to the Ideas column (POST /api/idea);
 // by names the suggester; note adds a role-specific line.
@@ -799,7 +801,8 @@ func (f *Factory) sideEffectStop(t Agent, labels map[string]string, notes string
 
 // passCode moves card t on from code that passed review (or the arbiter): a public repo's scan first, then
 // to Zach when finishedWorkReason says he sees it before it lands (asked is a reason already given),
-// otherwise to landing.
+// otherwise to landing. An answer to his feedback on the version he was shown returns to him, unless it asks
+// nothing and no reason but "you asked for it" holds (feedbackGate): then it is emailed and goes on to landing.
 func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, notes, asked string) error {
 	target, now := t.ID, iso(f.Now())
 	set := func(kv ...string) error {
@@ -829,20 +832,38 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 	if f.guarded(t.Repo) {
 		scanned = f.scanNote(t.Cwd, "") // public repo: the factory's own scan, before any landing
 	}
+	scanFailed := scanned != "" && !scanPassed(scanned)
+	sameVersion := t.L(labelReadyFeedback) != "" && t.L(labelReadyHead) != "" && t.L(labelReadyHead) == strings.TrimSpace(t.L(labelReviewed))
+	goesAhead, held := false, ""
+	if sameVersion && !scanFailed {
+		if reply, rerr := f.askReply(t); rerr == nil && feedbackAsksNothing(reply) {
+			held = f.feedbackGate(t, tier, notes, asked)
+			goesAhead = held == ""
+		}
+	}
+	readyWhy := func() string {
+		if goesAhead {
+			return ""
+		}
+		return feedbackReadyReason(t, f.finishedWorkReason(t, tier, notes, asked))
+	}
 	var err error
-	if scanned != "" && !scanPassed(scanned) {
+	if scanFailed {
 		// a scan hit or error stops the card; a clean public-repo card goes on like any other
 		err = set(labelStage, "zach", labelVerdict, verdict, labelNote, scanned)
-	} else if t.L(labelReadyFeedback) != "" && t.L(labelReadyHead) != "" && t.L(labelReadyHead) == strings.TrimSpace(t.L(labelReviewed)) {
+	} else if sameVersion && !goesAhead {
 		// reviewHold above established a clean HEAD matching this reviewed revision.
+		if held != "" {
+			labels[labelAskWhy] = held // the board's reason; the email and board read labelFeedbackHold
+		}
 		err = set(labelStage, "zach", labelVerdict, verdict, labelNote, feedbackPrefix+" "+t.L(labelReadyFeedback),
-			labelWriting, "")
-	} else if why := feedbackReadyReason(t, f.finishedWorkReason(t, tier, notes, asked)); why != "" {
+			labelWriting, "", labelFeedbackHold, held)
+	} else if why := readyWhy(); why != "" {
 		// the one stop for Zach, Ready for you: the builder writes what changed, the factory runs the
 		// preview (tryout.go), and mailZach waits for both
 		n := readyRound(t)
 		if err = set(labelStage, "zach", labelVerdict, verdict, labelNote, readyNote(n), labelReady, fmt.Sprint(n),
-			labelAskWhy, why, labelWriting, now, labelReadyHead, strings.TrimSpace(t.L(labelReviewed)), labelReadyFeedback, ""); err == nil {
+			labelAskWhy, why, labelWriting, now, labelReadyHead, strings.TrimSpace(t.L(labelReviewed)), labelReadyFeedback, "", labelFeedbackHold, ""); err == nil {
 			msg := readyMsg(why)
 			if fb != "" {
 				// one message: a second would interrupt the builder writing the first
@@ -852,6 +873,10 @@ func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, not
 			err = f.send(target, msg)
 		}
 	} else {
+		if goesAhead {
+			f.mailFeedbackGoesAhead(t)
+			labels[labelFeedbackHold] = ""
+		}
 		note := "auto-landing (" + tier + ")"
 		if scanned != "" {
 			note += ": public repo: scan passed at review"

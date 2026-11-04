@@ -153,10 +153,19 @@ func factoryStarted(a Agent) bool {
 	return false
 }
 
+// askedForItWhy is the reason that holds only until Zach has seen the finished work.
+const askedForItWhy = "you asked for it"
+
 // finishedWorkReason says why card t, whose code review passed, comes to Zach before it lands, or ""
 // when it lands on its own. review is the passing reviewer's (or arbiter's) final message; asked is a
 // reason the arbiter already gave.
 func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string {
+	return strings.Join(f.finishedWorkReasons(t, tier, review, asked, false), "; ")
+}
+
+// finishedWorkReasons lists finishedWorkReason's reasons. seen waives "you asked for it" alone, for work
+// Zach has already seen: every other reason still holds, including a missing plan review on his own card.
+func (f *Factory) finishedWorkReasons(t Agent, tier, review, asked string, seen bool) []string {
 	var why []string
 	add := func(s string) {
 		if s != "" {
@@ -165,8 +174,8 @@ func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string
 	}
 	add(asked)
 	reuse := reuseBehaviorApproval(t, review)
-	if !reuse && !factoryStarted(t) {
-		add("you asked for it")
+	if !reuse && !seen && !factoryStarted(t) {
+		add(askedForItWhy)
 	} else if !reuse && t.L(labelPlanRounds) == "" {
 		add("it had no plan review")
 	}
@@ -189,5 +198,5 @@ func (f *Factory) finishedWorkReason(t Agent, tier, review, asked string) string
 	} else {
 		add(f.alwaysAskFiles(t.Cwd))
 	}
-	return strings.Join(why, "; ")
+	return why
 }

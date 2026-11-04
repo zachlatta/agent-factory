@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Needs Zach email. Every card that waits on Zach gets one email per wait reason (factory.told), sent
@@ -387,13 +388,17 @@ type replyWord struct{ Word, Does string }
 
 // replyWords lists the one-word email answers for ask, matching parseAnswer: only words for buttons
 // the ask has (its Choices, the same as on the board), so no word is offered without its button. Any
-// other reply is the ask's text choice (Change, No or his Answer).
+// other reply is the ask's text choice (Change, No or his Answer). When the email withheld the questions,
+// no word approves: he has not read what it would approve.
 func replyWords(ask *Ask) []replyWord {
 	var out []replyWord
 	if ask.Ready != nil { // readyAnswer: approval and drop words act there
+		if ask.questionsWithheld {
+			return []replyWord{{"drop", "stop it"}}
+		}
 		return []replyWord{{"yes", "land it"}, {"land", "land it"}, {"drop", "stop it"}}
 	}
-	if goCh := goChoice(ask); goCh != nil {
+	if goCh := goChoice(ask); goCh != nil && !ask.questionsWithheld {
 		does := strings.ToLower(goCh.Label)
 		if x := actionFor(ask, goCh.action); x != nil {
 			does = strings.ToLower(x.Label)
@@ -501,16 +506,15 @@ func loadEvidenceSlots(cwd string, ev Evidence) []evidenceSlot {
 	return out
 }
 
-// Decision emails. The subject is the question; the body, under mailWordCap words, leads with the
-// recommendation and any choices, then what it is about, then the one-word replies and a board link. The full report
-// stays on the board. Agent text passes through plainText, so no hash, id, repo slug or file name
-// reaches Zach.
+// Decision emails. The subject is the question; the body, under mailWordCap words apart from any questions,
+// leads with the recommendation and any choices, then what it is about, then the one-word replies and a board
+// link. The full report stays on the board. Agent text passes through plainText, so no hash, id, repo slug or
+// file name reaches Zach. Emails print whole lines: a line that does not fit is dropped, never cut.
 const (
-	mailWordCap    = 59 // words in the body, not counting the board link
-	subjectCap     = 90 // runes in the subject
-	questionCap    = 12 // words of a question
-	optionCap      = 5  // words of an option
-	optionsEmailed = 4  // options listed per question
+	mailWordCap         = 59 // words in the body, not counting the board link or the questions
+	mailQuestionWordCap = 60 // words of all questions and their options, printed whole or not at all
+	subjectCap          = 90 // runes in the subject
+	aboutWordCap        = 14 // a longer title is left out of the body, not cut
 )
 
 var (
@@ -565,31 +569,176 @@ func dropOwners(s string) string {
 	return b.String()
 }
 
-// firstWords is s cut to n words, marked with "…" when cut.
-func firstWords(s string, n int) string {
-	w := strings.Fields(s)
-	if len(w) <= n {
-		return strings.Join(w, " ")
-	}
-	return strings.TrimRight(strings.Join(w[:n], " "), ",;:.-") + "…"
-}
-
 func wordCount(s string) int { return len(strings.Fields(s)) }
 
-// emailQuestion is the email's subject: the agent's DECISION line, unless the factory raised the
-// stop or the agent decided nothing, then the ask's own question.
-func emailQuestion(a Agent, ask *Ask, repos []string) string {
+var recommendedMarkRe = regexp.MustCompile(`(?i)\(?\s*recommended\s*\)?`)
+
+// readable reports whether line says anything once plainText has stripped it: a letter or digit, not
+// counting a "(recommended)" mark. An unreadable line is not printed as if it had content.
+func readable(line string) bool {
+	return strings.IndexFunc(recommendedMarkRe.ReplaceAllString(line, ""), func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	}) >= 0
+}
+
+var notSentenceEnd = []string{"e.g.", "i.e.", "vs.", "etc."}
+
+// sentences splits s at sentence ends, leaving out any that is not readable. A stop after an abbreviation
+// or before a lower-case word is not one.
+func sentences(s string) []string {
+	var out, cur []string
+	words := strings.Fields(s)
+	for i, w := range words {
+		cur = append(cur, w)
+		end := strings.TrimRight(w, `"')]`)
+		next := ""
+		if i+1 < len(words) {
+			next = words[i+1]
+		}
+		if next == "" || end != "" && strings.ContainsRune(".!?", rune(end[len(end)-1])) && strings.ToLower(next) != next && !slices.Contains(notSentenceEnd, strings.ToLower(end)) {
+			if l := strings.Join(cur, " "); readable(l) {
+				out = append(out, l)
+			}
+			cur = nil
+		}
+	}
+	return out
+}
+
+// wholeSentences is as many of s's first sentences as fit in n words, none cut.
+func wholeSentences(s string, n int) string {
+	var out []string
+	for _, l := range sentences(s) {
+		if n -= wordCount(l); n < 0 {
+			break
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, " ")
+}
+
+// emailedQuestion is a question as an email prints it: plain words, whole.
+type emailedQuestion struct {
+	Text    string
+	Options []string
+}
+
+// emailQuestions is qs ready for an email, or ok false when any of them cannot be read in full there:
+// over mailQuestionWordCap together, or not readable once plainText has stripped them. It is all or nothing, because
+// answering only some of the questions breaks the letter replies.
+func emailQuestions(qs []Question, repos []string) (out []emailedQuestion, ok bool) {
+	words := 0
+	for _, q := range qs {
+		eq := emailedQuestion{Text: plainText(q.Text, repos...)}
+		if !readable(eq.Text) {
+			return nil, false
+		}
+		words += wordCount(eq.Text)
+		for _, o := range q.Options {
+			o = plainText(o, repos...)
+			if !readable(o) {
+				return nil, false
+			}
+			words += wordCount(o)
+			eq.Options = append(eq.Options, o)
+		}
+		out = append(out, eq)
+	}
+	if words > mailQuestionWordCap {
+		return nil, false
+	}
+	return out, true
+}
+
+// questionLines is questions numbered, with lettered options, as an email prints them.
+func questionLines(qs []emailedQuestion) []string {
+	var out []string
+	for i, q := range qs {
+		out = append(out, fmt.Sprintf("%d. %s", i+1, q.Text))
+		for j, o := range q.Options {
+			out = append(out, fmt.Sprintf("   %s. %s", letter(j), o))
+		}
+	}
+	return out
+}
+
+// questionsForBoard is what an email says instead of questions it cannot print whole.
+func questionsForBoard(n int) string {
+	if n == 1 {
+		return "1 question is too long for email. Open the board to answer."
+	}
+	return fmt.Sprintf("%d questions are too long for email. Open the board to answer.", n)
+}
+
+const bareDecisionFallback = "Approve this change?"
+
+var (
+	// a recommendation at the end of a decision, for or against landing as a whole: it names no change
+	recommendRe = regexp.MustCompile(`(?i)[\s(—–-]+(yes(\s*\(?\s*recommended\s*\)?)?|\(?\s*recommended\s*\)?|((i|we)\s+)?(would\s+)?(recommend|suggest)(ation)?:?\s+(yes|land(ing)?(\s+it)?|ship(ping)?(\s+it)?|approv(e|ing)(\s+it)?|it|this|a)\s*\)?)[\s.!?]*$`)
+	// the same at the start, since agents are told to put the recommendation first
+	leadRecommendRe = regexp.MustCompile(`(?i)^(yes(\s*\(?\s*recommended\s*\)?)?|\(?\s*recommended\s*\)?|((i|we)\s+)?(would\s+)?(recommend|suggest)(ation)?:?\s+(yes|(land(ing)?|ship(ping)?|approv(e|ing))(\s+(it|this(\s+change)?))?))[\s.:;,!—–-]+`)
+	// a decision that names no change: "Land this change?", "Ready to land?", "Ship it?", or none at all
+	bareDecisionRe = regexp.MustCompile(`(?i)^((should|can|shall)\s+(we|i)\s+|ok(ay)?\s+to\s+|ready\s+to\s+)?(land|ship|approve|merge)(\s+(it|this|the|these|change|changes|now))*$|^(none|nothing|n/?a)?$`)
+	titleCutRe     = regexp.MustCompile(`\s*(…|\.\.\.)$`)
+	danglingWordRe = regexp.MustCompile(`(?i)(\s+(a|an|and|as|at|but|by|for|from|in|of|on|or|the|to|with))+$`)
+)
+
+const decisionTrim = " \t\n.!?:;,-()"
+
+// bareDecision is decision's words without markdown or a leading or trailing recommendation, and whether they name
+// no change. Text that is only a recommendation stays as it is: it is the agent's question, not an empty one.
+func bareDecision(decision string) (core string, bare bool) {
+	plain := strings.ReplaceAll(strings.ReplaceAll(decision, "*", ""), "_", "")
+	core = strings.Trim(recommendRe.ReplaceAllString(leadRecommendRe.ReplaceAllString(plain, ""), ""), decisionTrim)
+	if core == "" {
+		core = strings.Trim(plain, decisionTrim)
+	}
+	return core, bareDecisionRe.MatchString(core)
+}
+
+// wholeTitle is title without the marks of a cut (truncWords, at 60 characters): its "…" and the dangling
+// word before it, so Zach never reads a title that ends mid-sentence.
+func wholeTitle(title string) string {
+	t := strings.TrimSpace(title)
+	if !titleCutRe.MatchString(t) {
+		return t
+	}
+	t = strings.TrimRight(titleCutRe.ReplaceAllString(t, ""), " ,;:-")
+	return strings.TrimRight(danglingWordRe.ReplaceAllString(t, ""), " ,;:-")
+}
+
+// namedDecision is decision as Zach reads it: unchanged when it names the change, otherwise the
+// question in the card's outcome title, keeping "approve" when that is what it asks.
+func namedDecision(decision, title string) string {
+	core, bare := bareDecision(decision)
+	if !bare {
+		return strings.Trim(strings.TrimSpace(decision), "*_ ")
+	}
+	t := strings.TrimRight(wholeTitle(title), ".!?,;: ")
+	if t == "" {
+		return bareDecisionFallback
+	}
+	if strings.HasPrefix(strings.ToLower(core), "approve") {
+		return "Approve: " + t + "?"
+	}
+	return "Land: " + t + "?"
+}
+
+// emailQuestion is the email's question, whole: the agent's DECISION line named for the change
+// (namedDecision), unless the factory raised the stop or the agent decided nothing, then the ask's own
+// question. Only the subject line cuts it, at subjectCap.
+func emailQuestion(a Agent, ask *Ask, repos []string, title string) string {
 	q := ask.Title
 	if ov := ask.Overview; ov != nil && !factoryRaised(a) {
 		if d := plainText(ov.Decision, repos...); d != "" && !needsNothingRe.MatchString(d) {
 			q = d
 		}
 	}
-	return truncWords(q, subjectCap)
+	return namedDecision(q, plainText(title, repos...))
 }
 
 // composeEmail writes the decision email for card a waiting on ask: one question, under mailWordCap
-// words, answerable with one word, with any before and after screenshots inline.
+// words apart from its questions, answerable with one word, with any before and after screenshots inline.
 func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 	if isFeedbackNote(a.L(labelNote)) {
 		return f.feedbackEmail(a, c, ask)
@@ -606,7 +755,8 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 	if cwd == "" {
 		cwd = a.Cwd
 	}
-	subject := emailQuestion(a, ask, repos)
+	question := emailQuestion(a, ask, repos, title)
+	subject := truncWords(question, subjectCap)
 	slots := loadEvidenceSlots(cwd, ask.Evidence)
 	var atts []mailAttachment
 	for _, s := range slots {
@@ -616,27 +766,43 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 	// required lines: the deadline, the recommendation, the choices and how to answer
 	var lead, reply []string
 	var options []string
+	shown, whole := emailQuestions(ask.Questions, repos)
+	ask.questionsWithheld = !whole
 	words := replyWords(ask)
 	if due := waitDue(a); !due.IsZero() {
 		lead = append(lead, f.dueLine(due)+".")
 	}
+	if ov := ask.Overview; ov != nil && !factoryRaised(a) {
+		// a thread's later emails show no subject, so a decision named here also opens the body, as does
+		// one the subject line had to cut
+		if d := plainText(ov.Decision, repos...); d != "" && !needsNothingRe.MatchString(d) {
+			if _, bare := bareDecision(d); bare || question != subject {
+				lead = append(lead, question)
+			}
+		}
+	}
+	questionWords := 0 // the questions have their own allowance, mailQuestionWordCap
+	asked := func(l string) string { questionWords += wordCount(l); return l }
 	switch qs := ask.Questions; {
+	case len(qs) > 0 && !whole:
+		lead = append(lead, questionsForBoard(len(qs)))
 	case len(qs) == 1:
-		if subject != firstWords(plainText(qs[0].Text, repos...), questionCap) {
-			lead = append(lead, firstWords(plainText(qs[0].Text, repos...), questionCap))
+		if subject != truncWords(shown[0].Text, subjectCap) {
+			lead = append(lead, asked(shown[0].Text))
 		}
 		lead = append(lead, "I recommend A.")
-		for j, o := range qs[0].Options {
-			if j == optionsEmailed {
-				break
-			}
-			options = append(options, letter(j)+". "+firstWords(plainText(o, repos...), optionCap))
+		for j, o := range shown[0].Options {
+			options = append(options, asked(letter(j)+". "+o))
 		}
 		reply = append(reply, "Reply with a letter")
 	case len(qs) > 1:
 		var rec []string
-		for i := range qs {
+		for i, q := range shown {
 			rec = append(rec, fmt.Sprintf("%dA", i+1))
+			options = append(options, asked(fmt.Sprintf("%d. %s", i+1, q.Text)))
+			for j, o := range q.Options {
+				options = append(options, asked(letter(j)+". "+o))
+			}
 		}
 		lead = append(lead, fmt.Sprintf("%d questions; I recommend %s.", len(qs), strings.Join(rec, " ")))
 		reply = append(reply, "Reply with letters like "+strings.Join(rec, " "))
@@ -655,22 +821,22 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 	} else {
 		replyLine += ", or write what to change."
 	}
-	if len(ask.Questions) == 0 && len(words) == 0 {
+	if (len(ask.Questions) == 0 || !whole) && len(words) == 0 {
 		replyLine = "Reply with what to do."
 	}
 
 	// optional lines, as the word budget allows: what it is about, and the agent's overview
-	used := wordCount(strings.Join(lead, " ")) + wordCount(strings.Join(options, " ")) + wordCount(replyLine)
+	used := wordCount(strings.Join(lead, " ")) + wordCount(strings.Join(options, " ")) + wordCount(replyLine) - questionWords
 	var about, overview string
-	if t := plainText(title, repos...); t != "" && !strings.EqualFold(t, subject) {
-		about = "About: " + firstWords(t, 14)
-		if used+wordCount(about) > mailWordCap {
+	if t := wholeTitle(plainText(title, repos...)); t != "" && !strings.Contains(strings.ToLower(subject), strings.ToLower(t)) {
+		about = "About: " + t
+		if wordCount(t) > aboutWordCap || used+wordCount(about) > mailWordCap {
 			about = ""
 		}
 		used += wordCount(about)
 	}
-	if ov := ask.Overview; ov != nil && !factoryRaised(a) && mailWordCap-used >= 6 {
-		overview = firstWords(plainText(ov.Overview, repos...), mailWordCap-used)
+	if ov := ask.Overview; ov != nil && !factoryRaised(a) {
+		overview = wholeSentences(plainText(ov.Overview, repos...), mailWordCap-used)
 	}
 
 	link := f.cardLink(a.ID)

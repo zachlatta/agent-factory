@@ -46,6 +46,8 @@ type Ask struct {
 	zachItem string
 	// directAsk: a direct result's question (directAskFor); refineAsk titles it from the agent's overview.
 	directAsk bool
+	// questionsWithheld: the email could not print the questions whole, so no one word approves them
+	questionsWithheld bool
 }
 
 // Question is one multiple-choice question an agent asks Zach. He can also write his own answer.

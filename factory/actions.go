@@ -190,7 +190,10 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			msg += "\n\nPick the repo again and end with the REPO: line."
 		}
 		if readyStop(f.agent(c.ID)) {
-			msg += "\n\nAnswer this feedback directly and describe any changes. Do not repeat the Ready summary. Commit any code changes, then stop for code review."
+			msg += "\n\nAnswer this feedback directly and describe any changes. Do not repeat the Ready summary. " +
+				"Write DECISION: None. and NEEDS FROM ZACH: Nothing. only if his reply leaves nothing for him to decide, because this version then lands with no further ask. " +
+				"If he only asked a question, told you to wait or hold, or you are not sure, keep the ask in both lines. " +
+				"Commit any code changes, then stop for code review."
 		}
 		if landingReply(f.agent(c.ID)) {
 			msg += remainingRule
@@ -207,6 +210,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			labels := answerLabels(c, a, now, f.guarded(c.Repo))
 			if readyStop(a) {
 				labels[labelReadyFeedback] = now
+				labels[labelFeedbackHold] = ""
 				labels[labelWriting] = ""
 			}
 			labels[labelFinished] = ""

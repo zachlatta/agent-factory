@@ -88,11 +88,17 @@ func (f *Factory) numberedAsk(a Agent, c Card) (digestItem, *Ask, bool) {
 	if title == "" {
 		title = "(untitled)"
 	}
-	it := digestItem{Card: a.ID, Title: title, Since: a.L(labelSince), Question: emailQuestion(a, ask, repos)}
+	it := digestItem{Card: a.ID, Title: title, Since: a.L(labelSince), Question: digestQuestion(a, ask, repos)}
 	for _, ch := range ask.Choices {
 		it.Choices = append(it.Choices, ch.ID)
 	}
 	return it, ask, true
+}
+
+// digestQuestion is a numbered line's question: short, and with no title to name a bare decision, since
+// the line already opens with the title.
+func digestQuestion(a Agent, ask *Ask, repos []string) string {
+	return truncWords(emailQuestion(a, ask, repos, ""), subjectCap)
 }
 
 // numberDecisions moves the asks a number can answer from s.ForYou to s.Decisions, newest first.

@@ -112,6 +112,15 @@ const changedReplyQuestion = "That question changed. Please reply again with you
 
 const clarifyReply = "Does your previous reply answer the waiting question, or start a separate request? Reply answer to send that reply to the waiting work, or separate to start a new request."
 
+// withheldReplyLine answers a one-word yes to questions the email did not print.
+func withheldReplyLine(link string) string {
+	line := "The options did not fit in the email, so that reply did nothing."
+	if link == "" {
+		return line + " Answer on the board."
+	}
+	return line + " Answer on the board: " + link
+}
+
 func exactAnswer(text string, ask *Ask) bool {
 	c := cleanReply(text)
 	ans := parseAnswer(text, ask)
@@ -182,6 +191,10 @@ func (f *Factory) separateReply(a Agent, b Body, text string) (map[string]string
 
 // classifyEmail serializes reply handling and keeps only unresolved clarification data.
 func (f *Factory) classifyEmail(a Agent, c Card, ask *Ask, b Body, detail string) (answer, map[string]string, error) {
+	if approvesUnread(b.Text, ask) {
+		f.clarifyAnswer(a, b.MessageID, withheldReplyLine(f.cardLink(a.ID)))
+		return answer{}, map[string]string{"card": a.ID, "action": "clarify"}, nil
+	}
 	ans := parseAnswer(b.Text, ask)
 	if f.passive() {
 		if exactAnswer(b.Text, ask) || ans.Choice == "" {

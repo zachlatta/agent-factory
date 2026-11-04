@@ -54,10 +54,10 @@ func readyStop(a Agent) bool { return a.L(labelStage) == "zach" && isFinishedNot
 func readyMsg(reason string) string {
 	return "Code review passed. This change now goes to Zach once, finished, as \"Ready for you\", before it lands (" +
 		reason + "). Write it for reading on a phone, in plain words. Start with three lines:\n" +
-		"DECISION: <land this change?, in one line>\n" +
+		"DECISION: <the change by name, in one line, for example: Land the clearer board buttons?; never a bare \"Land this change?\">\n" +
 		"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
 		"NEEDS FROM ZACH: <with a preview, screenshots or sample output: try it, then reply yes or land; otherwise: reply yes or land to approve, ask for a change or drop it>\n" +
-		"Then exactly 3 lines, each starting `CHANGED: ` with one plain sentence on what changed for him (no file names, " +
+		"Then exactly 3 lines, each starting `CHANGED: ` with one plain sentence of at most 8 words on what changed for him (no file names, " +
 		"ids or jargon). If it changes something he sees (a page, an email, a message), take before (origin/main) and after " +
 		"(your branch) screenshots at desktop and phone widths, on test or fake data, and name them with the evidence lines " +
 		"the overview rule gives. Do not start a server, leave anything running or upload anything: the factory starts the " +
@@ -123,27 +123,40 @@ func (f *Factory) fillReady(ask *Ask, id, text string, cwd ...string) {
 	if len(cwd) > 0 {
 		folder = cwd[0]
 	}
+	a := f.agent(id)
+	if ask.Overview != nil {
+		// The board reuses the cached builder overview across preview refreshes.
+		overview := *ask.Overview
+		ask.Overview = &overview
+	}
+	named := func(decision string) string {
+		return namedDecision(plainText(decision, a.Repo), plainText(a.Title, a.Repo))
+	}
+	if ask.Overview != nil && ask.Overview.Decision != "" { // the board reads the decision before the title
+		ask.Overview.Decision = named(ask.Overview.Decision)
+	}
 	if !readyHasTry(ask.Ready, len(loadEvidenceSlots(folder, ask.Evidence)) > 0) {
-		ask.Title = "Approve this change?"
+		decision := ""
 		if ask.Overview != nil {
-			decision := strings.TrimSpace(plainText(ask.Overview.Decision, f.agent(id).Repo))
-			if decision != "" && !strings.EqualFold(strings.TrimRight(decision, ".!?"), "none") {
-				ask.Title = firstWords(decision, 12)
-			}
+			decision = ask.Overview.Decision
 		}
+		ask.Title = named(decision)
 		if ask.Overview != nil {
-			// The board reuses the cached builder overview across preview refreshes.
-			overview := *ask.Overview
-			ask.Overview = &overview
 			ask.Overview.Needs = "Reply yes or land to approve, ask for a change, or drop it. " + readyApprovalText
 		}
 		ask.Label = "Ready: approve the change"
 		ask.Why = strings.ReplaceAll(ask.Why, " Try the preview, then land it, ask for a change, or drop it.", " Reply yes or land to approve, ask for a change, or drop it.")
 		ask.Why += " " + readyApprovalText
 	}
+	if a.L(labelFeedbackHold) != "" && isFeedbackNote(a.L(labelNote)) && ask.Overview != nil {
+		ask.Overview.Needs = feedbackHoldLine(plainText(a.L(labelFeedbackHold), a.Repo))
+	}
 }
 
-const readyApprovalText = "Nothing is installed or changed until you say yes or land."
+const (
+	readyApprovalText   = "Nothing is installed or changed until you say yes or land."
+	readyOnBoardApprove = "Nothing is installed or changed until you land it on the board."
+)
 
 // Pending previews remain something to try; failed previews need other usable evidence.
 func readyHasTry(r *Ready, screenshots bool) bool {
@@ -205,6 +218,41 @@ func previewReason(r *Ready) string {
 	return "No live preview: the factory has not started one for this change."
 }
 
+// fitBullets is the lines that fit whole in budget words, a bullet costing one word for its mark, and how
+// many did not. When some do not fit, the line saying so is paid for first.
+func fitBullets(lines []string, budget int) (shown []string, dropped int) {
+	total := 0
+	for _, l := range lines {
+		total += wordCount(l) + 1
+	}
+	if total <= budget {
+		return lines, 0
+	}
+	budget -= wordCount(moreOnBoard(0, len(lines)))
+	for _, l := range lines {
+		if cost := wordCount(l) + 1; cost <= budget {
+			shown = append(shown, l)
+			budget -= cost
+		} else {
+			dropped++
+		}
+	}
+	return shown, dropped
+}
+
+// moreOnBoard says how many changes the email left for the board, or "".
+func moreOnBoard(shown, dropped int) string {
+	switch {
+	case dropped == 0:
+		return ""
+	case shown > 0:
+		return fmt.Sprintf("%d more on the board.", dropped)
+	case dropped == 1:
+		return "1 change is on the board."
+	}
+	return fmt.Sprintf("%d changes are on the board.", dropped)
+}
+
 // readyEmail is the Ready for you email: what changed, screenshots, the Preview button, how to answer.
 func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	repos := []string{c.Repo, a.Repo}
@@ -212,7 +260,7 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	if title == "" {
 		title = a.Title
 	}
-	title = plainText(title, repos...)
+	title = wholeTitle(plainText(title, repos...))
 	cwd := c.Cwd
 	if cwd == "" {
 		cwd = a.Cwd
@@ -227,63 +275,65 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	// agent text passes through plainText, as in every email: no hashes, ids, repo slugs or file names
 	var changed []string
 	for _, l := range r.Changed {
-		changed = append(changed, plainText(l, repos...))
+		if l = plainText(l, repos...); readable(l) {
+			changed = append(changed, l)
+		}
 	}
-	if len(changed) == 0 && ask.Overview != nil && ask.Overview.Overview != "" {
-		changed = []string{plainText(ask.Overview.Overview, repos...)}
+	if len(changed) == 0 && ask.Overview != nil {
+		changed = sentences(plainText(ask.Overview.Overview, repos...))
 	}
 	answerLine := "Reply \"yes\" or \"land\" to ship it, \"drop\" to drop it, or say what to change."
-	if len(ask.Questions) > 0 { // shorter, to stay under the email word cap with the questions
+	shownQs, whole := emailQuestions(ask.Questions, repos) // all whole (mail.go)
+	ask.questionsWithheld = !whole
+	qs := questionLines(shownQs)
+	notice, approval := "", readyApprovalText
+	switch {
+	case !whole: // nothing he has not read can be approved in one word
+		notice, approval = questionsForBoard(len(ask.Questions)), readyOnBoardApprove
+		answerLine = "Reply \"drop\" to drop it, or say what to change."
+	case len(qs) > 0: // shorter, to leave words for what changed
 		answerLine = "Reply \"yes\" or \"land\", \"drop\", or what to change. Letters like 1A answer the questions."
-	}
-	var qs []string                   // the builder's questions, numbered, with lettered options
-	for i, q := range ask.Questions { // cut like a decision email's (mail.go): the board has them whole
-		qs = append(qs, fmt.Sprintf("%d. %s", i+1, firstWords(plainText(q.Text, repos...), questionCap)))
-		for j, o := range q.Options {
-			if j == optionsEmailed {
-				break
-			}
-			qs = append(qs, fmt.Sprintf("   %s. %s", letter(j), firstWords(plainText(o, repos...), optionCap)))
-		}
 	}
 
 	heading := "Ready to try: " + title
 	noTry := !readyHasTry(r, len(slots) > 0)
 	if noTry {
-		heading = ask.Title
+		decision := ask.Title
+		if decision == bareDecisionFallback { // fillReady had no title to name it with
+			decision = ""
+		}
+		heading = namedDecision(decision, title)
 	}
+	// The instructions come first; what changed gets the rest, bullet by bullet. Questions have their
+	// own allowance and sample output is outside the count.
+	reserved := []string{heading, answerLine, "What changed:", previewWaitText(r), notice}
 	if noTry {
-		// Reserve the instructions first; share the remaining word budget with questions and changes.
-		budget := mailWordCap - wordCount(heading) - wordCount(readyApprovalText) - wordCount(answerLine) - wordCount(previewWaitText(r)) - 2 - len(changed)
-		for i := range qs {
-			n := min(max(budget, 0), wordCount(qs[i]))
-			if n > 0 {
-				qs[i] = firstWords(qs[i], n)
-			} else {
-				qs[i] = ""
-			}
-			budget -= n
-		}
-		for i := range changed {
-			n := min(max(budget, 0), wordCount(changed[i]))
-			if n > 0 {
-				changed[i] = firstWords(changed[i], n)
-			} else {
-				changed[i] = ""
-			}
-			budget -= n
-		}
+		reserved = append(reserved, approval)
 	}
+	if r.Preview != "" {
+		reserved = append(reserved, "Try it: "+r.Preview)
+	}
+	for _, s := range slots {
+		reserved = append(reserved, fmt.Sprintf("%s screenshot: %s (attached)", s.label, s.name))
+	}
+	changed, dropped := fitBullets(changed, mailWordCap-wordCount(strings.Join(reserved, " ")))
+	more := moreOnBoard(len(changed), dropped)
 	var t strings.Builder
 	fmt.Fprintf(&t, "%s\n", heading)
 	if noTry {
-		fmt.Fprintf(&t, "\n%s\n", readyApprovalText)
+		fmt.Fprintf(&t, "\n%s\n", approval)
 	}
 	if len(changed) > 0 {
 		t.WriteString("\nWhat changed:\n")
 	}
 	for _, l := range changed {
 		fmt.Fprintf(&t, "- %s\n", l)
+	}
+	if more != "" {
+		if len(changed) == 0 {
+			t.WriteString("\n")
+		}
+		fmt.Fprintf(&t, "%s\n", more)
 	}
 	for _, s := range slots {
 		fmt.Fprintf(&t, "\n%s screenshot: %s (attached)\n", s.label, s.name)
@@ -298,6 +348,9 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 	}
 	if len(qs) > 0 {
 		fmt.Fprintf(&t, "\n%s\n", strings.Join(qs, "\n"))
+	}
+	if notice != "" {
+		fmt.Fprintf(&t, "\n%s\n", notice)
 	}
 	fmt.Fprintf(&t, "\n%s\n", answerLine)
 	if link != "" {
@@ -314,13 +367,18 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
 		fmt.Fprintf(&h, `<p style="font-size:17px"><b>%s</b></p>`, e(heading))
 		if noTry {
-			fmt.Fprintf(&h, "<p>%s</p>", readyApprovalText)
+			fmt.Fprintf(&h, "<p>%s</p>", approval)
 		}
-		h.WriteString("<ul>")
-		for _, l := range changed {
-			fmt.Fprintf(&h, "<li>%s</li>", e(l))
+		if len(changed) > 0 {
+			h.WriteString("<ul>")
+			for _, l := range changed {
+				fmt.Fprintf(&h, "<li>%s</li>", e(l))
+			}
+			h.WriteString("</ul>")
 		}
-		h.WriteString("</ul>")
+		if more != "" {
+			fmt.Fprintf(&h, "<p>%s</p>", e(more))
+		}
 		if includeImages {
 			for _, s := range slots {
 				fmt.Fprintf(&h, `<div style="margin:12px 0"><p style="margin:0 0 4px;font-weight:600">%s</p>`+
@@ -340,6 +398,9 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		if len(qs) > 0 {
 			fmt.Fprintf(&h, `<pre style="white-space:pre-wrap;font-family:inherit">%s</pre>`, e(strings.Join(qs, "\n")))
 		}
+		if notice != "" {
+			fmt.Fprintf(&h, "<p>%s</p>", e(notice))
+		}
 		fmt.Fprintf(&h, "<p>%s</p>", e(answerLine))
 		if link != "" {
 			fmt.Fprintf(&h, `<p>%s</p>`, button(link, "Open board", "#59636e"))
@@ -348,7 +409,7 @@ func (f *Factory) readyEmail(a Agent, c Card, ask *Ask) email {
 		return h.String()
 	}
 	return email{
-		Subject:     truncWords(heading, 80),
+		Subject:     truncWords(heading, subjectCap),
 		Text:        t.String(),
 		HTML:        buildHTML(true),
 		HTMLNoImage: buildHTML(false),

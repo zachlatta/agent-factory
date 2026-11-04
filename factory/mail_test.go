@@ -153,7 +153,7 @@ func TestDecisionEmailIsShortAndPlain(t *testing.T) {
 	}
 }
 
-// Factory copy in every emailed ask avoids pipeline words, and every body stays under 60 words.
+// Factory copy in every emailed ask avoids pipeline words, and every body stays under 60 words apart from its question.
 func TestEmailedAsksUsePlainWords(t *testing.T) {
 	reply := "Built it.\n\nQUESTION: Which colour should the new button be on the phone page?\n" +
 		"- A calm blue that matches the rest of the page (recommended)\n- A bright red that stands out from everything\n" +
@@ -175,8 +175,17 @@ func TestEmailedAsksUsePlainWords(t *testing.T) {
 		}
 		text := s[0].Args["text"].(string)
 		body := text[:strings.Index(text, "Open the board:")]
-		if n := wordCount(body); n >= 60 {
-			t.Errorf("%s: %d words:\n%s", note, n, body)
+		// the question has its own allowance (mailQuestionWordCap), read in full
+		told := body
+		for _, l := range []string{"Which colour should the new button be on the phone page?", "A calm blue that matches the rest of the page (recommended)",
+			"A bright red that stands out from everything", "Green like the old one used to be before", "Grey so it fades into the page background", "Black", "White"} {
+			if !strings.Contains(told, l) {
+				t.Errorf("%s: lacks %q:\n%s", note, l, body)
+			}
+			told = strings.Replace(told, l, "", 1)
+		}
+		if n := wordCount(told); n >= 60 {
+			t.Errorf("%s: %d words apart from the question:\n%s", note, n, body)
 		}
 		for _, w := range []string{"card", "track", "landing", "fellow", "land "} {
 			if strings.Contains(strings.ToLower(s[0].Args["subject"].(string)+" "+body), w) {
@@ -635,5 +644,278 @@ func TestLaterWaitAfterAnEmailAnswerStaysAddressedToZach(t *testing.T) {
 	}
 	if to, _ := s[0].Args["to"].([]any); len(to) != 1 || to[0] != testZach {
 		t.Errorf("to = %v, want %s", s[0].Args["to"], testZach)
+	}
+}
+
+func TestNamedDecision(t *testing.T) {
+	const title = "Clearer board buttons"
+	const named = "Land: Clearer board buttons?"
+	for _, d := range []string{"Land this change?", "land this change", "LAND THIS CHANGE?", "Land this?", "Land it?", "Ready to land?",
+		"Ship it?", "Ship this change?", "Should we land this?", "**Land this change?**", "_Land this change?_",
+		"Land this change? I recommend yes.", "Land this change? (recommended)", "Land this change - I recommend yes", "**Land this change?** I recommend yes.",
+		"I recommend yes. Land this change?", "Yes: land this change?", "Yes, land this change?", "Yes - land this change?", "Land this change? Yes.",
+		"Land this change? Yes (recommended).", "I recommend landing. Land this change?", "I recommend landing this change. Land this change?",
+		"Recommended: land this change?", "**Yes:** land this change?",
+		"", "None.", "none", "Nothing"} {
+		if got := namedDecision(d, title); got != named {
+			t.Errorf("namedDecision(%q) = %q", d, got)
+		}
+	}
+	if got := namedDecision("Approve this change? I recommend yes.", title); got != "Approve: Clearer board buttons?" {
+		t.Errorf("approve: %q", got)
+	}
+	for _, d := range []string{"Use clearer buttons?", "Land the buttons before the phone page?", "Approve this plan?",
+		"Allow a test email to a real address?", "Should this also cover the phone page? I recommend yes.",
+		"I recommend yes: renew the domain for two years?", "I recommend A: wait or buy now?", "Approve the recommended vendor, Acme?",
+		"Land this change? I recommend shipping the phone page first.", "I recommend yes.", "Recommended",
+		"Yes.", "Yes: renew the domain for two years?", "I recommend yes. Renew the domain?", "Land this change? Yes, after the phone page is done."} {
+		if got := namedDecision(d, title); got != d {
+			t.Errorf("namedDecision(%q) = %q", d, got)
+		}
+	}
+	for _, tc := range []struct{ title, want string }{
+		{"", "Approve this change?"},
+		{"Clearer buttons.", "Land: Clearer buttons?"},
+		{"Clearer buttons?", "Land: Clearer buttons?"},
+		{truncWords("Approval emails name the change and never show blank or cut lines", 60), "Land: Approval emails name the change and never show blank?"},
+		{"Approval emails never show blank...", "Land: Approval emails never show blank?"},
+	} {
+		if got := namedDecision("Land this change?", tc.title); got != tc.want {
+			t.Errorf("title %q: %q, want %q", tc.title, got, tc.want)
+		}
+	}
+}
+
+func TestEmailQuestionUsesTheOutcomeTitle(t *testing.T) {
+	a := planWait("c1", nil)
+	a.Title = "Clearer board buttons"
+	f, p, m := mailFactory(t, a)
+	storeLog(t, f, p, "c1", "DECISION: Land this change? I recommend yes.\nOVERVIEW: Buttons say what they do.\nNEEDS FROM ZACH: approve it.")
+	f.Tick()
+	s := m.sends()
+	if len(s) != 1 || s[0].Args["subject"] != "Land: Clearer board buttons?" {
+		t.Fatalf("sends = %+v", s)
+	}
+	text := s[0].Args["text"].(string)
+	if !strings.HasPrefix(text, "Land: Clearer board buttons?\n") || strings.Contains(text, "About:") {
+		t.Errorf("first line, or the title twice:\n%s", text)
+	}
+}
+
+// A long decision opens the email whole; only the subject line is cut.
+func TestDecisionEmailOpensWithALongDecisionWhole(t *testing.T) {
+	const long = "Should the phone page also show the cost of each agent run and the model that ran it before you land?"
+	f, p, m := mailFactory(t, planWait("c1", nil))
+	storeLog(t, f, p, "c1", "DECISION: "+long+"\nOVERVIEW: Adds costs.\nNEEDS FROM ZACH: approve the plan.")
+	f.Tick()
+	s := m.sends()
+	if len(s) != 1 {
+		t.Fatalf("sends = %+v", s)
+	}
+	subject := s[0].Args["subject"].(string)
+	if n := len([]rune(subject)); n > subjectCap || !strings.HasSuffix(subject, "…") {
+		t.Errorf("subject (%d runes) = %q", n, subject)
+	}
+	if text := s[0].Args["text"].(string); !strings.HasPrefix(text, long+"\n") {
+		t.Errorf("first line is not the whole decision:\n%s", text)
+	}
+}
+
+func TestReadable(t *testing.T) {
+	for s, want := range map[string]bool{
+		"": false, ".": false, "?": false, "- .": false, "(recommended)": false, ". (Recommended)": false, "recommended": false,
+		"A": true, "7": true, "Keep it (recommended)": true, "Not recommended": true, "Élan": true,
+	} {
+		if got := readable(s); got != want {
+			t.Errorf("readable(%q) = %v", s, got)
+		}
+	}
+}
+
+// A decision email keeps questions all or nothing, so letter replies always answer every question.
+func TestDecisionEmailQuestions(t *testing.T) {
+	const opt = "Keep the old store running beside the new one until the end of the month"
+	for _, tc := range []struct {
+		name, reply string
+		want, not   []string
+	}{
+		{"one, in full", "QUESTION: Which store should it use?\n- " + opt + " (recommended)\n- Move now\n- C\n- D\n- E\n",
+			[]string{"Which store should it use?", "I recommend A.", "A. " + opt + " (recommended)", "B. Move now", "E. E", "Reply with a letter"}, []string{"…"}},
+		{"two, in full", "QUESTION: First?\n- One (recommended)\n- Two\n\nQUESTION: Second?\n- " + opt + " (recommended)\n- Four\n",
+			[]string{"2 questions; I recommend 1A 2A.", "1. First?", "A. One (recommended)", "B. Two", "2. Second?", "A. " + opt + " (recommended)", "Reply with letters like 1A 2A"}, []string{"…"}},
+		{"too long", "QUESTION: Which store?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n",
+			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "A. ", "B. ", "letter", "…", `"yes"`}},
+		{"two, too long", "QUESTION: First?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n\nQUESTION: Second?\n- One (recommended)\n- Two\n",
+			[]string{"2 questions are too long for email. Open the board to answer."}, []string{"I recommend", "letters", "…", `"yes"`}},
+		{"strips to nothing", "QUESTION: Which store?\n- Keep it (recommended)\n- Other\n- `factory/ready.go`\n",
+			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "letter", `"yes"`}},
+		{"strips to its mark", "QUESTION: Which store?\n- `factory/mail.go` (recommended)\n- Other\n",
+			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "letter", `"yes"`, "A. "}},
+		{"strips to punctuation", "QUESTION: Which store?\n- Keep it (recommended)\n- `factory/ready.go`.\n",
+			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "letter", `"yes"`, "B. "}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p, m := mailFactory(t, planWait("c1", nil))
+			storeLog(t, f, p, "c1", "DECISION: Approve building it?\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve the plan.\n\n"+tc.reply)
+			f.Tick()
+			s := m.sends()
+			if len(s) != 1 {
+				t.Fatalf("sends = %+v", s)
+			}
+			text, html := s[0].Args["text"].(string), s[0].Args["html"].(string)
+			for _, w := range tc.want {
+				if !strings.Contains(text, w) {
+					t.Errorf("lacks %q:\n%s", w, text)
+				}
+			}
+			for _, w := range tc.not {
+				if strings.Contains(text, w) {
+					t.Errorf("has %q:\n%s", w, text)
+				}
+			}
+			if !strings.Contains(html, tc.want[0]) {
+				t.Errorf("html lacks %q: %s", tc.want[0], html)
+			}
+		})
+	}
+}
+
+// A one-word yes never takes an option the email did not print; he answers on the board or by letter.
+func TestYesDoesNotTakeWithheldOptions(t *testing.T) {
+	long := "QUESTION: Which store?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n"
+	a := planWait("c1", nil)
+	f, p, m := mailFactory(t, a)
+	storeLog(t, f, p, "c1", "DECISION: Approve building it?\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve the plan.\n\n"+long)
+	f.Tick()
+	if s := m.sends(); len(s) != 1 {
+		t.Fatalf("sends = %+v", s)
+	}
+	f.SetAgents([]Agent{labeled(a, p.labels("c1"))})
+	res, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "yes"})
+	if err != nil || res["action"] != "clarify" {
+		t.Fatalf("yes: %v, %v", res, err)
+	}
+	if sent := p.sent("c1"); len(sent) != 0 {
+		t.Fatalf("yes reached the card: %v", sent)
+	}
+	s := m.sends()
+	if len(s) != 2 || !strings.Contains(s[1].Args["text"].(string), "Answer on the board") {
+		t.Fatalf("sends = %+v", s)
+	}
+	res, err = f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: "1b"})
+	if err != nil || res["action"] != "approve" {
+		t.Fatalf("letter read on the board: %v, %v", res, err)
+	}
+}
+
+func TestWithheldQuestionsChangeTheOneWordAnswers(t *testing.T) {
+	plan := askFor(Card{ID: "c1", Stage: "zach"}, planWait("c1", nil))
+	plan.Questions = []Question{{Text: "Q?", Options: []string{"x", "y"}}}
+	plan.questionsWithheld = true
+	for _, w := range replyWords(plan) {
+		if w.Word == "yes" {
+			t.Errorf("offers yes: %+v", replyWords(plan))
+		}
+	}
+	if got := parseAnswer("yes", plan); got.Choice != "" {
+		t.Errorf("yes = %+v", got)
+	}
+	if got := parseAnswer("drop", plan); got.Choice == "" {
+		t.Error("drop does nothing")
+	}
+	ready := readyAsk("")
+	ready.Questions = plan.Questions
+	ready.questionsWithheld = true
+	if words := replyWords(ready); len(words) != 1 || words[0].Word != "drop" {
+		t.Errorf("ready words = %+v", words)
+	}
+	for _, w := range []string{"yes", "land", "land it"} {
+		if got := parseAnswer(w, ready); got.Choice != "" {
+			t.Errorf("%s = %+v", w, got)
+		}
+	}
+	if got := parseAnswer("drop", ready); got.Choice != "drop" {
+		t.Errorf("drop = %+v", got)
+	}
+	if got := parseAnswer("1a", ready); got.Choice != "change" {
+		t.Errorf("letter = %+v", got)
+	}
+}
+
+func TestWholeTitle(t *testing.T) {
+	for in, want := range map[string]string{
+		"Clearer buttons":                  "Clearer buttons",
+		"Is this clear?":                   "Is this clear?",
+		"Emails never show blank or…":      "Emails never show blank",
+		"Emails never show blank and the…": "Emails never show blank",
+		"Emails never show blank...":       "Emails never show blank",
+		"Emails never show blank, ...":     "Emails never show blank",
+		"Emails for the board and":         "Emails for the board and",
+		"":                                 "",
+	} {
+		if got := wholeTitle(in); got != want {
+			t.Errorf("wholeTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A cut title reads whole in the About line, and is not repeated when the subject already names it.
+func TestDecisionEmailNeverPrintsACutTitle(t *testing.T) {
+	const cut = "Approval emails name the change and never show blank or…"
+	const whole = "Approval emails name the change and never show blank"
+	for _, tc := range []struct {
+		name, decision string
+		about          bool
+	}{
+		{"bare", "Land this change?", false},
+		{"specific", "Use the shorter copy?", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := planWait("c1", nil)
+			a.Title = cut
+			f, p, m := mailFactory(t, a)
+			storeLog(t, f, p, "c1", "DECISION: "+tc.decision+"\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve it.")
+			f.Tick()
+			s := m.sends()
+			if len(s) != 1 {
+				t.Fatalf("sends = %+v", s)
+			}
+			text := s[0].Args["text"].(string)
+			if strings.Contains(text, "…") || strings.Contains(s[0].Args["subject"].(string), "…") {
+				t.Errorf("cut text: %v\n%s", s[0].Args["subject"], text)
+			}
+			if got := strings.Contains(text, "About: "+whole+"\n"); got != tc.about {
+				t.Errorf("About line %v, want %v:\n%s", got, tc.about, text)
+			}
+		})
+	}
+}
+
+func TestDecisionEmailOverviewKeepsWholeSentences(t *testing.T) {
+	a := planWait("c1", nil)
+	f, p, m := mailFactory(t, a)
+	storeLog(t, f, p, "c1", "DECISION: Approve building it?\nOVERVIEW: Adds a checker. Then "+strings.Repeat("long ", 80)+"sentence. Short end.\nNEEDS FROM ZACH: approve the plan.")
+	f.Tick()
+	s := m.sends()
+	if len(s) != 1 {
+		t.Fatalf("sends = %+v", s)
+	}
+	text := s[0].Args["text"].(string)
+	if !strings.Contains(text, "Adds a checker.\n") || strings.Contains(text, "long") || strings.Contains(text, "…") {
+		t.Errorf("text:\n%s", text)
+	}
+}
+
+func TestSentences(t *testing.T) {
+	got := sentences("One thing, e.g. this one, e.g. That. Two things!  Three?\nFour")
+	want := []string{"One thing, e.g. this one, e.g. That.", "Two things!", "Three?", "Four"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %q", got)
+	}
+	if got := wholeSentences("One two. Three four five. Six.", 5); got != "One two. Three four five." {
+		t.Errorf("got %q", got)
+	}
+	if got := wholeSentences("One two three. Four.", 2); got != "" {
+		t.Errorf("a later sentence without the first: %q", got)
 	}
 }

@@ -178,18 +178,31 @@ The planner (the "Fellow") first picks a track:
   writes three `CHANGED:` lines in plain words and any `BEFORE:` / `AFTER:` screenshots; it starts no
   server and uploads nothing. The factory runs the repo's preview (below) and sends one email:
   subject "Ready to try: <title>" when a preview (including starting or queued), usable screenshot
-  or sample output exists. Otherwise the subject and board title use the builder’s decision
-  (or "Approve this change?" when absent), with "Nothing is installed or changed until you say yes or land."
-  A failed preview alone counts as nothing to try. The email includes the three lines, screenshots,
-  a Preview button when available and the board link. The board item shows the same with Land,
-  Change and Drop. Email replies: `yes`, the approval words below, `land` or `land it`
-  lands it; the drop words drop it; letters (`1A`, or `A` for one question) answer the builder's
-  questions, cut to the decision email's lengths, and go to it; anything else is a change request,
-  which sends the card back to building and code review. If the clean reviewed revision matches
-  the revision last presented, the builder's answer is emailed once per feedback exchange without
-  another Ready summary or announcement. Land, Change and Drop remain available. Changed code
-  gets a fresh Ready presentation (`factory.ready` counts presentations). The presented revision
-  and exchange are persisted through restart and agent replacement. The email waits for the preview to load or fail, at most 10 minutes
+  or sample output exists. Otherwise the subject, first line and board title use the builder’s decision,
+  with "Nothing is installed or changed until you say yes or land." A decision that names no change
+  ("Land this change?", none at all) becomes "Land: <title>?", on the board with a preview too, and
+  "Approve this change?" only when the card has no title. A title cut at 60 characters is printed without
+  its "…" and dangling word. A failed preview alone counts as nothing to try. The email includes what changed,
+  screenshots, a Preview button when available and the board link, under 60 words apart from any
+  questions and sample output: each line is printed whole or dropped, and a count says how many more
+  are on the board. The board item shows the same with Land, Change and Drop. Email replies: `yes`,
+  the approval words below, `land` or `land it` lands it; the drop words drop it; letters (`1A`, or
+  `A` for one question) answer the builder's questions and go to it; anything else is a change
+  request, which sends the card back to building and code review. If the clean reviewed revision
+  matches the revision last presented, the builder's answer is emailed once per feedback exchange
+  without another Ready summary or announcement, and what follows depends on the answer:
+  - It asks for something: Land, Change and Drop remain available, as above.
+  - `DECISION: None` and `NEEDS FROM ZACH: Nothing`, bare, with no question and no `REMAINING` item:
+    he has seen this version, so "you asked for it" is waived. If no other reason holds, the email says
+    "Nothing more is needed from you. It goes ahead on its own." (once per exchange,
+    `factory.feedback-told`; a failed send is logged and does not hold it back) and the card goes on to
+    the normal landing, with no approval recorded, so a later repair comes back to him.
+  - Otherwise, that same answer with any other reason (an arbiter's, no plan review, architecture, the
+    reviewer's always-ask line or a missing one, the file check, or a reason from the Ready stop) waits
+    for him, and the email and board say why (`factory.feedback-hold`).
+
+  Changed code gets a fresh Ready presentation (`factory.ready` counts presentations). The presented
+  revision and exchange are persisted through restart and agent replacement. The email waits for the preview to load or fail, at most 10 minutes
   after the builder was asked.
 - **Previews** (`factory/tryout.go`, `previews.json`). A repo declares one in `.factory.json`, read
   from `origin/main` only, so a card cannot change what runs on the host before it lands:
@@ -977,13 +990,21 @@ is either emailed or board-only (`Ask.boardOnly`):
 The email is the decision alone:
 
 - The subject is the question: the agent's `DECISION:` line, or the ask's own question when the
-  factory raised the stop or the agent decided nothing.
-- The body is under 60 words, not counting the board link: the due time first when the question has
-  one, then the recommendation ("I recommend
-  yes.", or "I recommend A." with up to 4 lettered options for one question), what it is about,
-  the agent's overview as far as the words allow, and the one-word replies. Inline `Before` /
-  `After` screenshots from `.factory-evidence/` follow, then an Open board button. The full report
-  stays on the board.
+  factory raised the stop or the agent decided nothing. A decision that names no change uses the
+  card's title ("Land: <title>?") and also opens the body. Only the subject line cuts a long decision,
+  at 90 characters; the body then opens with it whole, and the board shows it whole.
+- The body is under 60 words, not counting the board link or the questions: the due time first when
+  the question has one, then the recommendation ("I recommend yes.", or "I recommend A." for one
+  question), what it is about, as many whole sentences of the agent's overview as fit, and the
+  one-word replies. Inline `Before` / `After` screenshots from `.factory-evidence/` follow, then an
+  Open board button. The full report stays on the board.
+- Questions and their lettered options have their own 60 words and print in full. If they do not fit
+  together, or any has no letter or digit left once stripped, none print: the email says "1 question is too long for email.
+  Open the board to answer." and offers no letters, so a reply cannot answer only some of them. It
+  offers no `yes` either, and a `yes` or `land` reply does nothing but say to answer on the board (or
+  land it there, at Ready for you), so
+  one word never approves an option he has not read. An answer to his feedback prints its questions
+  the same way.
 - Agent text in it passes through `plainText`: backticks, commit hashes, agent ids, file names and
   the owner of `owner/repo-name` slugs are removed. Factory copy avoids pipeline words (card, track,
   landing, Fellow), and agents are told to write the same way for anything Zach reads by email.
@@ -996,6 +1017,7 @@ The email is the decision alone:
   there and later stages carry it. A reply that only gets a clarifying question or starts a separate
   card stores nothing. Its later waits stay addressed to `FACTORY_ZACH_EMAIL`.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
+  `factory.feedback-told` holds the feedback exchange whose goes-ahead answer was emailed, and is not.
   A wait where the builder was just asked for a decision or preview (`factory.writing`) is emailed
   once it has written it (at most 10 minutes later).
 - `factory.permit-told` holds the move (`<stage>@<since>`) whose stuck permission prompt was already
@@ -1020,12 +1042,12 @@ acts:
 
 | Reply | Does |
 | --- | --- |
-| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | Yes (Land, Done it, or Scan again & ship on a secret-scan stop); on an approve with questions, it takes the recommended (first) answers |
+| `approve`, `approved`, `yes`, `y`, `ok`, `okay`, `lgtm`, `go`, `go ahead`, `ship it` | Yes (Land, Done it, or Scan again & ship on a secret-scan stop); on an approve with questions, it takes the recommended (first) answers. Does nothing when the email left the questions out |
 | `no` | No |
 | `done`, `mark done`, `mark it done`, `works`, `it works` | Mark done, when the ask has it |
 | `drop`, `drop it`, `close`, `close it`, `cancel` | Drop, when the ask has it |
-| `land`, `land it` | Land, on Ready for you (approval words and drop words also act; anything else is Change) |
-| `1B 2A` (only numbers and letters of the email's questions), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
+| `land`, `land it` | Land, on Ready for you (approval words and drop words also act; anything else is Change). Does nothing when the email left the questions out |
+| `1B 2A` (only numbers and letters of the ask's questions, whether or not the email printed them), or one letter when there is one question | answers them, with Yes when it approves, else through the text choice |
 
 Other free text receives a tool-free relevance check with a 12-second deadline and no retry.
 Related answers and changes use the ask's text choice, including Change on Ready for you;
