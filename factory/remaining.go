@@ -158,9 +158,11 @@ func remainingZachItem(reply string) string {
 }
 
 // directAsk is what a direct-track reply asks Zach, and whether it asks at all: a DECISION that names
-// one, a QUESTION block (with or without an overview), a NEEDS FROM ZACH line that names one, or a
-// REMAINING item left for him. A reply with no overview and no QUESTION block asks nothing (an inbox
-// errand's last line can follow its final command), nor does one with only optional tries after landing.
+// one, a QUESTION block (with or without an overview), a NEEDS FROM ZACH line that does not start with
+// nothing, or a REMAINING item left for him. A NEEDS line that starts with nothing says nothing, whatever
+// follows it: stopping costs Zach an email, and an ask belongs on the DECISION line. A reply with no
+// overview and no QUESTION block asks nothing (an inbox errand's last line can follow its final command),
+// nor does one with only optional tries after landing.
 func directAsk(reply string) (string, bool) {
 	rest, qs := ParseQuestions(reply)
 	_, ov := ParseOverview(rest)
@@ -172,7 +174,10 @@ func directAsk(reply string) (string, bool) {
 		if !saysNothing.MatchString(ov.Decision) {
 			decision = strings.TrimSpace(strings.Trim(ov.Decision, "*_ \t"))
 		}
-		needs = needsAsked(ov.Needs)
+		needs = strings.TrimSpace(strings.Trim(ov.Needs, "*_ \t"))
+		if needsNothingRe.MatchString(needs) {
+			needs = ""
+		}
 	}
 	if len(qs) > 0 {
 		question = qs[0].Text

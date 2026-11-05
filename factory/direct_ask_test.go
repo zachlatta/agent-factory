@@ -31,7 +31,14 @@ func TestDirectAskReadsTheStop(t *testing.T) {
 		{"decision only", "DECISION: Send the form?\nOVERVIEW: Ready.", "Send the form?", true},
 		{"decision with nothing needed", "DECISION: Send the form?\nNEEDS FROM ZACH: Nothing.", "Send the form?", true},
 		{"needs only", "DECISION: None.\nNEEDS FROM ZACH: Approve the send.", "Approve the send.", true},
-		{"nothing, then an ask", "DECISION: None.\nNEEDS FROM ZACH: Nothing. Please reply with the size.", "Please reply with the size.", true},
+		{"nothing, then an ask", "DECISION: None.\nNEEDS FROM ZACH: Nothing. Please reply with the size.", "", false},
+		{"nothing from you", "DECISION: None.\nNEEDS FROM ZACH: Nothing from you.", "", false},
+		{"no action needed", "DECISION: None.\nNEEDS FROM ZACH: No action needed from you.", "", false},
+		{"nothing, then a pointer", "DECISION: None.\nNEEDS FROM ZACH: Nothing. The answer is in your email.", "", false},
+		{"bold nothing, then a rest", "DECISION: None.\nNEEDS FROM ZACH: **Nothing.** Details are below.", "", false},
+		{"decision with nothing, then a rest", "DECISION: Send the form?\nNEEDS FROM ZACH: Nothing from you.", "Send the form?", true},
+		{"item left for Zach with nothing, then a rest", "DECISION: None.\nNEEDS FROM ZACH: Nothing from you.\n\nREMAINING: Zach: sign the form", "sign the form", true},
+		{"question block with nothing, then a rest", "DECISION: None.\nNEEDS FROM ZACH: Nothing from you.\n\nQUESTION: Which size?\n- Large (recommended)\n- Small", "Which size?", true},
 		{"no needs line", "DECISION: None.\nOVERVIEW: The form went in.", "", false},
 		{"question block with an overview", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nQUESTION: Which size?\n- Large (recommended)\n- Small", "Which size?", true},
 		{"question block with no overview", "All set.\n\nQUESTION: Which size?\n- Large (recommended)\n- Small", "Which size?", true},
@@ -142,16 +149,24 @@ func TestFinishDirectWaitsWhenTheReplyAsks(t *testing.T) {
 }
 
 func TestFinishDirectLandsWhenTheReplyAsksNothing(t *testing.T) {
-	f, p, m, c := directCard(t, map[string]string{labelDue: askDue}, doneReply)
-	f.Tick()
-	relabel(f, p, c)
-	f.Tick()
-	l := p.labels("c1")
-	if l[labelStage] != "landed" || l[labelNote] != "done in one pass" || l[labelDue] != "" {
-		t.Fatalf("labels = %v", l)
-	}
-	if s := m.sends(); len(s) != 0 {
-		t.Errorf("sends = %+v", s)
+	for name, reply := range map[string]string{
+		"nothing":               doneReply,
+		"nothing, then a rest":  "DECISION: None.\nOVERVIEW: Answered.\nNEEDS FROM ZACH: Nothing. The answer is in your email.\n\nTRACK: direct",
+		"no action, then words": "DECISION: None.\nOVERVIEW: Answered.\nNEEDS FROM ZACH: No action needed from you.\n\nTRACK: direct",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, p, m, c := directCard(t, map[string]string{labelDue: askDue}, reply)
+			f.Tick()
+			relabel(f, p, c)
+			f.Tick()
+			l := p.labels("c1")
+			if l[labelStage] != "landed" || l[labelNote] != "done in one pass" || l[labelDue] != "" {
+				t.Fatalf("labels = %v", l)
+			}
+			if s := m.sends(); len(s) != 0 {
+				t.Errorf("sends = %+v", s)
+			}
+		})
 	}
 }
 
@@ -470,6 +485,24 @@ func TestDueReminderWindow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTickSendsTheDueReminder(t *testing.T) {
+	due := t0.Add(48 * time.Hour)
+	f, p, m, c := reminderCard(t, t0, due)
+	clockAt(f, due.Add(-time.Hour))
+	f.Tick()
+	relabel(f, p, c)
+	f.Tick()
+	var reminders int
+	for _, s := range m.sends() {
+		if text, _ := s.Args["text"].(string); strings.HasPrefix(text, "Reminder: ") {
+			reminders++
+		}
+	}
+	if reminders != 1 || p.labels("c1")[labelDueTold] != iso(due) {
+		t.Fatalf("reminders = %d, sends %+v, labels %v", reminders, m.sends(), p.labels("c1"))
 	}
 }
 

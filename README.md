@@ -88,8 +88,9 @@ The planner (the "Fellow") first picks a track:
   Needs Zach instead, once those checks pass, with that question as the ask: Answer, Mark done or
   Drop. It is emailed like any decision, also when its agent was already archived, which parks the
   card. This includes a result that waits only on a PDW approval: it stays in For you until he marks
-  it done. A reply with no overview and no QUESTION block asks nothing, so an inbox errand whose last
-  line follows a command still finishes.
+  it done. A NEEDS FROM ZACH line that starts with Nothing, None, N/A or No action says nothing,
+  whatever follows it. A reply with no overview and no QUESTION block asks nothing, so an inbox errand
+  whose last line follows a command still finishes.
   The ask can carry an optional `DUE:` line after NEEDS FROM ZACH: an ISO time with a zone
   (`2035-01-31T22:00:00-05:00`, seconds optional). A bad value or a time with no zone is logged and
   ignored, and the ask still stops. The due time shows on the board and in the ask email, puts the
@@ -483,6 +484,8 @@ idle agents (`factory/reap.go`), at most 20 archives per Tick:
   parked card on its own. Close, Archive or Done on a parked card drops the park and it is Done.
   Paseo's archive keeps the worktree; nothing may remove a parked card's worktree while it is
   parked.
+- A direct result that asks Zach something when its agent is already archived is parked at once, with
+  no idle time or cap: the agent is archived already, so the park is what keeps it in Needs Zach.
 - Idle factory cards in other columns count against the cap but are never parked. Only eligible
   Needs Zach cards are parked to reduce the count, so the cap can remain exceeded. Automatic recovery
   retries a stopped card up to its caps, then leaves it in its column marked stuck (see Automatic
@@ -735,6 +738,8 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
   its question (the agent's `DECISION:` line, else the ask's title) and the one thing to do (its
   `NEEDS FROM ZACH:` line); on Ready for you, what changed and
   the factory-run Preview button (or why there is none yet); its before/after images; and its buttons.
+  A direct result's question with a `DUE:` time also shows a Due or Overdue flag, here, on its kanban
+  card and in its panel. Those cards come first, soonest first.
 - **No answer yet**: requests from Zach that got no answer, from one source: the email dispatcher's
   watchdog (see "Unanswered requests"). Each says why, in the watchdog's plain words when it gives
   them ("no answer yet: from before the watchdog started"), and can be dismissed. A card's `noReply` timing is a metric
@@ -938,16 +943,19 @@ alerts in another inbox. Then, instead of step 2:
 ### Needs Zach email
 
 Zach is emailed only for decisions, by the factory itself through the zrl-bot mailbox
-(`pdw call zrl_bot_email_control__*`, `factory/mail.go`), once per wait reason. Each ask on the board
+(`pdw call zrl_bot_email_control__*`, `factory/mail.go`), once per wait reason. A question with a
+`DUE:` time also gets one reminder per due time (`factory/due.go`). Each ask on the board
 is either emailed or board-only (`Ask.boardOnly`):
 
 - **Emailed:** allow a build with side effects, try finished work before it lands, the secret
   scan's stop, a public-repo push without review, a landed diff on a public repo whose secret scan
-  did not pass (something unreviewed may already be public), and a repo choice.
+  did not pass (something unreviewed may already be public), a repo choice, and a direct result's
+  question, though its work has already landed.
 - **Board only:** finished cards and cards moved by hand; a running agent (permission prompt, stall,
   writing its summary); a card marked stuck by automatic recovery; a paused decision; a review that
   did not settle even with the arbiter (the arbiter's call, not his); a reviewer's close or
-  duplicate verdict; and the checks after landing (work left, did it finish, an older landed diff).
+  duplicate verdict; and the build track's checks after landing (work left, did it finish, an older
+  landed diff).
   Errors, usage limits, failed reviewers, stopped cards, dropped dependencies and failed landings
   never reach Needs Zach at all (automatic recovery). These are problems for the factory and its
   agents; the board shows them under Working on it, and the daily digest lists them.
@@ -956,7 +964,8 @@ The email is the decision alone:
 
 - The subject is the question: the agent's `DECISION:` line, or the ask's own question when the
   factory raised the stop or the agent decided nothing.
-- The body is under 60 words, not counting the board link: the recommendation first ("I recommend
+- The body is under 60 words, not counting the board link: the due time first when the question has
+  one, then the recommendation ("I recommend
   yes.", or "I recommend A." with up to 4 lettered options for one question), what it is about,
   the agent's overview as far as the words allow, and the one-word replies. Inline `Before` /
   `After` screenshots from `.factory-evidence/` follow, then an Open board button. The full report
@@ -977,6 +986,9 @@ The email is the decision alone:
   once it has written it (at most 10 minutes later).
 - `factory.permit-told` holds the move (`<stage>@<since>`) whose stuck permission prompt was already
   emailed (`factory/permit.go`); a later move that gets stuck again is emailed again.
+- `factory.due` holds when a direct result's question is due, and `factory.due-told` the due time Zach
+  was already reminded of (`factory/due.go`), so asking again with the same time does not resend and
+  a new time reminds him once more. The reminder goes in the card's thread like any later wait.
 - Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
   retried after 5 minutes; a timed-out one is not, since it may have gone out.
 - Cards that were waiting in Needs Zach for a reason automatic recovery now handles take the
@@ -1291,6 +1303,7 @@ reviewed plan whose build has a side effect (restarting a test service), with it
 `preview-ready` is finished work with Land / Change / Drop, its own synthetic request and changes, and an
 optional question; `preview-action` is work that landed with a required approval (Done it / Something's wrong / Skip it). Every fixture session starts with a synthetic request, so a card opens on its ask.
 `preview-unverified` shows a publication verification stop with Re-run, Reply and Drop.
+`preview-direct-ask` is a one-pass result that stopped on a question with a due time (Answer / Mark done / Drop).
 Their buttons are simulated through the same `choose` route the board posts, and move the card where the
 real action does: Land or Yes to landing or building, No, Change or an answer where a real message
 sends it (`answerLabels`), Drop to done. The page is served with `<html data-mode="preview">`, which
