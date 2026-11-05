@@ -122,7 +122,20 @@ The planner (the "Fellow") first picks a track:
 - **No plan approvals.** Agents review plans; a person is asked before building only when building
   has side effects. Every plan and plan review ends with `BUILD SIDE EFFECTS: none`, or what
   building (not landing) would change outside the worktree: prod data written or deleted, messages
-  sent, money spent, hosts or services changed. Only a bare none counts (`none`, `None.`, `**none**`;
+  sent, money spent, hosts or services changed. Local containers, temporary databases and test
+  servers count as none when all of these hold:
+  - the build or its tests start and remove them;
+  - they run on the build machine only;
+  - they use no live data or credentials, not even a temporary copy;
+  - nothing is reachable from outside;
+  - they send no messages and spend no money.
+
+  A plan that adds or runs such a service itself names it and shows how it meets every condition,
+  and the plan reviewer checks each one against the plan's approach; if one fails or is not shown,
+  it goes on the line. An existing test suite's own loopback servers that meet the conditions need
+  at most a short note. Anything else is a side effect.
+
+  Only a bare none counts (`none`, `None.`, `**none**`;
   also no, n/a or nothing): its reason goes on the next line. Anything else on the line, even a
   reason that sounds safe (`none (code and tests only)`), is read as a side effect
   (`ParseSideEffects`), so no reading of free text can let a plan with real effects skip the person.

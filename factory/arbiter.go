@@ -65,7 +65,7 @@ func ArbiterPrompt(c Card, kind string, port int, vis, last string, escalated bo
 	if escalated {
 		why = "The reviewer escalated: it says only Zach can decide. Zach is asked before building only about " +
 			"real-world side effects (money, messages to other people, production data written, deleted or moved, " +
-			"hosts or services changed, hardware), and after code review he sees the finished work if he asked for it " +
+			"hosts or services changed (not " + throwawayServices + "), hardware), and after code review he sees the finished work if he asked for it " +
 			"or it is on the always-ask list. Anything else is yours to decide."
 	}
 	var ruling string

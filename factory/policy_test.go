@@ -1427,6 +1427,10 @@ func TestParseSideEffectsOnlyBareNone(t *testing.T) {
 		"none. Changes the card store",
 		"none. Changes data",
 		"none. Restarts prod",
+		// a throwaway test service counts as none, but its reason still goes on the next line
+		"none (throwaway database, removed by the tests)",
+		"none. Temporary Postgres in a local container, removed by the tests",
+		"none, only a local test server on fake data",
 	}
 	for _, s := range effects {
 		if got := ParseSideEffects("BUILD SIDE EFFECTS: " + s); got == "none" || got == "" {
@@ -1494,6 +1498,94 @@ func TestArchitecturePlanStopsEarlyUnlessReviewerFindsNoSideEffects(t *testing.T
 		if stopped := l[labelStage] == "zach" && l[labelAwaiting] == "plan"; stopped != wantStop {
 			t.Errorf("%s: early stop = %v, want %v: %v", name, stopped, wantStop, l)
 		}
+	}
+}
+
+// A throwaway test service is only an exception in the wording: the gate still reads the bare none. Named
+// on the next line it builds; listed on the line by the builder or the reviewer it stops for Zach.
+func TestThrowawayTestServiceAtTheGate(t *testing.T) {
+	const below = "BUILD SIDE EFFECTS: none\nThe tests start and remove a temporary Postgres in a local container on fake data; it listens on loopback only.\nTIER: risky"
+	const onLine = "BUILD SIDE EFFECTS: a temporary Postgres in a local container, removed by the tests\nTIER: risky"
+	cases := []struct {
+		name, review, plan string
+		wantBuild          bool
+	}{
+		{"named below the line by both", below + "\nVERDICT: approve", "plan\n" + below, true},
+		{"on the line in the plan", below + "\nVERDICT: approve", "plan\n" + onLine, false},
+		{"on the line in the review", onLine + "\nVERDICT: approve", "plan\n" + below, false},
+	}
+	for _, tc := range cases {
+		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+			reviewer("r1", "c1", "plan"))
+		storeLog(t, f, p, "r1", tc.review)
+		storeLog(t, f, p, "c1", tc.plan)
+		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+			t.Fatal(err)
+		}
+		l := p.labels("c1")
+		if tc.wantBuild && l[labelStage] != "building" {
+			t.Errorf("%s: should build: %v", tc.name, l)
+		}
+		if !tc.wantBuild && (l[labelStage] != "zach" || l[labelAwaiting] != "plan") {
+			t.Errorf("%s: should stop at Allow this build?: %v", tc.name, l)
+		}
+	}
+}
+
+// throwawayConditions are the five conditions, each in the words every prompt must carry.
+var throwawayConditions = []string{
+	"the build or its tests start and remove them",
+	"they run on the build machine only",
+	"they use no live data or credentials, not even a temporary copy",
+	"nothing is reachable from outside",
+	"they send no messages and spend no money",
+}
+
+// The planner, plan reviewer and plan arbiter all read the same exception: every condition, the naming duty
+// on services a plan adds or runs itself, the short note for an existing suite, and that anything else stops.
+func TestThrowawayTestServiceRuleReachesEveryPlanPrompt(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	prompts := map[string]string{
+		"planner":  newCardPrompt,
+		"reviewer": ReviewPrompt(c, "plan", 7478, "unknown"),
+		"arbiter":  ArbiterPrompt(c, "plan", 7478, "unknown", "the last review", false),
+	}
+	wants := append([]string{
+		"local containers, temporary databases and test servers",
+		"A plan that adds or runs such a service itself names it and shows how it meets every condition.",
+		"An existing test suite's own loopback servers that meet these conditions need at most a short note, such as \"the test suite's own loopback servers\".",
+		"Anything else is a side effect, and so is a service the plan adds or runs without every condition shown.",
+		"Write none alone on that line",
+	}, throwawayConditions...)
+	for name, pr := range prompts {
+		flat := strings.Join(strings.Fields(pr), " ")
+		for _, want := range wants {
+			if !strings.Contains(flat, want) {
+				t.Errorf("%s prompt lacks %q", name, want)
+			}
+		}
+		if strings.Contains(flat, "nothing at all happens") {
+			t.Errorf("%s prompt keeps the old wording", name)
+		}
+	}
+}
+
+// The reviewer checks each condition itself rather than taking the plan's word, and an ordinary test run
+// does not stop a plan.
+func TestPlanReviewerChecksEachThrowawayCondition(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	flat := strings.Join(strings.Fields(ReviewPrompt(c, "plan", 7478, "unknown")), " ")
+	for _, want := range []string{
+		"A throwaway test service the plan adds or runs counts as none only if the plan names it and you checked every condition above against its approach. If one fails or is not shown, list it on the line.",
+		"Do not stop a plan for an existing test suite's own loopback servers that meet the conditions.",
+		"Any other answer, or no line, stops it for Zach",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("plan review prompt lacks %q", want)
+		}
+	}
+	if code := ReviewPrompt(c, "code", 7478, "unknown"); strings.Contains(code, "throwaway test service") {
+		t.Error("the code review prompt has no build gate to apply the exception to")
 	}
 }
 

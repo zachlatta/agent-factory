@@ -78,11 +78,23 @@ var (
 	effectsRe  = regexp.MustCompile(`(?im)^[ \t>*_#-]*BUILD[ \t]+SIDE[ \t]+EFFECTS[*_]*\s*:[ \t]*(.*)$`)
 )
 
+// throwawayServices is the one exception to "nothing happens outside the worktree": the only test services a
+// plan may answer none for. The rule and the arbiter's escalation text both use it, so the conditions cannot drift.
+const throwawayServices = "local containers, temporary databases and test servers when all of these hold: " +
+	"the build or its tests start and remove them; they run on the build machine only; " +
+	"they use no live data or credentials, not even a temporary copy; nothing is reachable from outside; " +
+	"they send no messages and spend no money"
+
 // sideEffectsRule asks planners and plan reviewers what building a plan would change outside its worktree
-// before landing. A plan goes to building without Zach only when the reviewer writes none and the plan lists none.
+// before landing, apart from throwawayServices. A plan goes to building without Zach only when the reviewer
+// writes none and the plan lists none.
 const sideEffectsRule = `BUILD SIDE EFFECTS: <none, or what building it changes outside the worktree before landing: prod data
 written or deleted, messages sent to anyone, money spent, hosts or services changed>
-(none means nothing at all happens outside the worktree while building. Write none alone on that line,
+(none means nothing happens outside the worktree while building, except ` + throwawayServices + `.
+A plan that adds or runs such a service itself names it and shows how it meets every condition. An existing
+test suite's own loopback servers that meet these conditions need at most a short note, such as "the test
+suite's own loopback servers". Anything else is a side effect, and so is a service the plan adds or runs
+without every condition shown. Write none alone on that line,
 and any reason on the next line: anything else on the line, even "none (code only)", counts as a side effect.)`
 
 // titleCap is the most runes a planner's TITLE line keeps; longer ones are cut at a word.
@@ -146,7 +158,7 @@ func ParseSideEffects(text string) string {
 }
 
 // buildsFirst says an architecture plan may be built before Zach sees it: the plan reviewer found that
-// building it changes nothing outside its worktree, and the builder's plan lists no side effect either.
+// building it has no side effect under sideEffectsRule, and the builder's plan lists none either.
 // A missing reviewer line keeps the plan-approval stop.
 func buildsFirst(review, plan string) bool {
 	b := ParseSideEffects(plan)
@@ -221,6 +233,9 @@ var rubric = map[string]string{
   written or deleted, messages sent to anyone, money spent, hosts or services changed? Check the plan's
   BUILD SIDE EFFECTS line against its approach and write your own, right before TIER:
   ` + sideEffectsRule + `
+  A throwaway test service the plan adds or runs counts as none only if the plan names it and you checked
+  every condition above against its approach. If one fails or is not shown, list it on the line.
+  Do not stop a plan for an existing test suite's own loopback servers that meet the conditions.
   A plan whose line you and the builder write as none is built without asking Zach. Any other answer, or no
   line, stops it for Zach to allow the build first: that is the only thing he is asked before building.`,
 	"code": `Check the work against Zach's request and follow-ups (section below) and its plan if any:

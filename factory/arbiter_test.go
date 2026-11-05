@@ -219,3 +219,19 @@ func TestArbiterPromptRules(t *testing.T) {
 		t.Error("arbiter prompts lack their gate's line")
 	}
 }
+
+// An escalated reviewer's arbiter hears the same exception as the rule, so it does not escalate what the rule clears.
+func TestArbiterEscalationTextExemptsThrowawayServices(t *testing.T) {
+	c := Card{ID: "c1", Title: "t", Repo: "example/desk", Cwd: "/w/c1"}
+	for _, kind := range []string{"plan", "code"} {
+		flat := strings.Join(strings.Fields(ArbiterPrompt(c, kind, 7478, "public", "the last review", true)), " ")
+		if !strings.Contains(flat, "hosts or services changed (not "+throwawayServices+")") {
+			t.Errorf("%s arbiter escalation text lacks the exception", kind)
+		}
+		for _, want := range throwawayConditions {
+			if !strings.Contains(flat, want) {
+				t.Errorf("%s arbiter escalation text lacks %q", kind, want)
+			}
+		}
+	}
+}
