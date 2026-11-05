@@ -55,6 +55,7 @@ main{padding:12px 16px calc(80px + env(safe-area-inset-bottom));overflow-x:auto}
 .flag.vc{background:#fff8c5;color:var(--amber)}
 .flag.note{background:#ddf4ff;color:var(--blue)}
 .flag.agent{background:#f3e8ff;color:#6f42c1}
+.flag.due{font-weight:600}
 .tier{display:inline-block;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;margin:3px 3px 0 0;text-transform:uppercase;letter-spacing:.02em}
 .tier.low{background:#dafbe1;color:var(--green)}
 .tier.risky{background:#fff1e5;color:#bc4c00}
@@ -528,8 +529,10 @@ function laneKey(c){ const g=$('group').value; return g==='none'?'All agents':g=
 const phone = matchMedia('(max-width:760px)');
 // inbox: begin
 function decisionWaitHtml(c){
+  const at = c.due ? new Date(c.due).toLocaleString([], {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '';
+  const due = c.due ? `<span class="flag due">${c.overdue?'Overdue: was due ':'Due '}${esc(at)}</span>` : '';
   const count = c.waitingCount ? `<span class="flag">${c.waitingCount===1?'1 card waits':c.waitingCount+' cards wait'} on this</span>` : '';
-  return count + (c.decisionBlocker ? `<a class="flag" href="?card=${encodeURIComponent(c.decisionBlocker)}" data-blocker="${esc(c.decisionBlocker)}" onclick="event.preventDefault();event.stopPropagation();openPanel(this.dataset.blocker)">${esc(c.decisionWait)}</a>` : '');
+  return due + count + (c.decisionBlocker ? `<a class="flag" href="?card=${encodeURIComponent(c.decisionBlocker)}" data-blocker="${esc(c.decisionBlocker)}" onclick="event.preventDefault();event.stopPropagation();openPanel(this.dataset.blocker)">${esc(c.decisionWait)}</a>` : '');
 }
 
 // The For you board (sections.go, the default view): what waits on Zach first, each with its question,

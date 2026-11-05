@@ -59,6 +59,8 @@ const (
 	labelAskWhy     = "ask-why"      // why a card whose code review passed comes to Zach before it lands (alwaysask.go)
 	labelReady      = "ready"        // Ready presentations so far; unchanged feedback answers do not increment it
 	labelPermitTold = "permit-told"  // the stage whose stuck permission prompt was already emailed to Zach (permit.go)
+	labelDue        = "due"          // when a direct card's question to Zach is due (due.go)
+	labelDueTold    = "due-told"     // the due time Zach was already reminded of (due.go)
 )
 
 // labelCodeOK is the HEAD a completed code review (or arbiter) passed, set where the card moves on

@@ -83,9 +83,24 @@ The planner (the "Fellow") first picks a track:
   through a PDW review such as `gmail.send_email`, where the agent queues the mutation and replies
   to Zach with an Approve button). Done in one pass; the factory checks the work reached
   `origin/main`, then moves it to Done.
-  Zach's message to an errand card (before its first plan, or after it finished direct) keeps it
-  on the direct track: it is not sent to code review, so it never asks to approve landing work it
-  already landed. Public repos have no direct track, so their cards still get a code review.
+  A last reply that asks Zach something (a DECISION that is not None, a NEEDS FROM ZACH that is not
+  Nothing, a QUESTION block with or without an overview, or a `REMAINING` item left for him) goes to
+  Needs Zach instead, once those checks pass, with that question as the ask: Answer, Mark done or
+  Drop. It is emailed like any decision, also when its agent was already archived, which parks the
+  card. This includes a result that waits only on a PDW approval: it stays in For you until he marks
+  it done. A reply with no overview and no QUESTION block asks nothing, so an inbox errand whose last
+  line follows a command still finishes.
+  The ask can carry an optional `DUE:` line after NEEDS FROM ZACH: an ISO time with a zone
+  (`2035-01-31T22:00:00-05:00`, seconds optional). A bad value or a time with no zone is logged and
+  ignored, and the ask still stops. The due time shows on the board and in the ask email, puts the
+  card first in For you (soonest first) and first in the daily digest, and turns to Overdue when it
+  passes. Zach gets one reminder in the card's thread when under 6 hours remain, parked or not, per
+  due time. An ask that arrives inside those 6 hours is its own reminder, and none is sent once it is
+  past due.
+  Zach's message to an errand card (before its first plan, after it finished direct, or answering
+  its question) keeps it on the direct track: it is not sent to code review, so it never asks to
+  approve landing work it already landed. Public repos have no direct track, so their cards still
+  get a code review.
 - **Build track**: everything else (code, config, infra, deletes, money, bulk sends, or messages
   sent without a PDW review). The plan ends with `TIER:`; the plan reviewer sets its own and
   the card takes the higher. A code reviewer can raise the tier, never lower it.
@@ -427,7 +442,8 @@ An agent archived from outside during Plan, Plan review, Building or Code review
 column marked Stuck: “Agent archived before this step finished.”, unless it has no plan-review
 rounds and its stored last reply already ends `TRACK: direct` (with no `TIER:` line), in which case
 it finishes through the direct track (with note `done in one pass; worktree removed before its
-landing was checked` when the archive already removed its worktree). A card marked Stuck does not
+landing was checked` when the archive already removed its worktree, where a question in that reply
+cannot be continued and is not asked). A card marked Stuck does not
 count as Done, release dependencies or free an idea slot. It is retained for 14 days after
 archival, like parked work. Automatic ticks and late reviews do not wake it.
 Resume, Re-run and Reply wake it explicitly and keep the normal review gates; when its worktree
@@ -846,6 +862,9 @@ possibly sent); it never fails the health check.
   A digest turned off (no address) and back on catches up on what finished while it was off, at
   most a week of it.
 - The factory writes it itself from the board; no agent turn.
+- A Due part comes first, soonest first: For you cards whose question has a `DUE:` time, each with
+  that time or Overdue. Such a card is not listed again under Waiting on you, and the subject counts
+  it first ("1 due").
 - One line lists the finished cards that asked Zach 3 or more times, most asked first:
   `Asked you 3 or more times: Fix the printer (4), Move the server (3)`. It reads card timing, so it
   includes dropped cards and cards that left the board. A card is listed once, for the first digest

@@ -143,6 +143,19 @@ func PreviewHandler(root string) (http.Handler, error) {
 	try.Labels = maps.Clone(ready.Labels)
 	try.Labels[labelPrefix+labelNote] = noteWorkLeft + "Zach: approve the required account setting"
 	agents = append(agents, try)
+	// A one-pass result that stopped on a question with a deadline: Answer / Mark done / Drop.
+	asked := ready
+	asked.ID, asked.SessionID, asked.Title = "preview-direct-ask", "preview-direct-ask", "Fill in the booth form"
+	if err := writePreviewSession(home, asked.Cwd, asked.ID, previewDirectAskRequest, previewDirectAskReply); err != nil {
+		return nil, err
+	}
+	asked.Labels = maps.Clone(ready.Labels)
+	delete(asked.Labels, labelPrefix+labelPlanRounds)
+	delete(asked.Labels, labelPrefix+labelCodeRounds)
+	asked.Labels[labelPrefix+labelTrack] = "direct"
+	asked.Labels[labelPrefix+labelNote] = directAskNote("Send the booth form with the larger table?")
+	asked.Labels[labelPrefix+labelDue] = iso(now.Add(10 * time.Hour))
+	agents = append(agents, asked)
 	f.hostMetrics.read = func(string) hostReading {
 		return hostReading{Metrics: hostMetrics{CPUCount: 4, Errors: map[string]string{}}}
 	}
@@ -317,6 +330,18 @@ func writePreviewSession(home, cwd, id, request, reply string) error {
 }
 
 const previewRequest = "Make the board easy to read on a phone: one column, and every card I need to answer at the top."
+
+const previewDirectAskRequest = "Fill in the booth form for the sample fair."
+
+// previewDirectAskReply is a one-pass result that stops on a question with a deadline.
+const previewDirectAskReply = `DECISION: Send the booth form with the larger table?
+OVERVIEW: The form is filled in and ready to send. The larger table costs a little more.
+NEEDS FROM ZACH: Answer yes, or name another size.
+DUE: 2026-01-01T22:00:00Z
+
+The form is saved with the larger table.
+
+TRACK: direct`
 
 const previewActionRequest = "Make the usage page fit a phone screen."
 

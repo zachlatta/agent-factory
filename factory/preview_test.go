@@ -9,6 +9,31 @@ import (
 	"testing"
 )
 
+func TestPreviewDirectAskSample(t *testing.T) {
+	root := t.TempDir()
+	h, err := PreviewHandler(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+	var board struct {
+		Cards []Card `json:"cards"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range board.Cards {
+		if c.ID == "preview-direct-ask" {
+			if c.Stage != "zach" || c.Due == "" || c.Overdue || c.Ask == nil || c.Ask.Kind != askQuestion {
+				t.Fatalf("card = %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatal("the direct ask sample is not on the board")
+}
+
 func TestPreviewIsolatedRealHandler(t *testing.T) {
 	// A poisoned host environment must never be used to construct preview state.
 	host := t.TempDir()

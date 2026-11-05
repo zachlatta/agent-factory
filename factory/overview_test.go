@@ -16,9 +16,9 @@ func TestParseOverview(t *testing.T) {
 	}{
 		{"full block on top", block + "\nThe plan in full.\n\nTIER: low",
 			"The plan in full.\n\nTIER: low",
-			&Overview{"Land the retry fix?", "Retries a failed upload once. Risk: a double upload.", "Approve landing; it lands within a minute."}},
+			&Overview{Decision: "Land the retry fix?", Overview: "Retries a failed upload once. Risk: a double upload.", Needs: "Approve landing; it lands within a minute."}},
 		{"bold keys", "**DECISION:** Pick a store\n**OVERVIEW:** Adds a cache.\n**NEEDS FROM ZACH:** Choose below.\n\nbody",
-			"body", &Overview{"Pick a store", "Adds a cache.", "Choose below."}},
+			"body", &Overview{Decision: "Pick a store", Overview: "Adds a cache.", Needs: "Choose below."}},
 		{"short NEEDS key", "DECISION: Go?\nNEEDS: Say yes.\n\nbody", "body", &Overview{Decision: "Go?", Needs: "Say yes."}},
 		{"two keys are enough", "OVERVIEW: Adds a cache.\nNEEDS FROM ZACH: Approve.\n", "",
 			&Overview{Overview: "Adds a cache.", Needs: "Approve."}},
@@ -27,11 +27,11 @@ func TestParseOverview(t *testing.T) {
 		{"multi-line needs with buttons",
 			"DECISION: Your call on the code\nOVERVIEW: Two points are open.\nNEEDS FROM ZACH: Tap a button:\n- \"Land as it is\": it lands\n- \"Drop it\": nothing lands\n\nPoints follow.",
 			"Points follow.",
-			&Overview{"Your call on the code", "Two points are open.", "Tap a button:\n- \"Land as it is\": it lands\n- \"Drop it\": nothing lands"}},
+			&Overview{Decision: "Your call on the code", Overview: "Two points are open.", Needs: "Tap a button:\n- \"Land as it is\": it lands\n- \"Drop it\": nothing lands"}},
 		{"the first block wins over a quoted one",
 			block + "\nThe reviewer wrote:\n> DECISION: Reviewer's decision\nDECISION: Quoted decision\nOVERVIEW: quoted\n",
 			"The reviewer wrote:\n> DECISION: Reviewer's decision\nDECISION: Quoted decision\nOVERVIEW: quoted",
-			&Overview{"Land the retry fix?", "Retries a failed upload once. Risk: a double upload.", "Approve landing; it lands within a minute."}},
+			&Overview{Decision: "Land the retry fix?", Overview: "Retries a failed upload once. Risk: a double upload.", Needs: "Approve landing; it lands within a minute."}},
 	} {
 		rest, got := ParseOverview(tc.in)
 		if fmt.Sprint(got) != fmt.Sprint(tc.want) {
@@ -55,7 +55,7 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 	f.SetAgents([]Agent{c})
 	got, _ := f.card("c1")
 	ask := got.Ask
-	want := &Overview{"Re-run the build?", "The build hung on a flaky test.", "Tap Re-run."}
+	want := &Overview{Decision: "Re-run the build?", Overview: "The build hung on a flaky test.", Needs: "Tap Re-run."}
 	if ask == nil || fmt.Sprint(ask.Overview) != fmt.Sprint(want) || ask.Detail != "I tried twice." || len(ask.Questions) != 1 {
 		t.Fatalf("ask = %+v", ask)
 	}

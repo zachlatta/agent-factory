@@ -366,8 +366,23 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 		lines       []SectionLine
 		clock       bool // show when it shipped
 	}
+	loc := f.cfg.Location
+	if loc == nil {
+		loc = time.UTC
+	}
+	// what has a deadline leads, and is not listed again under Waiting on you
+	var due, waiting []SectionLine
+	for _, l := range s.ForYou {
+		if at := parseTime(l.Due); !at.IsZero() {
+			l.State = dueText(at, f.Now(), loc) + " · " + l.State
+			due = append(due, l)
+			continue
+		}
+		waiting = append(waiting, l)
+	}
 	parts := []part{
-		{"Waiting on you", "for you", s.ForYou, false},
+		{"Due", "due", due, false},
+		{"Waiting on you", "for you", waiting, false},
 		{"Shipped", "shipped", s.Shipped, true},
 		{"In progress", "in progress", s.Working, false},
 		{"Stuck", "stuck", s.Stuck, false},
@@ -388,10 +403,6 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 	}
 	if len(counts) == 0 {
 		return email{}, false
-	}
-	loc := f.cfg.Location
-	if loc == nil {
-		loc = time.UTC
 	}
 	e := html.EscapeString
 	var t, h strings.Builder

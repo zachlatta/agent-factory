@@ -613,10 +613,13 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 		atts = append(atts, s.att)
 	}
 
-	// required lines: the recommendation, the choices and how to answer
+	// required lines: the deadline, the recommendation, the choices and how to answer
 	var lead, reply []string
 	var options []string
 	words := replyWords(ask)
+	if due := waitDue(a); !due.IsZero() {
+		lead = append(lead, f.dueLine(due)+".")
+	}
 	switch qs := ask.Questions; {
 	case len(qs) == 1:
 		if subject != firstWords(plainText(qs[0].Text, repos...), questionCap) {
@@ -647,7 +650,11 @@ func (f *Factory) composeEmail(a Agent, c Card, ask *Ask) email {
 	if len(reply) == 0 {
 		replyLine = "Reply with what to do"
 	}
-	replyLine += ", or write what to change."
+	if ask.directAsk {
+		replyLine += ", or write your answer."
+	} else {
+		replyLine += ", or write what to change."
+	}
 	if len(ask.Questions) == 0 && len(words) == 0 {
 		replyLine = "Reply with what to do."
 	}

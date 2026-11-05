@@ -92,7 +92,9 @@ type Card struct {
 	CreatedAt       string    `json:"createdAt"`
 	LastActivityAt  string    `json:"lastActivityAt"`
 	ArchivedAt      string    `json:"archivedAt"`
-	Parked          string    `json:"parked,omitempty"` // when the idle reap archived it; ArchivedAt stays "" (reap.go)
+	Parked          string    `json:"parked,omitempty"`  // when the idle reap archived it; ArchivedAt stays "" (reap.go)
+	Due             string    `json:"due,omitempty"`     // when its direct question to Zach is due (due.go)
+	Overdue         bool      `json:"overdue,omitempty"` // that time has passed
 	Children        []Child   `json:"children"`
 	Reviewing       bool      `json:"reviewing"`
 	Ask             *Ask      `json:"ask,omitempty"`  // Needs Zach only: what he is asked and how to answer

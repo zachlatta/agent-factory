@@ -54,6 +54,7 @@ func everyAsk() map[string]*Ask {
 	add("landed: did it finish", Card{}, zach(map[string]string{labelNote: "landed; did not say what remains"}))
 	add("landed other than reviewed", Card{}, zach(map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}))
 	add("landed other than reviewed, scan failed", Card{}, zach(map[string]string{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "failed"}))
+	add("direct ask", Card{}, zach(map[string]string{labelNote: directAskNote("Send the form?")}))
 	add("moved by hand", Card{}, zach(nil))
 	open := card("c1", map[string]string{})
 	open.RequiresAttention, open.AttentionReason = true, "question"
@@ -295,7 +296,7 @@ var askTitleLiteral = regexp.MustCompile(`&Ask\{[^}]*?Title:\s*"([^"]+)"`)
 
 // askBuilders is how many places in factory/ build an Ask. Adding one means adding its ask to everyAsk
 // (so it gets a label and fitting buttons), then this number.
-const askBuilders = 22
+const askBuilders = 23
 
 // Every place that builds an ask is held to the rules above: a new one fails here until it is checked.
 func TestEveryAskBuilderIsChecked(t *testing.T) {

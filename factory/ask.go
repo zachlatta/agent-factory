@@ -44,6 +44,8 @@ type Ask struct {
 	// Zach (a REMAINING Zach: item), if any.
 	landed   bool
 	zachItem string
+	// directAsk: a direct result's question (directAskFor); refineAsk titles it from the agent's overview.
+	directAsk bool
 }
 
 // Question is one multiple-choice question an agent asks Zach. He can also write his own answer.
@@ -205,6 +207,8 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Label: "Close this card?", Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
 			Actions: []Action{primary("close", "Close it"), reply("Keep going", "Why it is still needed")}}
+	case directAskStop(a):
+		return directAskFor(note)
 	case strings.HasPrefix(note, noteWorkLeft):
 		return workLeftAsk(strings.TrimPrefix(note, noteWorkLeft))
 	case note == "landed; did not say what remains":

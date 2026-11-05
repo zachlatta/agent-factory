@@ -195,6 +195,9 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 		if landingReply(f.agent(c.ID)) {
 			msg += remainingRule
 		}
+		if directAskStop(f.agent(c.ID)) {
+			msg += "\n\n" + directAnswerRule
+		}
 		files, err := f.chat(c.ID, via+msg, b.Attachments)
 		if err != nil {
 			return nil, err
@@ -482,10 +485,11 @@ func (f *Factory) retireReviews(id string) error {
 
 // planPending reports whether a board card's plan has not passed review or Zach yet. Its rework-cap
 // or escalation cards then mean "approve the plan", and Zach's replies go back to plan review.
-// A card in Done (say, a direct-track errand) has no plan pending.
+// A card in Done (say, a direct-track errand) has no plan pending, nor does a direct result waiting
+// on Zach's answer (directAskStop).
 func planPending(a Agent) bool {
 	v, st := a.L(labelVerdict), a.L(labelStage)
-	return a.L(labelSource) == "board" && (st == "plan" || st == "plan-review" || st == "zach") && a.L(labelZachPlan) != "approved" && a.L(labelCodeRounds) == "" &&
+	return !directAskStop(a) && a.L(labelSource) == "board" && (st == "plan" || st == "plan-review" || st == "zach") && a.L(labelZachPlan) != "approved" && a.L(labelCodeRounds) == "" &&
 		!strings.HasPrefix(v, "plan approve") && !strings.HasPrefix(v, "plan nits") && !strings.HasPrefix(v, "plan fixes") && !strings.HasPrefix(v, "code")
 }
 

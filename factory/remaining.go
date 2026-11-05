@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strings"
@@ -126,18 +127,58 @@ func needsNothing(reply string) bool {
 	if ov == nil {
 		return false
 	}
-	needs := strings.TrimSpace(strings.Trim(ov.Needs, "*_ \t"))
+	return strings.Trim(ov.Needs, "*_ \t\n") != "" && needsAsked(ov.Needs) == "" && remainingZachItem(reply) == ""
+}
+
+// needsAsked is what a NEEDS FROM ZACH line asks of Zach, or "" when it says nothing is needed or is empty.
+func needsAsked(needs string) string {
+	needs = strings.TrimSpace(strings.Trim(needs, "*_ \t"))
 	m := needsNothingRe.FindStringIndex(needs)
-	if m == nil || needsAskRe.MatchString(needs[m[1]:]) {
-		return false
+	if m == nil {
+		return needs
 	}
+	if !needsAskRe.MatchString(needs[m[1]:]) {
+		return ""
+	}
+	if loc := saysNothing.FindStringIndex(needs); loc != nil && loc[1] < len(needs) {
+		return needs[loc[1]:]
+	}
+	return needs
+}
+
+// remainingZachItem is the first REMAINING item left for Zach, without its prefix, or "".
+func remainingZachItem(reply string) string {
 	items, _ := ParseRemaining(reply)
 	for _, it := range items {
 		if remainingZachRe.MatchString(it) {
-			return false
+			return strings.TrimSpace(remainingZachRe.ReplaceAllString(it, ""))
 		}
 	}
-	return true
+	return ""
+}
+
+// directAsk is what a direct-track reply asks Zach, and whether it asks at all: a DECISION that names
+// one, a QUESTION block (with or without an overview), a NEEDS FROM ZACH line that names one, or a
+// REMAINING item left for him. A reply with no overview and no QUESTION block asks nothing (an inbox
+// errand's last line can follow its final command), nor does one with only optional tries after landing.
+func directAsk(reply string) (string, bool) {
+	rest, qs := ParseQuestions(reply)
+	_, ov := ParseOverview(rest)
+	if len(qs) == 0 && (ov == nil || optionalLandedTries(reply)) {
+		return "", false
+	}
+	var decision, question, needs string
+	if ov != nil {
+		if !saysNothing.MatchString(ov.Decision) {
+			decision = strings.TrimSpace(strings.Trim(ov.Decision, "*_ \t"))
+		}
+		needs = needsAsked(ov.Needs)
+	}
+	if len(qs) > 0 {
+		question = qs[0].Text
+	}
+	title := cmp.Or(decision, question, needs, remainingZachItem(reply))
+	return title, title != ""
 }
 
 // landedNothingRemains reports whether reply says nothing remains (REMAINING: none), asks no

@@ -85,6 +85,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelRecovery: "e30", labelReviewerRetries: "1",
 		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
 		labelArbitrated: "plan", labelWorkLeftRounds: "2", labelModelHandoff: "1", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
+		labelDue: "2026-10-27T20:00:00.000Z", labelDueTold: "2026-10-27T20:00:00.000Z",
 	})
 	old.Labels[gmailThreadLabel] = "th-gmail-1"
 	copied := copyCarriedLabels(old)

@@ -37,7 +37,8 @@ type SectionLine struct {
 	Title   string `json:"title"`
 	State   string `json:"state"`
 	Blocker string `json:"blocker,omitempty"`
-	At      string `json:"at,omitempty"` // RFC 3339: when it shipped, or its last activity
+	At      string `json:"at,omitempty"`  // RFC 3339: when it shipped, or its last activity
+	Due     string `json:"due,omitempty"` // RFC 3339: For you only, when its question is due (due.go)
 }
 
 // NoAnswerSource lists requests with no answer that are not cards (AddNoAnswer).
@@ -113,6 +114,7 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 			if c.WaitingCount > 0 {
 				line.State += " · " + waitingCountText(c.WaitingCount)
 			}
+			line.Due = c.Due
 			s.ForYou = append(s.ForYou, line)
 		case c.Stage == "zach":
 			line.State = stuckState(c)
@@ -146,7 +148,19 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 	}
 	sortNewest(s.Shipped)
 	sortNewest(s.Routine)
+	sortDueFirst(s.ForYou)
 	return s
+}
+
+// sortDueFirst puts lines with a due time first, soonest first; the others keep their order.
+func sortDueFirst(ls []SectionLine) {
+	sort.SliceStable(ls, func(i, j int) bool {
+		a, b := parseTime(ls[i].Due), parseTime(ls[j].Due)
+		if a.IsZero() || b.IsZero() {
+			return !a.IsZero() && b.IsZero()
+		}
+		return a.Before(b)
+	})
 }
 
 // finishedLine is the Shipped line of a card that reached Done at done, and whether it is listed: a

@@ -379,6 +379,11 @@ moved meeting: look at <errands> work items on origin/main from today). Deliver 
 a <errands> work item, land it (commit, then land it the way that repo's AGENTS.md says), and end your final message with the line
 TRACK: direct
 The direct track commits only its own <errands> work item (work/...): no other files, no other repo.
+A direct result that asks Zach something (a DECISION that is not None, a NEEDS FROM ZACH that is not
+Nothing, or a QUESTION block) waits for him once its work has landed, and his reply comes back to you on
+this track. If the ask has a deadline, add one line right after NEEDS FROM ZACH, an ISO time with its
+time zone:
+DUE: 2035-01-31T22:00:00-05:00
 Anything else (code, config, infra, deletes, money, bulk sends, or messages to anyone but Zach sent without a PDW review) is the build track:
 
 Step 1 now: write a PLAN only, then stop. No file edits yet. The plan has: goal (Zach's words),
@@ -1091,6 +1096,8 @@ func (f *Factory) Tick() {
 	f.denyPrompts(f.agents())
 	now := f.Now()
 	f.mailStuckPrompts(f.agents(), now)
+	f.mailParkedAsks(f.agents())
+	f.mailDueReminders(f.agents(), now)
 	p := f.beginPass()
 	defer f.endPass()
 	f.tickHot(p) // agents the watcher saw stop go first (watch.go)
@@ -1541,7 +1548,8 @@ func (f *Factory) markDirect(a Agent, c Card) error {
 }
 
 // finishDirect closes a card the builder did in one pass (TRACK: direct): no plan or code review,
-// but its work must be on origin/main like any other landing.
+// but its work must be on origin/main like any other landing. A last reply that asks Zach something
+// waits for him instead of closing (directAsk), and his reply continues it on this track.
 func (f *Factory) finishDirect(a Agent, c Card) error {
 	if f.guarded(c.Repo) {
 		// no direct track in a public repo: whatever it did waits for Zach, with a scan of its commits
@@ -1572,9 +1580,23 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 		return f.setLabels(a.ID, map[string]string{labelStage: "zach",
 			labelNote: "direct card changed files outside its work item without review: " + trunc(strings.Join(outside, ", "), 150), labelStuck: ""})
 	}
+	reply, err := f.storedReply(a)
+	if err != nil {
+		return f.waitForHistory(a, a, err)
+	}
 	f.recordLanded(a, c.Cwd)
+	if title, asks := directAsk(reply); asks {
+		f.logf("%s done in one pass, and asks Zach", short(a.ID))
+		now := iso(f.Now())
+		labels := map[string]string{labelStage: "zach", labelSince: now, labelNote: directAskNote(title),
+			labelDue: f.replyDue(a, reply), labelStuck: ""}
+		if a.archived() {
+			labels[labelParked] = now // it shows, a reply wakes it, and mailParkedAsks emails it
+		}
+		return f.setLabels(a.ID, labels)
+	}
 	f.logf("%s done in one pass", short(a.ID))
-	return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "done in one pass", labelStuck: ""})
+	return f.setLabels(a.ID, map[string]string{labelStage: "landed", labelNote: "done in one pass", labelDue: "", labelStuck: ""})
 }
 
 // nameCard renames board card a once, from the TITLE line of its first plan (or direct result),

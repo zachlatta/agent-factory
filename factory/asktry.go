@@ -88,6 +88,9 @@ func refineAsk(ask *Ask) {
 		return
 	}
 	cleanOverview(ask)
+	if ov := ask.Overview; ask.directAsk && ov != nil && ov.Decision != "" {
+		ask.Title = ov.Decision // the note is a label, cut and with its commas changed
+	}
 	if ov := ask.Overview; ask.Kind == askAction && ov != nil && ov.Needs != "" {
 		ask.Title = "Do it, then mark it done"
 	}

@@ -12,6 +12,9 @@ type Overview struct {
 	Decision string `json:"decision,omitempty"`
 	Overview string `json:"overview,omitempty"`
 	Needs    string `json:"needs,omitempty"`
+	// Due is the raw DUE: line, read only where a direct result stops (finishDirect): the card's
+	// due label is what the board and emails show.
+	Due string `json:"-"`
 }
 
 // overviewRule teaches agents the block ParseOverview reads. Every message where an agent stops carries
@@ -51,7 +54,7 @@ Factory serves these through the board's existing access boundary. For text chan
 before and after copy in the report. Use QUESTION blocks, recommendation first; the board adds Other.
 `
 
-var overviewKey = regexp.MustCompile(`^\s*\*{0,2}(DECISION|OVERVIEW|NEEDS FROM ZACH|NEEDS):\*{0,2}\s*(.*?)\s*$`)
+var overviewKey = regexp.MustCompile(`^\s*\*{0,2}(DECISION|OVERVIEW|NEEDS FROM ZACH|NEEDS|DUE):\*{0,2}\s*(.*?)\s*$`)
 
 const overviewCap = 2000 // a safety cap only: an overview is shown whole
 
@@ -100,7 +103,7 @@ func ParseOverview(text string) (string, *Overview) {
 			continue
 		}
 		get := func(k string) string { return trunc(strings.TrimSpace(strings.Join(fields[k], "\n")), overviewCap) }
-		ov := &Overview{Decision: get("DECISION"), Overview: get("OVERVIEW"), Needs: get("NEEDS")}
+		ov := &Overview{Decision: get("DECISION"), Overview: get("OVERVIEW"), Needs: get("NEEDS"), Due: get("DUE")}
 		rest := append(append([]string{}, lines[:i]...), lines[end:]...)
 		return strings.TrimSpace(strings.Join(rest, "\n")), ov
 	}

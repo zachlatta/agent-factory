@@ -247,6 +247,9 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				c.Reviewing = true
 			}
 		}
+		if due := waitDue(a); !due.IsZero() && c.Stage == "zach" {
+			c.Due, c.Overdue = iso(due), !now.Before(due)
+		}
 		c.Ask = askFor(c, a)
 		c.Idea = fromIdea[a.ID]
 		out = append(out, c)
