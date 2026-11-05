@@ -135,6 +135,51 @@ func TestCloseActionsStampClosedAt(t *testing.T) {
 	}
 }
 
+// A board read that started before a close and is stored after it still shows the card in Needs
+// Zach. It is no reopening: the close time stays and no ask is added.
+func TestReadStartedBeforeACloseDoesNotUndoIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		action string
+		body   Body
+		labels map[string]string
+	}{
+		{"done", "done", Body{ID: "c1"}, nil},
+		{"parked done", "done", Body{ID: "c1"}, map[string]string{labelParked: iso(t0)}},
+		{"close", "close", Body{ID: "c1"}, nil},
+		{"archive", "archive", Body{ID: "c1"}, nil},
+		{"drag to Done", "stage", Body{ID: "c1", Stage: "landed"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _, a := waitingCard(t, "c1", tc.labels)
+			before := f.nextRead()
+			closeAt := t0.Add(time.Hour)
+			clockAt(f, closeAt)
+			if _, err := f.Act(tc.action, tc.body); err != nil {
+				t.Fatal(err)
+			}
+			clockAt(f, closeAt.Add(time.Second))
+			if !f.setAgents([]Agent{a}, before, false) {
+				t.Fatal("the board did not store the older read: this test no longer covers the race")
+			}
+			check := func(when string) {
+				t.Helper()
+				ct := timing(t, f, "c1")
+				if ct.asks() != 1 || !ct.ClosedAt.Equal(closeAt) || !ct.doneAt().Equal(closeAt) {
+					t.Fatalf("%s: asks = %d, timing = %+v", when, ct.asks(), ct)
+				}
+				if got := strings.Join(stages(ct), " "); got != "plan zach landed" {
+					t.Fatalf("%s: stages = %s", when, got)
+				}
+			}
+			check("after the older read")
+			clockAt(f, closeAt.Add(time.Minute))
+			f.SetAgents([]Agent{moved(a, "landed", "")}) // the action's own reload
+			check("after the newer read")
+		})
+	}
+}
+
 // A failed close records nothing.
 func TestFailedCloseIsNotStamped(t *testing.T) {
 	f, p, _ := waitingCard(t, "c1", nil)

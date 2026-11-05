@@ -147,7 +147,8 @@ type TimingStore struct {
 	dirty bool
 	// readOnly: a deploy canary shares the live factory's StateDir, so it keeps changes in memory
 	readOnly bool
-	// highestSeq is the newest board read observed, in memory only: read numbers start again at 0
+	// highestSeq is the newest board read observed, or the read number a close took (recordClosed);
+	// observe skips older reads. In memory only: read numbers start again at 0
 	// on every run (Factory.readSeq), so a saved one would hold back every read after a restart.
 	highestSeq uint64
 }
@@ -576,7 +577,10 @@ func (s *TimingStore) manyAsks(after, upto time.Time) []AskedCard {
 // recordClosed records that Zach closed card id now. It is recorded here, not by observe: a parked
 // card can leave the board as it closes, and observe dates a move to Done at the archive time, which
 // for a parked card is when it was parked. A Done event a board read already added is moved to now.
+// A read started before now is out of date, and observe would take it for a reopening, so it stops
+// counting first. The read number is taken outside the store's lock: setAgents locks f.mu, then it.
 func (f *Factory) recordClosed(id string) {
+	f.timings.ignoreReadsBefore(f.nextRead())
 	at := f.Now().UTC()
 	f.timings.update(id, func(t *CardTiming) {
 		t.ClosedAt, t.CloseVersion = at, closeVersion
@@ -586,6 +590,13 @@ func (f *Factory) recordClosed(id string) {
 		}
 		t.Events = append(t.Events, TimingEvent{Stage: "landed", At: at})
 	})
+}
+
+// ignoreReadsBefore makes observe skip every read numbered below seq.
+func (s *TimingStore) ignoreReadsBefore(seq uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.highestSeq = max(s.highestSeq, seq)
 }
 
 // closeBackfillDue reports whether any retained record predates close times.
