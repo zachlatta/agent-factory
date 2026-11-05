@@ -846,7 +846,8 @@ digest set after 6 PM still goes out that evening, listing that day's finished c
 `/api/health` reports its last state as `digest` (off, nothing to report, sent, send failed,
 possibly sent); it never fails the health check.
 
-- It opens with a numbered list, newest first, of the waiting asks one word answers (see "Answering
+- It opens with what is due (the Due part below), then a numbered list, newest first, of the waiting
+  asks one word answers (see "Answering
   the digest by number"): one short line with the title and the decision, `1. Move the backup: Allow this build? (Yes, No or Drop)`.
   Then it lists, from the same `Sections` the board shows, one line per card with its board link:
   Waiting on you (the other asks, unnumbered), Shipped (with the time), In progress, Stuck, and No
@@ -867,9 +868,9 @@ possibly sent); it never fails the health check.
   A digest turned off (no address) and back on catches up on what finished while it was off, at
   most a week of it.
 - The factory writes it itself from the board; no agent turn.
-- A Due part comes first, soonest first: For you cards whose question has a `DUE:` time, each with
-  that time or Overdue. Such a card is not listed again under Waiting on you, and the subject counts
-  it first ("1 due").
+- A Due part comes first, above the numbered list, soonest first: For you cards whose question has a
+  `DUE:` time, each with that time or Overdue. Its answer takes words, so such a card has no number,
+  is not listed again under Waiting on you, and the subject counts it first ("1 due").
 - One line lists the finished cards that asked Zach 3 or more times, most asked first:
   `Asked you 3 or more times: Fix the printer (4), Move the server (3)`. It reads card timing, so it
   includes dropped cards and cards that left the board. A card is listed once, for the first digest

@@ -141,7 +141,7 @@ func digestLine(it digestItem) string {
 	return title + ": " + truncWords(it.Question, digestLineCap-len([]rune(title))-len(": "))
 }
 
-// writeDecisions writes the numbered list at the top of the digest. The HTML line links to the card; the
+// writeDecisions writes the numbered list, at the top of the digest below anything due. The HTML line links to the card; the
 // text one stays short.
 func (f *Factory) writeDecisions(t, h *strings.Builder, items []digestItem) {
 	if len(items) == 0 {

@@ -695,8 +695,34 @@ func TestDigestPutsDueFirst(t *testing.T) {
 	if !strings.Contains(d[0].Args["html"].(string), ">Due<") {
 		t.Errorf("html lacks the part: %s", d[0].Args["html"])
 	}
-	if i, j := strings.Index(text, "Fill in the booth form"), strings.Index(text, "Waiting on you"); i < 0 || j < 0 || i > j {
+	if i, j := strings.Index(text, "Fill in the booth form"), strings.Index(text, "Answer by reply"); i < 0 || j < 0 || i > j {
 		t.Errorf("order:\n%s", text)
+	}
+}
+
+func TestDigestPutsDueAboveTheNumberedList(t *testing.T) {
+	asked := card("c9", map[string]string{labelStage: "zach", labelSource: "board",
+		labelNote: directAskNote("Send the booth form?"), labelDue: "2026-10-28T22:00:00-04:00"})
+	asked.Title = "Fill in the booth form"
+	f, _, m := sentDigest(t, digestWait("c1", "Newer build", time.Hour), asked)
+	text := digests(m)[0].Args["text"].(string)
+	if !strings.HasPrefix(text, "Due\n- Fill in the booth form") {
+		t.Errorf("Due is not first:\n%s", text)
+	}
+	html := digests(m)[0].Args["html"].(string)
+	due, list := strings.Index(html, ">Due<"), strings.Index(html, ">Answer by reply<")
+	if due < 0 || list < 0 || due > list {
+		t.Errorf("Due is not above the numbered list: %s", html)
+	}
+	if !strings.Contains(text, "1. Newer build:") {
+		t.Errorf("the one-word ask lost its number:\n%s", text)
+	}
+	d, _ := f.readDigest()
+	if len(d.Lists) != 1 || len(d.Lists[0].Items) != 1 || d.Lists[0].Items[0].Card != "c1" {
+		t.Errorf("a question that needs words got a number: %+v", d.Lists)
+	}
+	if subj := digests(m)[0].Args["subject"].(string); !strings.HasPrefix(subj, "Factory today: 1 due, 1 for you") {
+		t.Errorf("subject = %q", subj)
 	}
 }
 

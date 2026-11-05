@@ -33,7 +33,7 @@ import (
 // The asked-often line is the exception: it reads the timing store, since a dropped card has no ledger
 // line, and lists the cards asked manyAsksMin times or more that reached Done after the last digest's
 // exact selection time (digest.json's asksCutoff, whenever that send happened), or today for the first.
-// The digest opens with a numbered list of the waiting asks one word answers (digest_reply.go), stored
+// The digest opens with what is due, then a numbered list of the waiting asks one word answers (digest_reply.go), stored
 // in digest.json with the thread the send returned, so a reply's numbers mean what that digest showed.
 
 const digestHour = 18 // 6 PM
@@ -407,8 +407,10 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 	e := html.EscapeString
 	var t, h strings.Builder
 	h.WriteString(`<div style="font-family:-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2328;max-width:640px">`)
-	f.writeDecisions(&t, &h, s.Decisions)
 	for _, p := range parts {
+		if p.count == "for you" { // the numbered asks follow what is due
+			f.writeDecisions(&t, &h, s.Decisions)
+		}
 		if len(p.lines) == 0 {
 			continue
 		}
