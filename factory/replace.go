@@ -10,14 +10,14 @@ const maxReplaceHops = 16
 
 // carriedFactoryLabels lists the factory.* labels copied at handoff (copyCarriedLabels, except
 // labelTold which is stage-bound). Clearable labels (held, held-approved, plan-fix, waits-on, waits-done,
-// reviewed, code-approved, landed-verified, decided, recovery, reviewer-retries) are copied once at handoff
+// waits-before, reviewed, code-approved, landed-verified, decided, recovery, reviewer-retries) are copied once at handoff
 // and never brought back by
 // applyLineageLabels after the replacement clears them; non-clearable lineage labels
 // (chainCarriedFactoryLabels) and any explicit empty value on a newer agent are read through the chain.
 var carriedFactoryLabels = []string{
 	labelReady, labelReadyHead, labelReadyFeedback, labelFeedbackHold, labelFeedbackTold, labelAskWhy, labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
 	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
-	labelDecided, labelPlanFix, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone,
+	labelDecided, labelPlanFix, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone, labelWaitsBefore,
 	labelHeld, labelHeldApproved, labelArbitrated, labelWorkLeftRounds, labelRecovery,
 	labelReviewerRetries, labelModelHandoff, labelBehaviorApproval, labelBehaviorSummary, labelBehaviorRepair,
 	labelDue, labelDueTold,

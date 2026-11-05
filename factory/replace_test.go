@@ -83,7 +83,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
 		labelLandedVerified: "1", labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
 		labelRecovery: "e30", labelReviewerRetries: "1",
-		labelWaitsOn: "depcard", labelWaitsDone: "1", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
+		labelWaitsOn: "depcard", labelWaitsDone: "1", labelWaitsBefore: "build", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
 		labelArbitrated: "plan", labelWorkLeftRounds: "2", labelModelHandoff: "1", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
 		labelDue: "2026-10-27T20:00:00.000Z", labelDueTold: "2026-10-27T20:00:00.000Z",
 	})
@@ -120,7 +120,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 		for k, v := range copied {
 			cleared.Labels[k] = v
 		}
-		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelReviewed, labelLandedVerified, labelDecided} {
+		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelWaitsBefore, labelReviewed, labelLandedVerified, labelDecided} {
 			if deleteKeys {
 				delete(cleared.Labels, labelPrefix+k)
 			} else {
@@ -128,7 +128,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 			}
 		}
 		gotCleared := applyLineageLabels([]Agent{old, cleared})[1]
-		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelReviewed, labelLandedVerified, labelDecided} {
+		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelWaitsBefore, labelReviewed, labelLandedVerified, labelDecided} {
 			if v := gotCleared.L(k); v != "" {
 				t.Fatalf("deleteKeys=%v: cleared label %s came back from old as %q", deleteKeys, k, v)
 			}

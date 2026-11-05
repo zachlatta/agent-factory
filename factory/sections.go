@@ -137,6 +137,8 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 			if c.WaitsOn != "" && c.Stage != "landed" {
 				if t := lookupTitle(titles, c.WaitsOn); t != "" {
 					line.State = "waiting on " + t
+				} else if strings.HasPrefix(c.Note, "waits on ") {
+					line.State = c.Note
 				}
 			}
 			if c.DecisionBlocker != "" {

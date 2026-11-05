@@ -123,3 +123,25 @@ func TestDecisionWaitUsesHeldDependency(t *testing.T) {
 		})
 	}
 }
+
+func TestDecisionWaitBeforeBuildHold(t *testing.T) {
+	d := card("ddd0004", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
+	a := card("aaa0001", map[string]string{labelStage: "building", labelHeld: d.ID, labelWaitsOn: d.ID, labelWaitsBefore: "build"})
+	agents := []Agent{a, d}
+	cards := BuildBoard(agents, nil, t0)
+	var held, blocker Card
+	for _, c := range cards {
+		switch c.ID {
+		case a.ID:
+			held = c
+		case d.ID:
+			blocker = c
+		}
+	}
+	if held.Stage != "building" || held.Ask != nil || held.DecisionBlocker != d.ID || blocker.WaitingCount != 1 {
+		t.Fatalf("held=%+v blocker=%+v", held, blocker)
+	}
+	if h := workflowHealth(agents); h.HeldForInput != 1 {
+		t.Fatalf("health = %+v, want held for input 1", h)
+	}
+}

@@ -751,6 +751,9 @@ Refresh the brief below before you plan, before you build and before you land:
 - If yours must land after another card, end the plan with a line "Waits on: <its short id>" (one
   card, the last such line counts). The factory holds your land prompt until that card lands and
   sends it then: never poll for it or refuse a land prompt.
+- If your build needs another card's result before you can write or test the code, end the plan with
+  "Waits on: <its short id> before build" instead. The factory holds the build after plan review and
+  starts it once that card lands: never poll for another card during plan or build.
 - Before landing, fetch origin/main; if a card that touched your files has landed, rebase on it and
   rerun the tests.
 - Never edit another card's worktree, and never message other agents.
@@ -765,7 +768,7 @@ func reviewPeersRule(port int, kind, id string) string {
 	if kind == "plan" {
 		return "Other cards in flight (their files, stages and requests): `" + cmd + "`. A duplicate of a card in " +
 			"flight is a close verdict: name it on a line `DUPLICATE OF: <card id>`. An overlap with another card's files or area that the plan does " +
-			"not name, or a named overlap with no \"Ordering:\" line, is a blocking finding.\n"
+			"not name, or a named overlap with no \"Ordering:\" line, is a blocking finding (`Waits on: <id>` holds landing; `Waits on: <id> before build` holds the build until that card lands).\n"
 	}
 	return "Other cards in flight and what landed lately: `" + cmd + "`. Check the work against origin/main as " +
 		"it is now (`git fetch` first): if a card that touched the same files landed after this one started, the " +

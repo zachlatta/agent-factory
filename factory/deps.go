@@ -2,31 +2,47 @@ package factory
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // Card dependencies. An approved plan may name one card this card lands after, with a line
-// "Waits on: <short id>" (ParseWaitsOn; stored as factory.waits-on when the plan review passes).
-// After code review passes, the land prompt is held while that card is in flight (factory.held,
-// stage landing) and sent by the next Tick once it lands. If it was dropped, or the factory cannot
-// find it, the card is told and goes back to building (rebuildWithoutDep): it decides itself whether
-// to rebuild without it or land as is, and either way code review runs again.
+// "Waits on: <short id>" (ParseWaitsOn; stored as factory.waits-on when the plan review passes),
+// or one its build needs first, with "Waits on: <short id> before build" (ParseWaitsOnSpec; stored
+// with factory.waits-before=build). A before-build dependency holds the card in building after plan
+// review (and any side-effect approval) with no running agent until that card lands; a plain waits-on
+// holds the land prompt after code review passes. If the blocker was dropped, or the factory cannot
+// find it, the card is told and goes to building (rebuildWithoutDep) to decide for itself.
 
 // labelHeldApproved marks a held card Zach approved himself (the time). Only such a card is released
-// while parked: the release's land prompt is what wakes it, after the freshness and scan gates.
+// while parked: the release's prompt is what wakes it, after the freshness and scan gates.
 const labelHeldApproved = "held-approved"
 
-// waitsOnRe matches a "Waits on:" line, markdown bullets and bold allowed, naming one short id.
-var waitsOnRe = regexp.MustCompile("(?im)^[\\s>*_-]*waits on\\s*[*_]*:[*_\\s]*`?([0-9a-f]{7})\\b")
+// waitsOnRe matches a "Waits on:" line, markdown bullets and bold allowed, naming one short id and an
+// optional same-line "before build" modifier.
+var waitsOnRe = regexp.MustCompile("(?im)^[ \\t>*_-]*waits[ \\t]+on[ \\t]*[*_]*:[*_ \\t]*`?([0-9a-f]{7})\\b[`*_ \\t()—–:-]*(?:(before[ \\t]+build)\\b)?")
+
+// ParseWaitsOnSpec returns the short id on the last "Waits on:" line of text and whether that line
+// specifies "before build", or ("", false) when there is none or it names the card self itself.
+func ParseWaitsOnSpec(text, self string) (id string, beforeBuild bool) {
+	m := waitsOnRe.FindAllStringSubmatch(text, -1)
+	if len(m) == 0 {
+		return "", false
+	}
+	last := m[len(m)-1]
+	id = strings.ToLower(last[1])
+	if id == short(self) {
+		return "", false
+	}
+	return id, last[2] != ""
+}
 
 // ParseWaitsOn returns the short id on the last "Waits on:" line of text, or "" when there is none
 // or it names the card self itself.
 func ParseWaitsOn(text, self string) string {
-	id := lastMatch(waitsOnRe, text)
-	if id == short(self) {
-		return ""
-	}
+	id, _ := ParseWaitsOnSpec(text, self)
 	return id
 }
 
@@ -96,6 +112,73 @@ func (f *Factory) markDepLanded(a Agent) {
 // holdNote is a held card's note. Label values hold no commas (labelArg).
 func holdNote(id string) string { return "waits on " + id + " to land" }
 
+// holdBuildNote is the note of a card held before building starts.
+func holdBuildNote(id string) string { return "waits on " + id + " before build" }
+
+// heldBeforeBuild reports whether a is held in building waiting for another card to land before building starts.
+func heldBeforeBuild(a Agent) bool {
+	return a.L(labelStage) == "building" && a.L(labelHeld) != "" && a.L(labelWaitsBefore) == "build"
+}
+
+// heldStage reports whether a is in a stage where factory.held holds the card (landing, or building with waits-before=build).
+func heldStage(a Agent) bool {
+	return a.L(labelStage) == "landing" || (a.L(labelStage) == "building" && a.L(labelWaitsBefore) == "build")
+}
+
+func (f *Factory) heldBuildPath(id string) string {
+	return filepath.Join(f.cfg.StateDir, "held-builds", filepath.Base(id)+".txt")
+}
+
+// saveHeldBuild stores the deferred build prompt for card id until its before-build dependency lands.
+func (f *Factory) saveHeldBuild(id, msg string) error {
+	path := f.heldBuildPath(id)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(msg), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// heldBuildMsg returns card a's saved deferred build prompt, or reconstructs it from labels if none was saved.
+func (f *Factory) heldBuildMsg(a Agent) string {
+	byID := f.byID()
+	byID[a.ID] = a
+	chain := cardLineage(byID, a.ID)
+	if len(chain) == 0 {
+		chain = []Agent{a}
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if b, err := os.ReadFile(f.heldBuildPath(chain[i].ID)); err == nil && strings.TrimSpace(string(b)) != "" {
+			return string(b)
+		}
+	}
+	notes := "(none)"
+	if fix := a.L(labelPlanFix); fix != "" {
+		notes = "Apply these fixes from the last plan review: " + fix
+	}
+	if fix := a.L(labelPlanFix); fix != "" && strings.HasPrefix(a.L(labelVerdict), "plan fixes") {
+		return buildWithFixesMsg(notes)
+	}
+	return buildMsg(fmt.Sprintf("Plan approved (%s tier).", a.L(labelTier)), notes)
+}
+
+func (f *Factory) dropHeldBuild(a Agent) {
+	byID := f.byID()
+	byID[a.ID] = a
+	chain := cardLineage(byID, a.ID)
+	if len(chain) == 0 {
+		chain = []Agent{a}
+	}
+	for _, x := range chain {
+		if err := os.Remove(f.heldBuildPath(x.ID)); err != nil && !os.IsNotExist(err) {
+			f.logf("%s: held build file: %v", short(x.ID), err)
+		}
+	}
+}
+
 // waitFlag is the board flag for a card with a waits-on line.
 func waitFlag(agents []Agent, a Agent) string {
 	id := a.L(labelWaitsOn)
@@ -106,6 +189,9 @@ func waitFlag(agents []Agent, a Agent) string {
 		return "waits on " + id + " (dropped)"
 	case depMissing:
 		return "waits on " + id + " (not found)"
+	}
+	if a.L(labelWaitsBefore) == "build" {
+		return "waits on " + id + " before build"
 	}
 	return "waits on " + id
 }
@@ -118,9 +204,9 @@ func depHoldMsg(id, fb string) string {
 		"summary with it under 'UI feedback:'.\n\n" + fb
 }
 
-// tickHeld moves a held landing card on. It sends the land prompt once its dependency landed, or
-// sends the card back to building if the dependency was dropped or is missing.
-// A held card is never checked as a landing (or stuck): it has not been told to land.
+// tickHeld moves a held card on. It sends the land or build prompt once its dependency landed, or
+// sends the card to building if the dependency was dropped or is missing.
+// A held card is never checked as a landing (or stuck): it has not been told to land or build yet.
 func (f *Factory) tickHeld(a Agent, c Card) error {
 	id := a.L(labelHeld)
 	if id == "" {
@@ -135,6 +221,9 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	}
 	if st != depLanded {
 		return f.rebuildWithoutDep(a, id, st)
+	}
+	if heldBeforeBuild(a) {
+		return f.releaseHeldBuild(a, id)
 	}
 	disposition, hold := f.assessReview(a, c.Cwd)
 	if disposition == reviewAlreadyLanded {
@@ -180,13 +269,28 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 		"Code review passed (%s tier). %s", id, a.L(labelTier), f.landMsgFor(a)))
 }
 
+// releaseHeldBuild starts the build of a card held in building once the card it waited on has landed.
+func (f *Factory) releaseHeldBuild(a Agent, id string) error {
+	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
+		labelSince: iso(f.Now()), labelHeld: "", labelTold: "", labelWaitsDone: "1",
+		labelNote: "building: " + id + " landed"})
+	msg := f.heldBuildMsg(a)
+	if err := f.setLabels(a.ID, labels); err != nil {
+		return err
+	}
+	f.dropHeldBuild(a)
+	f.logf("%s build released: %s landed", short(a.ID), id)
+	return f.advance(labeled(a, labels), "build", fmt.Sprintf("Card %s, which this card waited on before building, has landed: "+
+		"fetch and rebase on origin/main first (`git fetch origin main && git rebase origin/main`), then build as planned.\n\n%s", id, msg))
+}
+
 // parkedStaleNote is the note of a parked held card whose HEAD moved since its review.
 const parkedStaleNote = unverifiedReviewNote + "work changed after review"
 
 // heldApprovedParked reports whether a is a parked held card Zach approved: the one archived card the
-// factory moves on by itself, since its release's land prompt (or a stop for Zach) is what he asked for.
+// factory moves on by itself, since its release's prompt (or a stop for Zach) is what he asked for.
 func heldApprovedParked(a Agent) bool {
-	return a.parked() && a.L(labelStage) == "landing" && a.L(labelHeld) != "" && a.L(labelHeldApproved) != ""
+	return a.parked() && heldStage(a) && a.L(labelHeld) != "" && a.L(labelHeldApproved) != ""
 }
 
 // heldStopped is stillStopped for a held card, except that a parked one Zach approved may be moved on
@@ -205,8 +309,8 @@ func (f *Factory) heldStopped(a Agent) (bool, error) {
 // Anything else moves nothing; a failed read is an error, so the next Tick tries again.
 func (f *Factory) parkedHoldCurrent(a Agent) (bool, error) {
 	same := func(l func(string) string) bool {
-		return l(labelParked) != "" && l(labelStage) == "landing" && l(labelHeld) == a.L(labelHeld) &&
-			l(labelHeldApproved) != "" && l(labelHeldApproved) == a.L(labelHeldApproved)
+		return l(labelParked) != "" && l(labelStage) == a.L(labelStage) && l(labelWaitsBefore) == a.L(labelWaitsBefore) &&
+			l(labelHeld) == a.L(labelHeld) && l(labelHeldApproved) != "" && l(labelHeldApproved) == a.L(labelHeldApproved)
 	}
 	if cur, ok := f.agentOK(a.ID); !ok || !cur.parked() || !same(cur.L) {
 		f.logf("%s approved hold changed since the snapshot, no move", short(a.ID))
@@ -325,7 +429,7 @@ func decorateDecisionWaits(cards []Card, agents []Agent) {
 	}
 	for i := range cards {
 		a, ok := byID[cards[i].ID]
-		if !ok || a.L(labelStage) != "landing" || a.L(labelHeld) == "" || a.gone() || replacedPredecessor(byID, a) {
+		if !ok || !heldStage(a) || a.L(labelHeld) == "" || a.gone() || replacedPredecessor(byID, a) {
 			continue
 		}
 		target := traceHeldChain(agents, byID, a).decision

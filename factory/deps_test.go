@@ -11,19 +11,34 @@ import (
 )
 
 func TestParseWaitsOn(t *testing.T) {
-	for _, tc := range []struct{ text, want string }{
-		{"plan\nWaits on: abc1234\nTIER: low", "abc1234"},
-		{"- **Waits on:** `abc1234` (lands first)", "abc1234"},
-		{"waits on: ABC1234", "abc1234"},
-		{"Waits on: abc1234\nlater\nWaits on: def5678", "def5678"},
-		{"Waits on: c1c1c1c (this card)", ""},
-		{"Ordering: abc1234 lands first", ""},
-		{"It waits on: abc1234 in prose", ""},
-		{"Waits on: abc12345678", ""},
-		{"no line", ""},
+	for _, tc := range []struct {
+		text       string
+		wantID     string
+		wantBefore bool
+	}{
+		{"plan\nWaits on: abc1234\nTIER: low", "abc1234", false},
+		{"- **Waits on:** `abc1234` (lands first)", "abc1234", false},
+		{"waits on: ABC1234", "abc1234", false},
+		{"Waits on: abc1234 before build", "abc1234", true},
+		{"- **Waits on:** `abc1234` **before build**", "abc1234", true},
+		{"Waits on: abc1234 (before build)", "abc1234", true},
+		{"Waits on: abc1234 — before build", "abc1234", true},
+		{"Waits on: abc1234\nBefore build, run the tests.", "abc1234", false},
+		{"Waits on: abc1234\nlater\nWaits on: def5678", "def5678", false},
+		{"Waits on: abc1234 before build\nlater\nWaits on: def5678", "def5678", false},
+		{"Waits on: abc1234\nlater\nWaits on: def5678 before build", "def5678", true},
+		{"Waits on: c1c1c1c (this card)", "", false},
+		{"Waits on: c1c1c1c before build", "", false},
+		{"Ordering: abc1234 lands first", "", false},
+		{"It waits on: abc1234 in prose", "", false},
+		{"Waits on: abc12345678", "", false},
+		{"no line", "", false},
 	} {
-		if got := ParseWaitsOn(tc.text, "c1c1c1c9999"); got != tc.want {
-			t.Errorf("ParseWaitsOn(%q) = %q, want %q", tc.text, got, tc.want)
+		if got := ParseWaitsOn(tc.text, "c1c1c1c9999"); got != tc.wantID {
+			t.Errorf("ParseWaitsOn(%q) = %q, want %q", tc.text, got, tc.wantID)
+		}
+		if gotID, gotBefore := ParseWaitsOnSpec(tc.text, "c1c1c1c9999"); gotID != tc.wantID || gotBefore != tc.wantBefore {
+			t.Errorf("ParseWaitsOnSpec(%q) = (%q, %v), want (%q, %v)", tc.text, gotID, gotBefore, tc.wantID, tc.wantBefore)
 		}
 	}
 }
@@ -36,18 +51,18 @@ func TestPlanApprovalRecordsWaitsOn(t *testing.T) {
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelWaitsOn] != "d0e0001" || l[labelStage] != "building" {
+	if l := p.labels("c1"); l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "" || l[labelStage] != "building" {
 		t.Errorf("labels = %v", l)
 	}
 }
 
 func TestRevisedPlanWithoutWaitsOnClearsIt(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board",
-		labelWaitsOn: "d0e0001", labelWaitsDone: "1"}), reviewer("r1", "c1", "plan"))
+		labelWaitsOn: "d0e0001", labelWaitsDone: "1", labelWaitsBefore: "build"}), reviewer("r1", "c1", "plan"))
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[User] revise\nThe revised plan, no dependency.\nTIER: low")
 	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelWaitsOn] != "" || l[labelWaitsDone] != "" {
+	if l := p.labels("c1"); l[labelWaitsOn] != "" || l[labelWaitsDone] != "" || l[labelWaitsBefore] != "" {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -261,6 +276,21 @@ func TestBoardShowsWaitsOn(t *testing.T) {
 			t.Errorf("%q: waitsOn %q, flags %v", state, c.WaitsOn, c.Flags)
 		}
 	}
+	for state, d := range map[string]*Agent{" before build": ptr(dep("building", false)), " (landed)": ptr(dep("landed", true))} {
+		agents := []Agent{card("c1", map[string]string{labelStage: "building", labelWaitsOn: "d0e0001", labelWaitsBefore: "build"})}
+		if d != nil {
+			agents = append(agents, *d)
+		}
+		var c Card
+		for _, x := range BuildBoard(agents, nil, t0) {
+			if x.ID == "c1" {
+				c = x
+			}
+		}
+		if c.WaitsOn != "d0e0001" || !contains(c.Flags, "waits on d0e0001"+state) {
+			t.Errorf("before-build %q: waitsOn %q, flags %v", state, c.WaitsOn, c.Flags)
+		}
+	}
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -416,5 +446,193 @@ func TestFailedLandingDoesNotRecordVerifiedDependency(t *testing.T) {
 		if got := depOf([]Agent{c}, short(c.ID)); got != depWaiting {
 			t.Errorf("dependency state = %q", got)
 		}
+	}
+}
+
+func TestPlanApprovalWithWaitsBeforeBuildHoldsWhileDependencyInFlight(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+		reviewer("r1", "c1", "plan"), dep("building", false))
+	storeLog(t, f, p, "r1", "Check edge case X in foo.go.\nSMALL FIX: guard nil pointer\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: changes")
+	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: none\nTIER: low")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStage] != "building" || l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "build" ||
+		l[labelHeld] != "d0e0001" || l[labelAutoReview] != "" || l[labelNote] != "waits on d0e0001 before build" {
+		t.Fatalf("labels = %v", l)
+	}
+	if msgs := p.sent("c1"); len(msgs) != 0 {
+		t.Fatalf("held build was messaged: %v", msgs)
+	}
+	// While held in building for an hour, it is not nudged or marked stuck.
+	held := withLabels(f.agent("c1"), l)
+	held.Labels[labelPrefix+labelSince] = ago(time.Hour)
+	held.LastActivityAt = t0.Add(-time.Hour)
+	f.SetAgents([]Agent{held, dep("building", false)})
+	f.Tick()
+	if len(p.sent("c1")) != 0 || p.labels("c1")[labelStuck] != "" {
+		t.Fatalf("held before-build card was nudged or marked stuck: sent=%v labels=%v", p.sent("c1"), p.labels("c1"))
+	}
+	// Once the blocker lands, the deferred build message (including full reviewer notes and small fixes) is sent.
+	f.SetAgents([]Agent{held, dep("landed", true)})
+	f.Tick()
+	rl := p.labels("c1")
+	if rl[labelStage] != "building" || rl[labelHeld] != "" || rl[labelAutoReview] != "code" || rl[labelWaitsDone] != "1" ||
+		rl[labelNote] != "building: d0e0001 landed" {
+		t.Fatalf("release labels = %v", rl)
+	}
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "Card d0e0001, which this card waited on before building, has landed") ||
+		!strings.Contains(msgs[0], "git fetch origin main && git rebase origin/main") ||
+		!strings.Contains(msgs[0], "The plan review found only small, concrete blocking fixes") ||
+		!strings.Contains(msgs[0], "Check edge case X in foo.go.") || !strings.Contains(msgs[0], "guard nil pointer") {
+		t.Fatalf("release sent = %v", msgs)
+	}
+}
+
+func TestPlanApprovalWithWaitsBeforeBuildStartsWhenDependencyAlreadyLanded(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+		reviewer("r1", "c1", "plan"), dep("landed", true))
+	storeLog(t, f, p, "r1", "Looks good.\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: none\nTIER: low")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != "code" || l[labelWaitsDone] != "1" {
+		t.Fatalf("labels = %v", l)
+	}
+	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Build it now, as planned.") {
+		t.Fatalf("sent = %v", msgs)
+	}
+}
+
+func TestPlanApprovalWithWaitsBeforeBuildAndSideEffectsWaitsForZachThenHolds(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
+		reviewer("r1", "c1", "plan"), dep("building", false))
+	storeLog(t, f, p, "r1", "SMALL FIX: add timeout\nBUILD SIDE EFFECTS: sends test email\nTIER: low\nVERDICT: changes")
+	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: sends test email\nTIER: low")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelWaitsOn] != "d0e0001" ||
+		l[labelWaitsBefore] != "build" || l[labelPlanFix] != "add timeout" {
+		t.Fatalf("side effect stop labels = %v", l)
+	}
+	if len(p.sent("c1")) != 1 {
+		t.Fatalf("expected side effect stop prompt, got %v", p.sent("c1"))
+	}
+	stopped := withLabels(f.agent("c1"), l)
+	f.SetAgents([]Agent{stopped, dep("building", false)})
+	if _, err := f.Act("approve", Body{ID: "c1", Message: "1A: use staging"}); err != nil {
+		t.Fatal(err)
+	}
+	al := p.labels("c1")
+	if al[labelStage] != "building" || al[labelHeld] != "d0e0001" || al[labelAutoReview] != "" ||
+		al[labelZachPlan] != "approved" || al[labelHeldApproved] == "" || al[labelNote] != "waits on d0e0001 before build" {
+		t.Fatalf("approve labels = %v", al)
+	}
+	if al[labelPlanFix] != "add timeout" {
+		t.Fatalf("approve overwrote labelPlanFix: %q", al[labelPlanFix])
+	}
+	if len(p.sent("c1")) != 1 {
+		t.Fatalf("approve messaged held build before blocker landed: %v", p.sent("c1"))
+	}
+	held := withLabels(stopped, al)
+	f.SetAgents([]Agent{held, dep("landed", true)})
+	f.Tick()
+	rl := p.labels("c1")
+	if rl[labelHeld] != "" || rl[labelHeldApproved] != "" || !labelSent(rl, labelHeldApproved) ||
+		rl[labelAutoReview] != "code" || rl[labelWaitsDone] != "1" {
+		t.Fatalf("release labels = %v", rl)
+	}
+	msgs := p.sent("c1")
+	if len(msgs) != 2 || !strings.Contains(msgs[1], "Zach allowed this build.") ||
+		!strings.Contains(msgs[1], "1A: use staging") || !strings.Contains(msgs[1], "add timeout") {
+		t.Fatalf("release sent = %v", msgs)
+	}
+}
+
+func TestHeldBeforeBuildDroppedOrMissingDependencyUsesBeforeBuildWording(t *testing.T) {
+	for name, tc := range map[string]struct {
+		agents []Agent
+		state  string
+		says   string
+	}{
+		"dropped": {[]Agent{dep("building", true)}, depDropped, "was dropped"},
+		"missing": {nil, depMissing, "is not on the board"},
+	} {
+		c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelPlanRounds: "1",
+			labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
+		f, p, m := mailFactory(t, append(tc.agents, c)...)
+		if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "Check X.")); err != nil {
+			t.Fatal(err)
+		}
+		f.Tick()
+		l := p.labels("c1")
+		if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" ||
+			l[labelWaitsOn] != "" || l[labelWaitsBefore] != "" || l[labelNote] != "rebuilding: d0e0001 "+tc.state {
+			t.Errorf("%s: labels = %v", name, l)
+		}
+		msgs := p.sent("c1")
+		if len(msgs) != 1 || !strings.Contains(msgs[0], tc.says) ||
+			!strings.Contains(msgs[0], "which your approved plan waited on before building") ||
+			!strings.Contains(msgs[0], "Nothing is built yet") || !strings.Contains(msgs[0], "Check X.") ||
+			strings.Contains(msgs[0], "say so and change nothing") || strings.Contains(msgs[0], "Code review runs again") {
+			t.Errorf("%s: sent = %v", name, msgs)
+		}
+		if len(m.sends()) != 0 {
+			t.Errorf("%s: emailed Zach: %v", name, m.sends())
+		}
+	}
+}
+
+func TestHeldBeforeBuildKeepHoldOnZachReply(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelPlanRounds: "1",
+		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
+	f, p := newTestFactory(t, c, dep("building", false))
+	if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "(none)")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("send", Body{ID: "c1", Message: "keep it small"}); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	answered := withLabels(c, l)
+	if l[labelStage] != "building" || answered.L(labelHeld) != "d0e0001" || l[labelAutoReview] != "" {
+		t.Fatalf("after send labels = %v (held=%q)", l, answered.L(labelHeld))
+	}
+	// Agent answered Zach and stopped while blocker is still in flight: stays held, no code review starts.
+	answered.LastActivityAt = t0.Add(time.Minute)
+	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
+	f.SetAgents([]Agent{answered, dep("building", false)})
+	f.Tick()
+	if len(p.runsWithLabel(labelArg(labelRole, "reviewer"))) != 0 || len(p.sent("c1")) != 1 {
+		t.Fatalf("started review or sent message while still held: calls=%v", p.calls)
+	}
+	// Once blocker lands, build starts.
+	f.SetAgents([]Agent{answered, dep("landed", true)})
+	f.Tick()
+	if rl := p.labels("c1"); rl[labelHeld] != "" || rl[labelAutoReview] != "code" || len(p.sent("c1")) != 2 {
+		t.Fatalf("after blocker landed: labels=%v sent=%v", rl, p.sent("c1"))
+	}
+}
+
+func TestLandingHeldCardMovedByHandToBuildingIsNotTreatedAsBeforeBuildHold(t *testing.T) {
+	c := heldCard(map[string]string{labelReviewed: reviewedSHA})
+	f, p := newTestFactory(t, c, dep("building", false))
+	if _, err := f.Act("stage", Body{ID: "c1", Stage: "building"}); err != nil {
+		t.Fatal(err)
+	}
+	moved := withLabels(c, p.labels("c1"))
+	if heldBeforeBuild(moved) {
+		t.Fatalf("hand-moved landing card treated as heldBeforeBuild: %v", moved.Labels)
+	}
+	f.SetAgents([]Agent{moved, dep("landed", true)})
+	f.Tick()
+	if len(p.sent("c1")) != 0 {
+		t.Fatalf("hand-moved landing card released as before-build hold: %v", p.sent("c1"))
 	}
 }

@@ -170,3 +170,22 @@ func TestShippedFollowsLandingNotMissingMail(t *testing.T) {
 		t.Errorf("noAnswer = %+v, want none: only the watchdog flags requests", s.NoAnswer)
 	}
 }
+
+func TestSectionsBeforeBuildWaitState(t *testing.T) {
+	cards := []Card{
+		{ID: "b1abcdef", Short: "b1abcde", Title: "Blocker card", Stage: "building", Source: "board"},
+		{ID: "w1", Title: "Waiting build", Stage: "building", Source: "board", WaitsOn: "b1abcde", Note: "waits on b1abcde before build"},
+		{ID: "w2", Title: "Waiting unknown", Stage: "building", Source: "board", WaitsOn: "9999999", Note: "waits on 9999999 before build"},
+	}
+	s := BuildSections(cards, t0, time.UTC)
+	states := map[string]string{}
+	for _, l := range s.Working {
+		states[l.ID] = l.State
+	}
+	if states["w1"] != "waiting on Blocker card" {
+		t.Errorf("w1 state = %q, want %q", states["w1"], "waiting on Blocker card")
+	}
+	if states["w2"] != "waits on 9999999 before build" {
+		t.Errorf("w2 state = %q, want %q", states["w2"], "waits on 9999999 before build")
+	}
+}

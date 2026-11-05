@@ -691,12 +691,20 @@ func (f *Factory) rebuildWithoutDep(a Agent, id, state string) error {
 	if state == depMissing {
 		what = "is not on the board (a wrong id, or it left the board before it landed)"
 	}
+	beforeBuild := a.L(labelWaitsBefore) == "build"
 	f.logf("%s held: %s %s; back to building", short(a.ID), id, state)
 	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
-		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "",
+		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "", labelWaitsBefore: "",
 		labelNote: rebuildingNotePrefix + id + " " + state})
 	if err := f.setLabels(a.ID, labels); err != nil {
 		return err
+	}
+	if beforeBuild {
+		msg := f.heldBuildMsg(a)
+		f.dropHeldBuild(a)
+		return f.advance(labeled(a, labels), "build", "Card "+id+", which your approved plan waited on before building, "+what+
+			". Nothing is built yet: if you can build the approved plan without that card (bring in what you need, or cut the part "+
+			"that depended on it), build it now; if the scope must change, do not build — stop and say why.\n\n"+msg)
 	}
 	return f.advance(labeled(a, labels), "rebuilding without the card it waited on", "Card "+id+", which your approved plan lands after, "+what+". Do not land now. Decide "+
 		"yourself: if this change needs that card's work, rebuild without it (bring in what you need, or cut the part "+

@@ -268,3 +268,28 @@ func (p *fakePaseo) labelUpdates(id string) [][]string {
 	}
 	return out
 }
+
+func TestApprovedParkedBeforeBuildHeldCardIsReleasedWhenDependencyLands(t *testing.T) {
+	f, p, with := parkedHeld(t, true, map[string]string{
+		labelStage: "building", labelWaitsBefore: "build", labelAutoReview: "",
+	})
+	if err := f.saveHeldBuild("c1", buildMsg("Zach allowed this build.", "(none)")); err != nil {
+		t.Fatal(err)
+	}
+	with(dep("building", false))
+	f.Tick()
+	if len(p.sent("c1")) != 0 || len(p.labels("c1")) != 0 {
+		t.Fatalf("moved while dependency in flight: sent %v labels %v", p.sent("c1"), p.labels("c1"))
+	}
+	with(dep("landed", false))
+	f.Tick()
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "Card d0e0001, which this card waited on before building, has landed") ||
+		!strings.Contains(msgs[0], "Zach allowed this build.") {
+		t.Fatalf("sent = %v", msgs)
+	}
+	if l := p.labels("c1"); l[labelHeld] != "" || l[labelHeldApproved] != "" || !labelSent(l, labelHeldApproved) ||
+		l[labelParked] != "" || l[labelAutoReview] != "code" || l[labelWaitsDone] != "1" {
+		t.Errorf("labels = %v", l)
+	}
+}

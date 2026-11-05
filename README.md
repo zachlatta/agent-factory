@@ -359,13 +359,17 @@ The planner (the "Fellow") first picks a track:
   still on a prompt 20 minutes after its last activity gets Zach one email in its card's thread, once
   per move of the card (`factory.permit-told`, `factory/permit.go`); he approves or denies it in
   Paseo, stops the agent or messages it.
-- A plan can name one card it lands after, with a line `Waits on: <short id>`. After code review passes,
-  the factory holds the land prompt until that card is Done, then sends it. If that card was dropped
-  or closed, or is not on the board (an agent that is not a card counts as dropped once archived), the
-  card is told and goes back to building with its `Waits on` cleared. It decides itself whether to
-  rebuild without the other card's work or keep the change as is, and either way code review runs
-  again before the land prompt.
-  Held work stays in Landing and Working. When its dependency chain reaches Needs Zach,
+- A plan can name one card it lands after, with a line `Waits on: <short id>`, or one its build needs
+  first, with `Waits on: <short id> before build`. A plain `Waits on:` holds the land prompt after code
+  review passes until that card is Done, then sends it. `Waits on: <short id> before build` holds the
+  card in Building after plan review passes (and after any build side effects are allowed), with no
+  running agent (`factory.waits-before=build`, `factory.held=<id>`), and starts the build once that
+  card lands. If the blocker was dropped or closed, or is not on the board (an agent that is not a card
+  counts as dropped once archived), the card is told and goes to building with its `Waits on` cleared:
+  before build, it builds without that card if the approved plan still holds or stops and says why if
+  the scope must change; after build, it decides whether to rebuild without the other card's work or
+  keep the change as is, and either way code review runs again before the land prompt.
+  Held work stays in Building or Landing and in Working. When its dependency chain reaches Needs Zach,
   its tile, panel and Working line name and link to that decision. The decision shows how many
   held cards wait on it, including indirect dependencies, matching the workflow health count.
   These explanations clear automatically and create no extra asks or counts in Needs Zach.

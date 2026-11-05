@@ -760,15 +760,22 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 // blocking fixes the builder applies while building; prefix opens the build message ("" for the
 // small-fix message).
 func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, notes, builderPlan, builderReply, fixes, prefix string) error {
-	// the approved plan may name a card this one lands after (deps.go)
-	if id := ParseWaitsOn(builderReply, t.ID); id != t.L(labelWaitsOn) {
+	// the approved plan may name a card this one lands after, or before building (deps.go)
+	id, beforeBuild := ParseWaitsOnSpec(builderReply, t.ID)
+	if id != t.L(labelWaitsOn) {
 		labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
+	}
+	wantBefore := ""
+	if beforeBuild {
+		wantBefore = "build"
+	}
+	if wantBefore != t.L(labelWaitsBefore) {
+		labels[labelWaitsBefore] = wantBefore
 	}
 	labels[labelPlanFix] = fixes
 	if t.L(labelZachPlan) != "approved" && !buildsFirst(notes, builderPlan) {
 		return f.sideEffectStop(t, labels, notes)
 	}
-	labels[labelStage], labels[labelVerdict], labels[labelSince], labels[labelAutoReview] = "building", verdict, iso(f.Now()), "code"
 	msg := buildMsg(prefix, notes)
 	switch {
 	case prefix == "":
@@ -777,6 +784,21 @@ func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, not
 	case fixes != "":
 		labels[labelNote] = "building with the arbiter's fixes"
 	}
+	tWith := labeled(t, labels)
+	if beforeBuild {
+		if depID, _ := f.pendingDep(tWith); depID != "" {
+			if err := f.saveHeldBuild(t.ID, msg); err != nil {
+				return err
+			}
+			labels[labelStage], labels[labelVerdict], labels[labelSince], labels[labelAutoReview] = "building", verdict, iso(f.Now()), ""
+			labels[labelHeld], labels[labelNote] = depID, holdBuildNote(depID)
+			return f.setLabels(t.ID, labels)
+		}
+		if id != "" {
+			labels[labelWaitsDone] = "1"
+		}
+	}
+	labels[labelStage], labels[labelVerdict], labels[labelSince], labels[labelAutoReview] = "building", verdict, iso(f.Now()), "code"
 	if err := f.setLabels(t.ID, labels); err != nil {
 		return err
 	}
@@ -1305,7 +1327,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		_, err = f.StartReview(c, "plan")
 		return err
-	case a.L(labelStage) == "landing" && a.L(labelHeld) != "":
+	case (a.L(labelStage) == "landing" && a.L(labelHeld) != "") || heldBeforeBuild(a):
 		return f.tickHeld(a, c)
 	case a.L(labelStage) == "landing" && acted:
 		if live, err := f.stillStopped(a); !live {

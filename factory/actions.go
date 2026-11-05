@@ -250,9 +250,24 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			if fix := a.L(labelPlanFix); fix != "" {
 				notes = "Apply these fixes from the last plan review: " + fix
 			}
-			next := map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
-				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"}
-			if err := f.advance(labeled(a, next), "build", buildMsg("Zach allowed this build."+answers, notes)); err != nil {
+			msg := buildMsg("Zach allowed this build."+answers, notes)
+			if a.L(labelWaitsBefore) == "build" {
+				if depID, _ := f.pendingDep(a); depID != "" {
+					if err := f.saveHeldBuild(c.ID, msg); err != nil {
+						return nil, err
+					}
+					next := map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "",
+						labelAwaiting: "", labelZachPlan: "approved", labelHeld: depID,
+						labelNote: holdBuildNote(depID), labelHeldApproved: now}
+					return ok, f.setLabels(c.ID, next)
+				}
+			}
+			next := clearHeldApproval(a, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
+				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"})
+			if a.L(labelWaitsBefore) == "build" && a.L(labelWaitsOn) != "" {
+				next[labelWaitsDone] = "1"
+			}
+			if err := f.advance(labeled(a, next), "build", msg); err != nil {
 				return nil, err
 			}
 			return ok, f.setLabels(c.ID, next)
@@ -375,7 +390,14 @@ func (f *Factory) actionNeedsWorktree(a Agent, c Card, action string, b Body) bo
 		return true
 	case "approve":
 		if a.L(labelRouting) != "" || c.Awaiting == "plan" || planPending(a) {
-			return a.L(labelRouting) == ""
+			if a.L(labelRouting) != "" {
+				return false
+			}
+			if a.L(labelWaitsBefore) == "build" {
+				depID, _ := f.pendingDep(a)
+				return depID == ""
+			}
+			return true
 		}
 		_, st := f.pendingDep(a)
 		return st != depWaiting
@@ -559,6 +581,8 @@ func replyLabels(a Agent, now string, guarded bool) map[string]string {
 		return map[string]string{labelStage: "plan", labelSince: now, labelAwaiting: "", labelNote: "picking a repo"}
 	case a.L(labelStage) == "landing" || landingReply(a):
 		return map[string]string{labelStage: "landing", labelSince: now, labelAutoReview: ""}
+	case heldBeforeBuild(a):
+		return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: ""}
 	case planPending(a):
 		return map[string]string{labelStage: "plan", labelSince: now, labelNote: "revising plan for Zach"}
 	case !guarded && errandPass(a):
