@@ -176,12 +176,7 @@ func (f *Factory) choose(b Body) (any, error) {
 	if _, err := f.runChoice(a.ID, *ch, b); err != nil {
 		return map[string]any{"ok": false, "choice": ch.ID}, err
 	}
-	for thread, pending := range saved {
-		if pending.Card == a.ID {
-			delete(saved, thread)
-		}
-	}
-	if err := f.replies.save(saved); err != nil {
+	if err := f.replies.clearCard(saved, a.ID); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true, "choice": ch.ID}, nil

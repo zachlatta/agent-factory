@@ -83,7 +83,7 @@ func TestDigestLateStartSendsThatEvening(t *testing.T) {
 	}
 }
 
-// The digest lists what waits on him, what shipped, what is in progress, what is stuck and what got
+// The digest opens with the numbered answers, then lists what else waits on him, what shipped, what is in progress, what is stuck and what got
 // no answer, in plain words with a link per card, to his address, and says it once in the subject.
 func TestDigestContent(t *testing.T) {
 	f, m, _ := digestFactory(t, 18, 0)
@@ -99,7 +99,7 @@ func TestDigestContent(t *testing.T) {
 	if subj := d[0].Args["subject"].(string); subj != "Factory today: 1 for you, 1 in progress, 1 stuck, 1 no answer" {
 		t.Errorf("subject = %q", subj)
 	}
-	order := []string{"Waiting on you", "Board groups cards by repo", "In progress", "Retries after a usage limit",
+	order := []string{"Answer by reply", "1. Board groups cards by repo: Ready to try (Land or Drop)", "In progress", "Retries after a usage limit",
 		"Stuck", "Nightly restore drill", "No answer yet", "Order more batteries"}
 	last := -1
 	for _, w := range order {
@@ -112,12 +112,16 @@ func TestDigestContent(t *testing.T) {
 	if strings.Contains(text, "3fa9c1e") {
 		t.Errorf("a hash reached the digest:\n%s", text)
 	}
-	for _, id := range []string{"c1", "c2", "c3"} {
+	for _, id := range []string{"c2", "c3"} {
 		if !strings.Contains(text, "https://board.example/#"+id) || !strings.Contains(html, `href="https://board.example/#`+id+`"`) {
 			t.Errorf("no link to %s:\ntext %s\nhtml %s", id, text, html)
 		}
 	}
-	if strings.Count(text, "https://board.example/") < 4 { // the cards and the board at the foot
+	// a numbered line links only in the HTML, to keep the text short
+	if strings.Contains(text, "https://board.example/#c1") || !strings.Contains(html, `href="https://board.example/#c1"`) {
+		t.Errorf("numbered link:\ntext %s\nhtml %s", text, html)
+	}
+	if strings.Count(text, "https://board.example/") < 3 { // the unnumbered cards and the board at the foot
 		t.Errorf("text lacks the board link:\n%s", text)
 	}
 }

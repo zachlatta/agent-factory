@@ -97,6 +97,17 @@ func (s *replyStore) save(m map[string]pendingReply) error {
 	return os.Rename(s.path+".tmp", s.path)
 }
 
+// clearCard removes card id's unresolved clarifications from saved and stores the rest: an answer that
+// acted supersedes them.
+func (s *replyStore) clearCard(saved map[string]pendingReply, id string) error {
+	for thread, pending := range saved {
+		if pending.Card == id {
+			delete(saved, thread)
+		}
+	}
+	return s.save(saved)
+}
+
 const changedReplyQuestion = "That question changed. Please reply again with your full answer or request."
 
 const clarifyReply = "Does your previous reply answer the waiting question, or start a separate request? Reply answer to send that reply to the waiting work, or separate to start a new request."

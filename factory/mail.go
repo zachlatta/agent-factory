@@ -114,10 +114,8 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	if lineageTold(byID, a) == note {
 		return nil
 	}
-	if w := parseTime(a.L(labelWriting)); !w.IsZero() && !writtenFor(a, w, f.Now()) {
-		return nil // the builder is still to write the decision or preview the email carries
-	} else if !w.IsZero() && ask.Ready != nil && !f.previewSettled(a.ID) && f.Now().Sub(w) <= writeWait {
-		return nil // Ready for you waits for the preview to load or fail, as long as for the builder
+	if f.stillWriting(a, ask) {
+		return nil
 	}
 	if f.mailWaits(a.ID) {
 		return nil
@@ -137,6 +135,19 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 		f.logf("%s waits on Zach (%s): emailed him", short(a.ID), note)
 	}
 	return err
+}
+
+// stillWriting reports whether what Zach reads about ask is not ready yet: the builder is still to write
+// the decision or preview, or Ready for you waits for the preview to load or fail, as long as for the builder.
+func (f *Factory) stillWriting(a Agent, ask *Ask) bool {
+	w := parseTime(a.L(labelWriting))
+	if w.IsZero() {
+		return false
+	}
+	if !writtenFor(a, w, f.Now()) {
+		return true
+	}
+	return ask.Ready != nil && !f.previewSettled(a.ID) && f.Now().Sub(w) <= writeWait
 }
 
 // mailWaits reports whether an earlier failed send to Zach about agent id still waits out mailRetryAfter.

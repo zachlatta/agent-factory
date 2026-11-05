@@ -825,10 +825,14 @@ digest set after 6 PM still goes out that evening, listing that day's finished c
 `/api/health` reports its last state as `digest` (off, nothing to report, sent, send failed,
 possibly sent); it never fails the health check.
 
-- It lists, from the same `Sections` the board shows, one line per card with its board link:
-  Waiting on you, Shipped (with the time), In progress, Stuck, and No answer yet, then the
-  count of routine runs and the board link. The subject counts them ("Factory today: 2 shipped,
-  1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs and file names are cut.
+- It opens with a numbered list, newest first, of the waiting asks one word answers (see "Answering
+  the digest by number"): one short line with the title and the decision, `1. Move the backup: Allow this build? (Yes, No or Drop)`.
+  Then it lists, from the same `Sections` the board shows, one line per card with its board link:
+  Waiting on you (the other asks, unnumbered), Shipped (with the time), In progress, Stuck, and No
+  answer yet, then the count of routine runs and the board link. A numbered card is not listed twice,
+  and its link is in the HTML only. The subject counts them, and "for you" counts every waiting card
+  ("Factory today: 2 shipped, 1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs
+  and file names are cut.
 - No answer yet is the board's list as it stands: the dispatcher's requests not dismissed (see
   "Unanswered requests"), so a dismissed request leaves the board and the digest alike, and one
   still unanswered is listed again the next evening.
@@ -854,6 +858,37 @@ possibly sent); it never fails the health check.
   A day with nothing to report sends nothing. A failed send is tried again after 5 minutes; one
   that timed out (it may have gone out) stays recorded and is not sent again. Dry and read-only
   runs never send.
+
+#### Answering the digest by number
+
+- An ask is numbered only if it is emailed, its go answer is Land or Yes and does not close the card,
+  it has no questions (Yes would take the recommended options), and its builder is not still writing.
+  Agents' open questions, repo choices, Done it actions and approvals with questions stay unnumbered.
+- `digest.json` keeps what each sent digest numbered for 30 days: the card, its title, its
+  `factory.since`, the question line, its choices, and the thread the send returned, so a number means
+  what that digest showed and never shifts. A send that surely failed removes the list. One that may
+  have gone out has no thread, so a reply to it is not recognised (404).
+- `POST /api/answer` checks a reply's thread against these lists before any card. The whole reply must
+  read as word then numbers (`yes 1 3, drop 2`, `approve 3 and 5`) or numbers then word
+  (`1 yes, 2 drop`). The words are the approve, land and drop lists of the table under Needs Zach
+  email, plus `no`. A bare `1 2`, `approve all`, free text, an empty reply, or one number with two
+  answers changes nothing, and one reply says so. A word is required because a landing cannot be taken
+  back. No text from these replies reaches an agent.
+- Each number is refused if it is not in that digest's list, if the card is gone, replaced or no longer
+  waiting on Zach, if it no longer passes the numbering rule above, if its `factory.since`, question
+  line or choices differ from what was stored, or if the card does not offer that word (`land` on a
+  Yes ask). Otherwise it runs the same choice as the card's own email answer, through the same gates; a
+  gate's error is reported as refused with its reason. It clears any saved clarification for that card.
+- The message id is stored before anything acts, so a repeated POST answers `duplicate` and sends
+  nothing. A stop partway leaves the remaining numbers unanswered and still waiting on the board.
+- Replies are handled one at a time, so board answers wait while a reply's landings scan.
+- One reply in the thread lists what was done and what was refused. A failed send is logged and not
+  repeated. A card answered this way does not take the digest's thread, so later replies there stay
+  the digest's. `POST /api/answer` returns 200 with action `digest` (with `done` and `refused`
+  counts) or `digest-unparsed`.
+- The subject prefix `Factory today: ` is a contract with the email dispatcher: a reply with it and no
+  matching card goes to `/api/answer` first, and on 404 continues as usual. A quiet-delivery filter
+  on that subject must leave "Re:" messages alone, or it hides what was done and refused.
 
 Delivery, in this order:
 
@@ -933,9 +968,9 @@ The email is the decision alone:
   Email cards are told to end their landing email with it too.
 
 Replies: the email dispatcher checks the sender, then posts his reply to
-`POST /api/answer` (`thread`, `message_id`, `text`; 404 when no card has the thread, 409 when none
+`POST /api/answer` (`thread`, `message_id`, `text`; 404 when no card or digest has the thread, 409 when none
 of its cards waits, or when two or more do: then the reply could be for either, so the dispatcher
-passes it on as a follow-up). Quoted text and signatures are cut first. Only a whole reply from these lists
+passes it on as a follow-up). A reply in a digest's thread is read by "Answering the digest by number" instead. Quoted text and signatures are cut first. Only a whole reply from these lists
 acts:
 
 | Reply | Does |

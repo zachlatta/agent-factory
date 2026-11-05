@@ -20,6 +20,8 @@ type Sections struct {
 	NoAnswer []SectionLine `json:"noAnswer"`
 	Routine  []SectionLine `json:"routine"`
 	ManyAsks []AskedCard   `json:"-"` // the digest's alone (digestSections)
+	// Decisions are the digest's numbered asks, newest first (digestSections); they leave ForYou there.
+	Decisions []digestItem `json:"-"`
 }
 
 // AskedCard is a finished card that asked Zach often, for the digest.

@@ -15,6 +15,7 @@ import (
 // his reply here (/api/answer: thread, message_id, text). Only a whole reply from a closed word list
 // approves or drops; other text is checked for relevance. A reply that worked gets no
 // email back (the board shows the new state); one that did nothing gets one plain line saying so.
+// A reply in a daily digest's thread is that digest's (digest_reply.go), and is answered once.
 
 // ErrNoCard, ErrNotWaiting and ErrSharedThread tell the dispatcher to fall back to its own handling.
 var (
@@ -168,6 +169,9 @@ func (f *Factory) answerByEmail(b Body) (map[string]string, error) {
 	defer f.replies.mu.Unlock()
 	if f.replies.done[b.Thread+"\x00"+b.MessageID] {
 		return map[string]string{"action": "duplicate"}, nil
+	}
+	if res, ok, err := f.answerDigest(b); ok {
+		return res, err
 	}
 	a, err := f.waitingCard(b.Thread)
 	if err != nil {
