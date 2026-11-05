@@ -174,6 +174,8 @@ func (f *Factory) tickSteer(id string, st Steer) error {
 	kind := "code"
 	if stage == "plan" {
 		kind = "plan"
+	} else if heldBeforeBuild(k) {
+		kind = ""
 	}
 	return f.setLabels(k.ID, map[string]string{labelStage: stage, labelSince: iso(f.Now()), labelAutoReview: kind, labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""})
 }

@@ -181,6 +181,9 @@ func (f *Factory) applyArbiter(t Agent, kind, verdict, notes, tier, builderPlan,
 	now := iso(f.Now())
 	fixes := ParseMustFix(notes)
 	ruled := kind + " arbiter " + verdict
+	if kind == "plan" {
+		setPlanWaitsOn(t, labels, builderReply)
+	}
 	set := func(kv ...string) error {
 		for i := 0; i+1 < len(kv); i += 2 {
 			labels[kv[i]] = kv[i+1]

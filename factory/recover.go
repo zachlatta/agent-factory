@@ -692,25 +692,35 @@ func (f *Factory) rebuildWithoutDep(a Agent, id, state string) error {
 		what = "is not on the board (a wrong id, or it left the board before it landed)"
 	}
 	beforeBuild := a.L(labelWaitsBefore) == "build"
-	f.logf("%s held: %s %s; back to building", short(a.ID), id, state)
 	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
 		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "", labelWaitsBefore: "",
 		labelNote: rebuildingNotePrefix + id + " " + state})
+	step := "rebuilding without the card it waited on"
+	prompt := "Card " + id + ", which your approved plan lands after, " + what + ". Do not land now. Decide " +
+		"yourself: if this change needs that card's work, rebuild without it (bring in what you need, or cut the part " +
+		"that depends on it); if it does not, say so and change nothing. Rebase on origin/main, rerun the tests and " +
+		"commit on your branch. Then stop with a short summary that says which you chose. Code review runs again, " +
+		"then the factory sends the land prompt. " + overviewReminder
+	if beforeBuild {
+		step = "build"
+		prompt = "Card " + id + ", which your approved plan waited on before building, " + what +
+			". Nothing is built yet: if you can build the approved plan without that card (bring in what you need, or cut the part " +
+			"that depended on it), build it now; if the scope must change, do not build — stop and say why.\n\n" + f.heldBuildMsg(a)
+	}
+	if err := f.advance(labeled(a, labels), step, prompt); err != nil {
+		if errors.Is(err, errWorktreeGone) {
+			return f.stopHeldWorktreeGone(a)
+		}
+		return err
+	}
 	if err := f.setLabels(a.ID, labels); err != nil {
 		return err
 	}
 	if beforeBuild {
-		msg := f.heldBuildMsg(a)
 		f.dropHeldBuild(a)
-		return f.advance(labeled(a, labels), "build", "Card "+id+", which your approved plan waited on before building, "+what+
-			". Nothing is built yet: if you can build the approved plan without that card (bring in what you need, or cut the part "+
-			"that depended on it), build it now; if the scope must change, do not build — stop and say why.\n\n"+msg)
 	}
-	return f.advance(labeled(a, labels), "rebuilding without the card it waited on", "Card "+id+", which your approved plan lands after, "+what+". Do not land now. Decide "+
-		"yourself: if this change needs that card's work, rebuild without it (bring in what you need, or cut the part "+
-		"that depends on it); if it does not, say so and change nothing. Rebase on origin/main, rerun the tests and "+
-		"commit on your branch. Then stop with a short summary that says which you chose. Code review runs again, "+
-		"then the factory sends the land prompt. "+overviewReminder)
+	f.logf("%s held: %s %s; back to building", short(a.ID), id, state)
+	return nil
 }
 
 // Waits from before automatic recovery. A card still in Needs Zach with one of these notes takes

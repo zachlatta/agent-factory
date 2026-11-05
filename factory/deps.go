@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 )
 
 // Card dependencies. An approved plan may name one card this card lands after, with a line
-// "Waits on: <short id>" (ParseWaitsOn; stored as factory.waits-on when the plan review passes),
+// "Waits on: <short id>" (ParseWaitsOnSpec; stored as factory.waits-on when the plan review passes),
 // or one its build needs first, with "Waits on: <short id> before build" (ParseWaitsOnSpec; stored
 // with factory.waits-before=build). A before-build dependency holds the card in building after plan
 // review (and any side-effect approval) with no running agent until that card lands; a plain waits-on
@@ -22,7 +23,7 @@ const labelHeldApproved = "held-approved"
 
 // waitsOnRe matches a "Waits on:" line, markdown bullets and bold allowed, naming one short id and an
 // optional same-line "before build" modifier.
-var waitsOnRe = regexp.MustCompile("(?im)^[ \\t>*_-]*waits[ \\t]+on[ \\t]*[*_]*:[*_ \\t]*`?([0-9a-f]{7})\\b[`*_ \\t()—–:-]*(?:(before[ \\t]+build)\\b)?")
+var waitsOnRe = regexp.MustCompile("(?im)^[ \\t>*_-]*waits[ \\t]+on[ \\t]*[*_]*:[*_ \\t]*`?([0-9a-f]{7})\\b[`*_ \\t()—–:-]*(?:(before[ \\t-]+build)\\b)?")
 
 // ParseWaitsOnSpec returns the short id on the last "Waits on:" line of text and whether that line
 // specifies "before build", or ("", false) when there is none or it names the card self itself.
@@ -39,11 +40,20 @@ func ParseWaitsOnSpec(text, self string) (id string, beforeBuild bool) {
 	return id, last[2] != ""
 }
 
-// ParseWaitsOn returns the short id on the last "Waits on:" line of text, or "" when there is none
-// or it names the card self itself.
-func ParseWaitsOn(text, self string) string {
-	id, _ := ParseWaitsOnSpec(text, self)
-	return id
+// setPlanWaitsOn records the plan's Waits on: dependency and whether it holds before building in labels.
+func setPlanWaitsOn(t Agent, labels map[string]string, builderReply string) (id string, beforeBuild bool) {
+	id, beforeBuild = ParseWaitsOnSpec(builderReply, t.ID)
+	if id != t.L(labelWaitsOn) {
+		labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
+	}
+	wantBefore := ""
+	if beforeBuild {
+		wantBefore = "build"
+	}
+	if wantBefore != t.L(labelWaitsBefore) {
+		labels[labelWaitsBefore] = wantBefore
+	}
+	return id, beforeBuild
 }
 
 // The state of a card named in a Waits on line.
@@ -166,6 +176,9 @@ func (f *Factory) heldBuildMsg(a Agent) string {
 }
 
 func (f *Factory) dropHeldBuild(a Agent) {
+	if a.ID == "" {
+		return
+	}
 	byID := f.byID()
 	byID[a.ID] = a
 	chain := cardLineage(byID, a.ID)
@@ -275,13 +288,27 @@ func (f *Factory) releaseHeldBuild(a Agent, id string) error {
 		labelSince: iso(f.Now()), labelHeld: "", labelTold: "", labelWaitsDone: "1",
 		labelNote: "building: " + id + " landed"})
 	msg := f.heldBuildMsg(a)
+	if err := f.advance(labeled(a, labels), "build", fmt.Sprintf("Card %s, which this card waited on before building, has landed: "+
+		"fetch and rebase on origin/main first (`git fetch origin main && git rebase origin/main`), then build as planned.\n\n%s", id, msg)); err != nil {
+		if errors.Is(err, errWorktreeGone) {
+			return f.stopHeldWorktreeGone(a)
+		}
+		return err
+	}
 	if err := f.setLabels(a.ID, labels); err != nil {
 		return err
 	}
 	f.dropHeldBuild(a)
 	f.logf("%s build released: %s landed", short(a.ID), id)
-	return f.advance(labeled(a, labels), "build", fmt.Sprintf("Card %s, which this card waited on before building, has landed: "+
-		"fetch and rebase on origin/main first (`git fetch origin main && git rebase origin/main`), then build as planned.\n\n%s", id, msg))
+	return nil
+}
+
+func (f *Factory) stopHeldWorktreeGone(a Agent) error {
+	f.dropHeldBuild(a)
+	return f.setLabels(a.ID, clearHeldApproval(a, map[string]string{
+		labelStage: "zach", labelHeld: "", labelAutoReview: "",
+		labelNote: errWorktreeGone.Error(),
+	}))
 }
 
 // parkedStaleNote is the note of a parked held card whose HEAD moved since its review.

@@ -344,6 +344,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 		if err := f.endReviews(g, c.ID); err != nil {
 			return nil, err
 		}
+		f.dropHeldBuild(f.agent(c.ID))
 		if c.Parked != "" {
 			return f.zachClosed(c, f.unpark(c.ID))
 		}
@@ -390,14 +391,7 @@ func (f *Factory) actionNeedsWorktree(a Agent, c Card, action string, b Body) bo
 		return true
 	case "approve":
 		if a.L(labelRouting) != "" || c.Awaiting == "plan" || planPending(a) {
-			if a.L(labelRouting) != "" {
-				return false
-			}
-			if a.L(labelWaitsBefore) == "build" {
-				depID, _ := f.pendingDep(a)
-				return depID == ""
-			}
-			return true
+			return a.L(labelRouting) == ""
 		}
 		_, st := f.pendingDep(a)
 		return st != depWaiting
@@ -425,6 +419,11 @@ func (f *Factory) dropAgent(id string) error {
 	}
 	byID := f.byID()
 	f.dropLineage(byID, id)
+	a := f.agent(id)
+	if a.ID == "" {
+		a.ID = id
+	}
+	f.dropHeldBuild(a)
 	for _, r := range f.agents() {
 		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && r.Status == "running" && !r.archived() {
 			if err := f.archiveAgent(r.ID); err != nil {

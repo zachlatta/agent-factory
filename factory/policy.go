@@ -739,9 +739,15 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 			}
 		}
 	case verdict == "close":
+		if kind == "plan" {
+			setPlanWaitsOn(t, labels, builderReply)
+		}
 		err = set(labelStage, "zach", labelVerdict, "close", labelNote, "reviewer suggests closing")
 	case arbitrated(t, kind):
 		// the arbiter already ruled on this gate and it still did not settle: the board shows it
+		if kind == "plan" {
+			setPlanWaitsOn(t, labels, builderReply)
+		}
 		err = set(labelStage, "zach", labelVerdict, kind+" "+verdict, labelNote, arbiterStuckNote, labelStuckFrom, "")
 	default:
 		// rework cap or escalation: an arbiter agent rules instead of Zach
@@ -761,17 +767,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 // small-fix message).
 func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, notes, builderPlan, builderReply, fixes, prefix string) error {
 	// the approved plan may name a card this one lands after, or before building (deps.go)
-	id, beforeBuild := ParseWaitsOnSpec(builderReply, t.ID)
-	if id != t.L(labelWaitsOn) {
-		labels[labelWaitsOn], labels[labelWaitsDone] = id, ""
-	}
-	wantBefore := ""
-	if beforeBuild {
-		wantBefore = "build"
-	}
-	if wantBefore != t.L(labelWaitsBefore) {
-		labels[labelWaitsBefore] = wantBefore
-	}
+	id, beforeBuild := setPlanWaitsOn(t, labels, builderReply)
 	labels[labelPlanFix] = fixes
 	if t.L(labelZachPlan) != "approved" && !buildsFirst(notes, builderPlan) {
 		return f.sideEffectStop(t, labels, notes)
