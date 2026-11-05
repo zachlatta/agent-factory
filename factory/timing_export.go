@@ -167,6 +167,8 @@ type TimingExportCard struct {
 	LandedAt      time.Time       `json:"landedAt,omitzero"`
 	RepliedAt     time.Time       `json:"repliedAt,omitzero"`
 	NoReply       bool            `json:"noReply,omitempty"`
+	Asks          int             `json:"asks"`
+	ClosedAt      time.Time       `json:"closedAt,omitzero"`
 	DoneAt        time.Time       `json:"doneAt,omitzero"`
 	Events        []TimingEvent   `json:"events"`
 	Rounds        []TimingRound   `json:"rounds,omitempty"`
@@ -179,7 +181,7 @@ func (s *TimingStore) export() TimingExport {
 	for id, t := range all {
 		out.Cards = append(out.Cards, TimingExportCard{ID: id, Repo: t.Repo, Source: t.Source, Tier: t.Tier,
 			Partial: t.Partial, RequestedAt: t.RequestedAt, RequestedFrom: t.RequestedFrom,
-			LandedAt: t.LandedAt, RepliedAt: t.RepliedAt, NoReply: t.NoReply, DoneAt: t.doneAt(),
+			LandedAt: t.LandedAt, RepliedAt: t.RepliedAt, NoReply: t.NoReply, Asks: t.asks(), ClosedAt: t.ClosedAt, DoneAt: t.doneAt(),
 			Events: t.Events, Rounds: t.Rounds, Sessions: t.Sessions})
 	}
 	sort.Slice(out.Cards, func(i, j int) bool { return out.Cards[i].ID < out.Cards[j].ID })

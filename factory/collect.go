@@ -50,7 +50,7 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 	for _, f := range files {
 		var d struct {
 			ID, Title, Provider, Cwd, WorkspaceID, LastStatus, AttentionReason, LastError string
-			CreatedAt, LastActivityAt, LastUserMessageAt, ArchivedAt                      string
+			CreatedAt, LastActivityAt, LastUserMessageAt, ArchivedAt, UpdatedAt           string
 			Internal, RequiresAttention                                                   bool
 			Labels                                                                        map[string]string
 			Config                                                                        struct{ Model string }
@@ -63,7 +63,7 @@ func LoadAgents(home, host string, window time.Duration, now time.Time) ([]Agent
 			WorkspaceID: d.WorkspaceID, SessionID: d.Persistence.SessionID, Status: d.LastStatus,
 			CreatedAt: parseTime(d.CreatedAt), LastActivityAt: parseTime(d.LastActivityAt),
 			LastUserMessageAt: parseTime(d.LastUserMessageAt),
-			ArchivedAt:        parseTime(d.ArchivedAt), Labels: d.Labels, RequiresAttention: d.RequiresAttention,
+			ArchivedAt:        parseTime(d.ArchivedAt), UpdatedAt: parseTime(d.UpdatedAt), Labels: d.Labels, RequiresAttention: d.RequiresAttention,
 			AttentionReason: d.AttentionReason, LastError: d.LastError}
 		if a.Labels == nil {
 			a.Labels = map[string]string{}

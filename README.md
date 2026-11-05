@@ -842,6 +842,13 @@ possibly sent); it never fails the health check.
   A digest turned off (no address) and back on catches up on what finished while it was off, at
   most a week of it.
 - The factory writes it itself from the board; no agent turn.
+- One line lists the finished cards that asked Zach 3 or more times, most asked first:
+  `Asked you 3 or more times: Fix the printer (4), Move the server (3)`. It reads card timing, so it
+  includes dropped cards and cards that left the board. A card is listed once, for the first digest
+  after it reached Done: `digest.json` saves the exact time each digest selected its cards, whenever
+  it was sent, and a send that surely failed restores the previous time. The first digest looks back
+  to the start of that day. Open cards are not listed. The line alone is enough to send a digest,
+  and the subject counts it ("2 asked 3+ times").
 - `digest.json` in the state directory keeps the day last sent, written before the send, so a
   restart never sends a day twice, and a factory that was down at 6 PM still sends that evening.
   A day with nothing to report sends nothing. A failed send is tried again after 5 minutes; one
@@ -1036,6 +1043,13 @@ records its times in `timings.json` in the state directory, so a restart keeps t
   reply has `noReply: true` in saved timing, board timing and the timing export; the Timeline says
   “no reply”. This includes exhausted mailbox retries or a missing thread. A later reply outside
   the original window is not attributed to that card; it remains excluded from completed metrics.
+- **Asks** (`asks`): how many times the card entered Needs Zach, counted from the columns above, so
+  every retained record has it. Short stays and hand moves count.
+- **Closed** (`closedAt`): when Zach closed the card by Drop, Mark done, Archive or a drag to Done,
+  recorded at the action. The card's Done event gets the same time, so a parked card closed later ends
+  at the close rather than at its park. Closing a card already in Done changes nothing, and moving a
+  card out of Done clears it. `noReply` with `closedAt` means Zach closed the card; `noReply` alone
+  means it went unanswered.
 - **Partial**: a card first seen past its start (in flight when timing began, or created while the
   factory was down) has an incomplete history.
 
@@ -1049,6 +1063,15 @@ cleared only when it precedes Asked or a complete worktree reflog proves there i
 after Asked. Read-only and dry-run instances do not run reconciliation. Retained agents can
 supply missing app requests; removed agents cannot recover lost prompts or creation times. An app first observed after its start is
 partial, including finished requests; no earlier stages are invented.
+
+A separate per-record close revision gives retained records a `closedAt` once, without rerunning the
+landing migration, by reading the agent files back 31 days. A card whose note says Zach closed it gets
+its Done time. If that Done time equals its archive time, it stayed at least 30 minutes in Needs Zach
+before it (the least a card idles before parking), and its agent file was written later, the card was
+parked and closed later: `closedAt` and its Done event both move to that write, the latest the close
+can have happened. Landing times do not change. Records with no note or no agent file keep `closedAt`
+unset, and so do past Archive and drag actions, which left no note. Read-only and dry-run instances
+do not run it.
 
 The card panel shows it as one Timeline line. `GET /api/metrics?days=7` (1 to 30) gives the
 count, arithmetic mean (`average`), `median` and `p90`, in seconds, for:
@@ -1090,7 +1113,7 @@ Session ids use the same decoding as the transcript reader, including plugin pro
 
 `GET /api/timings` is a read-only snapshot of the timing store. It returns `{"cards":[...]}`,
 sorted by card id, with `id`, `repo`, `source`, `tier`, `partial`, `requestedAt`, `requestedFrom`,
-`landedAt`, `repliedAt`, `noReply`, `doneAt`, `events`, `rounds` and `sessions` when available. It excludes
+`landedAt`, `repliedAt`, `noReply`, `asks`, `closedAt`, `doneAt`, `events`, `rounds` and `sessions` when available. It excludes
 titles, folders, transcript bodies, mailbox thread and message ids, and reply-check bookkeeping.
 Like the other board APIs, it uses the server's existing access boundary; it must not be published
 on the public internet.

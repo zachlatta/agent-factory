@@ -19,6 +19,13 @@ type Sections struct {
 	Shipped  []SectionLine `json:"shipped"`
 	NoAnswer []SectionLine `json:"noAnswer"`
 	Routine  []SectionLine `json:"routine"`
+	ManyAsks []AskedCard   `json:"-"` // the digest's alone (digestSections)
+}
+
+// AskedCard is a finished card that asked Zach often, for the digest.
+type AskedCard struct {
+	Title string
+	Asks  int
 }
 
 // SectionLine is one card (or request) in plain words: its title and a short state.

@@ -94,7 +94,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			if err := f.endReviews(g, c.ID); err != nil {
 				return nil, err
 			}
-			return ok, f.archiveAgent(c.ID)
+			return f.zachClosed(c, f.archiveAgent(c.ID))
 		}
 		f.reopen(c.ID)
 		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), labels))
@@ -323,9 +323,9 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			return nil, err
 		}
 		if c.Parked != "" {
-			return ok, f.unpark(c.ID)
+			return f.zachClosed(c, f.unpark(c.ID))
 		}
-		return ok, nil
+		return f.zachClosed(c, nil)
 	case "close":
 		note := "closed by Zach"
 		if keep, err := f.recordSteer(f.agent(c.ID)); err != nil {
@@ -336,14 +336,14 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 		if err := f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), map[string]string{labelNote: note})); err != nil {
 			return nil, err
 		}
-		return ok, f.dropAgent(c.ID)
+		return f.zachClosed(c, f.dropAgent(c.ID))
 	case "archive":
 		if a := f.agent(c.ID); a.L(labelHeldApproved) != "" {
 			if err := f.setLabels(c.ID, clearHeldApproval(a, map[string]string{})); err != nil {
 				return nil, err
 			}
 		}
-		return ok, f.dropAgent(c.ID)
+		return f.zachClosed(c, f.dropAgent(c.ID))
 	case "stop":
 		_, err := f.paseo("stop", c.ID)
 		return ok, err
@@ -352,6 +352,15 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 }
 
 var ok = map[string]bool{"ok": true}
+
+// zachClosed ends a close action that returned err: a close that worked is recorded in the card's
+// timing. A card already in Done changes nothing, so tidying it away is not a close.
+func (f *Factory) zachClosed(c Card, err error) (any, error) {
+	if err == nil && c.Stage != "landed" {
+		f.recordClosed(c.ID)
+	}
+	return ok, err
+}
 
 func (f *Factory) actionNeedsWorktree(a Agent, c Card, action string, b Body) bool {
 	switch action {

@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,8 @@ const (
 	replyTries      = 3                   // failed thread reads before the reply check gives up
 	replyPerTick    = 3                   // thread reads per Tick at most
 	askedWait       = 10 * time.Minute    // an email card whose first prompt is unread this long uses its creation
+	// closeBackfillWindow reaches the agent file of any retained record
+	closeBackfillWindow = timingKeep + 24*time.Hour
 )
 
 // TimingEvent: the card entered Stage at At.
@@ -64,6 +67,7 @@ type CardTiming struct {
 	RequestedFrom     string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
 	Source            string          `json:"source"`
 	Tier              string          `json:"tier,omitempty"`
+	Title             string          `json:"title,omitempty"`  // for the digest; never exported
 	Thread            string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
 	Partial           bool            `json:"partial,omitempty"`
 	Events            []TimingEvent   `json:"events"`
@@ -71,6 +75,8 @@ type CardTiming struct {
 	LandedAt          time.Time       `json:"landedAt,omitzero"` // the final verified landing time
 	RepliedAt         time.Time       `json:"repliedAt,omitzero"`
 	NoReply           bool            `json:"noReply,omitempty"`
+	ClosedAt          time.Time       `json:"closedAt,omitzero"` // when Zach closed it; unset for any other finish
+	CloseVersion      int             `json:"closeVersion,omitempty"`
 	LandingChecked    bool            `json:"landingChecked,omitempty"` // ownership check completed; nonzero legacy landing was verified
 	VoiceReplyVersion int             `json:"voiceReplyVersion,omitempty"`
 	ReplyChecked      bool            `json:"replyChecked,omitempty"`
@@ -92,6 +98,17 @@ func (t CardTiming) doneAt() time.Time {
 		return l.At
 	}
 	return time.Time{}
+}
+
+// asks is how many times the card waited on Zach: its entries into Needs Zach.
+func (t CardTiming) asks() int {
+	n := 0
+	for _, e := range t.Events {
+		if e.Stage == "zach" {
+			n++
+		}
+	}
+	return n
 }
 
 // zach is the time spent in Needs Zach up to now (or Done).
@@ -288,7 +305,7 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 			if (a.gone() || c.Stage == "landed") && !isAppCard(a) {
 				continue // finished before timing saw it: nothing to time
 			}
-			t = &CardTiming{Source: timingSource(a), Version: timingVersion}
+			t = &CardTiming{Source: timingSource(a), Version: timingVersion, CloseVersion: closeVersion}
 			if c.Stage == "plan" && !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) >= 0 && now.Sub(a.CreatedAt) <= timingFreshCard {
 				t.Events = []TimingEvent{{Stage: "plan", At: a.CreatedAt}}
 			} else {
@@ -302,6 +319,7 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 				t.LandingChecked = false
 				t.ReplyChecked = false
 				t.NoReply = false
+				t.ClosedAt = time.Time{}
 			}
 			at := movedAt(a, l.At, now)
 			if c.Stage == "landed" && a.gone() && a.ArchivedAt.After(l.At) && !a.ArchivedAt.After(now) {
@@ -315,6 +333,9 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 			changed = true
 		}
 		normalizeTiming(t)
+		if c.Title != "" && c.Title != t.Title {
+			t.Title, changed = c.Title, true
+		}
 		if c.Tier != "" && c.Tier != t.Tier {
 			t.Tier, changed = c.Tier, true
 		}
@@ -442,6 +463,8 @@ type TimingView struct {
 	LandedAt      string      `json:"landedAt,omitempty"`
 	RepliedAt     string      `json:"repliedAt,omitempty"`
 	NoReply       bool        `json:"noReply,omitempty"`
+	Asks          int         `json:"asks"`
+	ClosedAt      string      `json:"closedAt,omitempty"`
 	TotalSecs     int         `json:"totalSecs,omitempty"` // asked to reply (else landing, Done or now)
 	Partial       bool        `json:"partial,omitempty"`
 }
@@ -465,7 +488,7 @@ func secs(d time.Duration) int { return int(d.Round(time.Second) / time.Second) 
 // view is t as the board shows it at now.
 func (t CardTiming) view(now time.Time) *TimingView {
 	v := &TimingView{RequestedAt: iso(t.RequestedAt), RequestedFrom: t.RequestedFrom, ZachSecs: secs(t.zach(now)),
-		LandedAt: iso(t.LandedAt), RepliedAt: iso(t.RepliedAt), NoReply: t.NoReply, Partial: t.Partial, Stages: []StageSpan{}}
+		LandedAt: iso(t.LandedAt), RepliedAt: iso(t.RepliedAt), NoReply: t.NoReply, Asks: t.asks(), ClosedAt: iso(t.ClosedAt), Partial: t.Partial, Stages: []StageSpan{}}
 	for i, e := range t.Events {
 		sp := StageSpan{Stage: e.Stage, Start: iso(e.At)}
 		if e.Stage != "landed" {
@@ -527,6 +550,98 @@ func (f *Factory) recordLanded(a Agent, cwd string) {
 		return
 	}
 	f.timings.update(a.ID, func(t *CardTiming) { t.LandedAt, t.LandingChecked = f.Now().UTC(), true })
+}
+
+// manyAsks is the cards asked manyAsksMin times or more that reached Done after after, up to upto, most
+// asked first. Read from the store, not the board: a dropped card is not Shipped, and a card can have left.
+func (s *TimingStore) manyAsks(after, upto time.Time) []AskedCard {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []AskedCard
+	for _, t := range s.cards {
+		done := t.doneAt()
+		if n := t.asks(); n >= manyAsksMin && done.After(after) && !done.After(upto) {
+			out = append(out, AskedCard{Title: t.Title, Asks: n})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Asks != out[j].Asks {
+			return out[i].Asks > out[j].Asks
+		}
+		return out[i].Title < out[j].Title
+	})
+	return out
+}
+
+// recordClosed records that Zach closed card id now. It is recorded here, not by observe: a parked
+// card can leave the board as it closes, and observe dates a move to Done at the archive time, which
+// for a parked card is when it was parked. A Done event a board read already added is moved to now.
+func (f *Factory) recordClosed(id string) {
+	at := f.Now().UTC()
+	f.timings.update(id, func(t *CardTiming) {
+		t.ClosedAt, t.CloseVersion = at, closeVersion
+		if n := len(t.Events) - 1; n >= 0 && t.Events[n].Stage == "landed" {
+			t.Events[n].At = at
+			return
+		}
+		t.Events = append(t.Events, TimingEvent{Stage: "landed", At: at})
+	})
+}
+
+// closeBackfillDue reports whether any retained record predates close times.
+func (s *TimingStore) closeBackfillDue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.cards {
+		if t.CloseVersion < closeVersion {
+			return true
+		}
+	}
+	return false
+}
+
+// closedByZach reports whether note is the one a close or Mark done leaves on a card.
+func closedByZach(note string) bool {
+	return strings.HasPrefix(note, "closed by Zach") || strings.HasPrefix(note, "marked done by Zach")
+}
+
+// backfillClosed gives retained records their title and close time, once. Close actions kept no log,
+// so a card's note says Zach closed it and its file's last write is the latest it can have happened.
+// The Done event moves there only for a card parked and closed later: Done at the archive time, after
+// a stay in Needs Zach long enough to be parked, with a later file write. Other closes keep their Done
+// time, and a card with no note or no file stays unset. Past Archive and drag actions left no note.
+func (s *TimingStore) backfillClosed(agents []Agent, now time.Time) {
+	byID := make(map[string]Agent, len(agents))
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, t := range s.cards {
+		if t.CloseVersion >= closeVersion {
+			continue
+		}
+		t.CloseVersion = closeVersion
+		s.dirty = true
+		a, ok := byID[id]
+		if !ok {
+			continue
+		}
+		if t.Title == "" {
+			t.Title = a.Title
+		}
+		n := len(t.Events) - 1
+		if !t.ClosedAt.IsZero() || t.doneAt().IsZero() || !closedByZach(a.L(labelNote)) {
+			continue
+		}
+		done := t.Events[n].At
+		if n > 0 && t.Events[n-1].Stage == "zach" && done.Sub(t.Events[n-1].At) >= capMinIdle &&
+			done.Equal(a.ArchivedAt) && a.UpdatedAt.After(done) && !a.UpdatedAt.After(now) {
+			done = a.UpdatedAt.UTC()
+			t.Events[n].At = done
+		}
+		t.ClosedAt = done
+	}
 }
 
 // reconcileTimings upgrades retained records without treating lost evidence as a contradiction.
@@ -602,6 +717,15 @@ func (f *Factory) reconcileTimings() {
 				complete(t)
 			}
 		})
+	}
+	if !f.stopping.Load() && f.timings.closeBackfillDue() {
+		now := f.Now()
+		switch agents, err := LoadAgents(f.cfg.Home, f.cfg.Host, closeBackfillWindow, now); {
+		case err != nil:
+			f.logf("close times not corrected: %v", err)
+		case len(agents) > 0: // none read at all is a failed read, not missing evidence: try again
+			f.timings.backfillClosed(agents, now)
+		}
 	}
 	if err := f.timings.save(); err != nil {
 		f.logf("timing correction not saved: %v", err)

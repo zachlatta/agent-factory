@@ -29,8 +29,14 @@ import (
 // digest marks the lines it lists, so a card is listed once and never dropped: selection is by card,
 // never by a time cutoff. The ledger keeps a line ledgerKeep, past the board's Done window, so a card
 // still on the board is not recorded again; the board's Shipped today reads today's lines all day.
+// The asked-often line is the exception: it reads the timing store, since a dropped card has no ledger
+// line, and lists the cards asked manyAsksMin times or more that reached Done after the last digest's
+// exact selection time (digest.json's asksCutoff, whenever that send happened), or today for the first.
 
 const digestHour = 18 // 6 PM
+
+// manyAsksMin is how many asks put a finished card on the digest's asked-often line.
+const manyAsksMin = 3
 
 // digestSubject starts every digest's subject; a recipient-side mail filter matches on it (README).
 const digestSubject = "Factory today: "
@@ -38,6 +44,9 @@ const digestSubject = "Factory today: "
 type digestFile struct {
 	Sent    string       `json:"sent"`              // the local day (2006-01-02) of the last digest
 	Shipped []ledgerLine `json:"shipped,omitempty"` // finished cards, kept after they leave the board
+	// AsksCutoff is when the last digest selected its asked-often cards, not always digestHour: it can
+	// send late, or retry.
+	AsksCutoff time.Time `json:"asksCutoff,omitzero"`
 }
 
 // ledgerLine is a finished card's line and whether a digest has listed it.
@@ -179,25 +188,31 @@ func (f *Factory) digestSections(d digestFile, now time.Time) Sections {
 	for _, src := range srcs {
 		s.NoAnswer = append(s.NoAnswer, src(now)...)
 	}
+	after := d.AsksCutoff
+	if after.IsZero() {
+		y, m, day := now.In(f.cfg.Location).Date()
+		after = time.Date(y, m, day, 0, 0, 0, 0, f.cfg.Location)
+	}
+	s.ManyAsks = f.timings.manyAsks(after, now)
 	return s
 }
 
-// commitDigest records, before the send, that day's digest went out listing s: its lines are marked
-// listed (added to the ledger if a pass had not recorded them yet). The first digest ever also marks
-// the ledger's earlier lines it left out, so no later digest lists them. It returns the undo for a
-// send that surely failed, which unmarks them for the retry.
-func (f *Factory) commitDigest(day string, s Sections) (undo func() error, err error) {
+// commitDigest records, before the send, that day's digest went out listing s, selected at selected:
+// its lines are marked listed (added to the ledger if a pass had not recorded them yet). The first
+// digest ever also marks the ledger's earlier lines it left out, so no later digest lists them. It
+// returns the undo for a send that surely failed, which unmarks them and restores the cutoff for the retry.
+func (f *Factory) commitDigest(day string, s Sections, selected time.Time) (undo func() error, err error) {
 	f.digestMu.Lock()
 	defer f.digestMu.Unlock()
 	d, err := f.readDigest()
 	if err != nil {
 		return nil, err
 	}
-	prevSent := d.Sent
+	prevSent, prevCutoff := d.Sent, d.AsksCutoff
 	if prevSent == "" {
 		s.Shipped = append(append([]SectionLine{}, s.Shipped...), unlisted(d.Shipped)...)
 	}
-	d.Sent = day
+	d.Sent, d.AsksCutoff = day, selected
 	d.Shipped = markListed(d.Shipped, s.Shipped, true)
 	if err := f.writeDigest(d); err != nil {
 		return nil, err
@@ -209,7 +224,7 @@ func (f *Factory) commitDigest(day string, s Sections) (undo func() error, err e
 		if err != nil {
 			return err
 		}
-		cur.Sent = prevSent
+		cur.Sent, cur.AsksCutoff = prevSent, prevCutoff
 		cur.Shipped = markListed(cur.Shipped, s.Shipped, false)
 		return f.writeDigest(cur)
 	}, nil
@@ -295,7 +310,7 @@ func (f *Factory) tickDigest() {
 	s := f.digestSections(d, now)
 	e, ok := f.digestEmail(s)
 	// recorded first: one digest a day even if the factory stops mid-send
-	undo, err := f.commitDigest(day, s)
+	undo, err := f.commitDigest(day, s, now)
 	if err != nil {
 		f.logf("daily digest: %v", err)
 		return
@@ -343,6 +358,9 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 		if len(p.lines) > 0 {
 			counts = append(counts, fmt.Sprintf("%d %s", len(p.lines), p.count))
 		}
+	}
+	if n := len(s.ManyAsks); n > 0 {
+		counts = append(counts, fmt.Sprintf("%d asked %d+ times", n, manyAsksMin))
 	}
 	if len(counts) == 0 {
 		return email{}, false
@@ -396,6 +414,19 @@ func (f *Factory) digestEmail(s Sections) (email, bool) {
 		}
 		t.WriteString("\n")
 		h.WriteString("</ul>")
+	}
+	if len(s.ManyAsks) > 0 {
+		cards := make([]string, len(s.ManyAsks))
+		for i, c := range s.ManyAsks {
+			title := plainText(c.Title)
+			if title == "" {
+				title = "(untitled)"
+			}
+			cards[i] = fmt.Sprintf("%s (%d)", title, c.Asks)
+		}
+		line := fmt.Sprintf("Asked you %d or more times: %s", manyAsksMin, strings.Join(cards, ", "))
+		t.WriteString(line + "\n\n")
+		h.WriteString(`<p>` + e(line) + `</p>`)
 	}
 	if n := len(s.Routine); n > 0 {
 		fmt.Fprintf(&t, "Also %d routine runs today.\n", n)
