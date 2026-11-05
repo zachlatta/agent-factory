@@ -25,6 +25,11 @@ func TestParseWaitsOn(t *testing.T) {
 		{"- **Waits on:** `abc1234` **before build**", "abc1234", true},
 		{"Waits on: abc1234 (before build)", "abc1234", true},
 		{"Waits on: abc1234 — before build", "abc1234", true},
+		{"Waits on: abc1234, before build", "abc1234", true},
+		{"Waits on: abc1234 before building", "abc1234", true},
+		{"Waits on: abc1234 before the build", "abc1234", true},
+		{"Waits on: abc1234 before build starts", "abc1234", true},
+		{"Waits on: abc1234 to land before build", "abc1234", false},
 		{"Waits on: abc1234\nBefore build, run the tests.", "abc1234", false},
 		{"Waits on: abc1234\nlater\nWaits on: def5678", "def5678", false},
 		{"Waits on: abc1234 before build\nlater\nWaits on: def5678", "def5678", false},
@@ -823,3 +828,86 @@ func TestApproveBeforeBuildWhenBlockerAlreadyLandedStartsImmediately(t *testing.
 		t.Fatalf("sent = %v", p.sent("c1"))
 	}
 }
+
+func TestPlanSmallFixRuleExcludesWaitsOnBeforeBuild(t *testing.T) {
+	p := ReviewPrompt(Card{ID: "c1", Title: "Card", Repo: "o/r"}, "plan", 7478, "unknown")
+	if strings.Contains(p, "or Waits on: line") {
+		t.Errorf("plan review prompt still lists Waits on: as a small fix:\n%s", p)
+	}
+	if !strings.Contains(p, "not a missing Waits on: <id> before build line") {
+		t.Errorf("plan review prompt does not exclude Waits on: <id> before build from small fixes:\n%s", p)
+	}
+}
+
+func TestBeforeBuildHandMovedToLandingUsesPostBuildDroppedWording(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landing", labelTier: "low", labelPlanRounds: "1",
+		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
+	f, p := newTestFactory(t, c, dep("building", true))
+	f.Tick()
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "which your approved plan lands after") ||
+		strings.Contains(msgs[0], "Nothing is built yet") {
+		t.Fatalf("hand-moved landing card got before-build dropped wording: %v", msgs)
+	}
+}
+
+func TestBeforeBuildStageHandoffOnReleaseAndDrop(t *testing.T) {
+	setup := func(t *testing.T, blocker Agent) (*Factory, *fakePaseo) {
+		a := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAgent: "opus",
+			labelTier: "low", labelBase: "base1", labelTitled: "given", labelPlanRounds: "1",
+			labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001",
+			labelVerdict: "plan approve", labelNote: "waits on d0e0001 before build", labelSince: ago(10 * time.Minute)})
+		a.WorkspaceID = "ws-1"
+		f, p := newTestFactory(t, a, blocker)
+		storeLog(t, f, p, a.ID, planLog+"\nWaits on: d0e0001 before build")
+		f.GitOut = gitStub(map[string]string{"log --oneline origin/main..HEAD": "", "diff --stat origin/main...HEAD": ""})
+		if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "MARKER-NOTES")); err != nil {
+			t.Fatal(err)
+		}
+		return f, p
+	}
+
+	t.Run("release carries waits-before to fresh builder", func(t *testing.T) {
+		f, p := setup(t, dep("landed", true))
+		f.Tick()
+		runs := stageRuns(p)
+		if len(runs) != 1 {
+			t.Fatalf("runs = %v", runs)
+		}
+		args := strings.Join(runs[0], " ")
+		for _, want := range []string{
+			"--label " + labelPrefix + labelWaitsBefore + "=build",
+			"--label " + labelPrefix + labelWaitsOn + "=d0e0001",
+			"--label " + labelPrefix + labelWaitsDone + "=1",
+			"--label " + labelPrefix + labelAutoReview + "=code",
+			"MARKER-NOTES",
+		} {
+			if !strings.Contains(args, want) {
+				t.Errorf("fresh builder args missing %q:\n%s", want, args)
+			}
+		}
+		if strings.Contains(args, "--label "+labelPrefix+labelHeld+"=") {
+			t.Errorf("fresh builder carried held label:\n%s", args)
+		}
+	})
+
+	t.Run("drop clears waits-before on fresh builder", func(t *testing.T) {
+		f, p := setup(t, dep("building", true))
+		f.Tick()
+		runs := stageRuns(p)
+		if len(runs) != 1 {
+			t.Fatalf("runs = %v", runs)
+		}
+		args := strings.Join(runs[0], " ")
+		for _, bad := range []string{labelHeld + "=", labelWaitsOn + "=", labelWaitsBefore + "="} {
+			if strings.Contains(args, "--label "+labelPrefix+bad) {
+				t.Errorf("fresh builder carried %s:\n%s", bad, args)
+			}
+		}
+		if !strings.Contains(args, "Nothing is built yet") || !strings.Contains(args, "MARKER-NOTES") {
+			t.Errorf("fresh builder prompt missing drop notes:\n%s", args)
+		}
+	})
+}
+
+

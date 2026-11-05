@@ -358,8 +358,8 @@ const decidedRule = `- Zach has already ruled on points in this card: his messag
 
 const planSmallFixRule = `- Small blocking fixes: when your verdict is changes and every blocking finding is a small, concrete fix the
   builder can apply while building and a code reviewer can check (such as a missing item in a list, an Ordering:
-  or Waits on: line, or a missed call site or test — not a design disagreement, wrong diagnosis or approach, an
-  unsplit >1,000-line change, or a large blocker), add one line right before TIER:
+  line, or a missed call site or test — not a missing Waits on: <id> before build line, a design disagreement,
+  wrong diagnosis or approach, an unsplit >1,000-line change, or a large blocker), add one line right before TIER:
   SMALL FIX: <one-line summary of the fixes the builder must apply>
   On every plan-review round, a plan with that line goes through the build side-effects check, then to build
   with those fixes applied and verified by code review. Without it, ordinary rework continues until the cap,

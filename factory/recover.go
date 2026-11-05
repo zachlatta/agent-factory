@@ -691,7 +691,7 @@ func (f *Factory) rebuildWithoutDep(a Agent, id, state string) error {
 	if state == depMissing {
 		what = "is not on the board (a wrong id, or it left the board before it landed)"
 	}
-	beforeBuild := a.L(labelWaitsBefore) == "build"
+	beforeBuild := heldBeforeBuild(a)
 	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
 		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "", labelWaitsBefore: "",
 		labelNote: rebuildingNotePrefix + id + " " + state})

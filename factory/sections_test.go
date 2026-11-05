@@ -174,8 +174,12 @@ func TestShippedFollowsLandingNotMissingMail(t *testing.T) {
 func TestSectionsBeforeBuildWaitState(t *testing.T) {
 	cards := []Card{
 		{ID: "b1abcdef", Short: "b1abcde", Title: "Blocker card", Stage: "building", Source: "board"},
+		{ID: "b2abcdef", Short: "b2abcde", Title: "Landed blocker", Stage: "landed", Source: "board"},
 		{ID: "w1", Title: "Waiting build", Stage: "building", Source: "board", WaitsOn: "b1abcde", Note: "waits on b1abcde before build"},
 		{ID: "w2", Title: "Waiting unknown", Stage: "building", Source: "board", WaitsOn: "9999999", Note: "waits on 9999999 before build"},
+		{ID: "w3", Title: "Released build", Stage: "building", Source: "board", WaitsOn: "b2abcde", Note: "building: b2abcde landed"},
+		{ID: "w4", Title: "Released build with active follow-up blocker", Stage: "building", Source: "board",
+			WaitsOn: "b1abcde", Flags: []string{"waits on b1abcde (landed)"}, Note: "building: b1abcde landed"},
 	}
 	s := BuildSections(cards, t0, time.UTC)
 	states := map[string]string{}
@@ -187,5 +191,25 @@ func TestSectionsBeforeBuildWaitState(t *testing.T) {
 	}
 	if states["w2"] != "waits on 9999999 before build" {
 		t.Errorf("w2 state = %q, want %q", states["w2"], "waits on 9999999 before build")
+	}
+	if states["w3"] != "building" {
+		t.Errorf("w3 state = %q, want %q", states["w3"], "building")
+	}
+	if states["w4"] != "building" {
+		t.Errorf("w4 state = %q, want %q", states["w4"], "building")
+	}
+
+	blocker := card("d0e0001aaaa", map[string]string{labelStage: "landed"})
+	blocker.Title = "Blocker title"
+	blocker.ArchivedAt = t0.Add(-time.Minute)
+	released := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelTier: "low",
+		labelPlanRounds: "1", labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelWaitsDone: "1",
+		labelAutoReview: "code", labelNote: "building: d0e0001 landed", labelSince: ago(10 * time.Minute)})
+	released.Status = "running"
+	f, _ := newTestFactory(t, released, blocker)
+	f.SetAgents([]Agent{released, blocker})
+	fs := f.sections()
+	if len(fs.Working) != 1 || fs.Working[0].State != "building" {
+		t.Errorf("released card Working = %+v, want state \"building\"", fs.Working)
 	}
 }

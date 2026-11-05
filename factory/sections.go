@@ -3,6 +3,7 @@ package factory
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -86,8 +87,10 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 		NoAnswer: []SectionLine{}, Routine: []SectionLine{}}
 	titles := map[string]string{}
 	for _, c := range cards {
-		titles[c.Short] = c.Title
-		titles[c.ID] = c.Title
+		if c.Stage != "landed" {
+			titles[c.Short] = c.Title
+			titles[c.ID] = c.Title
+		}
 	}
 	for _, c := range cards {
 		line := SectionLine{ID: c.ID, Title: c.Title, At: c.LastActivityAt}
@@ -134,7 +137,7 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 				continue
 			}
 			line.State = workingState[c.Stage]
-			if c.WaitsOn != "" && c.Stage != "landed" {
+			if c.WaitsOn != "" && c.Stage != "landed" && !waitsOnDone(c) {
 				if t := lookupTitle(titles, c.WaitsOn); t != "" {
 					line.State = "waiting on " + t
 				} else if strings.HasPrefix(c.Note, "waits on ") {
@@ -278,6 +281,10 @@ func lookupTitle(titles map[string]string, id string) string {
 		}
 	}
 	return ""
+}
+
+func waitsOnDone(c Card) bool {
+	return slices.Contains(c.Flags, "waits on "+c.WaitsOn+" (landed)") || strings.HasSuffix(c.Note, " landed")
 }
 
 func waitingCountText(n int) string {

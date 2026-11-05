@@ -23,7 +23,7 @@ const labelHeldApproved = "held-approved"
 
 // waitsOnRe matches a "Waits on:" line, markdown bullets and bold allowed, naming one short id and an
 // optional same-line "before build" modifier.
-var waitsOnRe = regexp.MustCompile("(?im)^[ \\t>*_-]*waits[ \\t]+on[ \\t]*[*_]*:[*_ \\t]*`?([0-9a-f]{7})\\b[`*_ \\t()—–:-]*(?:(before[ \\t-]+build)\\b)?")
+var waitsOnRe = regexp.MustCompile("(?im)^[ \\t>*_-]*waits[ \\t]+on[ \\t]*[*_]*:[*_ \\t]*`?([0-9a-f]{7})\\b[`*_ \\t(),—–:-]*(?:(before[ \\t-]+(?:the[ \\t-]+)?build(?:ing)?)\\b)?")
 
 // ParseWaitsOnSpec returns the short id on the last "Waits on:" line of text and whether that line
 // specifies "before build", or ("", false) when there is none or it names the card self itself.
