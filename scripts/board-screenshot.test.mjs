@@ -88,8 +88,8 @@ test('For you and card links render at exact widths and preserve navigation', as
         // the sample is marked as one on the page itself, not only in the tab title
         assert.match(await page.locator('#previewNote').innerText(), /sample cards/i);
         assert.equal(await page.locator('#previewNote').isVisible(), true);
-        // each For you card names the kind of input it wants: finished work to try, a build to allow
-        assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready: try it, then land');
+        // each For you card names the kind of input it wants: finished work to approve, a build to allow
+        assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready: approve the change');
         // work that landed with a required action: its label, the thing to do, the action buttons, no duplicate headline, and no "None"
         const actionCard = page.locator('.fy[data-id="preview-action"]');
         assert.equal(await actionCard.locator('.fk').innerText(), 'Work landed. Do this:');

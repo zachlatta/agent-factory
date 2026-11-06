@@ -357,7 +357,7 @@ REMAINING:
 
 const previewReadyRequest = "Make the board's answer buttons clearer on a phone, so one tap does what it says."
 
-// previewReadyReply is finished work: built and reviewed, waiting for Zach to try it and land it.
+// previewReadyReply is finished work: built and reviewed, waiting for Zach to approve it.
 const previewReadyReply = `DECISION: Land the clearer board buttons?
 OVERVIEW: Each card's buttons now say what they do, and one tap answers. It is built and reviewed; nothing is live yet.
 NEEDS FROM ZACH: Reply yes or land to approve, ask for a change or drop it.
