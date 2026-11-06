@@ -1514,6 +1514,33 @@ func TestThrowawayTestServiceAtTheGate(t *testing.T) {
 		{"on the line in the plan", below + "\nVERDICT: approve", "plan\n" + onLine, false},
 		{"on the line in the review", onLine + "\nVERDICT: approve", "plan\n" + below, false},
 	}
+	private := "BUILD SIDE EFFECTS: none\nThe build starts and removes a fake-data test server on this host's tailnet IP, with no live credentials, public exposure, host configuration changes, messages or spending.\nTIER: risky"
+	cases = append(cases, struct {
+		name, review, plan string
+		wantBuild          bool
+	}{"private server below the line", private + "\nVERDICT: approve", private, true})
+	// The gate preserves declared effects; these cases test parsing, not agent judgement.
+	for _, effect := range []string{
+		"temporary test server on the private network",
+		"public test server",
+		"public tunnel to a test server",
+		"dry-run server reading real data on the tailnet",
+		"production writes", "messages sent", "money spent",
+	} {
+		for _, inReview := range []bool{false, true} {
+			plan, review := private, private
+			declared := "BUILD SIDE EFFECTS: " + effect + "\nTIER: risky"
+			if inReview {
+				review = declared
+			} else {
+				plan = declared
+			}
+			cases = append(cases, struct {
+				name, review, plan string
+				wantBuild          bool
+			}{effect, review + "\nVERDICT: approve", plan, false})
+		}
+	}
 	for _, tc := range cases {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
 			reviewer("r1", "c1", "plan"))
@@ -1532,12 +1559,13 @@ func TestThrowawayTestServiceAtTheGate(t *testing.T) {
 	}
 }
 
-// throwawayConditions are the five conditions, each in the words every prompt must carry.
+// throwawayConditions are the conditions every plan prompt must carry.
 var throwawayConditions = []string{
 	"the build or its tests start and remove them",
 	"they run on the build machine only",
 	"they use no live data or credentials, not even a temporary copy",
-	"nothing is reachable from outside",
+	"bound to loopback or this host's tailnet IP, never a wildcard or public address",
+	"no public exposure or persistent host configuration changes",
 	"they send no messages and spend no money",
 }
 
@@ -1556,6 +1584,8 @@ func TestThrowawayTestServiceRuleReachesEveryPlanPrompt(t *testing.T) {
 		"An existing test suite's own loopback servers that meet these conditions need at most a short note, such as \"the test suite's own loopback servers\".",
 		"Anything else is a side effect, and so is a service the plan adds or runs without every condition shown.",
 		"Write none alone on that line",
+		"Temporary private-network test servers meeting every condition need no separate approval.",
+		"Dry-run servers that read real data still require approval, even on the tailnet.",
 	}, throwawayConditions...)
 	for name, pr := range prompts {
 		flat := strings.Join(strings.Fields(pr), " ")
@@ -1564,7 +1594,7 @@ func TestThrowawayTestServiceRuleReachesEveryPlanPrompt(t *testing.T) {
 				t.Errorf("%s prompt lacks %q", name, want)
 			}
 		}
-		if strings.Contains(flat, "nothing at all happens") {
+		if strings.Contains(flat, "nothing at all happens") || strings.Contains(flat, "nothing is reachable from outside") {
 			t.Errorf("%s prompt keeps the old wording", name)
 		}
 	}

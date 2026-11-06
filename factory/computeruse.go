@@ -17,6 +17,8 @@ const computerUseRule = `Computer use through PDW:
   (one that changes nothing). Never test mutations against the live service. Bind the test server to this
   host's tailnet IP from ` + "`tailscale ip -4`" + `, not a loopback or wildcard address or hostname output,
   so the remote browser can reach it. A local server address is not a link the user can necessarily open.
+- Temporary private-network test servers meeting every build-side-effect condition need no separate approval.
+  Dry-run servers that read real data still require approval, even on the tailnet.
 - Close every tab you opened or claimed and stop every server you started before your final message.
   Verify cleanup using your own session's state; never close another agent's or the user's tabs or apps.
 - Tool access does not authorize purchases, sends, submissions, production changes or other actions outside

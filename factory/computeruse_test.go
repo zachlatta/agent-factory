@@ -19,6 +19,8 @@ func checkComputerUsePrompt(t *testing.T, prompt string) {
 		"`tailscale ip -4`", "dry-run mode the repo's README documents",
 		"Close every tab you opened", "stop every server you started",
 		"does not authorize", "Do not change host settings",
+		"Temporary private-network test servers meeting every build-side-effect condition need no separate approval.",
+		"Dry-run servers that read real data still require approval, even on the tailnet.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("computer-use prompt lacks %q", want)

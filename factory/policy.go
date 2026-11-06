@@ -84,7 +84,9 @@ var (
 // plan may answer none for. The rule and the arbiter's escalation text both use it, so the conditions cannot drift.
 const throwawayServices = "local containers, temporary databases and test servers when all of these hold: " +
 	"the build or its tests start and remove them; they run on the build machine only; " +
-	"they use no live data or credentials, not even a temporary copy; nothing is reachable from outside; " +
+	"they use no live data or credentials, not even a temporary copy; " +
+	"bound to loopback or this host's tailnet IP, never a wildcard or public address; " +
+	"no public exposure or persistent host configuration changes; " +
 	"they send no messages and spend no money"
 
 // sideEffectsRule asks planners and plan reviewers what building a plan would change outside its worktree
@@ -96,7 +98,9 @@ written or deleted, messages sent to anyone, money spent, hosts or services chan
 A plan that adds or runs such a service itself names it and shows how it meets every condition. An existing
 test suite's own loopback servers that meet these conditions need at most a short note, such as "the test
 suite's own loopback servers". Anything else is a side effect, and so is a service the plan adds or runs
-without every condition shown. Write none alone on that line,
+without every condition shown. Temporary private-network test servers meeting every condition need no separate approval.
+Dry-run servers that read real data still require approval, even on the tailnet.
+Write none alone on that line,
 and any reason on the next line: anything else on the line, even "none (code only)", counts as a side effect.)`
 
 // titleCap is the most runes a planner's TITLE line keeps; longer ones are cut at a word.
