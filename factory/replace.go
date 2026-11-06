@@ -16,17 +16,17 @@ const maxReplaceHops = 16
 // (chainCarriedFactoryLabels) and any explicit empty value on a newer agent are read through the chain.
 var carriedFactoryLabels = []string{
 	labelReady, labelReadyHead, labelReadyFeedback, labelFeedbackHold, labelFeedbackTold, labelAskWhy, labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
-	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
-	labelDecided, labelPlanFix, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone, labelWaitsBefore,
-	labelHeld, labelHeldApproved, labelArbitrated, labelWorkLeftRounds, labelRecovery,
+	labelTier, labelTrack, labelBase, labelRoundsRequest, labelRoundsDesign, labelRoundsSignoff, labelSubmittedBy, labelBuilderAgent, labelResult, labelFollowedUp,
+	labelDecided, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone, labelWaitsBefore,
+	labelHeld, labelHeldApproved, labelWorkLeftRounds, labelRecovery,
 	labelReviewerRetries, labelModelHandoff, labelBehaviorApproval, labelBehaviorSummary, labelBehaviorRepair,
 	labelDue, labelDueTold,
 }
 
 var chainCarriedFactoryLabels = []string{
 	labelZachThread, labelSource, labelOrigin, labelTitled,
-	labelTier, labelTrack, labelBase, labelPlanRounds, labelCodeRounds, labelCodeRoundsFrom, labelZachPlan,
-	labelArbitrated, labelWorkLeftRounds, labelModelHandoff,
+	labelTier, labelTrack, labelBase, labelRoundsRequest, labelRoundsDesign, labelRoundsSignoff, labelSubmittedBy, labelBuilderAgent, labelResult,
+	labelWorkLeftRounds, labelModelHandoff,
 }
 
 // carriedRawLabels have no factory. prefix: the card's email thread (inbox.go), and the email dispatcher's

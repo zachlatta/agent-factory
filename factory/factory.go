@@ -25,7 +25,7 @@ type Config struct {
 	Port      int
 	Window    time.Duration // archived agents stay in Done this long
 	Poll      time.Duration
-	ReworkCap int           // review rounds per gate before the card goes to Zach
+	ReworkCap int           // rounds per gate before the card is marked stuck on the board
 	IdleTTL   time.Duration // a Needs Zach card idle this long is parked (reap.go)
 	IdleCap   int           // more live idle factory agents than this parks the longest idle (reap.go)
 	Location  *time.Location
@@ -99,9 +99,6 @@ type Factory struct {
 	recoveries map[string]recovery     // latest persisted recovery across stale snapshots
 	handoffMu  sync.Mutex              // guards handoffs
 	handoffs   map[string]handoffState // latest persisted hand-off step across stale snapshots (handoff.go)
-	panelMu    sync.Mutex              // guards panels and lenses (panel.go)
-	panels     map[string]string       // card id -> its open panel round ("" closed), ahead of stale snapshots
-	lenses     map[string]lensResult   // panel reviewer id -> its recorded result, ahead of stale snapshots
 	cardGates  sync.Map                // card ID -> *cardGate: its follow-ups and review verdicts (actions.go)
 
 	cfg        Config
@@ -149,8 +146,8 @@ type Factory struct {
 	archivedNow          map[string]time.Time
 	directArchiveChecked map[string]string    // archived card id -> LastActivityAt key checked for directReply (interrupted.go)
 	parkedNow            map[string]string    // agents the reap parked: their factory.parked value, applied like archivedNow
-	lastReap    *ReapReport          // the last reap that changed anything, for /api/health
-	retireTries map[string]retireTry // retired reviewers' failed archive tries in this process (retire.go)
+	lastReap             *ReapReport          // the last reap that changed anything, for /api/health
+	retireTries          map[string]retireTry // retired reviewers' failed archive tries in this process (retire.go)
 
 	provMu     sync.Mutex
 	prov       providers // Paseo provider status, for the agent choices

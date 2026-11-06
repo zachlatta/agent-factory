@@ -54,28 +54,8 @@ func TestWatcherMarksChangedAgentsHot(t *testing.T) {
 		t.Error("loop not woken")
 	}
 
-	writeAgents(t, f, card("c9", map[string]string{labelStage: "plan"})) // a new directory
+	writeAgents(t, f, card("c9", map[string]string{labelStage: "building"})) // a new directory
 	waitFor(t, "c9 hot", func() bool { return hotIDs(f)["c9"] })
-}
-
-// A file renamed into place counts as written.
-func TestWatcherSeesRenamedFiles(t *testing.T) {
-	f, _ := newTestFactory(t)
-	writeAgents(t, f, card("c1", map[string]string{labelStage: "plan"}))
-	f.reload()
-	stop := f.startWatch()
-	defer stop()
-	moved := card("c1", map[string]string{labelStage: "plan-review"})
-	writeAgents(t, f, moved)
-	path := agentFile(f.cfg.Home, "c1")
-	b, _ := os.ReadFile(path)
-	clear(f.hot)
-	tmp := filepath.Join(filepath.Dir(path), ".c1.tmp")
-	os.WriteFile(tmp, []byte(strings.Replace(string(b), "plan-review", "building", 1)), 0o644)
-	if err := os.Rename(tmp, path); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "c1 hot after rename", func() bool { return hotIDs(f)["c1"] })
 }
 
 // With no agent directory the watcher is off and says so; the loop still polls.
@@ -119,4 +99,28 @@ func TestRunActsOnStoppedReviewerWithinASecond(t *testing.T) {
 	if len(p.sent("c1")) != 0 || len(p.sent("c3")) != 0 {
 		t.Error("running reviewers' cards moved")
 	}
+}
+
+// A file renamed into place counts as written.
+
+// A file renamed into place counts as written.
+
+// A file renamed into place counts as written.
+func TestWatcherSeesRenamedFiles(t *testing.T) {
+	f, _ := newTestFactory(t)
+	writeAgents(t, f, card("c1", map[string]string{labelStage: "building"}))
+	f.reload()
+	stop := f.startWatch()
+	defer stop()
+	moved := card("c1", map[string]string{labelStage: gateRequest})
+	writeAgents(t, f, moved)
+	path := agentFile(f.cfg.Home, "c1")
+	b, _ := os.ReadFile(path)
+	clear(f.hot)
+	tmp := filepath.Join(filepath.Dir(path), ".c1.tmp")
+	os.WriteFile(tmp, []byte(strings.Replace(string(b), "plan-review", "building", 1)), 0o644)
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "c1 hot after rename", func() bool { return hotIDs(f)["c1"] })
 }

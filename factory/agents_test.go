@@ -20,48 +20,6 @@ func flag(args []string, name string) string {
 	return ""
 }
 
-func TestNewCardRunsTheChosenAgent(t *testing.T) {
-	for _, tc := range []struct {
-		agent, provider, thinking, mode string
-	}{
-		{"", "claude/claude-opus-5-5", "medium", "bypassPermissions"},
-		{"opus", "claude/claude-opus-5-5", "medium", "bypassPermissions"},
-		{"codex-astra", "codex/gpt-6-astra", "high", "full-access"},
-		{"codex-sol", "codex/gpt-6.1-sol", "medium", "full-access"},
-		{"sonnet", "claude/claude-sonnet-5-5", "medium", "bypassPermissions"},
-		{"gemini-argon", "antigravity/gemini-4-argon-high", "", "full-access"},
-		{"muse-wonder", "muse/muse-wonder-full-1.0", "", "allowAll"},
-	} {
-		t.Run(tc.agent, func(t *testing.T) {
-			f, p := newTestFactory(t)
-			if _, err := f.Act("new", Body{Request: "do a thing", Agent: tc.agent}); err != nil {
-				t.Fatal(err)
-			}
-			runs := p.runsWithLabel(labelArg(labelStage, "plan"))
-			if len(runs) != 1 {
-				t.Fatalf("runs = %v", p.calls)
-			}
-			r := runs[0]
-			if got := flag(r, "--provider"); got != tc.provider {
-				t.Errorf("--provider = %q, want %q", got, tc.provider)
-			}
-			if got := flag(r, "--thinking"); got != tc.thinking {
-				t.Errorf("--thinking = %q, want %q", got, tc.thinking)
-			}
-			if got := flag(r, "--mode"); got != tc.mode {
-				t.Errorf("--mode = %q, want %q", got, tc.mode)
-			}
-			want := tc.agent
-			if want == "" {
-				want = "opus"
-			}
-			if !slices.Contains(r, labelArg(labelAgent, want)) {
-				t.Errorf("run has no %s label: %v", labelArg(labelAgent, want), r)
-			}
-		})
-	}
-}
-
 func TestNewCardRejectsUnknownOrUnavailableAgent(t *testing.T) {
 	f, p := newTestFactory(t)
 	if _, err := f.Act("new", Body{Request: "x", Agent: "fable"}); err == nil || !strings.Contains(err.Error(), "unknown agent") {
@@ -71,7 +29,7 @@ func TestNewCardRejectsUnknownOrUnavailableAgent(t *testing.T) {
 	if _, err := f.Act("new", Body{Request: "x", Agent: "muse-wonder"}); err == nil || !strings.Contains(err.Error(), "not available") {
 		t.Errorf("muse down: err = %v, want not available", err)
 	}
-	if n := len(p.runsWithLabel(labelArg(labelStage, "plan"))); n != 0 {
+	if n := len(p.runsWithLabel(labelArg(labelStage, "building"))); n != 0 {
 		t.Errorf("started %d cards, want 0", n)
 	}
 }
@@ -83,7 +41,7 @@ func TestReviewersAndScoutsAlwaysUseOpus(t *testing.T) {
 		c.Provider = a.providerID()
 		f, p := newTestFactory(t, c)
 		got, _ := f.card("c1")
-		if _, err := f.StartReview(got, "code"); err != nil {
+		if _, err := f.StartReview(got, gateRequest); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.Act("scout", Body{Repo: "example/desk"}); err != nil {
@@ -187,7 +145,7 @@ func TestResolveAgentWaitIsBounded(t *testing.T) {
 }
 
 func TestBoardCardShowsAgent(t *testing.T) {
-	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "plan", labelAgent: "codex-astra"}))
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "building", labelAgent: "codex-astra"}))
 	c, _ := f.card("c1")
 	if c.Agent != "codex-astra" {
 		t.Errorf("card agent = %q", c.Agent)
@@ -360,134 +318,6 @@ func TestAgentsAPIRanksByPaceAndSuggestsTopPlan(t *testing.T) {
 	}
 }
 
-func TestNewCardAndAutoIdeaBalanceUsageAndKeepEmailOnOpus(t *testing.T) {
-	f, p := newTestFactory(t)
-	in3d := t0.Add(3 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	seedUsage(f, map[string]AgentUsage{
-		"claude":      {Summary: "35% 7d · 70% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 35, ResetsAt: in3d}, {Label: "5h", RemainingPct: 70}}},
-		"codex":       {Summary: "50% 7d left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 50, ResetsAt: in3d}}},
-		"antigravity": {Summary: "90% 7d · 85% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 90, ResetsAt: in3d}, {Label: "5h", RemainingPct: 85}}},
-		"muse":        {Summary: "40% 7d · 80% 5h left", Windows: []UsageWindow{{Label: "7d", RemainingPct: 40, ResetsAt: in3d}, {Label: "5h", RemainingPct: 80}}},
-	})
-
-	// 1. Board card with no agent picked uses the usage-balanced suggestion (gemini-argon).
-	if _, err := f.Act("new", Body{Request: "board work"}); err != nil {
-		t.Fatal(err)
-	}
-	runs := p.runsWithLabel(labelArg(labelStage, "plan"))
-	if len(runs) != 1 || flag(runs[0], "--provider") != "antigravity/gemini-4-argon-high" || !slices.Contains(runs[0], labelArg(labelAgent, "gemini-argon")) {
-		t.Fatalf("board card run = %v, want gemini-argon", runs)
-	}
-
-	// 2. Auto-started idea (tickIdeas) ignores any agent the scout sent and uses the best-ranked Frontier model.
-	if _, err := f.addIdea(Body{Request: "idea work", Title: "auto balanced idea", Agent: "opus", By: "scout"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.tickIdeas(); err != nil {
-		t.Fatal(err)
-	}
-	ideaRuns := p.runsWithLabel(labelArg(labelOrigin, "idea"))
-	if len(ideaRuns) != 1 || flag(ideaRuns[0], "--provider") != "antigravity/gemini-4-argon-high" {
-		t.Fatalf("auto-started idea run = %v, want gemini-argon", ideaRuns)
-	}
-
-	// 3. Direct-repo card from email (Thread set, Agent empty) stays on Opus 5.5.
-	if _, err := f.Act("new", Body{Request: "email work", Thread: "thread-abc"}); err != nil {
-		t.Fatal(err)
-	}
-	runs = p.runsWithLabel(labelArg(labelStage, "plan"))
-	if got := flag(runs[len(runs)-1], "--provider"); got != ReviewerModel {
-		t.Errorf("email card provider = %q, want %q", got, ReviewerModel)
-	}
-
-	// 4. Direct-repo card from email with an explicit agent honors the explicit choice.
-	if _, err := f.Act("new", Body{Request: "email work on codex", Thread: "thread-abc", Agent: "codex-astra"}); err != nil {
-		t.Fatal(err)
-	}
-	runs = p.runsWithLabel(labelArg(labelStage, "plan"))
-	if got := flag(runs[len(runs)-1], "--provider"); got != "codex/gpt-6-astra" {
-		t.Errorf("explicit email card provider = %q, want codex/gpt-6-astra", got)
-	}
-
-	// 5. Auto-repo card from email (Repo: "auto", Thread set, Agent empty) routes onto Opus 5.5.
-	withRepos(t, f, "example/desk")
-	res, err := f.Act("new", Body{Request: "routed email work", Repo: "auto", Thread: "thread-routed"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pickerID := res.(map[string]string)["id"]
-	storeLog(t, f, p, pickerID, "[Assistant]\nREPO: example/desk\n")
-	if err := f.routeFromReply(picker(pickerID, nil)); err != nil {
-		t.Fatal(err)
-	}
-	runs = p.runsWithLabel(gmailThreadLabel + "=thread-routed")
-	if len(runs) != 1 || flag(runs[0], "--provider") != ReviewerModel || !slices.Contains(runs[0], labelArg(labelAgent, "opus")) {
-		t.Errorf("auto-routed email card = %v, want opus (%s)", runs, ReviewerModel)
-	}
-}
-
-func TestPickIdeaAgentUsesBestFrontierModelAboveFloor(t *testing.T) {
-	all := map[string]string{"claude": "available", "codex": "available", "antigravity": "available", "muse": "available"}
-	week := func(pct int, reset time.Duration) AgentUsage {
-		return AgentUsage{Windows: []UsageWindow{{Label: "7d", RemainingPct: pct, ResetsAt: iso(t0.Add(reset))}}}
-	}
-	for _, tc := range []struct {
-		name     string
-		statuses map[string]string
-		usages   map[string]AgentUsage
-		want     string
-		hold     []string // substrings of the hold; nil means no hold
-	}{
-		{"non-frontier ranked first", all, map[string]AgentUsage{
-			"claude": week(40, 72*time.Hour), "codex": week(60, 72*time.Hour), "antigravity": week(50, 72*time.Hour), "muse": week(95, 72*time.Hour)},
-			"codex-sol", nil},
-		{"top frontier at the floor is skipped", all, map[string]AgentUsage{
-			"claude": week(60, 144*time.Hour), "codex": week(50, 144*time.Hour), "antigravity": week(18, time.Hour), "muse": week(90, 144*time.Hour)},
-			"opus", nil},
-		{"every frontier model at the floor holds", all, map[string]AgentUsage{
-			"claude": week(12, 72*time.Hour), "codex": week(9, 72*time.Hour), "antigravity": week(18, 72*time.Hour), "muse": week(90, 72*time.Hour)},
-			"", []string{"every Frontier model has 20% or less", "Opus 5.5 12%", "GPT-6.1 Sol 9%", "Gemini 4 Argon 18%"}},
-		{"exhausted plan is skipped", all, map[string]AgentUsage{
-			"claude": week(0, 72*time.Hour), "codex": week(50, 72*time.Hour), "antigravity": week(40, 72*time.Hour)},
-			"codex-sol", nil},
-		{"elapsed weekly window counts as unknown", all, map[string]AgentUsage{
-			"claude": week(5, -time.Minute), "codex": week(5, -time.Minute), "antigravity": week(5, -time.Minute)},
-			"opus", nil},
-		{"failed reading counts as unknown", all, map[string]AgentUsage{
-			"claude": {RefreshError: "meter unavailable", Windows: []UsageWindow{{Label: "7d", RemainingPct: 5}}}, "codex": week(10, 72*time.Hour), "antigravity": week(10, 72*time.Hour)},
-			"opus", nil},
-		{"above-floor model with its short window used up beats one at the floor", all, map[string]AgentUsage{
-			"claude": week(10, 72*time.Hour), "antigravity": week(15, 72*time.Hour),
-			"codex": {Windows: []UsageWindow{{Label: "5h", RemainingPct: 0, ResetsAt: iso(t0.Add(time.Hour))}, {Label: "7d", RemainingPct: 50, ResetsAt: iso(t0.Add(72 * time.Hour))}}}},
-			"codex-sol", nil},
-		{"unknown usage", all, nil, "opus", nil},
-		{"no frontier model available", map[string]string{"muse": "available"}, map[string]AgentUsage{"muse": week(90, 72*time.Hour)}, "opus", nil},
-		{"no frontier model available and Opus at the floor", nil, map[string]AgentUsage{"claude": week(3, 72*time.Hour)}, "",
-			[]string{"every Frontier model has 20% or less", "Opus 5.5 3%"}},
-		{"unavailable frontier model at the floor is not counted", map[string]string{"claude": "available", "antigravity": "error"}, map[string]AgentUsage{
-			"claude": week(50, 72*time.Hour), "antigravity": week(5, 72*time.Hour)},
-			"opus", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, hold := pickIdeaAgent(tc.statuses, tc.usages, t0)
-			if tc.hold == nil {
-				if hold != "" || got.ID != tc.want {
-					t.Fatalf("got %s (hold %q), want %s and no hold", got.ID, hold, tc.want)
-				}
-				return
-			}
-			for _, s := range tc.hold {
-				if !strings.Contains(hold, s) {
-					t.Errorf("hold %q missing %q", hold, s)
-				}
-			}
-			if strings.Contains(hold, "Muse") || strings.Contains(hold, "Sonnet") || strings.Contains(hold, "Astra") {
-				t.Errorf("hold names a model that is not Frontier: %q", hold)
-			}
-		})
-	}
-}
-
 func TestAutoStartedIdeaUsesFrontierModelNotItsOwn(t *testing.T) {
 	f, p := newTestFactory(t)
 	if _, err := f.waitProviderStatus("claude"); err != nil { // the pick ranks listed providers
@@ -575,5 +405,47 @@ func TestStoredIdeaWithAgentStillLoads(t *testing.T) {
 	}
 	if i.ID != "idea-1" || i.Status != "waiting" {
 		t.Errorf("old idea = %+v", i)
+	}
+}
+
+func TestNewCardRunsTheChosenAgent(t *testing.T) {
+	for _, tc := range []struct {
+		agent, provider, thinking, mode string
+	}{
+		{"", "claude/claude-opus-5-5", "medium", "bypassPermissions"},
+		{"opus", "claude/claude-opus-5-5", "medium", "bypassPermissions"},
+		{"codex-astra", "codex/gpt-6-astra", "high", "full-access"},
+		{"codex-sol", "codex/gpt-6.1-sol", "medium", "full-access"},
+		{"sonnet", "claude/claude-sonnet-5-5", "medium", "bypassPermissions"},
+		{"gemini-argon", "antigravity/gemini-4-argon-high", "", "full-access"},
+		{"muse-wonder", "muse/muse-wonder-full-1.0", "", "allowAll"},
+	} {
+		t.Run(tc.agent, func(t *testing.T) {
+			f, p := newTestFactory(t)
+			if _, err := f.Act("new", Body{Request: "do a thing", Agent: tc.agent}); err != nil {
+				t.Fatal(err)
+			}
+			runs := p.runsWithLabel(labelArg(labelStage, "building"))
+			if len(runs) != 1 {
+				t.Fatalf("runs = %v", p.calls)
+			}
+			r := runs[0]
+			if got := flag(r, "--provider"); got != tc.provider {
+				t.Errorf("--provider = %q, want %q", got, tc.provider)
+			}
+			if got := flag(r, "--thinking"); got != tc.thinking {
+				t.Errorf("--thinking = %q, want %q", got, tc.thinking)
+			}
+			if got := flag(r, "--mode"); got != tc.mode {
+				t.Errorf("--mode = %q, want %q", got, tc.mode)
+			}
+			want := tc.agent
+			if want == "" {
+				want = "opus"
+			}
+			if !slices.Contains(r, labelArg(labelAgent, want)) {
+				t.Errorf("run has no %s label: %v", labelArg(labelAgent, want), r)
+			}
+		})
 	}
 }

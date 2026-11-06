@@ -56,15 +56,15 @@ func TestAutomaticArchiveCallersPreserveProtections(t *testing.T) {
 		for _, failure := range []string{"fresh-running", "unverified"} {
 			t.Run(caller+"/"+failure, func(t *testing.T) {
 				a := idleFor(card("subject", map[string]string{labelStage: "landed"}), time.Hour)
-				target := card("target", map[string]string{labelStage: "plan-review", labelTier: "low"})
+				target := card("target", map[string]string{labelStage: gateRequest, labelTier: "low"})
 				switch caller {
 				case "reap-reviewer":
-					a = reviewer("subject", "target", "code")
+					a = reviewer("subject", "target", gateSignoff)
 					a.Labels[labelPrefix+labelApplied] = "1"
 				case "reap-park":
 					a = idleFor(card("subject", map[string]string{labelStage: "zach"}), 4*time.Hour)
 				case "verdict-live", "verdict-dropped":
-					a = reviewer("subject", "target", "plan")
+					a = reviewer("subject", "target", gateRequest)
 				case "verdict-land":
 					a = reviewer("subject", "target", "land")
 				case "scout":
@@ -75,7 +75,7 @@ func TestAutomaticArchiveCallersPreserveProtections(t *testing.T) {
 				}
 				f, p := newTestFactory(t, a, target)
 				storeLog(t, f, p, "target", "Plan: make the requested change.\nTIER: low")
-				storeLog(t, f, p, "subject", "TIER: low\nVERDICT: approve")
+				storeLog(t, f, p, "subject", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 				if caller == "verdict-land" {
 					if err := f.landReviews.put(LandReview{By: "target", Review: "subject", Status: "running"}, t0); err != nil {
 						t.Fatal(err)

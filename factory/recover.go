@@ -29,6 +29,7 @@ const (
 	directReturnCap      = 1 // retries of a direct card's landing
 	stuckAgentError      = "agent error"
 	stuckReview          = "review could not finish"
+	stuckGate            = "gate rounds used up"
 	stuckStopped         = "stopped with nothing queued"
 	stuckLanding         = "landing failed"
 	landDiffNotePrefix   = "landed diff differs from the reviewed one"
@@ -395,62 +396,26 @@ const pickerNudgeMsg = "The factory has no next step for this card: your last tu
 func nudgeMsg(stage string) string {
 	const lead = "The factory has no next step for this card: "
 	switch stage {
-	case "plan":
-		return lead + "your last turn ended without a plan or result it could read. Finish the step the way the first " +
-			"prompt says (the plan ending with its TIER: line, or the direct result with TRACK: direct), then stop."
 	case "landing":
 		return lead + "your landing turn ended without a verified landing. Land it now the way the land prompt says, " +
 			"or say plainly what blocks you." + remainingRule
 	}
-	return lead + "your build turn ended with no code review queued. Finish the build, commit everything on your " +
-		"branch (do NOT land), and stop with a short summary. " + overviewReminder
+	return lead + "your build turn ended with no gate queued. Finish the build, commit everything on your " +
+		"branch (do NOT land), and stop with a short summary ending in the RESULT: line. " + overviewReminder
 }
 
-// missingLensNote tells the arbiter what to do about a panel lens that never gave a verdict.
-var missingLensNote = fmt.Sprintf("This reviewer could not finish after %d tries, so its lens is missing: "+
-	"check that area of the change yourself before you decide.", reviewerRetryCap+1)
-
-// recoverReview handles a review column whose reviewer is gone without a verdict or blocked (errored,
-// stalled or on a permission prompt): a panel replaces that lens, a failed arbiter is replaced once,
-// and a single reviewer is replaced (replaceReviewer).
+// recoverReview handles a gate whose reviewer is gone without a verdict or blocked (errored, stalled or on
+// a permission prompt): it is replaced (replaceReviewer).
 func (f *Factory) recoverReview(a Agent, stage string, agents []Agent, now time.Time) error {
-	kind := reviewKindOf(stage)
-	r, blocked := blockedReviewerOf(agents, a.ID, now)
 	why := "gone without a verdict"
-	if blocked {
+	if r, blocked := blockedReviewerOf(agents, a.ID, now); blocked {
 		why = blockedWhy(agents, r, now)
-	} else if last, ok := newestReviewerOf(agents, a.ID); ok && (last.L(labelLens) == lensArbiter || last.L(labelArbiter) != "") &&
-		f.lensResultOf(last).verdict == "" {
-		r, blocked = last, true // the arbiter went without a ruling
 	}
-	switch {
-	case blocked && r.L(labelArbiter) != "":
-		return f.gateArbiterFailed(a, kind, why)
-	case blocked && r.L(labelLens) == lensArbiter:
-		return f.arbiterFailed(a, kind, r.L(labelPanel), why)
-	case kind == "code" && f.openPanel(a) != "":
-		return f.replaceLenses(a, f.openPanel(a), why)
-	}
-	return f.replaceReviewer(a, kind, why)
-}
-
-// newestReviewerOf is card id's most recently started reviewer.
-func newestReviewerOf(agents []Agent, id string) (Agent, bool) {
-	byID := make(map[string]Agent, len(agents))
-	for _, a := range agents {
-		byID[a.ID] = a
-	}
-	var out Agent
-	for _, r := range agents {
-		if r.L(labelRole) == "reviewer" && sameCard(byID, r.L(labelReviewOf), id) && (out.ID == "" || r.CreatedAt.After(out.CreatedAt)) {
-			out = r
-		}
-	}
-	return out, out.ID != ""
+	return f.replaceReviewer(a, stage, why)
 }
 
 // replaceReviewer retires card a's reviewers and starts a fresh one of kind, at most reviewerRetryCap
-// times per review round; then reviewersExhausted takes over. why says what went wrong. Like every
+// times per round; then the card stays in its gate, marked stuck. why says what went wrong. Like every
 // review recovery, it runs with card a's gate held (decide, checkStuck).
 func (f *Factory) replaceReviewer(a Agent, kind, why string) error {
 	n := atoi(a.L(labelReviewerRetries))
@@ -458,7 +423,8 @@ func (f *Factory) replaceReviewer(a Agent, kind, why string) error {
 		return err
 	}
 	if n >= reviewerRetryCap {
-		return f.reviewersExhausted(a, kind, why)
+		f.logf("%s %s reviewer %s again: the gate could not finish", short(a.ID), kind, why)
+		return f.markStuck(a, stuckReview)
 	}
 	if err := f.setLabels(a.ID, map[string]string{labelReviewerRetries: fmt.Sprint(n + 1)}); err != nil {
 		return err
@@ -467,148 +433,21 @@ func (f *Factory) replaceReviewer(a Agent, kind, why string) error {
 	return f.rerunReviewLocked(f.gate(a.ID), a, kind)
 }
 
-// replaceLenses replaces each lens of card a's open panel that has no result (blocked, or gone), at
-// most reviewerRetryCap times per lens. A lens past that is recorded without a verdict, so the
-// arbiter decides without it once the rest of the panel has finished.
-func (f *Factory) replaceLenses(a Agent, panel, why string) error {
-	c, ok := f.card(a.ID)
-	if !ok {
-		return nil
-	}
-	lenses := f.panelLenses(a.ID, panel)
-	if len(lenses) == 0 {
-		return f.replaceReviewer(a, "code", why) // the whole panel is gone: a fresh review
-	}
-	for _, l := range []string{lensCorrectness, lensArchitecture, lensUX} {
-		r, ok := lenses[l]
-		if !ok || f.lensResultOf(r).done {
-			continue
-		}
-		if f.lensRuns(a.ID, panel, l) > reviewerRetryCap {
-			f.logf("%s of %s %s; no replacements left, the arbiter decides without it", lensNames[l], short(a.ID), why)
-			if err := f.retireReviewer(r, ""); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := f.retireReviewer(r, "superseded"); err != nil {
-			return err
-		}
-		f.logf("%s of %s %s; starting a replacement", lensNames[l], short(a.ID), why)
-		if err := f.startLenses(c, []string{l}, panel, ""); err != nil {
-			return err
-		}
-	}
-	if f.panelReady(a) {
-		return f.closePanel(a)
-	}
-	return f.setLabels(a.ID, map[string]string{labelSince: iso(f.Now())})
-}
-
-// soloPanel is the panel round of the arbiter that stands in for card a's single reviewer of kind.
-func soloPanel(a Agent, kind string) string {
-	return "solo-" + kind + "-" + fmt.Sprint(atoi(a.L(roundsLabel(kind)))+1)
-}
-
-// reviewersExhausted runs when card a's single reviewer could not finish after every replacement:
-// the arbiter reviews the change itself, told the reviewer is missing. A failed arbiter gets one
-// replacement. factory.reviewer-retries keeps counting past the reviewer replacements, so the cap
-// holds even when a gone arbiter has left the agent list.
-func (f *Factory) reviewersExhausted(a Agent, kind, why string) error {
-	n := atoi(a.L(labelReviewerRetries))
-	if n >= reviewerRetryCap+2 {
-		f.logf("%s %s arbiter %s again: the review could not finish", short(a.ID), kind, why)
-		return f.markStuck(a, stuckReview)
-	}
-	if err := f.setLabels(a.ID, map[string]string{labelReviewerRetries: fmt.Sprint(n + 1)}); err != nil {
-		return err
-	}
-	f.logf("%s %s review could not finish (%s): the arbiter decides (try %d)", short(a.ID), kind, why, n-reviewerRetryCap+1)
-	return f.startSoloArbiter(a, kind, soloPanel(a, kind), why)
-}
-
-func (f *Factory) startSoloArbiter(a Agent, kind, panel, why string) error {
-	c, ok := f.card(a.ID)
-	if !ok {
-		return nil
-	}
-	extra := fmt.Sprintf("There are no reports: the single reviewer of this %s could not finish (%s) after %d tries, "+
-		"so you are the reviewer that is missing. Review it yourself, through every lens, and decide.", kind, why, reviewerRetryCap+1)
-	if _, err := f.runReviewer(c, kind, reviewSpec{lens: lensArbiter, panel: panel, extra: extra}, f.visibility(c.Cwd),
-		"Review (arbiter): "+trunc(c.Title, 50), "", ""); err != nil {
-		return err
-	}
-	return f.setLabels(a.ID, map[string]string{labelSince: iso(f.Now())})
-}
-
-// arbiterFailed handles an arbiter that ended without a ruling, or is blocked: it is replaced once,
-// then card a is marked stuck in its review column. Only a missing ruling lands here; an arbiter's
-// ruling that sends the card back, and the review round cap, follow decide as before.
-func (f *Factory) arbiterFailed(a Agent, kind, panel, why string) error {
-	if err := f.supersedeReviewers(a.ID); err != nil {
-		return err
-	}
-	if strings.HasPrefix(panel, "solo-") {
-		return f.reviewersExhausted(a, kind, why)
-	}
-	if f.lensRuns(a.ID, panel, lensArbiter) > 1 {
-		f.logf("%s arbiter %s again: the review could not finish", short(a.ID), why)
-		return f.markStuck(a, stuckReview)
-	}
-	f.logf("%s arbiter %s; starting a replacement", short(a.ID), why)
-	return f.startPanelArbiter(a, panel)
-}
-
-// gateArbiterFailed handles a gate arbiter (arbiter.go: the review round cap or an escalation) that ended
-// without a ruling or is blocked: it is replaced once, then card a is marked stuck in its review column.
-// A ruling, and a gate that fails again after one, follow decide and applyArbiter as before.
-func (f *Factory) gateArbiterFailed(a Agent, kind, why string) error {
-	if err := f.supersedeReviewers(a.ID); err != nil {
-		return err
-	}
-	if n := atoi(a.L(labelReviewerRetries)); n > 0 {
-		f.logf("%s %s arbiter %s again: the review could not finish", short(a.ID), kind, why)
-		return f.markStuck(a, stuckReview)
-	}
-	last, escalated := "", a.L(labelVerdict) == kind+" escalate"
-	byID := f.byID()
-	var newest Agent
-	for _, r := range f.agents() {
-		if r.L(labelRole) == "reviewer" && r.L(labelArbiter) == "" && r.L(labelReviewKind) == kind &&
-			sameCard(byID, r.L(labelReviewOf), a.ID) && (newest.ID == "" || r.CreatedAt.After(newest.CreatedAt)) {
-			newest = r
-		}
-	}
-	if newest.ID != "" {
-		if text, err := f.storedReply(newest); err == nil {
-			last = text
-		}
-	}
-	f.logf("%s %s arbiter %s; starting a replacement", short(a.ID), kind, why)
-	if err := f.startArbiter(a, kind, last, escalated); err != nil {
-		return err
-	}
-	return f.setLabels(a.ID, map[string]string{labelReviewerRetries: "1"})
-}
-
-// reviewKindOf is the review kind run in a review column.
-func reviewKindOf(stage string) string {
-	if stage == "plan-review" {
-		return "plan"
-	}
-	return "code"
-}
-
 // returnToBuild sends a card whose landing failed back to building, with note on the card and msg to
-// the agent: it fixes the branch, code review runs again, then the land prompt and its scan. After
-// landReturnCap returns the card stays in landing marked stuck.
+// the agent: it fixes the branch, the design gate runs again (it reflects the latest main), then sign-off,
+// the land prompt and its scan. After landReturnCap returns the card stays in landing marked stuck.
 func (f *Factory) returnToBuild(a Agent, note, msg string, landedDiff bool) error {
+	return f.returnToBuildFrom(a, gateDesign, note, msg, landedDiff)
+}
+
+// returnToBuildFrom is returnToBuild with the gate that runs when the builder stops.
+func (f *Factory) returnToBuildFrom(a Agent, gate, note, msg string, landedDiff bool) error {
 	if readRecovery(a).Lands >= landReturnCap {
 		return f.markStuck(a, stuckLanding)
 	}
 	f.logf("%s %s: back to building", short(a.ID), note)
 	// saveRecovery adds the new recovery label to labels, so a fresh agent carries the raised count
-	labels := map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: iso(f.Now()),
+	labels := map[string]string{labelStage: "building", labelAutoReview: gate, labelSince: iso(f.Now()),
 		labelNote: rebuildingNotePrefix + note, labelHeld: "", labelBehaviorRepair: "1"}
 	if err := f.updateRecovery(a, func(r *recovery) { r.Lands++; r.LandedDiff = landedDiff }, labels); err != nil {
 		return err
@@ -621,15 +460,15 @@ func landFailMsg(why string) string {
 		"origin/main, resolve any conflicts, rerun go vet and the repo's tests (or its own checks), and commit on your " +
 		"branch. If the land failed on a secret scan hit, rebasing does not fix it: remove the value and rewrite your " +
 		"own unpushed commits (git rebase -i, git commit --amend); a later commit that deletes it is not enough, since " +
-		"the push would publish the earlier commit too. Then stop with a short summary. Code review runs again, then " +
+		"the push would publish the earlier commit too. Then stop with a short summary. The design and sign-off gates run again, then " +
 		"the factory sends the land prompt. " + overviewReminder
 }
 
 func landDiffMsg(why string) string {
-	return "What reached origin/main is not exactly the commits code review approved (" + trunc(why, landFailMax) +
+	return "What reached origin/main is not exactly the commits the gates approved (" + trunc(why, landFailMax) +
 		"). It is already on origin/main: do not push it again. Check what landed against what was reviewed. If " +
 		"something is wrong, fix it forward on your branch rebased on origin/main, rerun the tests and commit (do " +
-		"NOT land). Then stop with a short summary. Code review covers what landed, and the land prompt that follows " +
+		"NOT land). Then stop with a short summary. The gates cover what landed, and the land prompt that follows " +
 		"only verifies it. " + overviewReminder
 }
 
@@ -685,26 +524,26 @@ func (f *Factory) returnDirect(a Agent, why string) error {
 
 // rebuildWithoutDep tells a held card that the card its plan waits on was dropped or cannot be
 // found. It decides itself whether to rebuild without it or land as is; either way it goes back
-// through code review.
+// through the gates.
 func (f *Factory) rebuildWithoutDep(a Agent, id, state string) error {
 	what := "was dropped or closed without landing"
 	if state == depMissing {
 		what = "is not on the board (a wrong id, or it left the board before it landed)"
 	}
 	beforeBuild := heldBeforeBuild(a)
-	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
+	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: gateRequest,
 		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "", labelWaitsBefore: "",
 		labelNote: rebuildingNotePrefix + id + " " + state})
 	step := "rebuilding without the card it waited on"
-	prompt := "Card " + id + ", which your approved plan lands after, " + what + ". Do not land now. Decide " +
+	prompt := "Card " + id + ", which this card lands after, " + what + ". Do not land now. Decide " +
 		"yourself: if this change needs that card's work, rebuild without it (bring in what you need, or cut the part " +
 		"that depends on it); if it does not, say so and change nothing. Rebase on origin/main, rerun the tests and " +
-		"commit on your branch. Then stop with a short summary that says which you chose. Code review runs again, " +
+		"commit on your branch. Then stop with a short summary that says which you chose. The gates run again, " +
 		"then the factory sends the land prompt. " + overviewReminder
 	if beforeBuild {
 		step = "build"
-		prompt = "Card " + id + ", which your approved plan waited on before building, " + what +
-			". Nothing is built yet: if you can build the approved plan without that card (bring in what you need, or cut the part " +
+		prompt = "Card " + id + ", which this card waited on before building, " + what +
+			". Nothing is built yet: if you can build it without that card (bring in what you need, or cut the part " +
 			"that depended on it), build it now; if the scope must change, do not build — stop and say why.\n\n" + f.heldBuildMsg(a)
 	}
 	if err := f.advance(labeled(a, labels), step, prompt); err != nil {
@@ -749,13 +588,17 @@ func (f *Factory) migrateWait(a Agent, c Card) (bool, error) {
 			return f.updateRecovery(a, func(r *recovery) { r.Phase = "exhausted" },
 				map[string]string{labelStage: r.Stage, labelStuck: stuckAgentError, labelNote: ""})
 		}
-	case (note == "stuck" || note == legacyNoVerdictNote) && stuckWhy[from] != "":
+	case (note == "stuck" || note == legacyNoVerdictNote) && (stuckWhy[from] != "" || from == "review" || from == "plan-review" || from == "plan"):
 		why := stuckStopped
-		if from == "review" || from == "plan-review" {
+		if isGate(from) || from == "review" || from == "plan-review" {
 			why = stuckReview
 		}
+		stage := from
+		if stage == "review" || stage == "plan-review" || stage == "plan" {
+			stage = gateRequest // a column of the old flow
+		}
 		move = func() error {
-			return f.setLabels(a.ID, map[string]string{labelStage: from, labelStuck: why, labelNote: "", labelStuckFrom: ""})
+			return f.setLabels(a.ID, map[string]string{labelStage: stage, labelStuck: why, labelNote: "", labelStuckFrom: ""})
 		}
 	case strings.HasPrefix(note, "waits on ") && (strings.HasSuffix(note, ": it was dropped") || strings.HasSuffix(note, ": no such card found")):
 		id, _, _ := strings.Cut(strings.TrimPrefix(note, "waits on "), ":")
@@ -775,7 +618,7 @@ func (f *Factory) migrateWait(a Agent, c Card) (bool, error) {
 		}
 	case note == legacyNotVerified && a.L(labelTrack) == "direct":
 		move = func() error {
-			return f.setLabels(a.ID, map[string]string{labelStage: "plan", labelStuck: stuckLanding, labelNote: ""})
+			return f.setLabels(a.ID, map[string]string{labelStage: "building", labelStuck: stuckLanding, labelNote: ""})
 		}
 	case note == legacyNotVerified:
 		move = func() error { return f.returnToBuild(a, "landing not verified", landFailMsg(note), false) }

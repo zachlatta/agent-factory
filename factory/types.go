@@ -83,6 +83,7 @@ type Card struct {
 	Verdict         string    `json:"verdict"`
 	Note            string    `json:"note"`
 	Tier            string    `json:"tier"`
+	SubmittedBy     string    `json:"submittedBy"` // zach or system (gates.go)
 	Awaiting        string    `json:"awaiting"`
 	Origin          string    `json:"origin"`
 	Agent           string    `json:"agent"`              // AgentChoice id (factory.agent label)
@@ -101,7 +102,6 @@ type Card struct {
 	Idea            *IdeaView `json:"idea,omitempty"` // waiting ideas, and cards started from one: what it proposes
 	WorkspaceID     string    `json:"-"`
 	Decided         bool      `json:"-"` // factory.zach-decided: reviews treat Zach's rulings as settled
-	PlanFix         string    `json:"-"` // factory.plan-fix: small fixes from the last plan review that code review checks
 
 	// when Zach asked, each column, reviews, landing and reply (timing.go)
 	Timing *TimingView `json:"timing,omitempty"`
@@ -111,8 +111,9 @@ type Card struct {
 }
 
 type Rounds struct {
-	Plan int `json:"plan"`
-	Code int `json:"code"`
+	Request int `json:"request"`
+	Design  int `json:"design"`
+	Signoff int `json:"signoff"`
 }
 
 type Child struct {
@@ -124,8 +125,6 @@ type Child struct {
 	Archived bool   `json:"archived"`
 	Role     string `json:"role"`
 	Kind     string `json:"kind"`
-	Lens     string `json:"lens,omitempty"`  // a code-review panel reviewer's focus, or arbiter (panel.go)
-	Panel    string `json:"panel,omitempty"` // the review round that panel belongs to
 	Verdict  string `json:"verdict"`
 	// Blocked: running but not moving on its own ("waiting on permission", "stalled N min"); Permission: the prompt
 	Blocked    string `json:"blocked,omitempty"`
@@ -177,6 +176,7 @@ type IdeaView struct {
 
 // Body is the JSON body of every POST /api/<action>.
 type Body struct {
+	SubmittedBy string            `json:"submittedBy"` // new: "system" tags an automatic submission
 	ID          string            `json:"id"`
 	Stage       string            `json:"stage"`
 	Kind        string            `json:"kind"`

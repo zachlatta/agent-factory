@@ -100,15 +100,15 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 		return ok, f.setLabels(c.ID, clearHeldApproval(f.agent(c.ID), labels))
 	case "review":
 		kind := b.Kind
-		if kind != "plan" {
-			kind = "code"
+		if !isGate(kind) {
+			kind = gateRequest
 		}
 		f.reopen(c.ID)
 		if c.Status == "running" {
 			labels := map[string]string{labelAutoReview: kind, labelSince: now}
 			if f.agent(c.ID).L(labelStage) == "landed" {
 				// out of Done, so the queued review starts once the agent stops
-				labels[labelStage] = map[string]string{"code": "building", "plan": "plan"}[kind]
+				labels[labelStage] = "building"
 			}
 			return map[string]bool{"queued": true}, f.setLabels(c.ID, labels)
 		}
@@ -175,17 +175,6 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 				return nil, err
 			}
 		}
-		if c.Awaiting == "plan" {
-			// Zach's answer to a build he was asked to allow: revise the plan, then plan review runs again
-			msg = "Zach read your plan and wants changes:\n\n" + msg + "\n\nRevise the plan, then restate the " +
-				"whole revised plan (not just the changes) and stop. " + overviewReminder + " Do not build yet."
-			files, err := f.chat(c.ID, msg, b.Attachments)
-			if err != nil {
-				return nil, err
-			}
-			f.delivered(c.ID, sub)
-			return map[string]any{"ok": true, "files": files}, f.setLabels(c.ID, answerLabels(c, f.agent(c.ID), now, f.guarded(c.Repo)))
-		}
 		if f.agent(c.ID).L(labelRouting) != "" {
 			msg += "\n\nPick the repo again and end with the REPO: line."
 		}
@@ -193,7 +182,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			msg += "\n\nAnswer this feedback directly and describe any changes. Do not repeat the Ready summary. " +
 				"Write DECISION: None. and NEEDS FROM ZACH: Nothing. only if his reply leaves nothing for him to decide, because this version then lands with no further ask. " +
 				"If he only asked a question, told you to wait or hold, or you are not sure, keep the ask in both lines. " +
-				"Commit any code changes, then stop for code review."
+				"Commit any code changes, then stop for the gates."
 		}
 		if landingReply(f.agent(c.ID)) {
 			msg += remainingRule
@@ -215,10 +204,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			}
 			labels[labelFinished] = ""
 			labels[labelStuck] = ""
-			if interrupted && (a.L(labelStage) == "plan" || a.L(labelStage) == "plan-review") && !landingReply(a) {
-				labels[labelStage], labels[labelAutoReview] = "plan", "plan"
-			}
-			if labels[labelAutoReview] == "code" {
+			if isGate(labels[labelAutoReview]) {
 				generation := newCodeGeneration(a)
 				if recoveryMessage {
 					// Recovery resets review limits while keeping finished-work approval.
@@ -245,33 +231,6 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			// Zach approved and answered the card's questions in one step
 			answers = "\n\nZach's answers to your questions:\n" + m + "\n\n"
 		}
-		if a := f.agent(c.ID); c.Awaiting == "plan" || planPending(a) {
-			notes := "(none)"
-			if fix := a.L(labelPlanFix); fix != "" {
-				notes = "Apply these fixes from the last plan review: " + fix
-			}
-			msg := buildMsg("Zach allowed this build."+answers, notes)
-			if a.L(labelWaitsBefore) == "build" {
-				if depID, _ := f.pendingDep(a); depID != "" {
-					if err := f.saveHeldBuild(c.ID, msg); err != nil {
-						return nil, err
-					}
-					next := map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "",
-						labelAwaiting: "", labelZachPlan: "approved", labelHeld: depID,
-						labelNote: holdBuildNote(depID), labelHeldApproved: now}
-					return ok, f.setLabels(c.ID, next)
-				}
-			}
-			next := clearHeldApproval(a, map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code",
-				labelAwaiting: "", labelZachPlan: "approved", labelNote: "build allowed by Zach"})
-			if a.L(labelWaitsBefore) == "build" && a.L(labelWaitsOn) != "" {
-				next[labelWaitsDone] = "1"
-			}
-			if err := f.advance(labeled(a, next), "build", msg); err != nil {
-				return nil, err
-			}
-			return ok, f.setLabels(c.ID, next)
-		}
 		// Save finished-work approval before either dependency or immediate landing.
 		// A scan-stop approval is not authorization of finished behavior.
 		approval := f.finishedApproval(f.agent(c.ID))
@@ -280,7 +239,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 				return nil, err
 			}
 		}
-		// Zach approves what was reviewed: a card that moved since goes back to code review, and one whose
+		// Zach approves what was reviewed: a card that moved since goes back to the gates, and one whose
 		// reviewed commit cannot be checked does not land
 		disposition, hold := f.assessReview(f.agent(c.ID), c.Cwd)
 		if disposition == reviewAlreadyLanded {
@@ -318,18 +277,6 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			return nil, err
 		}
 		return ok, f.setLabels(c.ID, next)
-	case "arbiter":
-		// Zach hands a review that did not settle to an arbiter agent, even one that ruled before
-		a := f.agent(c.ID)
-		kind := "code"
-		if strings.HasPrefix(a.L(labelVerdict), "plan") {
-			kind = "plan"
-		}
-		if err := f.supersedeReviewers(c.ID); err != nil {
-			return nil, err
-		}
-		return ok, f.startArbiter(a, kind, "(Not kept here: the last review is the latest reviewer message in the builder's "+
-			"conversation, or read the card's reviewers.)", false)
 	case "rerun":
 		f.reopen(c.ID)
 		return ok, f.rerun(c)
@@ -387,10 +334,10 @@ func (f *Factory) zachClosed(c Card, err error) (any, error) {
 
 func (f *Factory) actionNeedsWorktree(a Agent, c Card, action string, b Body) bool {
 	switch action {
-	case "resume", "rerun", "send", "review", "arbiter":
+	case "resume", "rerun", "send", "review":
 		return true
 	case "approve":
-		if a.L(labelRouting) != "" || c.Awaiting == "plan" || planPending(a) {
+		if a.L(labelRouting) != "" {
 			return a.L(labelRouting) == ""
 		}
 		_, st := f.pendingDep(a)
@@ -476,14 +423,14 @@ func (f *Factory) delivered(id string, sub bool) {
 
 // endReviews ends card id's review generation when Zach finishes the card, for a caller holding its gate
 // g: no review queued or started before now starts or applies (ApplyVerdict, startReview), and its
-// unapplied code and plan reviewers are retired. Only his next message starts a new generation.
+// unapplied gate reviewers are retired. Only his next message starts a new generation.
 func (f *Factory) endReviews(g *cardGate, id string) error {
 	g.followUp = f.Now()
 	g.delivered, g.finished = g.followUp, true
 	return f.retireReviews(id)
 }
 
-// retireReviews retires card id's unapplied code and plan reviewers, like supersedeReviewers, before
+// retireReviews retires card id's unapplied gate reviewers, like supersedeReviewers, before
 // a message gives the card new work: their late verdicts must not pass it. A landing review is left
 // alone: it answers bin/land, which checks the commit it lands itself.
 func (f *Factory) retireReviews(id string) error {
@@ -508,64 +455,29 @@ func (f *Factory) retireReviews(id string) error {
 	return nil
 }
 
-// planPending reports whether a board card's plan has not passed review or Zach yet. Its rework-cap
-// or escalation cards then mean "approve the plan", and Zach's replies go back to plan review.
-// A card in Done (say, a direct-track errand) has no plan pending, nor does a direct result waiting
-// on Zach's answer (directAskStop).
-func planPending(a Agent) bool {
-	v, st := a.L(labelVerdict), a.L(labelStage)
-	return !directAskStop(a) && a.L(labelSource) == "board" && (st == "plan" || st == "plan-review" || st == "zach") && a.L(labelZachPlan) != "approved" && a.L(labelCodeRounds) == "" &&
-		!strings.HasPrefix(v, "plan approve") && !strings.HasPrefix(v, "plan nits") && !strings.HasPrefix(v, "plan fixes") && !strings.HasPrefix(v, "code")
-}
-
-// errandPass reports whether card a is doing a one-pass errand: on its first pass (in plan, with no
-// plan written or reviewed yet) or marked direct with no plan review since. Zach's reply keeps it in
-// plan, so its TRACK: direct ending (or an inbox card's missing TIER line) still finishes it there.
+// errandPass reports whether card a is doing a one-pass errand: marked direct with no gate since, or on
+// its first pass with no gate run yet. Its TRACK: direct ending still finishes it (tickAgent).
 func errandPass(a Agent) bool {
-	if a.L(labelPlanRounds) != "" {
+	if a.L(labelResult) != "" || atoi(a.L(labelRoundsRequest)) > 0 {
 		return false
 	}
-	if a.L(labelTrack) == "direct" {
-		return true
-	}
-	return a.L(labelStage) == "plan" && a.L(labelCodeRounds) == "" && a.L(labelVerdict) == ""
+	return a.L(labelTrack) == "direct" || (a.L(labelStage) == "building" && a.L(labelVerdict) == "")
 }
 
-// labelCodeRoundsFrom is the code round count when Zach's latest follow-up started a new code review
-// generation: the rework cap counts only the rounds after it, so his new request gets its own bounded
-// review while automatic rework inside a generation still stops at the cap.
-const labelCodeRoundsFrom = "code-rounds-from"
-
-// newCodeGeneration is the labels that start card a's new code review generation after Zach's
-// follow-up: the cap counts from its current round, the code arbiter may rule again and reviewer
-// replacements start fresh. Round numbers and plan state are kept; finished-work authorization is invalidated.
-func newCodeGeneration(a Agent) map[string]string {
-	labels := map[string]string{labelCodeRoundsFrom: a.L(labelCodeRounds), labelReviewerRetries: "", labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}
-	if arbitrated(a, "code") {
-		var keep []string
-		for _, k := range strings.Fields(a.L(labelArbitrated)) {
-			if k != "code" {
-				keep = append(keep, k)
-			}
-		}
-		labels[labelArbitrated] = strings.Join(keep, " ")
-	}
-	return labels
+// newCodeGeneration is the labels that start card a's new gate generation after Zach's follow-up: every
+// gate's rounds and reviewer replacements start afresh; finished-work authorization is invalidated.
+func newCodeGeneration(Agent) map[string]string {
+	return map[string]string{labelRoundsRequest: "", labelRoundsDesign: "", labelRoundsSignoff: "", labelReviewerRetries: "",
+		labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}
 }
 
 // replyLabels places a factory card after Zach replies to it, so its next move is queued once the
-// agent answers: a landing card stays in Landing (the landing check runs when it stops), a plan that
-// has not passed goes back to plan review, an errand stays in plan, anything else gets a code
-// review. A guarded (public) repo has no direct track, so its errands get a code review too. Nothing
-// is left in Building with no move queued.
-// answerLabels is where Zach's message (No, Change or an answer) moves card c: a plan he was asked to
-// allow goes back to planning, anything else to the step replyLabels picks. The board preview
+// agent answers: a landing card stays in Landing (the landing check runs when it stops), anything else
+// builds and goes through the gates again, an errand's TRACK: direct ending finishing it there. Nothing is
+// left in Building with no move queued.
+// answerLabels is where Zach's message (No, Change or an answer) moves card c. The board preview
 // simulates the same move.
 func answerLabels(c Card, a Agent, now string, guarded bool) map[string]string {
-	if c.Awaiting == "plan" {
-		return map[string]string{labelStage: "plan", labelAwaiting: "", labelPlanFix: "", labelSince: now,
-			labelNote: "revising plan for Zach", labelDecided: "1"}
-	}
 	labels := replyLabels(a, now, guarded)
 	if a.L(labelStage) == "zach" {
 		labels[labelDecided] = "1" // his answer to a stop: later reviews treat it as settled
@@ -577,17 +489,15 @@ func replyLabels(a Agent, now string, guarded bool) map[string]string {
 	switch {
 	case a.L(labelRouting) != "":
 		// a repo picker answers with a new REPO line, which the Tick routes again
-		return map[string]string{labelStage: "plan", labelSince: now, labelAwaiting: "", labelNote: "picking a repo"}
+		return map[string]string{labelStage: stageRoute, labelSince: now, labelAwaiting: "", labelNote: "picking a repo"}
 	case a.L(labelStage) == "landing" || landingReply(a):
 		return map[string]string{labelStage: "landing", labelSince: now, labelAutoReview: ""}
 	case heldBeforeBuild(a):
 		return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: ""}
-	case planPending(a):
-		return map[string]string{labelStage: "plan", labelSince: now, labelNote: "revising plan for Zach"}
 	case !guarded && errandPass(a):
-		return map[string]string{labelStage: "plan", labelSince: now, labelAutoReview: "", labelNote: "answering Zach"}
+		return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: gateRequest, labelNote: "answering Zach", labelFollowedUp: "1"}
 	}
-	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: "code"}
+	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: gateRequest, labelFollowedUp: "1"}
 }
 
 // rerun restarts the step a stuck card left: its column when it is marked stuck there (factory.stuck),
@@ -607,6 +517,10 @@ func (f *Factory) rerun(c Card) error {
 	}
 	if from == "" {
 		return errors.New("this card is not stuck")
+	}
+	switch from {
+	case "plan", "plan-review", "review":
+		from = gateRequest // a card stuck before the gates existed
 	}
 	if err := f.updateRecovery(a, func(r *recovery) { r.Nudges, r.NudgeStage = 0, "" },
 		map[string]string{labelStuck: "", labelReviewerRetries: ""}); err != nil {
@@ -641,10 +555,10 @@ func (f *Factory) rerunStep(c Card, from string) error {
 			return err
 		}
 		return f.setLabels(c.ID, next)
-	case "plan", "plan-review", "building", "review":
-		kind := "code"
-		if from == "plan" || from == "plan-review" {
-			kind = "plan"
+	case "building", gateRequest, gateDesign, gateSignoff:
+		kind := from
+		if !isGate(kind) {
+			kind = gateRequest
 		}
 		if err := f.supersedeReviewers(c.ID); err != nil {
 			return err
@@ -663,7 +577,7 @@ func fromEmail(b Body) bool {
 	return strings.TrimSpace(b.Thread) != "" || b.Origin == "email" || b.Origin == "voice"
 }
 
-// newCard starts a planning agent in a fresh worktree of the chosen repo, or, for repo "auto", a
+// newCard starts a builder in a fresh worktree of the chosen repo, or, for repo "auto", a
 // picker that chooses the repo first (route.go).
 func (f *Factory) newCard(b Body) (map[string]string, error) {
 	req := strings.TrimSpace(b.Request)
@@ -682,11 +596,7 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		title = strings.SplitN(req, "\n", 2)[0]
 	}
 	title = truncWords(strings.TrimSpace(title), 70)
-	agentID := b.Agent
-	if agentID == "" && fromEmail(b) {
-		agentID = defaultAgent
-	}
-	agent, err := f.resolveAgent(agentID)
+	agent, err := f.resolveAgent(b.Agent)
 	if err != nil {
 		return nil, err
 	}
@@ -702,15 +612,16 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		if source != "board" {
 			return nil, errors.New("an email or voice card names its repo")
 		}
-		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, Agent: agent.ID, Thinking: agent.Thinking}
+		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Agent: agent.ID, Thinking: agent.Thinking}
 		if tierRank(b.Tier) >= 0 {
 			r.Tier = b.Tier
 		}
 		return f.startPicker(r)
 	}
+	by := submissionTag(b)
 	repoDir := f.repoDir(repo)
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
-		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelArchiveWatch, "1"), "--label", labelArg(labelSince, iso(f.Now())),
+		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "building"), "--label", labelArg(labelAutoReview, gateRequest), "--label", labelArg(labelSubmittedBy, by), "--label", labelArg(labelArchiveWatch, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))
 	args = append(args, extra...)
 	if branch := f.freeBranch(repoDir, branchSlug(title)); branch != "" {
@@ -718,16 +629,19 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	}
 	if b.Origin == "idea" {
 		args = append(args, "--label", labelArg(labelOrigin, "idea"))
+	} else if strings.TrimSpace(b.Schedule) != "" {
+		// a scheduled run of an approved job: the sign-off gate reads this source
+		args = append(args, "--label", labelArg(labelOrigin, "schedule"))
 	}
 	if tierRank(b.Tier) >= 0 {
 		args = append(args, "--label", labelArg(labelTier, b.Tier))
 	}
 	if b.Title != "" {
-		// the caller named the card (an idea, the email dispatcher): the planner does not rename it
+		// the caller named the card (an idea, the email dispatcher): the builder does not rename it
 		args = append(args, "--label", labelArg(labelTitled, "given"))
 	}
 	prompt := fmt.Sprintf(strings.ReplaceAll(newCardPrompt, "<errands>", f.errandsName()), req, repo, fellowPeersRule(f.cfg.Port, f.Peers("", repo).Text(f.cfg.Location)),
-		tierRules, wholeChangeRule, questionRule)
+		wholeChangeRule, questionRule)
 	prompt += ideaRule(f.cfg.Port, "fellow <first 7 characters of $PASEO_AGENT_ID>", "")
 	prompt += f.delegateRule(false)
 	if f.guarded(repo) {
@@ -792,7 +706,7 @@ func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
 	return files, f.send(id, msg, images...)
 }
 
-// landingReply resumes verification or completion reporting without queuing a code review.
+// landingReply resumes verification or completion reporting without queuing the gates.
 func landingReply(a Agent) bool {
 	note := a.L(labelNote)
 	return note == "landed; did not say what remains"

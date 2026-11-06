@@ -14,16 +14,16 @@ import (
 func TestParseTitle(t *testing.T) {
 	long := "Show the remaining usage for each agent provider on the board header and the picker"
 	for _, c := range []struct{ in, want string }{
-		{"Plan...\nTITLE: Cards get short titles\nTIER: low", "Cards get short titles"},
+		{"Plan...\nTITLE: Cards get short titles\nRESULT: code", "Cards get short titles"},
 		{"**TITLE:** Cards get short titles", "Cards get short titles"},
 		{"TITLE: **Cards get short titles**", "Cards get short titles"},
 		{"TITLE: `Cards get short titles`", "Cards get short titles"},
 		{`TITLE: "Cards get short titles"`, "Cards get short titles"},
 		{"- TITLE: Cards get short titles", "Cards get short titles"},
 		{"> **Title:** _Cards get short titles_", "Cards get short titles"},
-		{"no title here\nTIER: low", ""},
+		{"no title here\nRESULT: code", ""},
 		{"TITLE: <the outcome in at most 60 characters, plain words, no file names>", ""},
-		{"TITLE:   \nTIER: low", ""},
+		{"TITLE:   \nRESULT: code", ""},
 		{"TITLE: First idea\nmore\nTITLE: Second idea", "Second idea"},
 		// a repeated prompt placeholder after the real title does not hide it
 		{"TITLE: Real one\nTITLE: <the outcome in at most 60 characters>", "Real one"},
@@ -123,7 +123,7 @@ func TestScoutTitleCutAtWord(t *testing.T) {
 // planStop is a board card in Plan that stopped after acting, with reply as its last message.
 func planStop(t *testing.T, labels map[string]string, reply string) (*Factory, *fakePaseo) {
 	t.Helper()
-	l := map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)}
+	l := map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute)}
 	for k, v := range labels {
 		l[k] = v
 	}
@@ -133,7 +133,7 @@ func planStop(t *testing.T, labels map[string]string, reply string) (*Factory, *
 }
 
 func TestPlannerNamesCard(t *testing.T) {
-	f, p := planStop(t, nil, "Plan: ...\nTITLE: **Cards get short titles**\nTIER: low")
+	f, p := planStop(t, nil, "Plan: ...\nTITLE: **Cards get short titles**\nRESULT: code")
 	f.Tick()
 	if got := p.names("c1"); len(got) != 1 || got[0] != "Cards get short titles" {
 		t.Errorf("renames = %v", got)
@@ -155,7 +155,7 @@ func TestPlannerNamesDirectCard(t *testing.T) {
 }
 
 func TestPlannerRenamesOnce(t *testing.T) {
-	f, p := planStop(t, map[string]string{labelTitled: "planner"}, "Revised plan\nTITLE: Another name\nTIER: low")
+	f, p := planStop(t, map[string]string{labelTitled: "planner"}, "Revised plan\nTITLE: Another name\nRESULT: code")
 	f.Tick()
 	if got := p.names("c1"); len(got) != 0 {
 		t.Errorf("renamed twice: %v", got)
@@ -163,7 +163,7 @@ func TestPlannerRenamesOnce(t *testing.T) {
 }
 
 func TestGivenTitleKept(t *testing.T) {
-	f, p := planStop(t, map[string]string{labelTitled: "given"}, "Plan\nTITLE: Another name\nTIER: low")
+	f, p := planStop(t, map[string]string{labelTitled: "given"}, "Plan\nTITLE: Another name\nRESULT: code")
 	f.Tick()
 	if got := p.names("c1"); len(got) != 0 {
 		t.Errorf("given title renamed: %v", got)
@@ -171,7 +171,7 @@ func TestGivenTitleKept(t *testing.T) {
 }
 
 func TestInboxCardNotRenamed(t *testing.T) {
-	f, p := planStop(t, map[string]string{labelSource: "email"}, "Plan\nTITLE: Another name\nTIER: low")
+	f, p := planStop(t, map[string]string{labelSource: "email"}, "Plan\nTITLE: Another name\nRESULT: code")
 	f.Tick()
 	if got := p.names("c1"); len(got) != 0 {
 		t.Errorf("inbox card renamed: %v", got)
@@ -179,7 +179,7 @@ func TestInboxCardNotRenamed(t *testing.T) {
 }
 
 func TestPlanWithoutTitleKeepsTitle(t *testing.T) {
-	f, p := planStop(t, nil, "Plan with no title line\nTIER: low")
+	f, p := planStop(t, nil, "Plan with no title line\nRESULT: code")
 	f.Tick()
 	if got := p.names("c1"); len(got) != 0 {
 		t.Errorf("renames = %v", got)
@@ -190,7 +190,7 @@ func TestPlanWithoutTitleKeepsTitle(t *testing.T) {
 }
 
 func TestSameTitleNotRenamed(t *testing.T) {
-	f, p := planStop(t, nil, "Plan\nTITLE: card c1\nTIER: low")
+	f, p := planStop(t, nil, "Plan\nTITLE: card c1\nRESULT: code")
 	f.Tick()
 	if got := p.names("c1"); len(got) != 0 {
 		t.Errorf("renames = %v", got)
@@ -277,7 +277,7 @@ func TestNewCardAvoidsExistingBranch(t *testing.T) {
 func TestPlannerRenamesBranch(t *testing.T) {
 	wt := t.TempDir()
 	initTestRepo(t, wt, "initial-request-slug")
-	a := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	a := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute)})
 	a.Cwd = wt
 	a.Branch = "initial-request-slug"
 	f, p := newTestFactory(t, a)
@@ -285,7 +285,7 @@ func TestPlannerRenamesBranch(t *testing.T) {
 	if err := f.Git(context.Background(), wt, "branch", "cards-get-short-titles"); err != nil {
 		t.Fatal(err)
 	}
-	storeLog(t, f, p, "c1", "[Assistant] Plan: ...\nTITLE: **Cards get short titles**\nTIER: low")
+	storeLog(t, f, p, "c1", "[Assistant] Plan: ...\nTITLE: **Cards get short titles**\nRESULT: code")
 	f.Tick()
 	got, err := f.GitOut(context.Background(), wt, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -298,12 +298,12 @@ func TestPlannerRenamesBranch(t *testing.T) {
 	// Pre-titled cards keep their existing branch.
 	wtGiven := t.TempDir()
 	initTestRepo(t, wtGiven, "ideas-keep-their-title")
-	g := card("c2", map[string]string{labelStage: "plan", labelSource: "board", labelTitled: "given", labelSince: ago(10 * time.Minute)})
+	g := card("c2", map[string]string{labelStage: "building", labelSource: "board", labelTitled: "given", labelSince: ago(10 * time.Minute)})
 	g.Cwd = wtGiven
 	g.Branch = "ideas-keep-their-title"
 	f2, p2 := newTestFactory(t, g)
 	f2.Git, f2.GitOut = runGit, runGitOut
-	storeLog(t, f2, p2, "c2", "[Assistant] Plan\nTITLE: Another name\nTIER: low")
+	storeLog(t, f2, p2, "c2", "[Assistant] Plan\nTITLE: Another name\nRESULT: code")
 	f2.Tick()
 	gotGiven, err := f2.GitOut(context.Background(), wtGiven, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {

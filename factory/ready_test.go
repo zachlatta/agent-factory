@@ -40,23 +40,6 @@ func TestReadyReplyWords(t *testing.T) {
 	}
 }
 
-func TestReadyForYouRoundsGetOneEmailEach(t *testing.T) {
-	// a change request after the first Ready for you: the next code review pass is a new stop and a new email
-	c := card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1",
-		labelCodeRounds: "1", labelReady: "1", labelTold: readyNote(1), labelReviewed: reviewedSHA})
-	f, p := newTestFactory(t, c, reviewer("r2", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r2", "TIER: architecture\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r2"))
-	l := p.labels("c1")
-	if l[labelNote] != readyNote(2) || l[labelReady] != "2" || l[labelStage] != "zach" {
-		t.Errorf("labels = %v", l)
-	}
-	if lineageTold(f.byID(), f.agent("c1")) == waitNote(f.agent("c1")) {
-		t.Error("the second Ready for you must not count as already emailed")
-	}
-}
-
 func TestReadyEmail(t *testing.T) {
 	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
 		labelWriting: ago(5 * 60e9)}), "t1")
@@ -115,16 +98,6 @@ func TestReadyEmailWaitsForThePreview(t *testing.T) {
 	sends := m.sends()
 	if len(sends) != 1 || !strings.Contains(sends[0].Args["text"].(string), "The preview didn't start.") {
 		t.Fatalf("sends = %+v", sends)
-	}
-}
-
-func TestReadyEmailAnswer(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1", labelSource: "board"})
-	c.Labels[gmailThreadLabel] = "th1"
-	f, _, _ := mailFactory(t, c)
-	got, err := f.answerByEmail(Body{Thread: "th1", MessageID: "m1", Text: "Land it"})
-	if err != nil || got["action"] != "approve" {
-		t.Fatalf("answer = %v, %v", got, err)
 	}
 }
 
@@ -659,5 +632,22 @@ func TestReadyMsgAsksForANamedDecision(t *testing.T) {
 	}
 	if strings.Contains(m, "<land this change?") {
 		t.Errorf("still asks for the bare form: %s", m)
+	}
+}
+
+func TestReadyForYouRoundsGetOneEmailEach(t *testing.T) {
+	// a change request after the first Ready for you: the next code review pass is a new stop and a new email
+	c := card("c1", map[string]string{labelStage: gateDesign, labelTier: "architecture", labelRoundsRequest: "1",
+		labelRoundsDesign: "1", labelReady: "1", labelTold: readyNote(1), labelReviewed: reviewedSHA})
+	f, p := newTestFactory(t, c, reviewer("r2", "c1", gateSignoff))
+	headIs(f, reviewedSHA, nil)
+	storeLog(t, f, p, "r2", "SIGN OFF: he should see this\nVERDICT: approve")
+	f.ApplyVerdict(f.agent("r2"))
+	l := p.labels("c1")
+	if l[labelNote] != readyNote(2) || l[labelReady] != "2" || l[labelStage] != "zach" {
+		t.Errorf("labels = %v", l)
+	}
+	if lineageTold(f.byID(), f.agent("c1")) == waitNote(f.agent("c1")) {
+		t.Error("the second Ready for you must not count as already emailed")
 	}
 }

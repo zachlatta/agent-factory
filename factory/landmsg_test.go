@@ -13,7 +13,7 @@ func TestLandingTextNamesNoScript(t *testing.T) {
 	texts := map[string]string{
 		"landMsg":       landMsg,
 		"landMsgFor":    f.landMsgFor(card("c", map[string]string{})),
-		"newCardPrompt": fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "", ""),
+		"newCardPrompt": fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", ""),
 	}
 	for name, s := range texts {
 		if strings.Contains(s, "bin/land") {

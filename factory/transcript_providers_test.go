@@ -215,7 +215,7 @@ func TestAskDetailFromAntigravitySession(t *testing.T) {
 }
 
 func TestTickReadsTrackFromACodexReply(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	c.Provider, c.SessionID = "codex", "sess-t"
@@ -227,16 +227,16 @@ func TestTickReadsTrackFromACodexReply(t *testing.T) {
 	f.SetAgents([]Agent{c})
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != "plan-review" {
+	if l := p.labels("c1"); l[labelStage] != gateRequest {
 		t.Errorf("labels = %v, calls = %v", l, p.calls)
 	}
 }
 
 func TestPeersRequestFromCodexSession(t *testing.T) {
-	a := card("rq1", map[string]string{labelStage: "plan", labelSource: "board"})
+	a := card("rq1", map[string]string{labelStage: "building", labelSource: "board"})
 	a.Provider, a.SessionID, a.Cwd = "codex", "sess-q", "/w/rq1"
 	f, _ := newTestFactory(t, a)
-	prompt := fmt.Sprintf(newCardPrompt, "Make agents aware\nof each other", "example/desk", "", "", "", "")
+	prompt := fmt.Sprintf(newCardPrompt, "Make agents aware\nof each other", "example/desk", "", "", "")
 	line, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "user",
 		"content": []any{map[string]any{"type": "input_text", "text": prompt}}}})
 	writeFile(t, f.cfg.Home+"/.codex/sessions/2026/01/02/rollout-x-sess-q.jsonl",

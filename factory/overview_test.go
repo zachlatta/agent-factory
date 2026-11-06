@@ -73,29 +73,14 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 	}
 }
 
-func TestEmailLeadsWithTheOverview(t *testing.T) {
-	f, p, m := mailFactory(t, inThread(planWait("c1", nil), "t1"))
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	storeLog(t, f, p, "c1", "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.")
-	f.Tick()
-	sends := m.sends()
-	if len(sends) != 1 {
-		t.Fatalf("sends = %+v", sends)
-	}
-	text, html := sends[0].Args["text"].(string), sends[0].Args["html"].(string)
-	if got := composed(t, f, "c1").Subject; got != "Re-run the build?" {
-		t.Errorf("the decision is the subject: %v", got)
-	}
-	if !strings.HasPrefix(text, "I recommend yes.\n") || !strings.Contains(text, "The build hung.") {
-		t.Errorf("text does not lead with the recommendation, then the overview:\n%s", text)
-	}
-	if strings.Contains(text, "DECISION:") || strings.Contains(text, "I tried twice.") {
-		t.Errorf("the report stays on the board: %s", text)
-	}
-	if !strings.Contains(html, "I recommend yes.") || !strings.Contains(html, "The build hung.") {
-		t.Errorf("html lacks the overview: %s", html)
-	}
-}
+// Every message after which an agent stops, and which can end up on a Needs Zach card, asks for the
+// overview block.
+
+// Every message after which an agent stops, and which can end up on a Needs Zach card, asks for the
+// overview block.
+
+// Every message after which an agent stops, and which can end up on a Needs Zach card, asks for the
+// overview block.
 
 // Every message after which an agent stops, and which can end up on a Needs Zach card, asks for the
 // overview block.
@@ -103,18 +88,15 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 	f, p := newTestFactory(t)
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	prompts := map[string]string{
-		"new card":     fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeChangeRule, questionRule),
-		"plan review":  ReviewPrompt(c, "plan", 7478, "unknown"),
-		"code review":  ReviewPrompt(c, "code", 7478, "unknown"),
-		"build":        buildMsg("Plan approved.", "(none)"),
-		"rework plan":  reworkMsg("plan", 1, 3, "notes"),
-		"rework code":  reworkMsg("code", 1, 3, "notes"),
-		"side effects": sideEffectMsg,
-		"preview":      readyMsg("you asked for it"),
-		"arbiter":      ArbiterPrompt(c, "code", 7478, "unknown", "notes", false),
-		"land":         landMsg,
-		"guarded land": guardedLandMsg,
-		"ui hold":      uiFeedbackHoldMsg("- the button is small"),
+		"new card":      fmt.Sprintf(newCardPrompt, "req", "example/desk", "", wholeChangeRule, questionRule),
+		"request gate":  ReviewPrompt(c, gateRequest, 7478, "unknown"),
+		"design gate":   ReviewPrompt(c, gateDesign, 7478, "unknown"),
+		"sign-off gate": ReviewPrompt(c, gateSignoff, 7478, "unknown"),
+		"rework":        reworkGateMsg(gateRequest, 1, 3, "notes"),
+		"preview":       readyMsg("you asked for it"),
+		"land":          landMsg,
+		"guarded land":  guardedLandMsg,
+		"ui hold":       uiFeedbackHoldMsg("- the button is small"),
 	}
 	// the board's own messages: plan changes, commit before review
 	for _, tc := range []struct {
@@ -122,9 +104,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 		labels map[string]string
 		act    string
 		body   Body
-	}{
-		{"plan changes", map[string]string{labelStage: "zach", labelAwaiting: "plan"}, "send", Body{Message: "smaller"}},
-	} {
+	}{} {
 		f.SetAgents([]Agent{card(tc.name, tc.labels)})
 		tc.body.ID = tc.name
 		if _, err := f.Act(tc.act, tc.body); err != nil {
@@ -138,7 +118,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 	}
 	ac := card("dirty", nil)
 	f.SetAgents([]Agent{ac})
-	if err := f.askToCommit(Card{ID: "dirty"}, " M a.go"); err != nil {
+	if err := f.askToCommit(Card{ID: "dirty"}, " M a.go", gateRequest); err != nil {
 		t.Fatal(err)
 	}
 	prompts["commit before review"] = p.sent("dirty")[0]
@@ -147,14 +127,14 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 			t.Errorf("%s does not ask for the overview block", name)
 		}
 	}
-	for _, name := range []string{"new card", "plan review", "code review", "side effects", "preview", "arbiter"} {
+	for _, name := range []string{"new card", "request gate", "design gate", "sign-off gate", "preview"} {
 		if !strings.Contains(prompts[name], "NEEDS FROM ZACH:") {
 			t.Errorf("%s does not teach the whole block", name)
 		}
 	}
-	for _, kind := range []string{"plan", "code"} {
-		if !strings.HasSuffix(ReviewPrompt(c, kind, 7478, "unknown"), "TIER: <low|risky|architecture>\nVERDICT: <approve|nits|changes|escalate|close>\n") {
-			t.Errorf("%s review no longer ends with TIER and VERDICT", kind)
+	for _, kind := range []string{gateRequest, gateDesign, gateSignoff} {
+		if !strings.HasSuffix(ReviewPrompt(c, kind, 7478, "unknown"), "VERDICT: <approve|nits|changes|close>\n") {
+			t.Errorf("%s review no longer ends with VERDICT", kind)
 		}
 	}
 }

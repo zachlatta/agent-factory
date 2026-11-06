@@ -6,25 +6,6 @@ import (
 	"testing"
 )
 
-func TestRepairApprovalReasons(t *testing.T) {
-	for _, tc := range []struct{ finding, asked, files, want string }{
-		{"unchanged: only the test setup changed", "", "", ""},
-		{"changed: output changed", "", "", "you asked"},
-		{"unsure: insufficient evidence", "", "", "you asked"},
-		{"", "", "", "you asked"},
-		{"unchanged: only setup changed", "arbiter decision", "", "arbiter decision"},
-		{"unchanged: only setup changed", "", "AGENTS.md", "AGENTS.md"},
-	} {
-		f, _ := newTestFactory(t)
-		a := card("c1", map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorRepair: "1", labelBehaviorSummary: "c3VtbWFyeQ"})
-		f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": tc.files, "diff --no-ext-diff --no-renames --unified=0 base.." + reviewedSHA + " -- AGENTS.md": "", "diff --no-ext-diff --no-renames --unified=0 origin/main...HEAD -- AGENTS.md": "+new rule"})
-		got := f.finishedWorkReason(a, "architecture", "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: "+tc.finding, tc.asked)
-		if (got == "") != (tc.want == "") || !strings.Contains(got, tc.want) {
-			t.Errorf("%+v: %q", tc, got)
-		}
-	}
-}
-
 func TestApprovalOnlyFinishedWork(t *testing.T) {
 	f, _ := newTestFactory(t)
 	for _, note := range []string{readyPrefix, "scan failed"} {
@@ -38,7 +19,7 @@ func TestApprovalOnlyFinishedWork(t *testing.T) {
 
 func TestFinishedApprovalRecoveryAndFreshReview(t *testing.T) {
 	for _, held := range []bool{false, true} {
-		labels := map[string]string{labelStage: "zach", labelNote: readyPrefix, labelReadyHead: reviewedSHA, labelReviewed: reviewedSHA, labelTier: "architecture", labelPlanRounds: "1"}
+		labels := map[string]string{labelStage: "zach", labelNote: readyPrefix, labelReadyHead: reviewedSHA, labelReviewed: reviewedSHA, labelTier: "architecture", labelRoundsRequest: "1"}
 		if held {
 			labels[labelWaitsOn] = "d0e0001"
 		}
@@ -64,7 +45,7 @@ func TestFinishedApprovalRecoveryAndFreshReview(t *testing.T) {
 		f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": "", "status --porcelain": ""})
 		headIs(f, reviewedSHA, nil)
 		next := map[string]string{}
-		if err := f.passCode(a, next, "code approve", "architecture", "APPROVED BEHAVIOR: unchanged: output matches approved contract\nALWAYS ASK: none\nREPAIR ALWAYS ASK: none", ""); err != nil {
+		if err := f.passSignoffForTest(a, next, "code approve", "architecture", "APPROVED BEHAVIOR: unchanged: output matches approved contract\nALWAYS ASK: none\nREPAIR SIGN OFF: none", ""); err != nil {
 			t.Fatal(err)
 		}
 		if got := p.labels("c1")[labelStage]; got != "landing" {
@@ -123,7 +104,7 @@ func TestNewInstructionsCancelRepairApproval(t *testing.T) {
 			if reuseBehaviorApproval(a, "APPROVED BEHAVIOR: unchanged: fixture repair") {
 				t.Fatal("new instructions retained approval")
 			}
-			if got := f.finishedWorkReason(a, "architecture", "ALWAYS ASK: none\nREPAIR ALWAYS ASK: none\nAPPROVED BEHAVIOR: unchanged: fixture repair", ""); got == "" {
+			if got := f.finishedWorkReason(a, "ALWAYS ASK: none\nREPAIR SIGN OFF: none\nAPPROVED BEHAVIOR: unchanged: fixture repair"); got == "" {
 				t.Fatal("must ask again")
 			}
 		})
@@ -142,10 +123,30 @@ func TestSteerCancelsRepairApproval(t *testing.T) {
 	}
 }
 
+func TestRepairAlwaysAskScope(t *testing.T) {
+	for _, tc := range []struct {
+		scoped string
+		want   bool
+	}{
+		{"REPAIR SIGN OFF: none", false},
+		{"", true},
+		{"REPAIR SIGN OFF: new service", true},
+		{"REPAIR SIGN OFF: new service\nREPAIR SIGN OFF: none", true},
+	} {
+		f, _ := newTestFactory(t)
+		a := card("c1", map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorRepair: "1", labelBehaviorSummary: "c3VtbWFyeQ"})
+		f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": ""})
+		report := "APPROVED BEHAVIOR: unchanged: approved contract preserved\nALWAYS ASK: architecture change already approved\n" + tc.scoped
+		if got := f.finishedWorkReason(a, report); (got != "") != tc.want {
+			t.Fatalf("%q: %q", tc.scoped, got)
+		}
+	}
+}
+
 func TestInterruptedRepairKeepsApproval(t *testing.T) {
 	for _, action := range []string{"resume", "rerun"} {
 		t.Run(action, func(t *testing.T) {
-			a := card("c1", map[string]string{labelCodeRounds: "4", labelCodeRoundsFrom: "1", labelReviewerRetries: "2", labelArbitrated: "plan code", labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived, labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1", labelReviewed: reviewedSHA})
+			a := card("c1", map[string]string{labelRoundsDesign: "4", labelReviewerRetries: "2", labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived, labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1", labelReviewed: reviewedSHA})
 			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
@@ -155,7 +156,7 @@ func TestInterruptedRepairKeepsApproval(t *testing.T) {
 			}
 			a = labeled(f.agent(a.ID), p.labels(a.ID))
 			for key, want := range map[string]string{
-				labelCodeRoundsFrom: "4", labelReviewerRetries: "", labelArbitrated: "plan",
+				labelReviewerRetries:  "",
 				labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
 			} {
 				if got := a.L(key); got != want {
@@ -164,32 +165,12 @@ func TestInterruptedRepairKeepsApproval(t *testing.T) {
 			}
 			f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": "", "status --porcelain": ""})
 			headIs(f, reviewedSHA, nil)
-			if err := f.passCode(a, map[string]string{}, "code approve", "architecture", "APPROVED BEHAVIOR: unchanged: only fixture setup changed\nALWAYS ASK: architecture and approval gate changes\nREPAIR ALWAYS ASK: none", ""); err != nil {
+			if err := f.passSignoffForTest(a, map[string]string{}, "code approve", "architecture", "APPROVED BEHAVIOR: unchanged: only fixture setup changed\nALWAYS ASK: architecture and approval gate changes\nREPAIR SIGN OFF: none", ""); err != nil {
 				t.Fatal(err)
 			}
 			if p.labels(a.ID)[labelStage] != "landing" {
 				t.Fatalf("approval lost: %v", p.labels(a.ID))
 			}
 		})
-	}
-}
-
-func TestRepairAlwaysAskScope(t *testing.T) {
-	for _, tc := range []struct {
-		scoped string
-		want   bool
-	}{
-		{"REPAIR ALWAYS ASK: none", false},
-		{"", true},
-		{"REPAIR ALWAYS ASK: new service", true},
-		{"REPAIR ALWAYS ASK: new service\nREPAIR ALWAYS ASK: none", true},
-	} {
-		f, _ := newTestFactory(t)
-		a := card("c1", map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorRepair: "1", labelBehaviorSummary: "c3VtbWFyeQ"})
-		f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "diff --no-renames --name-only base.." + reviewedSHA: "", "diff --no-renames --name-only origin/main...HEAD": ""})
-		report := "APPROVED BEHAVIOR: unchanged: approved contract preserved\nALWAYS ASK: architecture change already approved\n" + tc.scoped
-		if got := f.finishedWorkReason(a, "architecture", report, ""); (got != "") != tc.want {
-			t.Fatalf("%q: %q", tc.scoped, got)
-		}
 	}
 }

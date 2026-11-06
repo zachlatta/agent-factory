@@ -99,9 +99,9 @@ func finishAsk(ask *Ask) {
 // boardOnly reports whether the wait is shown on the board only, never emailed: a finished or
 // hand-moved card, a running agent (permission prompt, stall, writing its summary), a card marked stuck
 // by automatic recovery (recover.go), a paused decision, a reviewed commit that cannot be confirmed, a
-// close or duplicate verdict, a review that did not settle (the arbiter's to decide, not his), and the
+// close or duplicate verdict, and the
 // checks after landing.
-// Decisions (allowing a build, previews, landings, repo choice, the secret scan, an agent waiting on him)
+// Decisions (finished work, previews, landings, repo choice, the secret scan, an agent waiting on him)
 // are emailed, and so is a landed diff on a public repo whose secret scan did not pass: something
 // unreviewed may already be public.
 func boardOnly(c Card, a Agent, ask *Ask) bool {
@@ -115,8 +115,6 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 		return true
 	case strings.HasPrefix(note, unverifiedReviewNote):
 		// a technical stop: publication is unverified, and Re-run starts a fresh review
-		return true
-	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
 		return true
 	case strings.HasPrefix(note, landDiffNotePrefix):
 		return !strings.Contains(note, landDiffScanMark)
@@ -166,11 +164,6 @@ func baseAsk(c Card, a Agent) *Ask {
 			Actions: []Action{primary("rerun", "Re-run the step"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case a.L(labelAwaiting) == "repo":
 		return repoAsk(note, a.L(labelCandidates))
-	case a.L(labelAwaiting) == "plan":
-		return &Ask{Label: "Allow the build", Kind: askDecision, Title: "Allow this build?", From: "builder",
-			Why: "Other agents reviewed the plan. Building it would change something outside its own copy of the code (or that was not ruled out), so nothing is built until you allow it. A code review still runs before it lands.",
-			Actions: []Action{primary("approve", "Allow & build"),
-				reply("Send back with changes", "What should change?"), act("close", "Drop it")}}
 	case strings.HasPrefix(note, "secret scan"):
 		// a fix first, not a landing: its own buttons, never Land / Change / Drop
 		return &Ask{Label: "Publishing stopped: fix it", Kind: askDecision, Title: "Private text found before publishing: fix it?", From: "builder",
@@ -197,14 +190,11 @@ func baseAsk(c Card, a Agent) *Ask {
 			why = "The reviewed work is not on origin/main."
 		}
 		if note == parkedStaleNote {
-			why = "The work changed after review and needs a fresh code review."
+			why = "The work changed after review and needs a fresh pass through the gates."
 		}
 		return &Ask{Label: "Review needed", Title: "Review needed: could not verify reviewed work", From: "builder",
-			Why:     why + " " + strings.TrimRight(strings.ReplaceAll(strings.TrimPrefix(note, unverifiedReviewNote), why, ""), ". ") + ". Re-running starts a fresh code review of what the card has now.",
+			Why:     why + " " + strings.TrimRight(strings.ReplaceAll(strings.TrimPrefix(note, unverifiedReviewNote), why, ""), ". ") + ". Re-running starts the gates on what the card has now.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
-	case note == arbiterStuckNote || note == "rework cap reached" || note == "reviewer escalated":
-		// the last two are cards that waited for Zach's brief before the arbiter took over the cap
-		return settleAsk()
 	case a.L(labelVerdict) == "close":
 		return &Ask{Label: "Close this card?", Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",
@@ -251,7 +241,7 @@ func baseAsk(c Card, a Agent) *Ask {
 // repoAsk is the question for a repo picker in Needs Zach: which repo the card starts in.
 func repoAsk(note, candidates string) *Ask {
 	ask := &Ask{Label: "Pick a repo", Kind: askDecision, Title: repoTitle, From: "builder",
-		Why: "The factory could not tell which repo this belongs in. Pick one and the card starts planning there. The picker's reasoning is below."}
+		Why: "The factory could not tell which repo this belongs in. Pick one and the card starts building there. The picker's reasoning is below."}
 	switch note {
 	case "routing failed":
 		ask.Why = "A repo was picked, but starting the card there failed (the reason is in the factory log). Pick a repo to try again."
@@ -266,26 +256,6 @@ func repoAsk(note, candidates string) *Ask {
 	ask.Actions = append(ask.Actions, Action{ID: "pickrepo", Label: "Other repo…", Primary: len(ask.Actions) == 0},
 		reply("Reply", "e.g. it's about the PDW Android app"), act("close", "Drop it"))
 	return ask
-}
-
-// askQuestions is the builder's QUESTION blocks shown with ask: none on a review that did not settle.
-// Those were written for a ruling the arbiter now makes, and its action carries no answers, so picking one
-// could only be refused; Zach can still write his own answer through the reply.
-func askQuestions(ask *Ask, qs []Question) []Question {
-	if ask != nil && actionFor(ask, "arbiter") != nil {
-		return nil
-	}
-	return qs
-}
-
-// settleAsk is the Ask for a card whose review did not settle even with the arbiter (or that waited for
-// Zach at the review cap before the arbiter existed): another arbiter, his own instructions, or drop it.
-func settleAsk() *Ask {
-	return &Ask{Label: "Reviews stuck", Title: "Reviews didn't settle", From: "builder",
-		Why: "The reviewers and the builder could not agree. Let an agent weigh both sides and decide, or tell the " +
-			"builder what to do. The builder's last message is below.",
-		Actions: []Action{primary("arbiter", "Let an agent decide"), reply("Tell it what to do", "e.g. ignore the second point, fix the first"),
-			act("close", "Drop it")}}
 }
 
 func stalledFlag(c Card) string {
@@ -339,7 +309,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 			ask.Request = cached.request
 		}
 		if ok && (cached.key == key || !fetch) {
-			ask.Detail, ask.Questions, ask.Overview = cached.text, askQuestions(ask, cached.questions), cached.overview
+			ask.Detail, ask.Questions, ask.Overview = cached.text, (cached.questions), cached.overview
 			ask.Evidence = cached.evidence
 			ask.Report = cached.report
 			if fetch {
@@ -370,7 +340,7 @@ func (f *Factory) fillAsks(cards []Card, agents []Agent, fetch bool) {
 		f.mu.Lock()
 		f.details[cards[n].ID] = detailEntry{key, ask.Detail, ask.Questions, ask.Overview, ask.Evidence, ask.Report, ask.Request}
 		f.mu.Unlock()
-		ask.Questions = askQuestions(ask, ask.Questions) // the cache keeps them: the ask can change without new activity
+		ask.Questions = (ask.Questions) // the cache keeps them: the ask can change without new activity
 		refineAsk(ask)
 	}
 }

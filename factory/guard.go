@@ -14,8 +14,8 @@ import (
 // Guarded repos are public: anything that lands there is published. For their cards the factory
 // runs the secret scan itself before any landing (from this binary, with origin/main's gitleaks
 // config, so a card cannot weaken the scan that checks it). Reviewers are told the repo is public,
-// and private data in the diff is blocking. A card lands on its own once its code review approves
-// and that scan passes, under the usual tier rules; a scan hit or error stops it for Zach. Their
+// and private data in the diff is blocking. A card lands once its gates pass and that scan passes;
+// a scan hit or error stops it for Zach. Their
 // ideas start on their own like any repo's (ideas.go), and the direct track is off. Other repos are
 // unaffected.
 
@@ -26,7 +26,7 @@ func (f *Factory) guarded(repo string) bool {
 
 const publicCardNote = `
 This repo is public: everything that lands here is published. So:
-- No direct track: every change is a build-track card. It lands on its own only after both reviews
+- No direct track: every change goes through the gates. A first pass that says it took one is scanned and stops for Zach. It lands only after the gates
   and the factory's secret scan pass.
 - Never commit secrets, hostnames, IP addresses, email addresses, home-directory paths, thread or
   session ids, quotes from Zach or personal facts, in code, comments, tests, docs or commit messages.
@@ -42,7 +42,7 @@ messages or the commit authors; and any change to the secret scan (factory/scan/
 
 // guardedLandMsg replaces the landing message for a guarded card.
 const guardedLandMsg = "Land it now with bin/land (it scans, tests, rebases and pushes HEAD:main). Land exactly the " +
-	"reviewed commits: do not commit anything else first. Never use --no-verify. Then run any deploy steps from your reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system). Then stop with " +
+	"reviewed commits: do not commit anything else first. Never use --no-verify. " + landRunbookRule + "Then run any deploy steps or runbook from the reviewed summary and verify the landing and deploy (if a deploy step fails after the push, stop and report it; do not improvise a fix on the live system). Then stop with " +
 	"a one-line summary. " + overviewReminder + " " + shellRule + " " + scratchCleanupRule
 
 // scanCard runs the secret scan on what the card at cwd would publish (origin/main..HEAD). It

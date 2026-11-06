@@ -214,7 +214,7 @@ func TestUsageCollectionKeepsQuietCardsSeparate(t *testing.T) {
 	labels := map[string]map[string]string{
 		"anchor": {labelPrefix + labelRole: quietAnchorRole, parentAgentLabel: quietBootstrapParent},
 		"first":  {labelPrefix + labelStage: "building", parentAgentLabel: "anchor"},
-		"second": {labelPrefix + labelStage: "review", parentAgentLabel: "anchor"},
+		"second": {labelPrefix + labelStage: gateDesign, parentAgentLabel: "anchor"},
 		"review": {labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewKind: "code", labelPrefix + labelReviewOf: "first", parentAgentLabel: "anchor"},
 		"child":  {parentAgentLabel: "first"},
 		"nested": {parentAgentLabel: "review"},

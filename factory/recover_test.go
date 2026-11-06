@@ -61,90 +61,6 @@ func TestErrorWaitSurvivesRestartAndLabelActivity(t *testing.T) {
 	}
 }
 
-// A known reset resumes once on the same model, then the error retries after 2, 10 and 30
-// minutes, then the card is marked stuck in its column: never Needs Zach, never an email.
-func TestErrorRetriesThenStuckWithoutEmail(t *testing.T) {
-	for _, stage := range []string{"plan", "building", "landing"} {
-		t.Run(stage, func(t *testing.T) {
-			a := quotaCard(stage)
-			a.LastActivityAt = t0.Add(-time.Hour) // the reset is already past
-			f, p, m := mailFactory(t, a)
-			now := t0
-			tick := func() {
-				t.Helper()
-				f.SetAgents([]Agent{a})
-				if err := f.tickAgent(a, now); err != nil {
-					t.Fatal(err)
-				}
-			}
-			tick()
-			if msgs := p.sent(a.ID); len(msgs) != 1 || msgs[0] != limitResumeMessage {
-				t.Fatalf("reset resume = %v", msgs)
-			}
-			for n, wait := range errorBackoff {
-				// the attempt failed the same way
-				a = failedAgain(a, p.labels(a.ID), now)
-				now = now.Add(limitGrace)
-				tick() // plans the next try
-				if len(p.sent(a.ID)) != n+1 {
-					t.Fatalf("try %d sent early: %v", n+1, p.sent(a.ID))
-				}
-				a = withLabels(a, p.labels(a.ID))
-				if r := readRecovery(a); r.FromReset || !r.Reset.Equal(now.Add(wait)) {
-					t.Fatalf("try %d: next at %v, want %v after the failure", n+1, r.Reset, wait)
-				}
-				now = now.Add(wait)
-				tick()
-				if msgs := p.sent(a.ID); len(msgs) != n+2 || msgs[n+1] != errorRetryMessage {
-					t.Fatalf("try %d: messages = %v", n+1, msgs)
-				}
-			}
-			a = failedAgain(a, p.labels(a.ID), now)
-			now = now.Add(limitGrace)
-			tick()
-			l := p.labels(a.ID)
-			if l[labelStuck] != stuckAgentError || (l[labelStage] != "" && l[labelStage] != stage) || len(p.sent(a.ID)) != 4 {
-				t.Fatalf("not marked stuck in %s: %v, sent %v", stage, l, p.sent(a.ID))
-			}
-			a = withLabels(a, l)
-			now = now.Add(time.Hour)
-			tick()
-			if len(p.sent(a.ID)) != 4 || len(m.sends()) != 0 {
-				t.Fatalf("stuck card retried or emailed: %v %v", p.sent(a.ID), m.sends())
-			}
-			if n := len(p.runsWithLabel(labelArg(labelRole, "reviewer"))); n != 0 || p.labels(a.ID)[labelAutoReview] == "" && a.L(labelAutoReview) == "" {
-				t.Fatalf("an errored card started its queued review (%d) or lost it", n)
-			}
-			f.SetAgents([]Agent{a})
-			c, _ := f.card(a.ID)
-			if c.Stage != stage || c.Ask == nil || actionIDs(c.Ask) != "resume,reply,close" || !strings.Contains(c.Ask.Why, a.LastError) ||
-				!slices.Contains(c.Flags, stuckFlagPrefix+stuckAgentError) {
-				t.Fatalf("board: stage %s flags %v ask %+v", c.Stage, c.Flags, c.Ask)
-			}
-
-			// Resume makes one attempt; its failure marks the card stuck again without rearming retries.
-			if _, err := f.Act("resume", Body{ID: a.ID}); err != nil {
-				t.Fatal(err)
-			}
-			if l := p.labels(a.ID); len(p.sent(a.ID)) != 5 || l[labelStuck] != "" || l[labelStage] != stage {
-				t.Fatalf("resume: %v %v", l, p.sent(a.ID))
-			}
-			if _, err := f.Act("resume", Body{ID: a.ID}); err == nil {
-				t.Fatal("duplicate resume accepted")
-			}
-			a = failedAgain(a, p.labels(a.ID), now)
-			now = now.Add(limitGrace)
-			tick()
-			now = now.Add(time.Hour)
-			a = withLabels(a, p.labels(a.ID))
-			tick()
-			if l := p.labels(a.ID); l[labelStuck] != stuckAgentError || len(p.sent(a.ID)) != 5 {
-				t.Fatalf("manual resume rearmed retries: %v %v", l, p.sent(a.ID))
-			}
-		})
-	}
-}
-
 func TestUnknownErrorStartsTimedRetries(t *testing.T) {
 	a := quotaCard("building")
 	a.LastError = "Unrecognized provider error"
@@ -336,28 +252,11 @@ func TestOldLimitLabelIsReadThenCleared(t *testing.T) {
 	}
 }
 
-func TestErrorReviewerIsReplaced(t *testing.T) {
-	c := card("parent", map[string]string{labelStage: "review", labelSince: ago(time.Hour)})
-	c.LastActivityAt = t0.Add(-time.Hour)
-	r := reviewer("failed-review", "parent", "code")
-	r.Status = "error"
-	f, p, m := mailFactory(t, c, r)
-	f.Tick()
-	if reviewPending([]Agent{r}, c.ID, t0) {
-		t.Fatal("error reviewer counts as pending")
-	}
-	l := p.labels(c.ID)
-	if l[labelStage] != "review" || l[labelReviewerRetries] != "1" || !p.called("archive", r.ID) || p.labels(r.ID)[labelApplied] != "1" ||
-		len(p.runsWithLabel(labelArg(labelReviewOf, c.ID))) != 1 || len(m.sends()) != 0 {
-		t.Fatalf("error reviewer not replaced: %v %v", l, p.calls)
-	}
-}
-
 func TestBlockedReviewerIsReplaced(t *testing.T) {
 	for _, why := range []string{"permission", "stalled"} {
-		c := card("parent", map[string]string{labelStage: "plan-review", labelSince: ago(time.Hour)})
+		c := card("parent", map[string]string{labelStage: gateRequest, labelSince: ago(time.Hour)})
 		c.LastActivityAt = t0.Add(-time.Hour)
-		r := reviewer("blocked-review", "parent", "plan")
+		r := reviewer("blocked-review", "parent", gateRequest)
 		r.Status, r.LastActivityAt = "running", t0.Add(-(stallMinutes+1)*time.Minute)
 		if why == "permission" {
 			r.Pending, r.LastActivityAt = "Bash: rm -rf x", t0.Add(-stuckAfter)
@@ -373,7 +272,7 @@ func TestBlockedReviewerIsReplaced(t *testing.T) {
 
 func recoveryLandingCard(repo string) Agent {
 	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelReviewed: "h1",
-		labelBase: "b0", labelTier: "low", labelPlanRounds: "1"})
+		labelBase: "b0", labelTier: "low", labelRoundsRequest: "1"})
 	c.Repo = repo
 	return c
 }
@@ -394,7 +293,7 @@ func TestLandingNotVerifiedReturnsToBuildingThenStuck(t *testing.T) {
 		f.Tick()
 		l := p.labels("c1")
 		msgs := p.sent("c1")
-		if l[labelStage] != "building" || l[labelAutoReview] != "code" || len(msgs) != n {
+		if l[labelStage] != "building" || l[labelAutoReview] == "" || len(msgs) != n {
 			t.Fatalf("return %d: %v %v", n, l, msgs)
 		}
 		for _, want := range []string{"rebase conflict in a.go", "Rebase on origin/main", "secret scan hit", "git rebase -i"} {
@@ -477,7 +376,7 @@ func TestLandedDiffDiffersOnAPublicRepo(t *testing.T) {
 
 func TestLandedDiffRecoveryReviewsPublishedHead(t *testing.T) {
 	c := card("c1", map[string]string{
-		labelStage: "building", labelAutoReview: "code", labelPlanRounds: "1",
+		labelStage: "building", labelAutoReview: gateRequest, labelRoundsRequest: "1",
 		labelSince: ago(10 * time.Minute), labelLandedVerified: "1", labelReviewed: "h1",
 	})
 	b, _ := json.Marshal(recovery{Lands: 1, LandedDiff: true})
@@ -489,21 +388,21 @@ func TestLandedDiffRecoveryReviewsPublishedHead(t *testing.T) {
 	})
 	storeLog(t, f, p, c.ID, "The published change needs no further edits.\nREMAINING: none")
 	f.Tick()
-	if l := p.labels(c.ID); l[labelStage] != "review" || l[labelReviewed] != "h2" || p.runs != 1 {
+	if l := p.labels(c.ID); l[labelStage] != gateRequest || l[labelReviewed] != "h2" || p.runs != 1 {
 		t.Fatalf("published recovery skipped review: labels %v runs %d", l, p.runs)
 	}
 }
 
 func TestReLandAfterRecoveryStillScans(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "1",
+	c := card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelRoundsDesign: "1",
 		labelReviewed: reviewedSHA})
 	c.Repo = publicRepo
 	b, _ := json.Marshal(recovery{Lands: 1})
 	c.Labels[labelPrefix+labelRecovery] = base64.RawURLEncoding.EncodeToString(b)
-	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
 	ranges := fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +412,7 @@ func TestReLandAfterRecoveryStillScans(t *testing.T) {
 }
 
 func TestDirectCardNotOnMainIsToldOnceThenStuck(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.Cwd = t.TempDir()
 	f, p, m := mailFactory(t, c)
 	storeLog(t, f, p, "c1", "Landed the work item.\nTRACK: direct")
@@ -584,59 +483,19 @@ func TestStuckMarkerClearsWhenTheCardRunsAgain(t *testing.T) {
 	}
 }
 
-// Cards left in Needs Zach by waits that are now recovered automatically move on their next pass.
-func TestOldWaitsMoveToAutomaticRecovery(t *testing.T) {
-	exhausted, _ := json.Marshal(map[string]any{"Stage": "landing", "Phase": "blocked"})
-	for _, tc := range []struct {
-		name   string
-		labels map[string]string
-		repo   string
-		stage  string // the stage label written ("" = none)
-		stuck  string
-		sends  int
-	}{
-		{"agent error", map[string]string{labelNote: legacyLimitNote, legacyLimitLabel: base64.RawURLEncoding.EncodeToString(exhausted)}, "", "landing", stuckAgentError, 0},
-		{"stuck builder", map[string]string{labelNote: "stuck", labelStuckFrom: "building"}, "", "building", stuckStopped, 0},
-		{"stuck reviewer", map[string]string{labelNote: "stuck", labelStuckFrom: "review"}, "", "review", stuckReview, 0},
-		{"no verdict", map[string]string{labelNote: legacyNoVerdictNote, labelStuckFrom: "plan-review"}, "", "plan-review", stuckReview, 0},
-		{"landing not verified", map[string]string{labelNote: legacyNotVerified}, "", "building", "", 1},
-		{"direct not on main", map[string]string{labelNote: legacyNotVerified, labelTrack: "direct"}, "", "plan", stuckLanding, 0},
-		{"landed diff, private", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, "", "building", "", 1},
-		{"landed diff, public", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, publicRepo, "", "", 0},
-		{"history unavailable stays", map[string]string{labelNote: histWait, labelStuckFrom: "review"}, "", "", "", 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", tc.labels)
-			c.Labels[labelPrefix+labelStage] = "zach"
-			if tc.repo != "" {
-				c.Repo = tc.repo
-			}
-			f, p, m := mailFactory(t, c)
-			f.Tick()
-			l := p.labels("c1")
-			if l[labelStage] != tc.stage || l[labelStuck] != tc.stuck || len(p.sent("c1")) != tc.sends {
-				t.Fatalf("labels %v sent %v", l, p.sent("c1"))
-			}
-			if moved := tc.stage != ""; moved && len(m.sends()) != 0 {
-				t.Errorf("moved wait was emailed: %v", m.sends())
-			}
-		})
-	}
-}
-
 func TestReplyToAStuckCardClearsTheMark(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelStuck: stuckStopped, labelPlanRounds: "1"})
+	c := card("c1", map[string]string{labelStage: "building", labelStuck: stuckStopped, labelRoundsRequest: "1"})
 	f, p := newTestFactory(t, c)
 	if _, err := f.Act("send", Body{ID: "c1", Message: "try the other approach"}); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelStuck] != "" || l[labelStage] != "building" || l[labelAutoReview] != "code" || len(p.sent("c1")) != 1 {
+	if l := p.labels("c1"); l[labelStuck] != "" || l[labelStage] != "building" || l[labelAutoReview] == "" || len(p.sent("c1")) != 1 {
 		t.Fatalf("labels %v sent %v", l, p.sent("c1"))
 	}
 }
 
 func TestStuckPickerIsAskedForItsRepoLine(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelRouting: "1", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: stageRoute, labelRouting: "1", labelSince: ago(10 * time.Minute)})
 	c.LastActivityAt = t0.Add(-time.Hour)
 	f, p := newTestFactory(t, c)
 	f.Tick()
@@ -718,6 +577,153 @@ func TestLegacyErrorWaitMovesToDoneWhenLanded(t *testing.T) {
 			l := p.labels(c.ID)
 			if v, ok := l[labelStuck]; !ok || v != "" || l[labelStage] != "landed" || l[labelNote] != "landed; "+legacyLimitNote || len(p.sent(c.ID)) != 0 || len(m.sends()) != 0 {
 				t.Fatalf("labels %v sent %v mails %v", l, p.sent(c.ID), m.sends())
+			}
+		})
+	}
+}
+
+// A known reset resumes once on the same model, then the error retries after 2, 10 and 30
+// minutes, then the card is marked stuck in its column: never Needs Zach, never an email.
+
+func TestErrorReviewerIsReplaced(t *testing.T) {
+	c := card("parent", map[string]string{labelStage: gateDesign, labelSince: ago(time.Hour)})
+	c.LastActivityAt = t0.Add(-time.Hour)
+	r := reviewer("failed-review", "parent", gateSignoff)
+	r.Status = "error"
+	f, p, m := mailFactory(t, c, r)
+	f.Tick()
+	if reviewPending([]Agent{r}, c.ID, t0) {
+		t.Fatal("error reviewer counts as pending")
+	}
+	l := p.labels(c.ID)
+	if !isGate(l[labelStage]) || l[labelReviewerRetries] != "1" || !p.called("archive", r.ID) || p.labels(r.ID)[labelApplied] != "1" ||
+		len(p.runsWithLabel(labelArg(labelReviewOf, c.ID))) != 1 || len(m.sends()) != 0 {
+		t.Fatalf("error reviewer not replaced: %v %v", l, p.calls)
+	}
+}
+
+// Cards left in Needs Zach by waits that are now recovered automatically move on their next pass.
+func TestOldWaitsMoveToAutomaticRecovery(t *testing.T) {
+	exhausted, _ := json.Marshal(map[string]any{"Stage": "landing", "Phase": "blocked"})
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		repo   string
+		stage  string // the stage label written ("" = none)
+		stuck  string
+		sends  int
+	}{
+		{"agent error", map[string]string{labelNote: legacyLimitNote, legacyLimitLabel: base64.RawURLEncoding.EncodeToString(exhausted)}, "", "landing", stuckAgentError, 0},
+		{"stuck builder", map[string]string{labelNote: "stuck", labelStuckFrom: "building"}, "", "building", stuckStopped, 0},
+		{"stuck reviewer", map[string]string{labelNote: "stuck", labelStuckFrom: "review"}, "", gateRequest, stuckReview, 0},
+		{"no verdict", map[string]string{labelNote: legacyNoVerdictNote, labelStuckFrom: "plan-review"}, "", gateRequest, stuckReview, 0},
+		{"landing not verified", map[string]string{labelNote: legacyNotVerified}, "", "building", "", 1},
+		{"direct not on main", map[string]string{labelNote: legacyNotVerified, labelTrack: "direct"}, "", "building", stuckLanding, 0},
+		{"landed diff, private", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, "", "building", "", 1},
+		{"landed diff, public", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, publicRepo, "", "", 0},
+		{"history unavailable stays", map[string]string{labelNote: histWait, labelStuckFrom: "review"}, "", "", "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := card("c1", tc.labels)
+			c.Labels[labelPrefix+labelStage] = "zach"
+			if tc.repo != "" {
+				c.Repo = tc.repo
+			}
+			f, p, m := mailFactory(t, c)
+			f.Tick()
+			l := p.labels("c1")
+			if l[labelStage] != tc.stage || l[labelStuck] != tc.stuck || len(p.sent("c1")) != tc.sends {
+				t.Fatalf("labels %v sent %v", l, p.sent("c1"))
+			}
+			if moved := tc.stage != ""; moved && len(m.sends()) != 0 {
+				t.Errorf("moved wait was emailed: %v", m.sends())
+			}
+		})
+	}
+}
+
+// A known reset resumes once on the same model, then the error retries after 2, 10 and 30
+// minutes, then the card is marked stuck in its column: never Needs Zach, never an email.
+
+// A known reset resumes once on the same model, then the error retries after 2, 10 and 30
+// minutes, then the card is marked stuck in its column: never Needs Zach, never an email.
+func TestErrorRetriesThenStuckWithoutEmail(t *testing.T) {
+	for _, stage := range []string{"building", "landing"} {
+		t.Run(stage, func(t *testing.T) {
+			a := quotaCard(stage)
+			a.LastActivityAt = t0.Add(-time.Hour) // the reset is already past
+			f, p, m := mailFactory(t, a)
+			now := t0
+			tick := func() {
+				t.Helper()
+				f.SetAgents([]Agent{a})
+				if err := f.tickAgent(a, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tick()
+			if msgs := p.sent(a.ID); len(msgs) != 1 || msgs[0] != limitResumeMessage {
+				t.Fatalf("reset resume = %v", msgs)
+			}
+			for n, wait := range errorBackoff {
+				// the attempt failed the same way
+				a = failedAgain(a, p.labels(a.ID), now)
+				now = now.Add(limitGrace)
+				tick() // plans the next try
+				if len(p.sent(a.ID)) != n+1 {
+					t.Fatalf("try %d sent early: %v", n+1, p.sent(a.ID))
+				}
+				a = withLabels(a, p.labels(a.ID))
+				if r := readRecovery(a); r.FromReset || !r.Reset.Equal(now.Add(wait)) {
+					t.Fatalf("try %d: next at %v, want %v after the failure", n+1, r.Reset, wait)
+				}
+				now = now.Add(wait)
+				tick()
+				if msgs := p.sent(a.ID); len(msgs) != n+2 || msgs[n+1] != errorRetryMessage {
+					t.Fatalf("try %d: messages = %v", n+1, msgs)
+				}
+			}
+			a = failedAgain(a, p.labels(a.ID), now)
+			now = now.Add(limitGrace)
+			tick()
+			l := p.labels(a.ID)
+			if l[labelStuck] != stuckAgentError || (l[labelStage] != "" && l[labelStage] != stage) || len(p.sent(a.ID)) != 4 {
+				t.Fatalf("not marked stuck in %s: %v, sent %v", stage, l, p.sent(a.ID))
+			}
+			a = withLabels(a, l)
+			now = now.Add(time.Hour)
+			tick()
+			if len(p.sent(a.ID)) != 4 || len(m.sends()) != 0 {
+				t.Fatalf("stuck card retried or emailed: %v %v", p.sent(a.ID), m.sends())
+			}
+			if n := len(p.runsWithLabel(labelArg(labelRole, "reviewer"))); n != 0 || p.labels(a.ID)[labelAutoReview] == "" && a.L(labelAutoReview) == "" {
+				t.Fatalf("an errored card started its queued review (%d) or lost it", n)
+			}
+			f.SetAgents([]Agent{a})
+			c, _ := f.card(a.ID)
+			if c.Stage != stage || c.Ask == nil || actionIDs(c.Ask) != "resume,reply,close" || !strings.Contains(c.Ask.Why, a.LastError) ||
+				!slices.Contains(c.Flags, stuckFlagPrefix+stuckAgentError) {
+				t.Fatalf("board: stage %s flags %v ask %+v", c.Stage, c.Flags, c.Ask)
+			}
+
+			// Resume makes one attempt; its failure marks the card stuck again without rearming retries.
+			if _, err := f.Act("resume", Body{ID: a.ID}); err != nil {
+				t.Fatal(err)
+			}
+			if l := p.labels(a.ID); len(p.sent(a.ID)) != 5 || l[labelStuck] != "" || l[labelStage] != stage {
+				t.Fatalf("resume: %v %v", l, p.sent(a.ID))
+			}
+			if _, err := f.Act("resume", Body{ID: a.ID}); err == nil {
+				t.Fatal("duplicate resume accepted")
+			}
+			a = failedAgain(a, p.labels(a.ID), now)
+			now = now.Add(limitGrace)
+			tick()
+			now = now.Add(time.Hour)
+			a = withLabels(a, p.labels(a.ID))
+			tick()
+			if l := p.labels(a.ID); l[labelStuck] != stuckAgentError || len(p.sent(a.ID)) != 5 {
+				t.Fatalf("manual resume rearmed retries: %v %v", l, p.sent(a.ID))
 			}
 		})
 	}

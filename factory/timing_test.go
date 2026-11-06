@@ -15,7 +15,7 @@ import (
 
 // fresh is a board card created just now, in plan.
 func fresh(id string) Agent {
-	a := card(id, map[string]string{labelStage: "plan", labelSource: "board"})
+	a := card(id, map[string]string{labelStage: "building", labelSource: "board"})
 	a.CreatedAt = t0.Add(-30 * time.Second)
 	return a
 }
@@ -61,14 +61,14 @@ func TestTimingRecordsStagesFromAcceptedReads(t *testing.T) {
 	}
 	// a move with a since label is dated by it; the same read again adds nothing
 	f.Now = func() time.Time { return t0.Add(10 * time.Minute) }
-	b := moved(a, "plan-review", t0.Add(9*time.Minute).Format(time.RFC3339))
+	b := moved(a, gateRequest, t0.Add(9*time.Minute).Format(time.RFC3339))
 	f.SetAgents([]Agent{b})
 	f.SetAgents([]Agent{b})
 	// Needs Zach sets no since: it is dated when the factory saw it
 	f.Now = func() time.Time { return t0.Add(20 * time.Minute) }
 	f.SetAgents([]Agent{moved(b, "zach", "")})
 	ct = timing(t, f, "c1")
-	if got := strings.Join(stages(ct), " "); got != "plan plan-review zach" {
+	if got := strings.Join(stages(ct), " "); got != "building request zach" {
 		t.Fatalf("stages = %s", got)
 	}
 	if !ct.Events[1].At.Equal(t0.Add(9*time.Minute)) || !ct.Events[2].At.Equal(t0.Add(20*time.Minute)) {
@@ -93,7 +93,7 @@ func TestTimingNeedsNoPaseoCall(t *testing.T) {
 	before := len(p.calls)
 	f.SetAgents([]Agent{moved(a, "building", ago(-time.Minute))})
 	f.Now = func() time.Time { return t0.Add(time.Hour) }
-	f.SetAgents([]Agent{moved(a, "review", "")})
+	f.SetAgents([]Agent{moved(a, gateDesign, "")})
 	f.SetAgents([]Agent{moved(a, "landed", "")})
 	if len(p.calls) != before {
 		t.Errorf("paseo calls: %v", p.calls[before:])
@@ -104,7 +104,7 @@ func TestTimingIgnoresOlderReads(t *testing.T) {
 	a := fresh("c1")
 	f, _ := newTestFactory(t, a)
 	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
-	newer := moved(a, "plan-review", t0.Add(4*time.Minute).Format(time.RFC3339))
+	newer := moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))
 	seqOld, seqNew := f.nextRead(), f.nextRead()
 	if !f.setAgents([]Agent{newer}, seqNew, false) {
 		t.Fatal("newer read refused")
@@ -113,7 +113,7 @@ func TestTimingIgnoresOlderReads(t *testing.T) {
 	if f.setAgents([]Agent{moved(a, "zach", "")}, seqOld, false) {
 		t.Fatal("older read accepted")
 	}
-	if got := strings.Join(stages(timing(t, f, "c1")), " "); got != "plan plan-review" {
+	if got := strings.Join(stages(timing(t, f, "c1")), " "); got != "building request" {
 		t.Errorf("stages = %s", got)
 	}
 	// the store's own guard, for reads that reach it out of order
@@ -134,40 +134,6 @@ func TestTimingSameReadRebuildRecordsArchive(t *testing.T) {
 	ct := timing(t, f, "c1")
 	if l := ct.last(); l.Stage != "landed" || !l.At.Equal(t0.Add(time.Minute)) {
 		t.Errorf("events = %+v", ct.Events)
-	}
-}
-
-func TestTimingSurvivesRestart(t *testing.T) {
-	a := fresh("c1")
-	f, p := newTestFactory(t, a)
-	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
-	f.SetAgents([]Agent{moved(a, "plan-review", t0.Add(4*time.Minute).Format(time.RFC3339))})
-	for range 5 {
-		f.nextRead() // the old run read many times; the new one starts again at 0
-	}
-	f.SetAgents([]Agent{moved(a, "plan-review", t0.Add(4*time.Minute).Format(time.RFC3339))})
-	if b, err := os.ReadFile(filepath.Join(f.cfg.StateDir, "timings.json")); err != nil || strings.Contains(strings.ToLower(string(b)), "seq") {
-		t.Fatalf("file = %s %v (no read number saved)", b, err)
-	}
-
-	g := New(Config{Host: "host1", Home: f.cfg.Home, StateDir: f.cfg.StateDir}, p)
-	g.Now = func() time.Time { return t0.Add(30 * time.Minute) }
-	g.GitOut = f.GitOut
-	// unchanged column: no duplicate
-	g.SetAgents([]Agent{moved(a, "plan-review", t0.Add(4*time.Minute).Format(time.RFC3339))})
-	if got := strings.Join(stages(timing(t, g, "c1")), " "); got != "plan plan-review" {
-		t.Fatalf("after restart stages = %s", got)
-	}
-	// a move made while the factory was down is dated by its since; the next one is still recorded
-	g.SetAgents([]Agent{moved(a, "building", t0.Add(20*time.Minute).Format(time.RFC3339))})
-	g.Now = func() time.Time { return t0.Add(40 * time.Minute) }
-	g.SetAgents([]Agent{moved(a, "review", t0.Add(39*time.Minute).Format(time.RFC3339))})
-	ct := timing(t, g, "c1")
-	if got := strings.Join(stages(ct), " "); got != "plan plan-review building review" {
-		t.Fatalf("stages = %s", got)
-	}
-	if !ct.Events[2].At.Equal(t0.Add(20 * time.Minute)) {
-		t.Errorf("down-time move at %v", ct.Events[2].At)
 	}
 }
 
@@ -212,10 +178,10 @@ func TestTimingCardsExcludeHelpers(t *testing.T) {
 	app := Agent{ID: "app1", Status: "running", CreatedAt: t0, LastActivityAt: t0, Labels: map[string]string{}}
 	sched := Agent{ID: "s1", Status: "idle", CreatedAt: t0, Labels: map[string]string{"paseo.schedule-id": "x"}}
 	scout := card("sc1", map[string]string{labelRole: "scout"})
-	picker := card("p1", map[string]string{labelStage: "plan", labelRouting: "1"})
+	picker := card("p1", map[string]string{labelStage: "building", labelRouting: "1"})
 	rev := reviewer("r1", "c1", "plan")
 	doneBefore := card("d1", map[string]string{labelStage: "landed"}) // finished before timing saw it
-	mailCard := card("e1", map[string]string{labelStage: "plan", labelSource: "email"})
+	mailCard := card("e1", map[string]string{labelStage: "building", labelSource: "email"})
 	mailCard.Labels[gmailThreadLabel] = "th1"
 	f, _ := newTestFactory(t, app, sched, scout, picker, rev, mailCard, doneBefore)
 	// the unlabelled session moves between Building and Needs Zach as it works
@@ -253,7 +219,7 @@ func TestTimingRequestedAt(t *testing.T) {
 		{"no line", "email", "Zach's email:\nhi\n(end of Zach's email)", created, created, "created"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := card("c1", map[string]string{labelStage: "plan", labelSource: tc.source})
+			a := card("c1", map[string]string{labelStage: "building", labelSource: tc.source})
 			a.CreatedAt = tc.created
 			r := CardRequest{Read: true}
 			r.AskedKind, r.Asked = askedOf(tc.prompt)
@@ -264,7 +230,7 @@ func TestTimingRequestedAt(t *testing.T) {
 		})
 	}
 	// an email card whose first prompt is not read yet waits
-	a := card("c1", map[string]string{labelStage: "plan", labelSource: "email"})
+	a := card("c1", map[string]string{labelStage: "building", labelSource: "email"})
 	a.CreatedAt = t0.Add(-time.Minute)
 	if got, _ := requestedAt(a, nil, ny, t0); !got.IsZero() {
 		t.Errorf("unread prompt gave %v", got)
@@ -272,23 +238,6 @@ func TestTimingRequestedAt(t *testing.T) {
 	// ... until askedWait: then its creation
 	if got, from := requestedAt(a, nil, ny, t0.Add(askedWait)); !got.Equal(a.CreatedAt) || from != "created" {
 		t.Errorf("long unread prompt gave %v %s", got, from)
-	}
-}
-
-func TestTimingRecordsReviewRounds(t *testing.T) {
-	c := moved(fresh("c1"), "review", ago(5*time.Minute))
-	c.Labels[labelPrefix+labelTier] = "low"
-	c.Labels[labelPrefix+labelPlanRounds] = "1"
-	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "VERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	ct := timing(t, f, "c1")
-	if len(ct.Rounds) != 1 {
-		t.Fatalf("rounds = %+v", ct.Rounds)
-	}
-	r := ct.Rounds[0]
-	if r.Kind != "code" || r.N != 1 || r.Verdict != "approve" || !r.Start.Equal(t0.Add(-5*time.Minute)) || !r.End.Equal(t0) {
-		t.Errorf("round = %+v", r)
 	}
 }
 
@@ -425,22 +374,6 @@ func TestTimingReplyCheckSkips(t *testing.T) {
 	}
 	if n := gets(m); n != replyTries {
 		t.Errorf("thread reads = %d", n)
-	}
-}
-
-func TestFactoryEmailsAreRecorded(t *testing.T) {
-	c := inThread(card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}), "t1")
-	f, p, m := mailFactory(t, c)
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	storeLog(t, f, p, "c1", "What now?")
-	f.Tick()
-	ct := timing(t, f, "c1")
-	if len(ct.Mails) != 1 || ct.Mails[0].ID != "nm1" || !ct.Mails[0].At.Equal(t0) {
-		t.Errorf("mails = %+v", ct.Mails)
-	}
-	f.answerFailed(f.agent("c1"), "m2")
-	if ct := timing(t, f, "c1"); len(ct.Mails) != 2 {
-		t.Errorf("failed-answer note not recorded: %+v", ct.Mails)
 	}
 }
 
@@ -709,5 +642,72 @@ func TestMetricsEndpoint(t *testing.T) {
 		if m.Days != tc.days || m.Cards != tc.cards {
 			t.Errorf("%s: %+v", tc.q, m)
 		}
+	}
+}
+
+func TestTimingSurvivesRestart(t *testing.T) {
+	a := fresh("c1")
+	f, p := newTestFactory(t, a)
+	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
+	f.SetAgents([]Agent{moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))})
+	for range 5 {
+		f.nextRead() // the old run read many times; the new one starts again at 0
+	}
+	f.SetAgents([]Agent{moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))})
+	if b, err := os.ReadFile(filepath.Join(f.cfg.StateDir, "timings.json")); err != nil || strings.Contains(strings.ToLower(string(b)), "seq") {
+		t.Fatalf("file = %s %v (no read number saved)", b, err)
+	}
+
+	g := New(Config{Host: "host1", Home: f.cfg.Home, StateDir: f.cfg.StateDir}, p)
+	g.Now = func() time.Time { return t0.Add(30 * time.Minute) }
+	g.GitOut = f.GitOut
+	// unchanged column: no duplicate
+	g.SetAgents([]Agent{moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))})
+	if got := strings.Join(stages(timing(t, g, "c1")), " "); got != "building request" {
+		t.Fatalf("after restart stages = %s", got)
+	}
+	// a move made while the factory was down is dated by its since; the next one is still recorded
+	g.SetAgents([]Agent{moved(a, "building", t0.Add(20*time.Minute).Format(time.RFC3339))})
+	g.Now = func() time.Time { return t0.Add(40 * time.Minute) }
+	g.SetAgents([]Agent{moved(a, gateDesign, t0.Add(39*time.Minute).Format(time.RFC3339))})
+	ct := timing(t, g, "c1")
+	if got := strings.Join(stages(ct), " "); got != "building request building design" {
+		t.Fatalf("stages = %s", got)
+	}
+	if !ct.Events[2].At.Equal(t0.Add(20 * time.Minute)) {
+		t.Errorf("down-time move at %v", ct.Events[2].At)
+	}
+}
+
+func TestTimingRecordsReviewRounds(t *testing.T) {
+	c := moved(fresh("c1"), gateDesign, ago(5*time.Minute))
+	c.Labels[labelPrefix+labelTier] = "low"
+	c.Labels[labelPrefix+labelRoundsRequest] = "1"
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
+	storeLog(t, f, p, "r1", "VERDICT: approve")
+	f.ApplyVerdict(f.agent("r1"))
+	ct := timing(t, f, "c1")
+	if len(ct.Rounds) != 1 {
+		t.Fatalf("rounds = %+v", ct.Rounds)
+	}
+	r := ct.Rounds[0]
+	if r.Kind != gateSignoff || r.N != 1 || r.Verdict != "approve" || !r.Start.Equal(t0.Add(-5*time.Minute)) || !r.End.Equal(t0) {
+		t.Errorf("round = %+v", r)
+	}
+}
+
+func TestFactoryEmailsAreRecorded(t *testing.T) {
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA}), "t1")
+	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
+	storeLog(t, f, p, "c1", "What now?")
+	f.Tick()
+	ct := timing(t, f, "c1")
+	if len(ct.Mails) != 1 || ct.Mails[0].ID != "nm1" || !ct.Mails[0].At.Equal(t0) {
+		t.Errorf("mails = %+v", ct.Mails)
+	}
+	f.answerFailed(f.agent("c1"), "m2")
+	if ct := timing(t, f, "c1"); len(ct.Mails) != 2 {
+		t.Errorf("failed-answer note not recorded: %+v", ct.Mails)
 	}
 }

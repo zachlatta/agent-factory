@@ -74,7 +74,7 @@ func TestDecisionWaitSafety(t *testing.T) {
 }
 
 func TestDecisionWaitBoardIsReadOnly(t *testing.T) {
-	d := card("ddd0004", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
+	d := card("ddd0004", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA})
 	a := card("aaa0001", map[string]string{labelStage: "landing", labelHeld: d.ID, labelWaitsOn: d.ID})
 	before := maps.Clone(a.Labels)
 	cards := BuildBoard([]Agent{a, d}, nil, t0)
@@ -125,7 +125,7 @@ func TestDecisionWaitUsesHeldDependency(t *testing.T) {
 }
 
 func TestDecisionWaitBeforeBuildHold(t *testing.T) {
-	d := card("ddd0004", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
+	d := card("ddd0004", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA})
 	a := card("aaa0001", map[string]string{labelStage: "building", labelHeld: d.ID, labelWaitsOn: d.ID, labelWaitsBefore: "build"})
 	agents := []Agent{a, d}
 	cards := BuildBoard(agents, nil, t0)

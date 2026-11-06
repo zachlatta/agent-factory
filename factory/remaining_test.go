@@ -168,19 +168,68 @@ func TestRemainingRuleNamesWhoDoesWhatIsLeft(t *testing.T) {
 // A landing that needs nothing from Zach but lists agent work goes back to the same card: it finishes the
 // work, gets a code review for new commits, and lands again. No idea is filed. A card Zach asked for
 // stops at his finished-work stop again when the round made new commits.
+func TestWorkLeftCapWaitsOnTheBoard(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelWorkLeftRounds: "2"})
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.Git = func(context.Context, string, ...string) error { return nil }
+	storeLog(t, f, p, "c1", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nREMAINING:\n- agent: rerun the check")
+	f.Tick()
+	l := p.labels("c1")
+	if l[labelStage] != "zach" || l[labelNote] != "landed; still to do: rerun the check" {
+		t.Fatalf("labels = %v", l)
+	}
+	if v, set := l[labelWorkLeftRounds]; set {
+		t.Errorf("round count changed to %q", v)
+	}
+	if len(p.sent("c1")) != 0 {
+		t.Errorf("sent = %v", p.sent("c1"))
+	}
+}
+
+func TestLandedClearsStuckMark(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelStuck: stuckLanding})
+	c.Cwd = t.TempDir()
+	f, p := newTestFactory(t, c)
+	f.Git = func(context.Context, string, ...string) error { return nil }
+	storeLog(t, f, p, "c1", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING: none")
+	if err := f.landed(c, Card{ID: c.ID, Cwd: c.Cwd}, "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING: none"); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("c1")
+	if v, ok := l[labelStuck]; !ok || v != "" || l[labelStage] != "landed" {
+		t.Fatalf("labels = %v", l)
+	}
+}
+
+// A landing that needs nothing from Zach but lists agent work goes back to the same card: it finishes the
+// work, gets a code review for new commits, and lands again. No idea is filed. A card Zach asked for
+// stops at his finished-work stop again when the round made new commits.
+
+// A landing that needs nothing from Zach but lists agent work goes back to the same card: it finishes the
+// work, gets a code review for new commits, and lands again. No idea is filed. A card Zach asked for
+// stops at his finished-work stop again when the round made new commits.
+
+// A landing that needs nothing from Zach but lists agent work goes back to the same card: it finishes the
+// work, gets a code review for new commits, and lands again. No idea is filed. A card Zach asked for
+// stops at his finished-work stop again when the round made new commits.
+
+// A landing that needs nothing from Zach but lists agent work goes back to the same card: it finishes the
+// work, gets a code review for new commits, and lands again. No idea is filed. A card Zach asked for
+// stops at his finished-work stop again when the round made new commits.
 func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 	const reply = "DECISION: None. It is landed and live.\nNEEDS FROM ZACH: Nothing.\n\nLanded abc1234.\nREMAINING:\n- agent: the phone-width check was not run"
 	for _, commits := range []string{"", "def5678\n"} {
 		t.Run(fmt.Sprintf("commits %q", commits), func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelTier: "architecture",
-				labelPlanRounds: "1", labelCodeRounds: "1"})
+				labelRoundsRequest: "1", labelRoundsDesign: "1"})
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
 			storeLog(t, f, p, "c1", reply)
 			f.Tick()
 			l := p.labels("c1")
-			if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelWorkLeftRounds] != "1" ||
+			if l[labelStage] != "building" || l[labelAutoReview] != gateRequest || l[labelWorkLeftRounds] != "1" ||
 				l[labelNote] != "finishing work left (round 1 of 2)" || l[labelLandedVerified] != "1" {
 				t.Fatalf("labels = %v", l)
 			}
@@ -218,17 +267,16 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 				}
 				return
 			}
-			// an architecture card's code review is a panel of two (panel.go)
-			if p.runs != 2 || len(p.runsWithLabel(labelPrefix+labelLens+"="+lensCorrectness)) != 1 {
-				t.Fatalf("new commits: reviews started = %d, want a panel of 2", p.runs)
+			if p.runs != 1 {
+				t.Fatalf("new commits: reviews started = %d, want the request gate", p.runs)
 			}
 			// code review passes: a card Zach asked for waits for him before it lands again
-			rev := reviewer("r1", c.ID, "code")
+			rev := reviewer("r1", c.ID, gateSignoff)
 			for k, v := range p.labels("c1") {
 				c.Labels[labelPrefix+k] = v
 			}
 			f.SetAgents([]Agent{c, rev})
-			storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
+			storeLog(t, f, p, "r1", "SIGN OFF: he should see this\nVERDICT: approve")
 			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 				t.Fatal(err)
 			}
@@ -236,40 +284,5 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 				t.Fatalf("after review: labels = %v", l)
 			}
 		})
-	}
-}
-
-// After workLeftCap rounds, agent work left waits on the board, and the count is not reset.
-func TestWorkLeftCapWaitsOnTheBoard(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelWorkLeftRounds: "2"})
-	c.Cwd = t.TempDir()
-	f, p := newTestFactory(t, c)
-	f.Git = func(context.Context, string, ...string) error { return nil }
-	storeLog(t, f, p, "c1", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nREMAINING:\n- agent: rerun the check")
-	f.Tick()
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != "landed; still to do: rerun the check" {
-		t.Fatalf("labels = %v", l)
-	}
-	if v, set := l[labelWorkLeftRounds]; set {
-		t.Errorf("round count changed to %q", v)
-	}
-	if len(p.sent("c1")) != 0 {
-		t.Errorf("sent = %v", p.sent("c1"))
-	}
-}
-
-func TestLandedClearsStuckMark(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelStuck: stuckLanding})
-	c.Cwd = t.TempDir()
-	f, p := newTestFactory(t, c)
-	f.Git = func(context.Context, string, ...string) error { return nil }
-	storeLog(t, f, p, "c1", "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING: none")
-	if err := f.landed(c, Card{ID: c.ID, Cwd: c.Cwd}, "DECISION: None.\nNEEDS FROM ZACH: Nothing.\n\nLanded.\nREMAINING: none"); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if v, ok := l[labelStuck]; !ok || v != "" || l[labelStage] != "landed" {
-		t.Fatalf("labels = %v", l)
 	}
 }

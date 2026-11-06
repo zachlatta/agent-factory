@@ -282,17 +282,16 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
 
 <dialog id="newDlg">
   <h3>New card</h3>
-  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, an Opus 5.5 agent first picks the repo it belongs in (or asks you in Needs Zach if it truly can't tell). The agent you pick (auto-suggested to balance plan usage unless you choose another; email cards default to Opus 5.5) writes a plan in its own worktree and then builds it; reviewers are always Opus 5.5. A reviewer checks the plan and sets the tier, which decides how much review it gets:</div>
-  <div class="tiers" id="nTiers"></div>
+  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, Opus first picks the repo it belongs in. The agent you pick (auto-suggested to balance plan usage across Frontier models) builds the proposed solution, read-only against production. Three gates then check it meets the request, is well designed, and whether you need to sign off. Opus lands it.</div>
   <label class="sub">Repo</label><br><select id="nRepo" style="width:100%;margin-bottom:8px"></select>
-  <label class="sub">Agent (plans and builds it)</label><br><select id="nAgent" style="width:100%"></select>
+  <label class="sub">Agent (builds it)</label><br><select id="nAgent" style="width:100%"></select>
   <div id="nThinkingRow" hidden><label class="sub" for="nThinking">Thinking level</label><br><select id="nThinking" style="width:100%"></select></div>
   <div class="ausage" id="nAgentUsage"></div>
   <div class="sub" id="nAgentNote" style="margin:2px 0 8px;min-height:1em"></div>
   <label class="sub">What should it do?</label>
   <textarea id="nReq" style="min-height:120px" placeholder="e.g. Add a dry-run flag to bin/land that prints what it would push"></textarea>
   <p id="nError" role="alert"></p>
-  <div class="acts" style="justify-content:flex-end"><button id="nScout" title="A read-only agent looks through this repo and past sessions and suggests up to 3 ideas">Suggest ideas</button><span style="flex:1"></span><button onclick="newDlg.close()">Cancel</button><button class="primary" id="nGo">Start planning</button></div>
+  <div class="acts" style="justify-content:flex-end"><button id="nScout" title="A read-only agent looks through this repo and past sessions and suggests up to 3 ideas">Suggest ideas</button><span style="flex:1"></span><button onclick="newDlg.close()">Cancel</button><button class="primary" id="nGo">Start building</button></div>
 </dialog>
 
 <div id="activity" title="Factory activity (click to expand)"></div>
@@ -346,7 +345,7 @@ function dur(sec){ const m=Math.round(sec/60); return m<60 ? m+'m' : Math.floor(
 function clock(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
 function timeline(t){
   const names = Object.fromEntries(B.stages.map(s=>[s[0], s[1]]));
-  const rounds = {'plan-review': (t.rounds||[]).filter(r=>r.kind==='plan'), review: (t.rounds||[]).filter(r=>r.kind==='code')};
+  const rounds = Object.fromEntries(['request','design','signoff'].map(g=>[g, (t.rounds||[]).filter(r=>r.kind===g)]));
   const parts = t.requestedAt ? ['asked '+clock(t.requestedAt)] : [];
   let done = '';
   for(const s of t.stages){
@@ -388,7 +387,7 @@ if (matchMedia('(pointer:coarse)').matches) {
   }
 }
 
-let AG = {agents:[], default:'opus', ideaDefault:'opus'}; // GET /api/agents: who can plan and build a card
+let AG = {agents:[], default:'opus', ideaDefault:'opus'}; // GET /api/agents: who can build a card
 async function loadAgents(){ try{ AG = await (await fetch('api/agents')).json(); }catch(e){} }
 const agentLabel = id => (AG.agents.find(a=>a.id===id)||{}).label || id;
 function inTime(iso){ if(!iso) return ''; const h=(Date.parse(iso)-Date.now())/3600000; if(h<=0) return 'soon'; if(h<24) return Math.ceil(h)+'h'; return Math.round(h/24)+'d'; }
@@ -606,7 +605,7 @@ function render(){
   });
   const g=$('grid'); g.style.setProperty('--cols', stages.length);
   g.style.gridTemplateColumns = '150px ' + stages.map(s=>s[0]==='zach'?'minmax(340px,2.2fr)':'minmax(180px,1fr)').join(' ');
-  let h = '<div class="colhead"></div>' + stages.map(s=>`<div class="colhead ${s[0].includes('review')?'gate':''} ${s[0]==='zach'?'zach':''}" title="${esc(s[2])}">${esc(s[1])}<small>${esc(s[2])}</small></div>`).join('');
+  let h = '<div class="colhead"></div>' + stages.map(s=>`<div class="colhead ${['request','design','signoff'].includes(s[0])?'gate':''} ${s[0]==='zach'?'zach':''}" title="${esc(s[2])}">${esc(s[1])}<small>${esc(s[2])}</small></div>`).join('');
   for(const k of order){
     const lc = lanes[k];
     h += `<div class="lane">${esc(LANE_NAMES[k]||k)}<small>${esc(LANDS[k]||($('group').value==='repo'?k:''))}</small><small>${lc.filter(c=>c.stage!=='landed').length} open · ${lc.filter(c=>c.stage==='landed').length} landed</small></div>`;
@@ -618,7 +617,7 @@ function render(){
       let more = '';
       const ck=k+'|'+s[0], cap = s[0]==='landed' ? ($('showLanded').checked?1e9:4) : (open_.has(ck)?1e9:6);
       if(cs.length>cap){ more=`<div class="more" onclick="${s[0]==='landed'?"$('showLanded').click()":`open_.add('${esc(ck).replace(/'/g,"")}');render()`}">+${cs.length-cap} more</div>`; cs=cs.slice(0,cap); }
-      h += `<div class="cell ${s[0].includes('review')?'gate':''} ${s[0]==='zach'?'zachc':''}" data-stage="${s[0]}">${cs.map(cardHtml).join('')}${more}</div>`;
+      h += `<div class="cell ${['request','design','signoff'].includes(s[0])?'gate':''} ${s[0]==='zach'?'zachc':''}" data-stage="${s[0]}">${cs.map(cardHtml).join('')}${more}</div>`;
     }
   }
   if(g.dataset.html === h) return; // unchanged: a refresh moves nothing under a tap
@@ -636,35 +635,21 @@ function render(){
 }
 
 // latestReviews: begin
-// latestReviews keeps the newest reviewer of each kind; children arrive oldest first. When the newest
-// is on a code-review panel, it keeps the newest reviewer of each lens instead, so a reviewer that
-// approved an earlier round and did not re-run still shows that verdict; an arbiter shows only for
-// the newest round.
+// latestReviews keeps the newest reviewer of each gate; children arrive oldest first.
 function latestReviews(children){
-  const last = {}, out = [];
+  const last = {};
   children.forEach(k=>{ if(k.role==='reviewer') last[k.kind||''] = k; });
-  Object.values(last).forEach(n=>{
-    if(!n.panel){ out.push(n); return; }
-    const per = {};
-    children.forEach(k=>{
-      if(k.role!=='reviewer' || (k.kind||'')!==(n.kind||'') || !k.lens) return;
-      if(k.lens==='arbiter' && k.panel!==n.panel) return;
-      per[k.lens] = k;
-    });
-    out.push(...Object.values(per));
-  });
-  return out;
+  return Object.values(last);
 }
-const lensNames = {correctness:'correctness review', architecture:'architecture review', ux:'phone UX review', arbiter:'panel arbiter'};
-// reviewName is a reviewer's name: its panel lens, else its kind.
-function reviewName(k){ return lensNames[k.lens] || (k.kind||'')+' review'; }
+const gateNames = {request:'request gate', design:'design gate', signoff:'sign-off gate'};
+// reviewName is a reviewer's name: its gate, or an older card's review kind.
+function reviewName(k){ return gateNames[k.kind] || (k.kind||'')+' review'; }
 // reviewLabel names a reviewer's round and verdict. The round counter only counts applied
-// verdicts, so a running reviewer is on the next round; a panel reviewer knows its round.
+// verdicts, so a running reviewer is on the next round.
 function reviewLabel(k, rounds){
   const running = k.status==='running' && !k.archived;
-  const n = k.panel ? +k.panel : ((k.kind && rounds[k.kind]) || 0) + (running && !k.verdict ? 1 : 0);
-  const name = k.lens ? (lensNames[k.lens]||k.lens).replace(/ review$/,'') : (k.kind||'review');
-  return name + (n ? ' round '+n : '') + (k.verdict ? ': '+k.verdict : running ? ' (running)' : '');
+  const n = ((k.kind && rounds[k.kind]) || 0) + (running && !k.verdict ? 1 : 0);
+  return reviewName(k) + (n ? ' round '+n : '') + (k.verdict ? ': '+k.verdict : running ? ' (running)' : '');
 }
 // latestReviews: end
 // subagents: begin
@@ -733,7 +718,7 @@ function cardHtml(c){
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
     ${c.stage==='idea'&&c.idea&&c.idea.error?`<div class="err">${esc(c.idea.error)}</div>`:''}
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
-    <div>${c.tier?`<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Plans and builds this card">${esc(agentLabel(c.agent))}</span>`:''}${decisionWaitHtml(c)}${c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
+    <div>${c.tier==='routine'?`<span class="tier routine">routine</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Builds this card">${esc(agentLabel(c.agent))}</span>`:''}${decisionWaitHtml(c)}${c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?`<div class="ask" onclick="event.stopPropagation()">${askKind(c.ask)}<div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?askTodo(c.ask)+evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
   </div>`;
@@ -844,7 +829,7 @@ function rerenderAsk(id){ delete $('grid').dataset.html; delete $('inbox').datas
 // before the button's own handler, which calls post in the same tick.
 let pressed = null;
 document.addEventListener('click', e=>{ pressed = e.target.closest && e.target.closest('button'); setTimeout(()=>{ pressed=null; }); }, true);
-const busyText = {choose:'Sending…', approve:'Approving…', arbiter:'Handing over…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
+const busyText = {choose:'Sending…', approve:'Approving…', send:'Sending…', close:'Dropping…', archive:'Archiving…',
   stop:'Stopping…', rerun:'Re-running…', review:'Starting review…', stage:'Moving…', new:'Starting…', scout:'Starting…'};
 let afterLoad = [];
 function busy(btn, action){
@@ -890,8 +875,8 @@ function fillPanel(c, fresh){
   $('pBar').innerHTML = B.stages.map((s,i)=>`<span title="${esc(s[1])}" class="${i===idx?'on':i<idx?'done':''}"></span>`).join('');
   $('pFlags').innerHTML = decisionWaitHtml(c) + c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('') + (c.verdict?`<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>`:'') + (c.note && !c.decisionBlocker?`<span class="flag note">${esc(c.note)}</span>`:'');
   const kv = [['Column', (B.stages[idx]||[])[1] + (c.labelled?'':' (from Paseo status)')],
-    ['Tier', c.tier ? c.tier + ': ' + ((B.tiers||{})[c.tier]||'') : 'not set yet (the plan review sets it)'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
-    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Reviews', `plan ${c.rounds.plan} · code ${c.rounds.code} (cap 3 each)`],
+    ['Submitted by', c.submittedBy==='system'?'the system':'you'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
+    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Gate rounds', `request ${c.rounds.request} · design ${c.rounds.design} · sign-off ${c.rounds.signoff} (cap 3 each)`],
     ...(c.timing ? [['Timeline', timeline(c.timing)]] : []),
     ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
@@ -919,9 +904,9 @@ function fillPanel(c, fresh){
     const curThinking = ($('pThinking')&&!fresh) ? $('pThinking').value : '';
     $('pActs').innerHTML = `
     <select id="pRepo" title="Repo where this idea runs">${repoOptions(curRepo)}</select>
-    <select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>
+    <select id="pAgent" title="Agent that builds it">${agentOptions(curAg)}</select>
     <div id="pThinkingRow" style="width:100%" hidden><label class="sub" for="pThinking">Thinking level</label><br><select id="pThinking" style="width:100%"></select></div>
-    <button class="primary" onclick="act('approve',{repo:$('pRepo').value, agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})" title="Start planning it now, past the daily cap">Start now</button>
+    <button class="primary" onclick="act('approve',{repo:$('pRepo').value, agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})" title="Start building it now, past the daily cap">Start now</button>
     <button class="danger" onclick="if(confirm('Dismiss this idea?')) act('archive')">Dismiss</button>
     <div class="ausage" id="pAgentUsage" style="width:100%">${agentUsageHtml(curAg,'pAgent')}</div>`;
     fillThinking('pThinking',curAg,curThinking);
@@ -933,11 +918,8 @@ function fillPanel(c, fresh){
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   else $('pActs').innerHTML = `
-    <button onclick="act('review',{kind:'plan'})" title="A fresh Opus agent tries to find fault with the plan">Review plan</button>
-    <button onclick="act('review',{kind:'code'})" title="A fresh Opus agent reviews the diff, read-only">${busy?'Review when idle':'Review code'}</button>
-    ${c.awaiting==='plan'
-      ? `<button class="primary" onclick="act('approve')" title="Building it has side effects: let it build. Code review still runs before it lands">Allow &amp; build</button>`
-      : `<button class="primary" onclick="act('approve')" title="Tell the agent to land it">Approve &amp; land</button>`}
+    <button onclick="act('review',{kind:'request'})" title="Run the gates from the start: request, design, then sign-off">${busy?'Run gates when idle':'Run gates'}</button>
+    <button class="primary" onclick="act('approve')" title="Opus lands it">Approve &amp; land</button>
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   const mv=$('pMove'); mv.innerHTML = B.stages.map(s=>`<option value="${s[0]}" ${s[0]===c.stage?'selected':''}>${s[1]}</option>`).join('');
@@ -1007,8 +989,6 @@ function ideaRetryText(errorAt){
 }
 function ideaHtml(c, isIdea){
   const i = c.idea;
-  const tier = c.tier ? `<span class="tier ${esc(c.tier)}">${esc(c.tier)}</span> ${esc((B.tiers||{})[c.tier]||'')}`
-    : 'No tier guess yet; the plan review sets it.';
   const brief = briefs[i.id];
   const next = isIdea ? (i.error
     ? `<div class="next"><b>What happens next:</b> automatic start failed (${ago(i.errorAt||i.createdAt)}), so the factory moved on to other waiting ideas.
@@ -1016,7 +996,7 @@ function ideaHtml(c, isIdea){
       <b>Start now</b> retries it right away, or <b>Dismiss</b> removes it.</div>`
     : `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line for this repo':esc('number '+i.queue+' in line for this repo')}.
       ${ideaStartText(c)}
-      Each one is then planned and reviewed like any card; this tier decides how much review it gets. <b>Start now</b> skips the line.</div>`) : '';
+      Each one is then built and goes through the three gates like any card, and comes to you to sign off. <b>Start now</b> skips the line.</div>`) : '';
   return `${isIdea?'':'<h4>Started from this idea</h4>'}
     ${isIdea&&i.error?`<div class="err">Could not start: ${esc(i.error)}</div>`:''}
     <h4>What it proposes</h4>
@@ -1024,7 +1004,6 @@ function ideaHtml(c, isIdea){
     ${!isIdea&&i.note?`<h4>Your changes before starting</h4><div class="md">${mdIdea(i.note)}</div>`:''}
     <h4>Why</h4><div class="md">${i.why?mdIdea(i.why):'<i>Not given.</i>'}</div>
     ${i.doneWhen?`<h4>Done when</h4><div class="md">${mdIdea(i.doneWhen)}</div>`:''}
-    <h4>Tier</h4><div class="md">${tier}</div>
     ${isIdea?`<h4>Priority</h4><div class="md">${esc(prioHelp[i.priority]||prioHelp.normal)}</div>`:''}
     <h4>Suggested by</h4><div class="md">${esc(i.by||'agent')}, ${ago(i.createdAt)}</div>
     ${next}
@@ -1039,13 +1018,13 @@ async function act(a, extra={}){
   try{ r = await post(a, {id:sel, ...extra}); }
   catch(e){ if(c.id&&c.id.startsWith('idea-')) refresh(); throw e; }
   toast(r.queued?'Review queued: starts when the agent goes idle'
-    : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: planning now':c.awaiting==='plan'?'Build allowed: agent is building':'Approved: agent is landing it')
+    : a==='approve' ? (c.id&&c.id.startsWith('idea-')?'Idea started: building now':'Approved: Opus is landing it')
     : a+' done');
   if(c.id&&c.id.startsWith('idea-')){ $('pMsg').value=''; releaseKeyboard(); closePanel(); }
   refresh(); }
 $('pSend').onclick = async()=>{ const m=$('pMsg').value.trim(); if(!m) return; await post('send',{id:sel,message:m}); $('pMsg').value=''; releaseKeyboard(); toast('Sent'); refresh(); };
 $('pMoveBtn').onclick = ()=>move(sel, $('pMove').value);
-function fillNewDlg(){ const v = ($('nAgent').dataset.picked && $('nAgent').value) || AG.default; $('nAgent').innerHTML = agentOptions(v); fillThinking('nThinking',v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); $('nTiers').innerHTML = ['low','risky','architecture','routine'].map(t=>`<span class="tier ${t}">${t}</span><span>${esc((B.tiers||{})[t]||'')}</span>`).join(''); }
+function fillNewDlg(){ const v = ($('nAgent').dataset.picked && $('nAgent').value) || AG.default; $('nAgent').innerHTML = agentOptions(v); fillThinking('nThinking',v); $('nAgentUsage').innerHTML = agentUsageHtml(v,'nAgent'); $('nAgentNote').textContent = agentNote(v); }
 // The dialog opens from the cached agent list at once; right after a factory restart the
 // server may still be fetching availability/usage, so refill until they land (bounded).
 function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) return; fillNewDlg(); if(tries>0 && AG.agents.some(a=>a.status==='unknown')) setTimeout(()=>refreshNewDlg(tries-1), 2500); }); }
@@ -1078,7 +1057,7 @@ $('nGo').onclick = async()=>{
   const draft=$('nReq').value;
   const body={request:draft.trim(), repo:$('nRepo').value, agent:$('nAgent').value, thinking:$('nThinking').value};
   if(!body.request) return;
-  newSubmission={body}; $('nError').textContent='';
+  body.submittedBy='zach'; newSubmission={body}; $('nError').textContent='';
   renderNewSubmission();
   // Start the request without awaiting it before closing the dialog or releasing the keyboard.
   let response;

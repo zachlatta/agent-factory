@@ -44,18 +44,18 @@ test('For you and card links render at exact widths and preserve navigation', as
         await page.locator('#inbox .sec').first().waitFor();
         assert.equal(await page.locator('.tabs').count(), 0);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-        // the decision is the one asked before building: allow a side effect, with its plain reason in the card
-        assert.equal(await page.locator('.fy[data-id="preview-zach"] .fk').innerText(), 'Allow the build');
-        assert.match(await page.locator('.fy[data-id="preview-zach"] a.fq').innerText(), /restart the test board service/);
+        // the decision is a sign-off: it changes more than was asked for, with its plain reason in the card
+        assert.equal(await page.locator('.fy[data-id="preview-zach"] .fk').innerText(), 'Ready: approve the change');
+        assert.match(await page.locator('.fy[data-id="preview-zach"] a.fq').innerText(), /board rewrite/);
         // tapping a For you card's title opens it; a working card's line opens it too
         await page.locator('.fy[data-id="preview-zach"] a.ft').click();
         await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pAsk').innerText(), /card list load faster[\s\S]*down for about ten seconds/);
+        assert.match(await page.locator('#pAsk').innerText(), /card list load faster[\s\S]*more than you asked for/);
         await page.locator('#panel > .x').click();
         await page.locator('#panel.open').waitFor({ state: 'hidden' });
         await page.locator('.line[data-id="preview-building"]').click();
         await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pTitle').innerText(), /Building:/);
+        assert.match(await page.locator('#pTitle').innerText(), /Build:/);
         await page.locator('#panel > .x').click();
         await page.locator('#panel.open').waitFor({ state: 'hidden' });
         // the same line is a link a keyboard reaches and opens with Enter
@@ -64,38 +64,12 @@ test('For you and card links render at exact widths and preserve navigation', as
         await line.focus();
         await page.keyboard.press('Enter');
         await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pTitle').innerText(), /Building:/);
+        assert.match(await page.locator('#pTitle').innerText(), /Build:/);
         await page.locator('#panel > .x').click();
         await page.locator('#panel.open').waitFor({ state: 'hidden' });
-        // No on a decision answers in one tap, with no box and no text, as an emailed "no" does
-        const no = page.waitForRequest(r => r.url().endsWith('/api/choose'));
-        await page.locator('.fy[data-id="preview-zach"] button[data-choice="no"]').click();
-        assert.deepEqual(JSON.parse((await no).postData()), { id: 'preview-zach', choice: 'no' });
-        assert.equal(await page.locator('.fy[data-id="preview-zach"] textarea').count(), 0);
-        // and the answered decision leaves For you for Working on it, as the real send moves it
-        await page.locator('.fy[data-id="preview-zach"]').waitFor({ state: 'detached' });
-        await page.locator('#inbox a.line[data-id="preview-zach"]').waitFor();
-        await page.evaluate(() => load());
-        assert.equal(await page.locator('.fy[data-id="preview-zach"]').count(), 0);
-        // a request with no answer keeps Dismiss beside its status on the phone, and Dismiss removes it
-        // from No answer yet; a reload (the next board poll) does not bring it back
-        const request = page.locator('#inbox .line.stuck', { hasText: 'Order more desk lamps' });
-        const dismiss = request.locator('.ls button.link');
-        assert.equal(await dismiss.innerText(), 'Dismiss');
-        const [rowBox, buttonBox] = [await request.boundingBox(), await dismiss.boundingBox()];
-        assert.ok(buttonBox.x + buttonBox.width <= rowBox.x + rowBox.width && buttonBox.y >= rowBox.y);
-        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-        const dismissed = page.waitForRequest(r => r.url().endsWith('/api/dismiss-request'));
-        await dismiss.click();
-        assert.deepEqual(JSON.parse((await dismissed).postData()), { id: 'sample-request-1' });
-        await request.waitFor({ state: 'detached' });
-        await page.evaluate(() => load());
-        assert.equal(await page.locator('#inbox .line', { hasText: 'Order more desk lamps' }).count(), 0);
-        assert.equal(await page.locator('#inbox .line.stuck', { hasText: 'Move the team call' }).count(), 1);
-        // the sample is marked as one on the page itself, not only in the tab title
         assert.match(await page.locator('#previewNote').innerText(), /sample cards/i);
         assert.equal(await page.locator('#previewNote').isVisible(), true);
-        // each For you card names the kind of input it wants: finished work to approve, a build to allow
+        // each For you card names the kind of input it wants: finished work to approve, a change to sign off
         assert.equal(await page.locator('.fy[data-id="preview-ready"] .fk').innerText(), 'Ready: approve the change');
         // work that landed with a required action: its label, the thing to do, the action buttons, no duplicate headline, and no "None"
         const actionCard = page.locator('.fy[data-id="preview-action"]');
@@ -133,17 +107,17 @@ test('For you and card links render at exact widths and preserve navigation', as
         await page.evaluate(() => load());
         assert.equal(await page.locator('#panel.open').count(), 0);
         await page.goto(url);
-        await page.goto(`${url}/?card=preview-zach#preview-plan`);
+        await page.goto(`${url}/?card=preview-zach#preview-building`);
         // Preserve main's hash precedence; a later hash still opens its card.
         await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pTitle').innerText(), /Plan:/);
+        assert.match(await page.locator('#pTitle').innerText(), /Build:/);
         await page.locator('#panel > .x').click();
         // Changing just the fragment must keep main's hashchange navigation working.
         const hashLink = new URL(page.url());
         hashLink.hash = 'preview-building';
         await page.goto(hashLink.href);
         await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pTitle').innerText(), /Building:/);
+        assert.match(await page.locator('#pTitle').innerText(), /Build:/);
         // The live board resolves links to replaced predecessors and short IDs.
         await page.route('**/api/board', async route => {
           const response = await route.fetch();
@@ -153,7 +127,7 @@ test('For you and card links render at exact widths and preserve navigation', as
         });
         await page.goto(`${url}/?card=prior-preview-b`);
         await page.locator('#panel.open').waitFor();
-        assert.match(await page.locator('#pTitle').innerText(), /Building:/);
+        assert.match(await page.locator('#pTitle').innerText(), /Build:/);
         await page.locator('#panel > .x').click();
         await page.evaluate(() => load());
         assert.equal(await page.locator('#panel.open').count(), 0);
@@ -215,7 +189,7 @@ test('declared live preview uses actual CLI and only simulates sample-card actio
     assert.equal(choose.status,200);
     assert.equal((await (await fetch(address+'/api/board')).json()).cards.find(c=>c.id==='preview-ready').stage,'landing');
     assert.equal((await post('approve','real-card')).status,404);
-    assert.equal((await post('new','preview-plan')).status,403);
+    assert.equal((await post('new','preview-building')).status,403);
   }finally{
     lines.close();
     try{process.kill(-proc.pid,'SIGTERM')}catch(e){if(e.code!=='ESRCH')throw e}

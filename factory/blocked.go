@@ -228,7 +228,6 @@ func (f *Factory) retireReviewer(r Agent, verdict string) error {
 		return err
 	}
 	r = withRetireLabels(r, labels)
-	f.noteLens(r.ID, lensResult{done: true, verdict: verdict})
 	if r.archived() {
 		return nil
 	}

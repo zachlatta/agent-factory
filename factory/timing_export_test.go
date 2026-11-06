@@ -17,85 +17,6 @@ func sessionAgent(a Agent, session string) Agent {
 	return a
 }
 
-func TestTimingSessionLinksFollowStepsAndSessions(t *testing.T) {
-	a := sessionAgent(fresh("c1"), "first")
-	f, p := newTestFactory(t, a)
-	first := timing(t, f, a.ID)
-	if first.Repo != a.Repo || len(first.Sessions) != 1 {
-		t.Fatalf("initial metadata = %+v", first)
-	}
-	l := first.Sessions[0]
-	if l.AgentID != a.ID || l.SessionID != "first" || l.Provider != "codex" || l.Model != "model-a" ||
-		l.Device != a.Host || l.Role != "fellow" || l.Stage != "plan" || !l.ObservedAt.Equal(t0) ||
-		!l.CreatedAt.Equal(a.CreatedAt) {
-		t.Fatalf("session link = %+v", l)
-	}
-	f.Now = func() time.Time { return t0.Add(time.Minute) }
-	a = moved(a, "building", iso(f.Now()))
-	f.SetAgents([]Agent{a})
-	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
-	a.SessionID, a.Model = "second", "model-b"
-	f.SetAgents([]Agent{a})
-	ct := timing(t, f, a.ID)
-	if len(ct.Sessions) != 2 || ct.Sessions[0].Stage != "building" ||
-		len(ct.Sessions[0].History) != 2 || ct.Sessions[1].SessionID != "second" || ct.Sessions[1].Model != "model-b" {
-		t.Fatalf("session history = %+v", ct.Sessions)
-	}
-	if len(p.calls) != 0 {
-		t.Fatalf("observation called Paseo: %v", p.calls)
-	}
-	// A caller cannot mutate the store through a returned snapshot.
-	ct.Sessions[0].Model = "changed"
-	ct.Sessions[0].History[0].Model = "changed"
-	if got := timing(t, f, a.ID); got.Sessions[0].Model != "model-a" || got.Sessions[0].History[0].Model != "model-a" {
-		t.Fatal("session links were not copied")
-	}
-}
-
-func TestTimingSessionLinksNestedReviewersAndArchivedChildren(t *testing.T) {
-	a := sessionAgent(fresh("c1"), "builder")
-	a = moved(a, "plan-review", iso(t0))
-	r := sessionAgent(reviewer("r1", a.ID, "plan"), "reviewer")
-	b := sessionAgent(card("child", nil), "child")
-	b.Labels["paseo.parent-agent-id"] = r.ID
-	c := sessionAgent(card("nested", nil), "nested")
-	c.Labels["paseo.parent-agent-id"] = b.ID
-	unrelated := sessionAgent(card("unrelated", nil), "unrelated")
-	f, _ := newTestFactory(t, a, r, b, c, unrelated)
-	ct := timing(t, f, a.ID)
-	if len(ct.Sessions) != 4 {
-		t.Fatalf("links = %+v", ct.Sessions)
-	}
-	for _, l := range ct.Sessions {
-		if l.Stage != "plan-review" {
-			t.Errorf("wrong step: %+v", l)
-		}
-		switch l.AgentID {
-		case r.ID:
-			if l.ParentID != a.ID || l.Role != "reviewer" || l.ReviewKind != "plan" {
-				t.Errorf("review link = %+v", l)
-			}
-		case b.ID:
-			if l.ParentID != r.ID || l.Role != "subagent" {
-				t.Errorf("child link = %+v", l)
-			}
-		case c.ID:
-			if l.ParentID != b.ID || l.Role != "subagent" {
-				t.Errorf("nested link = %+v", l)
-			}
-		}
-	}
-	// Old reviewers and their children must not acquire the next build's step.
-	f.Now = func() time.Time { return t0.Add(time.Minute) }
-	r.ArchivedAt, b.ArchivedAt, c.ArchivedAt = f.Now(), f.Now(), f.Now()
-	a = moved(a, "building", iso(f.Now()))
-	f.SetAgents([]Agent{a, r, b, c})
-	ct = timing(t, f, a.ID)
-	if len(ct.Sessions) != 4 || ct.Sessions[0].AgentID != a.ID || ct.Sessions[0].Stage != "building" {
-		t.Fatalf("archived children relabelled: %+v", ct.Sessions)
-	}
-}
-
 func TestTimingSessionUnchangedPollDoesNotWrite(t *testing.T) {
 	a := sessionAgent(fresh("c1"), "first")
 	a.Status = "running"
@@ -153,18 +74,6 @@ func TestTimingSessionIDAppearsLater(t *testing.T) {
 	f.SetAgents([]Agent{a})
 	if ct := timing(t, f, a.ID); len(ct.Sessions) != 1 || ct.Sessions[0].SessionID != "ready" {
 		t.Fatalf("late session link = %+v", ct.Sessions)
-	}
-}
-
-func TestTimingSessionArchivedIdentityCanArriveLate(t *testing.T) {
-	a := sessionAgent(fresh("c1"), "first")
-	f, _ := newTestFactory(t, a)
-	f.Now = func() time.Time { return t0.Add(time.Minute) }
-	a.SessionID, a.ArchivedAt = "final", f.Now()
-	f.SetAgents([]Agent{a})
-	ct := timing(t, f, a.ID)
-	if len(ct.Sessions) != 2 || ct.Sessions[1].SessionID != "final" || ct.Sessions[1].Stage != "plan" {
-		t.Fatalf("late archived identity = %+v", ct.Sessions)
 	}
 }
 
@@ -324,5 +233,96 @@ func TestTimingSessionOffsetCreationDoesNotRepeatObservation(t *testing.T) {
 	got := timing(t, f, a.ID)
 	if len(got.Sessions) != 1 || len(got.Sessions[0].History) != 1 {
 		t.Fatalf("unchanged offset creation repeated observation: %+v", got.Sessions)
+	}
+}
+
+func TestTimingSessionLinksFollowStepsAndSessions(t *testing.T) {
+	a := sessionAgent(fresh("c1"), "first")
+	f, p := newTestFactory(t, a)
+	first := timing(t, f, a.ID)
+	if first.Repo != a.Repo || len(first.Sessions) != 1 {
+		t.Fatalf("initial metadata = %+v", first)
+	}
+	l := first.Sessions[0]
+	if l.AgentID != a.ID || l.SessionID != "first" || l.Provider != "codex" || l.Model != "model-a" ||
+		l.Device != a.Host || l.Role != "fellow" || l.Stage != "building" || !l.ObservedAt.Equal(t0) ||
+		!l.CreatedAt.Equal(a.CreatedAt) {
+		t.Fatalf("session link = %+v", l)
+	}
+	f.Now = func() time.Time { return t0.Add(time.Minute) }
+	a = moved(a, "building", iso(f.Now()))
+	f.SetAgents([]Agent{a})
+	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
+	a.SessionID, a.Model = "second", "model-b"
+	f.SetAgents([]Agent{a})
+	ct := timing(t, f, a.ID)
+	if len(ct.Sessions) != 2 || ct.Sessions[0].Stage != "building" ||
+		ct.Sessions[1].SessionID != "second" || ct.Sessions[1].Model != "model-b" {
+		t.Fatalf("session history = %+v", ct.Sessions)
+	}
+	if len(p.calls) != 0 {
+		t.Fatalf("observation called Paseo: %v", p.calls)
+	}
+	// A caller cannot mutate the store through a returned snapshot.
+	ct.Sessions[0].Model = "changed"
+	ct.Sessions[0].History[0].Model = "changed"
+	if got := timing(t, f, a.ID); got.Sessions[0].Model != "model-a" || got.Sessions[0].History[0].Model != "model-a" {
+		t.Fatal("session links were not copied")
+	}
+}
+
+func TestTimingSessionLinksNestedReviewersAndArchivedChildren(t *testing.T) {
+	a := sessionAgent(fresh("c1"), "builder")
+	a = moved(a, gateRequest, iso(t0))
+	r := sessionAgent(reviewer("r1", a.ID, gateRequest), "reviewer")
+	b := sessionAgent(card("child", nil), "child")
+	b.Labels["paseo.parent-agent-id"] = r.ID
+	c := sessionAgent(card("nested", nil), "nested")
+	c.Labels["paseo.parent-agent-id"] = b.ID
+	unrelated := sessionAgent(card("unrelated", nil), "unrelated")
+	f, _ := newTestFactory(t, a, r, b, c, unrelated)
+	ct := timing(t, f, a.ID)
+	if len(ct.Sessions) != 4 {
+		t.Fatalf("links = %+v", ct.Sessions)
+	}
+	for _, l := range ct.Sessions {
+		if l.Stage != gateRequest {
+			t.Errorf("wrong step: %+v", l)
+		}
+		switch l.AgentID {
+		case r.ID:
+			if l.ParentID != a.ID || l.Role != "reviewer" || l.ReviewKind != gateRequest {
+				t.Errorf("review link = %+v", l)
+			}
+		case b.ID:
+			if l.ParentID != r.ID || l.Role != "subagent" {
+				t.Errorf("child link = %+v", l)
+			}
+		case c.ID:
+			if l.ParentID != b.ID || l.Role != "subagent" {
+				t.Errorf("nested link = %+v", l)
+			}
+		}
+	}
+	// Old reviewers and their children must not acquire the next build's step.
+	f.Now = func() time.Time { return t0.Add(time.Minute) }
+	r.ArchivedAt, b.ArchivedAt, c.ArchivedAt = f.Now(), f.Now(), f.Now()
+	a = moved(a, "building", iso(f.Now()))
+	f.SetAgents([]Agent{a, r, b, c})
+	ct = timing(t, f, a.ID)
+	if len(ct.Sessions) != 4 || ct.Sessions[0].AgentID != a.ID || ct.Sessions[0].Stage != "building" {
+		t.Fatalf("archived children relabelled: %+v", ct.Sessions)
+	}
+}
+
+func TestTimingSessionArchivedIdentityCanArriveLate(t *testing.T) {
+	a := sessionAgent(fresh("c1"), "first")
+	f, _ := newTestFactory(t, a)
+	f.Now = func() time.Time { return t0.Add(time.Minute) }
+	a.SessionID, a.ArchivedAt = "final", f.Now()
+	f.SetAgents([]Agent{a})
+	ct := timing(t, f, a.ID)
+	if len(ct.Sessions) != 2 || ct.Sessions[1].SessionID != "final" || ct.Sessions[1].Stage != "building" {
+		t.Fatalf("late archived identity = %+v", ct.Sessions)
 	}
 }

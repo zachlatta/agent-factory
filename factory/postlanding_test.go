@@ -13,7 +13,7 @@ func TestPostLandingReplyRouting(t *testing.T) {
 	for _, via := range []string{"board", "email"} {
 		for _, note := range []string{"landed; did not say what remains", "landed; still to do: finish"} {
 			t.Run(via+note, func(t *testing.T) {
-				c := card("c1", map[string]string{labelStage: "zach", labelNote: note, labelPlanRounds: "1", labelAutoReview: "code"})
+				c := card("c1", map[string]string{labelStage: "zach", labelNote: note, labelRoundsRequest: "1", labelAutoReview: gateRequest})
 				f, p := newTestFactory(t, c)
 				if _, err := f.Act("send", Body{ID: c.ID, Message: "continue", Via: via}); err != nil {
 					t.Fatal(err)
@@ -27,60 +27,11 @@ func TestPostLandingReplyRouting(t *testing.T) {
 					if !strings.Contains(strings.Join(p.sent(c.ID), ""), remainingRule) {
 						t.Fatal("missing rule")
 					}
-				} else if l[labelStage] != "building" || l[labelAutoReview] != "code" {
+				} else if l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
 					t.Fatalf("labels: %v", l)
 				}
 			})
 		}
-	}
-}
-
-func TestPostLandingEmptyReview(t *testing.T) {
-	for _, tc := range []struct {
-		name, commits, reply string
-		verified             bool
-		gitErr               bool
-		stage                string
-	}{
-		{"empty done", "", "REMAINING: none", true, false, "landed"},
-		{"empty missing", "", "Finished", true, false, "landing"},
-		{"empty items", "", "REMAINING: Zach: approve", true, false, "zach"},
-		{"new commits", "new\n", "REMAINING: none", true, false, "review"},
-		{"git failure", "", "REMAINING: none", true, true, "review"},
-		{"unverified", "", "REMAINING: none", false, false, "review"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: "code", labelPlanRounds: "1",
-				labelNote: "landed; still to do: finish"})
-			if tc.verified {
-				c.Labels[labelPrefix+labelLandedVerified] = "1"
-			}
-			c.Cwd = t.TempDir()
-			f, p := newTestFactory(t, c)
-			writeSession(t, f.cfg.Home, c.Cwd, c.SessionID, sessionLine("continue", false), postLandingAnswer(tc.reply))
-			f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
-				if strings.Contains(strings.Join(args, " "), "origin/main..HEAD") {
-					if tc.gitErr {
-						return "", fmt.Errorf("git failed")
-					}
-					return tc.commits, nil
-				}
-				return "", nil
-			}
-			f.Tick()
-			if l := p.labels(c.ID); l[labelStage] != tc.stage {
-				t.Fatalf("labels: %v", l)
-			}
-			if tc.stage == "landing" {
-				l := p.labels(c.ID)
-				if l[labelRemainingAsk] != "1" || l[labelAutoReview] != "" {
-					t.Fatalf("completion not queued cleanly: %v", l)
-				}
-			}
-			if tc.stage != "review" && p.runs != 0 {
-				t.Fatal("empty review started")
-			}
-		})
 	}
 }
 
@@ -146,9 +97,9 @@ func postLandingAnswer(text string) []byte {
 func TestNewLandingPromptsResetClarification(t *testing.T) {
 	for _, route := range []string{"approve", "rerun", "code review", "dependency"} {
 		t.Run(route, func(t *testing.T) {
-			c := idea("c1", map[string]string{labelStage: "zach", labelPlanRounds: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1",
+			c := idea("c1", map[string]string{labelStage: "zach", labelRoundsRequest: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1",
 				labelReviewed: reviewedSHA})
-			agents := []Agent{c, reviewer("r1", c.ID, "code")}
+			agents := []Agent{c, reviewer("r1", c.ID, gateSignoff)}
 			if route == "dependency" {
 				c = heldCard(map[string]string{labelRemainingAsk: "1", labelReviewed: reviewedSHA})
 				agents = []Agent{c, dep("landed", false)}
@@ -160,7 +111,7 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 			case "approve", "rerun":
 				_, err = f.Act(route, Body{ID: c.ID})
 			case "code review":
-				storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
+				storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
 				err = f.ApplyVerdict(f.agent("r1"))
 			case "dependency":
 				err = f.tickHeld(c, Card{ID: c.ID, Repo: c.Repo, Cwd: c.Cwd})
@@ -174,6 +125,55 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 			}
 			if val, ok := l[labelRemainingAsk]; !ok || val != "" {
 				t.Fatalf("%s not reset: %v", labelRemainingAsk, l)
+			}
+		})
+	}
+}
+
+func TestPostLandingEmptyReview(t *testing.T) {
+	for _, tc := range []struct {
+		name, commits, reply string
+		verified             bool
+		gitErr               bool
+		stage                string
+	}{
+		{"empty done", "", "REMAINING: none", true, false, "landed"},
+		{"empty missing", "", "Finished", true, false, "landing"},
+		{"empty items", "", "REMAINING: Zach: approve", true, false, "zach"},
+		{"new commits", "new\n", "REMAINING: none", true, false, gateRequest},
+		{"git failure", "", "REMAINING: none", true, true, gateRequest},
+		{"unverified", "", "REMAINING: none", false, false, gateRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelRoundsRequest: "1",
+				labelNote: "landed; still to do: finish"})
+			if tc.verified {
+				c.Labels[labelPrefix+labelLandedVerified] = "1"
+			}
+			c.Cwd = t.TempDir()
+			f, p := newTestFactory(t, c)
+			writeSession(t, f.cfg.Home, c.Cwd, c.SessionID, sessionLine("continue", false), postLandingAnswer(tc.reply))
+			f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
+				if strings.Contains(strings.Join(args, " "), "origin/main..HEAD") {
+					if tc.gitErr {
+						return "", fmt.Errorf("git failed")
+					}
+					return tc.commits, nil
+				}
+				return "", nil
+			}
+			f.Tick()
+			if l := p.labels(c.ID); l[labelStage] != tc.stage {
+				t.Fatalf("labels: %v", l)
+			}
+			if tc.stage == "landing" {
+				l := p.labels(c.ID)
+				if l[labelRemainingAsk] != "1" || l[labelAutoReview] != "" {
+					t.Fatalf("completion not queued cleanly: %v", l)
+				}
+			}
+			if !isGate(tc.stage) && p.runs != 0 {
+				t.Fatal("empty review started")
 			}
 		})
 	}

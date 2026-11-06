@@ -14,8 +14,7 @@ import (
 
 // Fresh agents per stage. Every move of a card to new work starts a new agent on the same model in the
 // same worktree instead of resuming the card's session, which by then re-reads hundreds of thousands
-// of tokens on every call: a passed plan (plan reviewer, arbiter or Zach) going to build, plan-review
-// fixes, code-review or arbiter fixes, the land prompt (sendLanding), and a failed landing, a dropped
+// of tokens on every call: a gate's fixes, the land prompt (sendLanding), and a failed landing, a dropped
 // dependency or work left after a landing going back to building. The new agent gets a compact
 // handoff (stagePrompt) and the ids of the earlier agents, whose full transcripts it can read in PDW
 // (not the transcript API, which resolves a replaced agent to the current one and stitches whole
@@ -89,7 +88,14 @@ func (f *Factory) advance(a Agent, step, msg string) error {
 	if f.cfg.NoStageHandoff || a.L(labelRole) != "" || f.handoffBusy(a) {
 		return f.send(a.ID, msg)
 	}
-	choice, ok := sameChoice(a)
+	choice, ok := stageChoice(a, a.L(labelStage))
+	if a.L(labelStage) == "landing" && a.L(labelBuilderAgent) == "" && builderChoiceLabel(a) != "" {
+		// the builder's model stays on record for a return to build
+		if err := f.setLabels(a.ID, map[string]string{labelBuilderAgent: builderChoiceLabel(a)}); err != nil {
+			return err
+		}
+		a = labeled(a, map[string]string{labelBuilderAgent: builderChoiceLabel(a)})
+	}
 	if !ok {
 		f.logf("%s: model unknown, resuming its session for %s", short(a.ID), step)
 		return f.send(a.ID, msg)
@@ -147,7 +153,7 @@ func sameChoice(a Agent) (AgentChoice, bool) {
 }
 
 // stagePrompt is the fresh agent's first message: what it is and where the past is, the card's
-// original instructions verbatim, Zach's follow-ups, the approved plan, the branch, the last
+// original instructions verbatim, Zach's follow-ups, the proposed solution, the branch, the last
 // agent's message and the stage message. An unreadable first session is an error.
 func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (string, error) {
 	byID := f.byID()
@@ -172,9 +178,9 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 	fmt.Fprintf(&b, "%s You are this factory card's fresh agent (%s) for its next step: %s. Earlier agents of the card "+
 		"worked in this same worktree and branch; the factory moved its labels, email thread, review rounds and board "+
 		"history to you, and starts each stage in a fresh agent so the context stays small. This message has what you "+
-		"need: the card's original instructions, Zach's follow-ups, the approved plan, the branch's commits, the last "+
+		"need: the card's original instructions, Zach's follow-ups, the proposed solution, the branch's commits, the last "+
 		"agent's message and this step's instructions. Do not start over: first check where the work stands (git status, "+
-		"git log --oneline origin/main..HEAD, the files the plan names).\n\n", stageHandoffMarker, choice.Label, step)
+		"git log --oneline origin/main..HEAD).\n\n", stageHandoffMarker, choice.Label, step)
 	b.WriteString("Earlier agents of this card, oldest first:\n")
 	for _, x := range lin {
 		fmt.Fprintf(&b, "- Paseo agent %s (%s", x.ID, modelLabel(x))
@@ -188,7 +194,7 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 		"`pdw search`, a bounded query at a time; PDW can lag by a few minutes. Never run `paseo logs` on an earlier " +
 		"agent: it loads that agent in Paseo and can resume an archived one.\n\n")
 	b.WriteString("=== Original instructions ===\nThey still apply (rules, gates, the public-repo scan, the opening lines), " +
-		"but this step replaces their \"Step 1\".\n\n")
+		"but this step replaces their first step.\n\n")
 	b.WriteString(strings.TrimSpace(first))
 	b.WriteString("\n")
 	if fus := f.cardRequest(a).FollowUps; len(fus) > 0 {
@@ -201,20 +207,20 @@ func (f *Factory) stagePrompt(a Agent, choice AgentChoice, step, msg string) (st
 		}
 	}
 	if a.L(labelBehaviorApproval) != "" {
-		fmt.Fprintf(&b, "\n=== Finished-work approval ===\nApproved revision: %s. Preserve this authorization through repairs; fresh code review must explicitly confirm unchanged behavior before reuse.\n", a.L(labelBehaviorApproval))
+		fmt.Fprintf(&b, "\n=== Finished-work approval ===\nApproved revision: %s. Preserve this authorization through repairs; the fresh gates must explicitly confirm unchanged behavior before reuse.\n", a.L(labelBehaviorApproval))
 		if summary, err := base64.RawURLEncoding.DecodeString(a.L(labelBehaviorSummary)); err == nil {
 			fmt.Fprintf(&b, "Approved summary:\n%s\n", summary)
 		}
 	}
 	if plan != "" {
-		fmt.Fprintf(&b, "\n=== Approved plan ===\n%s\n", trunc(plan, handoffTextCap))
+		fmt.Fprintf(&b, "\n=== Proposed solution ===\n%s\n", trunc(plan, handoffTextCap))
 	}
 	fmt.Fprintf(&b, "\n=== Branch ===\n%s\n", f.stageBranch(a.Cwd))
 	if last != "" && last != plan && !strings.Contains(plan, last) {
 		fmt.Fprintf(&b, "\n=== Last message of the previous agent ===\n%s\n", trunc(last, handoffTextCap))
 	}
 	if step == "landing" {
-		b.WriteString("\nLanding: run the deploy steps of the reviewed build summary. If the messages above do not " +
+		b.WriteString("\nLanding: run the deploy steps and any runbook in the proposed solution. If the messages above do not " +
 			"list them, read them from the previous agent's transcript before you land.\n")
 	}
 	fmt.Fprintf(&b, "\n=== This step ===\n%s\n", msg)
@@ -242,9 +248,8 @@ func (f *Factory) stageBranch(cwd string) string {
 	return out + "\n\nRead the diff itself with git diff origin/main...HEAD."
 }
 
-// lineagePlan is the card's approved plan, newest agent first: the reply before a "Build it now"
-// message in its session, the plan section of a handoff it started with, or (the planner itself, at
-// the plan's approval) its newest reply with a TIER: line.
+// lineagePlan is the card's proposed solution, newest agent first: the section of a handoff it started
+// with, or its newest reply with a RESULT: line. An older card's plan is read the same way.
 func (f *Factory) lineagePlan(lin []Agent) string {
 	for i := len(lin) - 1; i >= 0; i-- {
 		evs, err := storedEvents(f.cfg.Home, lin[i])
@@ -255,10 +260,10 @@ func (f *Factory) lineagePlan(lin []Agent) string {
 		if plan != "" {
 			return plan
 		}
-		if p := handoffSection(first, "Approved plan"); p != "" {
+		if p := lastResultReply(evs); p != "" {
 			return p
 		}
-		if p := lastTierReply(evs); p != "" {
+		if p := handoffSection(first, "Proposed solution"); p != "" {
 			return p
 		}
 	}
@@ -277,12 +282,12 @@ func handoffSection(prompt, name string) string {
 	return strings.TrimSpace(rest)
 }
 
-// lastTierReply is the newest assistant reply (a run of text blocks) with a TIER: line: a plan.
-func lastTierReply(evs []Event) string {
+// lastResultReply is the newest assistant reply (a run of text blocks) with a RESULT: line.
+func lastResultReply(evs []Event) string {
 	var run []string
 	best := ""
 	flush := func() {
-		if r := strings.TrimSpace(strings.Join(run, "\n\n")); r != "" && ParseTier(r) != "" {
+		if r := strings.TrimSpace(strings.Join(run, "\n\n")); r != "" && ParseResult(r) != "" {
 			best = r
 		}
 		run = nil

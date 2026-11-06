@@ -539,6 +539,8 @@ func turnStepAndModel(turn turnSpan, links []TimingSession, events []TimingEvent
 			return "plan-review", model
 		case "code":
 			return "review", model
+		case gateRequest, gateDesign, gateSignoff:
+			return l.ReviewKind, model
 		}
 		if l.Role == "reviewer" && l.Stage != "" && l.Stage != "landed" {
 			return l.Stage, model
@@ -565,7 +567,7 @@ func turnStepAndModel(turn turnSpan, links []TimingSession, events []TimingEvent
 			for i, sp := range spans {
 				if !turn.start.Before(sp.start) && (sp.end.IsZero() || turn.start.Before(sp.end)) {
 					step = sp.stage
-					if (step == "plan-review" || step == "review") && i+1 < len(spans) {
+					if (step == "plan-review" || step == "review" || isGate(step)) && i+1 < len(spans) {
 						step = spans[i+1].stage
 					}
 					break

@@ -101,13 +101,15 @@ func feedbackAsksNothing(reply string) bool {
 	return len(items) == 0
 }
 
-// feedbackGate says why a passed answer that asks nothing still waits for Zach, or "". He has seen this
-// exact version, so only "you asked for it" is waived; what stopped it at Ready for you for any other
-// reason still holds, even if a later review round did not repeat it.
-func (f *Factory) feedbackGate(t Agent, tier, review, asked string) string {
-	why := f.finishedWorkReasons(t, tier, review, asked, true)
+// legacyAskedForWhy is the old flow's reason on a card still waiting: under the new rule his own request needs no sign-off.
+const legacyAskedForWhy = "you asked for it"
+
+// feedbackGate says why a passed answer that asks nothing still waits for Zach, or "". What stopped it at
+// Ready for you still holds, even if a later gate round did not repeat it.
+func (f *Factory) feedbackGate(t Agent, review string) string {
+	why := f.finishedWorkReasons(t, review)
 	for _, w := range strings.Split(t.L(labelAskWhy), "; ") {
-		if w != "" && w != askedForItWhy && w != feedbackAgainWhy && !slices.Contains(why, w) {
+		if w != "" && w != feedbackAgainWhy && w != legacyAskedForWhy && !slices.Contains(why, w) {
 			why = append(why, w)
 		}
 	}

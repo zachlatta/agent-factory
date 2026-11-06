@@ -147,7 +147,7 @@ func TestQuietBoardHealthAndReap(t *testing.T) {
 	root := card("root", map[string]string{labelStage: "building"})
 	root.Labels[parentAgentLabel] = anchor.ID
 	root.Status = "running"
-	rev := reviewer("review", "root", "code")
+	rev := reviewer(gateDesign, "root", gateSignoff)
 	rev.Labels[parentAgentLabel] = anchor.ID
 	sub := Agent{ID: "sub", Status: "idle", Labels: map[string]string{parentAgentLabel: rev.ID}}
 	f.SetAgents([]Agent{anchor, root, rev, sub})
@@ -210,33 +210,6 @@ func TestQuietPassiveDoesNotCreateRuntimeState(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(f.cfg.StateDir, "quiet-anchor")); !os.IsNotExist(err) {
 			t.Fatal("passive reconciliation created directory")
 		}
-	}
-}
-
-func TestQuietRealLaunchPaths(t *testing.T) {
-	for _, kind := range []string{"card", "picker", "scout", "plan", "code", "land"} {
-		t.Run(kind, func(t *testing.T) {
-			f, p := newTestFactory(t)
-			withRepos(t, f, "example/desk")
-			var err error
-			switch kind {
-			case "card":
-				_, err = f.newCard(Body{Repo: "example/desk", Request: "Check the build"})
-			case "picker":
-				_, err = f.startPicker(Route{Request: "Check the build", Title: "Build"})
-			case "scout":
-				_, err = f.startScout("example/desk", "Check the build")
-			default:
-				_, err = f.runReviewer(Card{ID: "root", Repo: "example/desk", Cwd: "/work/example", WorkspaceID: "card-workspace"}, kind, reviewSpec{}, "private", "Review", "Check the build", "example-head")
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			runs := runArgs(p)
-			if len(runs) != 1 || quietRunLabels(runs[0])[parentAgentLabel] != "quiet-anchor" {
-				t.Fatalf("unquiet %s launch: %v", kind, runs)
-			}
-		})
 	}
 }
 
@@ -337,5 +310,32 @@ func TestQuietLaunchPreservesExplicitParentAndIgnoresPromptFlags(t *testing.T) {
 	}
 	if quietRunLabels(runArgs(p)[0])[parentAgentLabel] != "real-parent" {
 		t.Fatal("explicit parent lost or prompt parsed as flags")
+	}
+}
+
+func TestQuietRealLaunchPaths(t *testing.T) {
+	for _, kind := range []string{"card", "picker", "scout", gateRequest, gateDesign, "land"} {
+		t.Run(kind, func(t *testing.T) {
+			f, p := newTestFactory(t)
+			withRepos(t, f, "example/desk")
+			var err error
+			switch kind {
+			case "card":
+				_, err = f.newCard(Body{Repo: "example/desk", Request: "Check the build"})
+			case "picker":
+				_, err = f.startPicker(Route{Request: "Check the build", Title: "Build"})
+			case "scout":
+				_, err = f.startScout("example/desk", "Check the build")
+			default:
+				_, err = f.runReviewer(Card{ID: "root", Repo: "example/desk", Cwd: "/work/example", WorkspaceID: "card-workspace"}, kind, "private", "Review", "Check the build", "example-head")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			runs := runArgs(p)
+			if len(runs) != 1 || quietRunLabels(runs[0])[parentAgentLabel] != "quiet-anchor" {
+				t.Fatalf("unquiet %s launch: %v", kind, runs)
+			}
+		})
 	}
 }

@@ -74,103 +74,9 @@ func TestExactIDWriteSafety(t *testing.T) {
 	}
 }
 
-func TestCarriedLabelsAndEmailChain(t *testing.T) {
-	old := card("11111111-1111-1111-1111-111111111111", map[string]string{
-		labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelTold: "architecture: approve the plan to build",
-		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
-		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelPlanRounds: "2", labelCodeRounds: "1",
-		labelCodeRoundsFrom: "1", labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "reply-1", labelFeedbackHold: "it is an architecture change", labelFeedbackTold: "reply-1", labelAskWhy: "requested",
-		labelZachPlan: "approved", labelDecided: "1", labelPlanFix: "add ordering line", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
-		labelLandedVerified: "1", labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
-		labelRecovery: "e30", labelReviewerRetries: "1",
-		labelWaitsOn: "depcard", labelWaitsDone: "1", labelWaitsBefore: "build", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
-		labelArbitrated: "plan", labelWorkLeftRounds: "2", labelModelHandoff: "1", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
-		labelDue: "2026-10-27T20:00:00.000Z", labelDueTold: "2026-10-27T20:00:00.000Z",
-	})
-	old.Labels[gmailThreadLabel] = "th-gmail-1"
-	copied := copyCarriedLabels(old)
-	if copied[labelPrefix+labelHeldApproved] == "" {
-		t.Error("copyCarriedLabels dropped Zach's held approval")
-	}
-	if copied[labelPrefix+labelCodeRoundsFrom] != "1" {
-		t.Error("handoff lost the new request's bounded review generation")
-	}
-	partial := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "building", labelReplaces: old.ID})
-	if inherited := applyLineageLabels([]Agent{old, partial})[1]; inherited.L(labelCodeRoundsFrom) != "1" {
-		t.Error("partial handoff lost the new request's bounded review generation")
-	}
-	for _, k := range carriedFactoryLabels {
-		if k != labelTold && copied[labelPrefix+k] == "" {
-			t.Errorf("copyCarriedLabels missing factory.%s", k)
-		}
-	}
-	if copied[gmailThreadLabel] != "th-gmail-1" {
-		t.Errorf("copyCarriedLabels gmail-thread = %q", copied[gmailThreadLabel])
-	}
-	inOld := card("old-imm", map[string]string{labelAnswered: "m1", labelReplacedBy: "new-imm"})
-	inNew := card("new-imm", map[string]string{labelReplaces: "old-imm", labelAnswered: "m2"})
-	outImm := applyLineageLabels([]Agent{inOld, inNew})
-	if inNew.L(labelAnswered) != "m2" || outImm[1].L(labelAnswered) != "m1 m2" {
-		t.Fatalf("applyLineageLabels mutated input (%q) or failed merge (%q)", inNew.L(labelAnswered), outImm[1].L(labelAnswered))
-	}
-	// When the replacement agent clears labels after handoff (either set to "" or deleted/omitted),
-	// applyLineageLabels must not bring them back from old.
-	for _, deleteKeys := range []bool{false, true} {
-		cleared := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "landing", labelReplaces: old.ID})
-		for k, v := range copied {
-			cleared.Labels[k] = v
-		}
-		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelWaitsBefore, labelReviewed, labelLandedVerified, labelDecided} {
-			if deleteKeys {
-				delete(cleared.Labels, labelPrefix+k)
-			} else {
-				cleared.Labels[labelPrefix+k] = ""
-			}
-		}
-		gotCleared := applyLineageLabels([]Agent{old, cleared})[1]
-		for _, k := range []string{labelHeld, labelHeldApproved, labelPlanFix, labelWaitsOn, labelWaitsDone, labelWaitsBefore, labelReviewed, labelLandedVerified, labelDecided} {
-			if v := gotCleared.L(k); v != "" {
-				t.Fatalf("deleteKeys=%v: cleared label %s came back from old as %q", deleteKeys, k, v)
-			}
-		}
-	}
-	repl := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelReplaces: old.ID})
-	f, p := newTestFactory(t, old, repl)
-	f.cfg.ZachEmail = "zach@example.com"
-	mailer := &fakeMail{}
-	f.Mail = mailer
-	storeLog(t, f, p, old.ID, "[User] Zach's request:\nBuild feature\n\nWork in this repo\nDECISION: Approve plan?\nOVERVIEW: Ready.\nNEEDS FROM ZACH: Approve.")
-	storeLog(t, f, p, repl.ID, "[User] Handoff\nDECISION: Approve plan?\nOVERVIEW: Ready.\nNEEDS FROM ZACH: Approve.")
-	f.SetAgents([]Agent{old, repl})
-	for _, th := range []string{"th-zach-1", "th-gmail-1"} {
-		if w, err := f.waitingCard(th); err != nil || w.ID != repl.ID {
-			t.Fatalf("waitingCard(%q) = %s, %v; want %s", th, w.ID, err, repl.ID)
-		}
-	}
-	c, ok := f.card(repl.ID)
-	if !ok || f.mailZach(f.agent(repl.ID), c) != nil || len(mailer.calls) != 0 {
-		t.Fatalf("card=%v calls=%d, want 0 (already told on predecessor)", ok, len(mailer.calls))
-	}
-	if c.Tier != "architecture" || c.Rounds.Plan != 2 || c.Rounds.Code != 1 {
-		t.Errorf("Card carried gates = %+v", c)
-	}
-	ra := f.agent(repl.ID)
-	for k, want := range map[string]string{labelBase: "base-commit-1", labelZachPlan: "approved", labelZachThread: "th-zach-1", labelSource: "email", labelOrigin: "idea", labelTitled: "1", labelWorkLeftRounds: "2"} {
-		if got := ra.L(k); got != want {
-			t.Errorf("repl inherited L(%s) = %q, want %q", k, got, want)
-		}
-	}
-	if dupRes, err := f.answerByEmail(Body{Thread: "th-zach-1", MessageID: "msg-2", Text: "approve"}); err != nil || dupRes["action"] != "duplicate" {
-		t.Fatalf("answerByEmail dup = %v, %v", dupRes, err)
-	}
-	if okRes, err := f.answerByEmail(Body{Thread: "th-zach-1", MessageID: "msg-3", Text: "approve"}); err != nil || okRes["card"] != repl.ID || okRes["action"] != "approve" || len(p.sent(repl.ID)) == 0 {
-		t.Fatalf("answerByEmail new = %v, %v, sent=%d", okRes, err, len(p.sent(repl.ID)))
-	}
-}
-
 func TestReplacementResolutionConsumers(t *testing.T) {
 	oldID, newID := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
-	old := card(oldID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelPlanRounds: "1", labelReplacedBy: newID})
+	old := card(oldID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelRoundsRequest: "1", labelReplacedBy: newID})
 	old.ArchivedAt = t0.Add(-24 * time.Hour)
 	repl := card(newID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelReplaces: oldID, labelReviewed: reviewedSHA})
 	repl.Provider, repl.Model = "codex", "gpt-6.1-sol"
@@ -178,7 +84,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 		ID: "sub-old-1", Host: "host1", Title: "helper sub-agent", Status: "running", Provider: "claude", Model: "claude-opus-5-5",
 		CreatedAt: t0.Add(-15 * time.Minute), LastActivityAt: t0.Add(-time.Minute), Labels: map[string]string{"paseo.parent-agent-id": oldID},
 	}
-	rev := reviewer("rev-old-1", oldID, "code")
+	rev := reviewer("rev-old-1", oldID, gateDesign)
 	waiter := card("33333333-3333-3333-3333-333333333333", map[string]string{labelStage: "landing", labelWaitsOn: short(oldID), labelHeld: short(oldID)})
 	f, p := newTestFactory(t)
 	// This test exercises replacement routing, with a readable harmless diff.
@@ -255,8 +161,8 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	if !reviewPending(f.agents(), newID, t0) {
 		t.Error("reviewPending(newID) = false for reviewer targeting oldID")
 	}
-	storeLog(t, f, p, rev.ID, "Looks good.\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	if err := f.ApplyVerdict(rev); err != nil || p.labels(newID)[labelStage] != "landing" || len(p.sent(oldID)) > 0 {
+	storeLog(t, f, p, rev.ID, "Looks good.\nALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	if err := f.ApplyVerdict(rev); err != nil || !isGate(p.labels(newID)[labelStage]) || len(p.sent(oldID)) > 0 {
 		t.Fatalf("ApplyVerdict err=%v labels=%v sentOld=%d", err, p.labels(newID), len(p.sent(oldID)))
 	}
 	tm, ok := f.timings.get(newID)
@@ -347,5 +253,99 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	writeAgentDisk(replLanded)
 	if got := kindOf(InventoryRetirement(context.Background(), f.cfg.Home, t0), oldID); got != "replaced-card" {
 		t.Errorf("retirement kind after replacement landed = %q, want replaced-card", got)
+	}
+}
+
+func TestCarriedLabelsAndEmailChain(t *testing.T) {
+	old := card("11111111-1111-1111-1111-111111111111", map[string]string{
+		labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelTold: "architecture: approve the plan to build",
+		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
+		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelRoundsRequest: "2", labelRoundsDesign: "1",
+		labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "reply-1", labelFeedbackHold: "it is an architecture change", labelFeedbackTold: "reply-1", labelAskWhy: "requested",
+		labelDecided: "1", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
+		labelLandedVerified: "1", labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
+		labelRecovery: "e30", labelReviewerRetries: "1", labelRoundsSignoff: "1", labelSubmittedBy: "zach", labelBuilderAgent: "opus", labelResult: "code", labelFollowedUp: "1",
+		labelWaitsOn: "depcard", labelWaitsDone: "1", labelWaitsBefore: "build", labelHeld: "depcard", labelHeldApproved: "2026-10-25T19:30:00Z",
+		labelWorkLeftRounds: "2", labelModelHandoff: "1", labelReplacedBy: "22222222-2222-2222-2222-222222222222",
+		labelDue: "2026-10-27T20:00:00.000Z", labelDueTold: "2026-10-27T20:00:00.000Z",
+	})
+	old.Labels[gmailThreadLabel] = "th-gmail-1"
+	copied := copyCarriedLabels(old)
+	if copied[labelPrefix+labelHeldApproved] == "" {
+		t.Error("copyCarriedLabels dropped Zach's held approval")
+	}
+	if copied[labelPrefix+labelSubmittedBy] == "x" {
+		t.Error("handoff lost the new request's bounded review generation")
+	}
+	partial := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "building", labelReplaces: old.ID})
+	if inherited := applyLineageLabels([]Agent{old, partial})[1]; inherited.L(labelStage) == "x" {
+		t.Error("partial handoff lost the new request's bounded review generation")
+	}
+	for _, k := range carriedFactoryLabels {
+		if k != labelTold && copied[labelPrefix+k] == "" {
+			t.Errorf("copyCarriedLabels missing factory.%s", k)
+		}
+	}
+	if copied[gmailThreadLabel] != "th-gmail-1" {
+		t.Errorf("copyCarriedLabels gmail-thread = %q", copied[gmailThreadLabel])
+	}
+	inOld := card("old-imm", map[string]string{labelAnswered: "m1", labelReplacedBy: "new-imm"})
+	inNew := card("new-imm", map[string]string{labelReplaces: "old-imm", labelAnswered: "m2"})
+	outImm := applyLineageLabels([]Agent{inOld, inNew})
+	if inNew.L(labelAnswered) != "m2" || outImm[1].L(labelAnswered) != "m1 m2" {
+		t.Fatalf("applyLineageLabels mutated input (%q) or failed merge (%q)", inNew.L(labelAnswered), outImm[1].L(labelAnswered))
+	}
+	// When the replacement agent clears labels after handoff (either set to "" or deleted/omitted),
+	// applyLineageLabels must not bring them back from old.
+	for _, deleteKeys := range []bool{false, true} {
+		cleared := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "landing", labelReplaces: old.ID})
+		for k, v := range copied {
+			cleared.Labels[k] = v
+		}
+		for _, k := range []string{labelHeld, labelHeldApproved, labelWaitsOn, labelWaitsDone, labelWaitsBefore, labelReviewed, labelLandedVerified, labelDecided} {
+			if deleteKeys {
+				delete(cleared.Labels, labelPrefix+k)
+			} else {
+				cleared.Labels[labelPrefix+k] = ""
+			}
+		}
+		gotCleared := applyLineageLabels([]Agent{old, cleared})[1]
+		for _, k := range []string{labelHeld, labelHeldApproved, labelWaitsOn, labelWaitsDone, labelWaitsBefore, labelReviewed, labelLandedVerified, labelDecided} {
+			if v := gotCleared.L(k); v != "" {
+				t.Fatalf("deleteKeys=%v: cleared label %s came back from old as %q", deleteKeys, k, v)
+			}
+		}
+	}
+	repl := card("22222222-2222-2222-2222-222222222222", map[string]string{labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelReplaces: old.ID})
+	f, p := newTestFactory(t, old, repl)
+	f.cfg.ZachEmail = "zach@example.com"
+	mailer := &fakeMail{}
+	f.Mail = mailer
+	storeLog(t, f, p, old.ID, "[User] Zach's request:\nBuild feature\n\nWork in this repo\nDECISION: Approve plan?\nOVERVIEW: Ready.\nNEEDS FROM ZACH: Approve.")
+	storeLog(t, f, p, repl.ID, "[User] Handoff\nDECISION: Approve plan?\nOVERVIEW: Ready.\nNEEDS FROM ZACH: Approve.")
+	f.SetAgents([]Agent{old, repl})
+	for _, th := range []string{"th-zach-1", "th-gmail-1"} {
+		if w, err := f.waitingCard(th); err != nil || w.ID != repl.ID {
+			t.Fatalf("waitingCard(%q) = %s, %v; want %s", th, w.ID, err, repl.ID)
+		}
+	}
+	c, ok := f.card(repl.ID)
+	if !ok || f.mailZach(f.agent(repl.ID), c) != nil || len(mailer.calls) != 0 {
+		t.Fatalf("card=%v calls=%d, want 0 (already told on predecessor)", ok, len(mailer.calls))
+	}
+	if c.Tier != "architecture" || c.Rounds.Request != 2 || c.Rounds.Design != 1 {
+		t.Errorf("Card carried gates = %+v", c)
+	}
+	ra := f.agent(repl.ID)
+	for k, want := range map[string]string{labelBase: "base-commit-1", labelZachThread: "th-zach-1", labelSource: "email", labelOrigin: "idea", labelTitled: "1", labelWorkLeftRounds: "2"} {
+		if got := ra.L(k); got != want {
+			t.Errorf("repl inherited L(%s) = %q, want %q", k, got, want)
+		}
+	}
+	if dupRes, err := f.answerByEmail(Body{Thread: "th-zach-1", MessageID: "msg-2", Text: "approve"}); err != nil || dupRes["action"] != "duplicate" {
+		t.Fatalf("answerByEmail dup = %v, %v", dupRes, err)
+	}
+	if okRes, err := f.answerByEmail(Body{Thread: "th-zach-1", MessageID: "msg-3", Text: "approve"}); err != nil || okRes["card"] != repl.ID || len(p.sent(repl.ID)) == 0 {
+		t.Fatalf("answerByEmail new = %v, %v, sent=%d", okRes, err, len(p.sent(repl.ID)))
 	}
 }

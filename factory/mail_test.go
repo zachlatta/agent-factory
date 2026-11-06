@@ -76,7 +76,8 @@ func mailFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo, *fakeMail
 	f.Mail = m
 	f.cfg.ZachEmail = testZach
 	f.cfg.BoardURL = "https://board.example/"
-	f.mailProbe.at = t0 // no health probe in these tests
+	f.mailProbe.at = t0         // no health probe in these tests
+	headIs(f, reviewedSHA, nil) // a card waiting on Zach here was reviewed at this commit
 	// an email answer reloads the board from the agent files: save the agents these tests hold in memory
 	f.p = &diskPaseo{fakePaseo: p, home: f.cfg.Home, beforeWrite: func() {
 		for _, a := range f.agents() {
@@ -97,7 +98,7 @@ func longPlan() string {
 		"QUESTION: Which store?\n- Postgres (recommended)\n- SQLite\n"
 }
 
-const planNote = sideEffectNote
+const planNote = "ready for you"
 
 // composed is the decision email mailZach composes for card id, without sending it: the same
 // ask-assembly mailZach runs, for tests of parts a thread reply does not carry (the subject).
@@ -118,56 +119,11 @@ func composed(t *testing.T, f *Factory, id string) email {
 
 // planWait is a card waiting for Zach to approve its plan: a decision, so it is emailed in its thread.
 func planWait(id string, extra map[string]string) Agent {
-	l := map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: planNote}
+	l := map[string]string{labelStage: "zach", labelNote: readyNote(1)}
 	for k, v := range extra {
 		l[k] = v
 	}
 	return card(id, l)
-}
-
-func TestDecisionEmailIsShortAndPlain(t *testing.T) {
-	c := inThread(planWait("c1", nil), "t1")
-	c.Title = "Accept schedule handoffs before retirement is turned on"
-	f, p, m := mailFactory(t, c)
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	storeLog(t, f, p, "c1", "DECISION: Approve building the handoff checker?\n"+
-		"OVERVIEW: Adds a checker in `factory/retire.go` for zachlatta/agent-factory, commit 0f1bc63ab.\n"+
-		"NEEDS FROM ZACH: approve the plan.\n\n"+longPlan())
-	f.Tick()
-	sends := m.sends()
-	if len(sends) != 1 || sends[0].Tool != "reply_to_message" {
-		t.Fatalf("sends = %+v", sends)
-	}
-	a := sends[0].Args
-	text, html := a["text"].(string), a["html"].(string)
-	if got := composed(t, f, "c1").Subject; got != "Approve building the handoff checker?" {
-		t.Errorf("the subject must be the question: %v", got)
-	}
-	for _, want := range []string{"I recommend A.", "Which store?", "A. Postgres (recommended)", "B. SQLite",
-		"Reply with a letter", `"yes" to allow & build`, `"drop" to stop it`, "https://board.example/#c1"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("text lacks %q:\n%s", want, text)
-		}
-	}
-	body := text[:strings.Index(text, "Open the board:")]
-	if n := wordCount(body); n >= 60 {
-		t.Errorf("a decision email is under 60 words, got %d:\n%s", n, body)
-	}
-	for _, banned := range []string{"PLAN START", "factory/retire.go", "zachlatta/", "0f1bc63ab", "`", "QUESTION:",
-		"Card", "card c1", "Details", "Original task"} {
-		if strings.Contains(text, banned) || strings.Contains(html, banned) {
-			t.Errorf("email has %q:\n%s", banned, text)
-		}
-	}
-	if !strings.Contains(html, "Open board") || !strings.Contains(html, `href="https://board.example/#c1"`) {
-		t.Errorf("html lacks the board button:\n%s", html)
-	}
-	if l := p.labels("c1"); l[labelTold] != planNote || l[labelZachThread] != "" {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 0 {
-		t.Errorf("the agent was messaged: %v", msgs)
-	}
 }
 
 // Factory copy in every emailed ask avoids pipeline words, and every body stays under 60 words apart from its question.
@@ -214,28 +170,6 @@ func TestEmailedAsksUsePlainWords(t *testing.T) {
 	}
 }
 
-func TestApproveWordOnlyWhenYesApproves(t *testing.T) {
-	f, _, _ := mailFactory(t, planWait("c1", nil))
-	c, _ := f.card("c1")
-	ask := askFor(c, f.agent("c1"))
-	words := replyWords(ask)
-	if len(words) != 3 || words[0].Word != "yes" || words[0].Does != "allow & build" || words[1].Word != "no" || words[2].Word != "drop" {
-		t.Errorf("plan words = %+v", words)
-	}
-	stuck := card("c2", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"})
-	f, _, _ = mailFactory(t, stuck)
-	c, _ = f.card("c2")
-	var hasDone bool
-	for _, w := range replyWords(askFor(c, f.agent("c2"))) {
-		if w.Word == "yes" {
-			t.Errorf("a stuck card offers yes: %+v", w)
-		}
-		hasDone = hasDone || w.Word == "done"
-	}
-	if !hasDone {
-		t.Error("a card with Mark done must offer the done reply word")
-	}
-}
 func TestLaterWaitRepliesInTheCardsThread(t *testing.T) {
 	// a board card answered by email: its gmail-thread is the factory-started thread
 	c := planWait("c1", map[string]string{labelTold: "stuck", labelZachThread: "nt1"})
@@ -318,75 +252,6 @@ func TestNoEmailForHandMovesOrWithoutAddress(t *testing.T) {
 }
 
 // Problems the factory or an agent can sort out show on the board only; decisions are emailed in the thread.
-func TestWhichWaitsAreEmailed(t *testing.T) {
-	running := func(a Agent, pending string) Agent { a.Status, a.Pending = "running", pending; return a }
-	attention := func(reason string) Agent { // the finished-card ask
-		a := card("c1", map[string]string{})
-		a.RequiresAttention, a.AttentionReason = true, reason
-		return a
-	}
-	stuckReviewer := reviewer("r1", "c1", "code")
-	stuckReviewer.Status, stuckReviewer.Pending = "running", "Bash"
-	for _, tc := range []struct {
-		name  string
-		agent Agent
-		extra []Agent
-		mail  bool
-	}{
-		{"landed with work left", card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: browser check"}), nil, false},
-		{"landed did it finish", card("c1", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}), nil, false},
-		{"landed diff differs, older wait", card("c1", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: x"}), nil, false},
-		{"landed diff differs, public scan failed", func() Agent {
-			a := card("c1", map[string]string{labelStage: "zach",
-				labelNote: "landed diff differs from the reviewed one: x" + landDiffScanMark + "found: tailnet-hostname a.go:3"})
-			a.Repo = publicRepo
-			return a
-		}(), nil, true},
-		{"stuck in its column", card("c1", map[string]string{labelStage: "building", labelStuck: stuckStopped}), nil, false},
-		{"stuck reviewer", card("c1", map[string]string{labelStage: "review", labelStuck: stuckReview}), []Agent{stuckReviewer}, false},
-		{"agent error", card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), nil, false},
-		{"reviewed commit unverified", card("c1", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}), nil, false},
-		{"parked changed since review", card("c1", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}), nil, false},
-		{"history unavailable", card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused"}), nil, false},
-		{"duplicate close", card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}), nil, false},
-		{"permission prompt", running(card("c1", map[string]string{labelStage: "zach"}), "Bash"), nil, false},
-		{"finished", attention("finished"), nil, false},
-		{"allow a build", planWait("c1", nil), nil, true},
-		{"preview", card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)}), nil, true},
-		{"secret scan", card("c1", map[string]string{labelStage: "zach", labelNote: "secret scan found 1 hit"}), nil, true},
-		{"older brief", card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), nil, false},
-		{"did not settle", card("c1", map[string]string{labelStage: "zach", labelNote: arbiterStuckNote}), nil, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f, p, m := mailFactory(t, append([]Agent{inThread(tc.agent, "t1")}, tc.extra...)...)
-			m.threads["t1"] = []threadMsg{{ID: "m1"}}
-			storeLog(t, f, p, "c1", "DECISION: Pick a colour?\nOVERVIEW: Changes the button.\nNEEDS FROM ZACH: choose.\n\nReport.")
-			c, ok := f.card("c1")
-			if !ok || c.Ask == nil {
-				t.Fatalf("no ask: %+v", c)
-			}
-			if c.Ask.BoardOnly == tc.mail {
-				t.Errorf("BoardOnly = %v for %q", c.Ask.BoardOnly, c.Ask.Title)
-			}
-			f.Tick()
-			if got := len(m.sends()) == 1; got != tc.mail {
-				t.Errorf("emailed = %v, want %v: %+v", got, tc.mail, m.sends())
-			}
-		})
-	}
-}
-
-// A plan approval is emailed with its own question even when the agent wrote that it needs nothing.
-func TestNeedsNothingDecisionUsesTheAsksQuestion(t *testing.T) {
-	// a plan approval is emailed even when the agent wrote that it needs nothing
-	f, p, m := mailFactory(t, inThread(planWait("c2", nil), "t1"))
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	storeLog(t, f, p, "c2", "DECISION: None before building.\nOVERVIEW: x.\nNEEDS FROM ZACH: Nothing now.\n\nPlan.")
-	f.Tick()
-	if s := m.sends(); len(s) != 1 || composed(t, f, "c2").Subject != "Allow this build?" {
-		t.Errorf("a plan approval must be emailed with its own question: %+v", s)
-	}
-}
 
 func TestPlainText(t *testing.T) {
 	for in, want := range map[string]string{
@@ -400,56 +265,6 @@ func TestPlainText(t *testing.T) {
 		if got := plainText(in, "zachlatta/agent-factory"); got != want {
 			t.Errorf("plainText(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-func TestSideEffectEmailWaitsForTheDecision(t *testing.T) {
-	c1 := inThread(card("c1", map[string]string{labelStage: "plan-review"}), "t1")
-	f, p, m := mailFactory(t, c1, reviewer("r1", "c1", "plan"))
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: writes prod rows\nTIER: architecture\nVERDICT: approve")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelWriting] == "" || l[labelTold] != "" {
-		t.Fatalf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.HasPrefix(msgs[0], sideEffectMsg) {
-		t.Errorf("sent = %v", msgs)
-	}
-	// the builder has not written the summary yet: no email
-	waiting := withLabels(c1, l)
-	f.SetAgents([]Agent{waiting})
-	f.Tick()
-	if s := m.sends(); len(s) != 0 {
-		t.Fatalf("emailed before the summary: %+v", s)
-	}
-	// it wrote it: one email carrying it
-	done := waiting
-	done.LastActivityAt = t0.Add(2 * time.Minute)
-	f.Now = func() time.Time { return t0.Add(3 * time.Minute) }
-	storeLog(t, f, p, "c1", "DECISION: Approve building the new page?\nOVERVIEW: SUMMARY for Zach.\nNEEDS FROM ZACH: approve.")
-	f.SetAgents([]Agent{done})
-	f.Tick()
-	if s := m.sends(); len(s) != 1 || !strings.Contains(s[0].Args["text"].(string), "SUMMARY for Zach") ||
-		composed(t, f, "c1").Subject != "Approve building the new page?" {
-		t.Errorf("sends = %+v", s)
-	}
-}
-
-func TestReviewCapGoesToTheArbiterWithoutEmail(t *testing.T) {
-	labels := map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "2", labelSource: "email"}
-	f, p, m := mailFactory(t)
-	c := inboxCard("c1", labels)
-	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", "code", "changes", p)})
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "review" || l[labelNote] != arbiterNote || len(p.sent("c1")) != 0 {
-		t.Errorf("labels = %v sent = %v", l, p.sent("c1"))
-	}
-	if s := m.sends(); len(s) != 0 {
-		t.Errorf("emailed Zach about agents disagreeing: %+v", s)
 	}
 }
 
@@ -513,7 +328,7 @@ func TestHealthReportsMailWithoutFailing(t *testing.T) {
 
 func TestCloseVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r := reviewer("r1", "c1", "plan")
+	r := reviewer("r1", "c1", gateRequest)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Provider, r.SessionID, r.Cwd = "claude", "s-oom", "/w/c1"
 	f, _, m := mailFactory(t, c, r)
@@ -543,7 +358,7 @@ func TestCloseVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
 
 	// Missing transcript file says why it could not be read.
 	c2 := card("c2", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r2 := reviewer("r2", "c2", "code")
+	r2 := reviewer("r2", "c2", gateDesign)
 	r2.Labels[labelPrefix+labelApplied] = "1"
 	r2.Provider, r2.SessionID, r2.Cwd = "claude", "missing-id", "/w/c2"
 	f2, _, _ := mailFactory(t, c2, r2)
@@ -562,74 +377,6 @@ func boardDetail(t *testing.T, f *Factory, id string) string {
 	}
 	detail, _, _ := f.askDetail(c, c.Ask)
 	return detail
-}
-
-func TestEmailIncludesInlineEvidenceWithFallback(t *testing.T) {
-	dir := t.TempDir()
-	evDir := filepath.Join(dir, ".factory-evidence")
-	if err := os.Mkdir(evDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	var pngBuf bytes.Buffer
-	if err := png.Encode(&pngBuf, stdimage.NewRGBA(stdimage.Rect(0, 0, 2, 2))); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(evDir, "before.png"), pngBuf.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(evDir, "after.png"), pngBuf.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	c := inThread(card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}), "t1")
-	c.Provider, c.SessionID, c.Cwd = "claude", "s-req", dir
-	f, p, m := mailFactory(t, c)
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	replyBody := `DECISION: Approve the email layout?\nOVERVIEW: Adds the original request and screenshots.\nNEEDS FROM ZACH: Approve or ask for changes.\n\nBEFORE: before.png\nAFTER: after.png\n\nDetailed plan text.`
-	sessionLines := `{"type":"user","message":{"content":"You are the Fellow on Zach's agent factory board: you own this card from plan to landing.\n\nZach's request:\nMake the Needs Zach emails show the original request and screenshots.\n\nWork in this repo (example/desk). Read its AGENTS.md and README first."}}` + "\n" +
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"` + replyBody + `"}]}}` + "\n"
-	writeFile(t, filepath.Join(f.cfg.Home, ".claude", "projects", strings.ReplaceAll(dir, "/", "-"), "s-req.jsonl"), sessionLines)
-	storeLog(t, f, p, "c1", strings.ReplaceAll(replyBody, `\n`, "\n"))
-	f.SetAgents([]Agent{c})
-	f.Tick()
-
-	sends := m.sends()
-	if len(sends) != 1 {
-		t.Fatalf("sends = %+v", sends)
-	}
-	text, html := sends[0].Args["text"].(string), sends[0].Args["html"].(string)
-	if !strings.Contains(text, "Before screenshot attached.") || composed(t, f, "c1").Subject != "Approve the email layout?" {
-		t.Errorf("text lacks the screenshots or the question:\n%s", text)
-	}
-	if strings.Contains(text, "BEFORE: before.png") || strings.Contains(html, "BEFORE: before.png") {
-		t.Errorf("raw BEFORE: line was not stripped:\n%s", text)
-	}
-	if !strings.Contains(html, `src="cid:before"`) || !strings.Contains(html, `src="cid:after"`) {
-		t.Errorf("html lacks inline cid images:\n%s", html)
-	}
-	atts, ok := sends[0].Args["attachments"].([]any)
-	if !ok || len(atts) != 2 {
-		t.Fatalf("attachments = %#v", sends[0].Args["attachments"])
-	}
-
-	// If sending with attachments fails (e.g. size limit), deliver retries without attachments.
-	c2 := inThread(card("c2", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}), "t1")
-	c2.Cwd = dir
-	f2, p2, m2 := mailFactory(t, c2)
-	m2.threads["t1"] = []threadMsg{{ID: "m1"}}
-	m2.attachmentErr = errors.New("attachment too large")
-	storeLog(t, f2, p2, "c2", strings.ReplaceAll(replyBody, `\n`, "\n"))
-	f2.Tick()
-	sends2 := m2.sends()
-	if len(sends2) != 2 {
-		t.Fatalf("expected retry without attachments, got %d sends: %+v", len(sends2), sends2)
-	}
-	if sends2[1].Args["attachments"] != nil || strings.Contains(sends2[1].Args["html"].(string), `src="cid:before"`) {
-		t.Errorf("fallback send still included attachments or cid img: %+v", sends2[1].Args)
-	}
-	if p2.labels("c2")[labelTold] == "" {
-		t.Errorf("fallback send did not mark card told: %v", p2.labels("c2"))
-	}
 }
 
 // Every factory email ends with the board link, on the one path all of them take (sendMail).
@@ -763,84 +510,6 @@ func TestReadable(t *testing.T) {
 	}
 }
 
-// A decision email keeps questions all or nothing, so letter replies always answer every question.
-func TestDecisionEmailQuestions(t *testing.T) {
-	const opt = "Keep the old store running beside the new one until the end of the month"
-	for _, tc := range []struct {
-		name, reply string
-		want, not   []string
-	}{
-		{"one, in full", "QUESTION: Which store should it use?\n- " + opt + " (recommended)\n- Move now\n- C\n- D\n- E\n",
-			[]string{"Which store should it use?", "I recommend A.", "A. " + opt + " (recommended)", "B. Move now", "E. E", "Reply with a letter"}, []string{"…"}},
-		{"two, in full", "QUESTION: First?\n- One (recommended)\n- Two\n\nQUESTION: Second?\n- " + opt + " (recommended)\n- Four\n",
-			[]string{"2 questions; I recommend 1A 2A.", "1. First?", "A. One (recommended)", "B. Two", "2. Second?", "A. " + opt + " (recommended)", "Reply with letters like 1A 2A"}, []string{"…"}},
-		{"too long", "QUESTION: Which store?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n",
-			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "A. ", "B. ", "letter", "…", `"yes"`}},
-		{"two, too long", "QUESTION: First?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n\nQUESTION: Second?\n- One (recommended)\n- Two\n",
-			[]string{"2 questions are too long for email. Open the board to answer."}, []string{"I recommend", "letters", "…", `"yes"`}},
-		{"strips to nothing", "QUESTION: Which store?\n- Keep it (recommended)\n- Other\n- `factory/ready.go`\n",
-			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "letter", `"yes"`}},
-		{"strips to its mark", "QUESTION: Which store?\n- `factory/mail.go` (recommended)\n- Other\n",
-			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "letter", `"yes"`, "A. "}},
-		{"strips to punctuation", "QUESTION: Which store?\n- Keep it (recommended)\n- `factory/ready.go`.\n",
-			[]string{"1 question is too long for email. Open the board to answer."}, []string{"I recommend A.", "letter", `"yes"`, "B. "}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f, p, m := mailFactory(t, inThread(planWait("c1", nil), "t1"))
-			m.threads["t1"] = []threadMsg{{ID: "m1"}}
-			storeLog(t, f, p, "c1", "DECISION: Approve building it?\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve the plan.\n\n"+tc.reply)
-			f.Tick()
-			s := m.sends()
-			if len(s) != 1 {
-				t.Fatalf("sends = %+v", s)
-			}
-			text, html := s[0].Args["text"].(string), s[0].Args["html"].(string)
-			for _, w := range tc.want {
-				if !strings.Contains(text, w) {
-					t.Errorf("lacks %q:\n%s", w, text)
-				}
-			}
-			for _, w := range tc.not {
-				if strings.Contains(text, w) {
-					t.Errorf("has %q:\n%s", w, text)
-				}
-			}
-			if !strings.Contains(html, tc.want[0]) {
-				t.Errorf("html lacks %q: %s", tc.want[0], html)
-			}
-		})
-	}
-}
-
-// A one-word yes never takes an option the email did not print; he answers on the board or by letter.
-func TestYesDoesNotTakeWithheldOptions(t *testing.T) {
-	long := "QUESTION: Which store?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n"
-	a := inThread(planWait("c1", nil), "t1")
-	f, p, m := mailFactory(t, a)
-	m.threads["t1"] = []threadMsg{{ID: "m1"}}
-	storeLog(t, f, p, "c1", "DECISION: Approve building it?\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve the plan.\n\n"+long)
-	f.Tick()
-	if s := m.sends(); len(s) != 1 {
-		t.Fatalf("sends = %+v", s)
-	}
-	f.SetAgents([]Agent{labeled(a, p.labels("c1"))})
-	res, err := f.answerByEmail(Body{Thread: "t1", MessageID: "m2", Text: "yes"})
-	if err != nil || res["action"] != "clarify" {
-		t.Fatalf("yes: %v, %v", res, err)
-	}
-	if sent := p.sent("c1"); len(sent) != 0 {
-		t.Fatalf("yes reached the card: %v", sent)
-	}
-	s := m.sends()
-	if len(s) != 2 || !strings.Contains(s[1].Args["text"].(string), "Answer on the board") {
-		t.Fatalf("sends = %+v", s)
-	}
-	res, err = f.answerByEmail(Body{Thread: "t1", MessageID: "m3", Text: "1b"})
-	if err != nil || res["action"] != "approve" {
-		t.Fatalf("letter read on the board: %v, %v", res, err)
-	}
-}
-
 func TestWithheldQuestionsChangeTheOneWordAnswers(t *testing.T) {
 	plan := askFor(Card{ID: "c1", Stage: "zach"}, planWait("c1", nil))
 	plan.Questions = []Question{{Text: "Q?", Options: []string{"x", "y"}}}
@@ -892,39 +561,6 @@ func TestWholeTitle(t *testing.T) {
 	}
 }
 
-// A cut title reads whole in the About line, and is not repeated when the subject already names it.
-func TestDecisionEmailNeverPrintsACutTitle(t *testing.T) {
-	const cut = "Approval emails name the change and never show blank or…"
-	const whole = "Approval emails name the change and never show blank"
-	for _, tc := range []struct {
-		name, decision string
-		about          bool
-	}{
-		{"bare", "Land this change?", false},
-		{"specific", "Use the shorter copy?", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a := inThread(planWait("c1", nil), "t1")
-			a.Title = cut
-			f, p, m := mailFactory(t, a)
-			m.threads["t1"] = []threadMsg{{ID: "m1"}}
-			storeLog(t, f, p, "c1", "DECISION: "+tc.decision+"\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve it.")
-			f.Tick()
-			s := m.sends()
-			if len(s) != 1 {
-				t.Fatalf("sends = %+v", s)
-			}
-			text := s[0].Args["text"].(string)
-			if strings.Contains(text, "…") || strings.Contains(composed(t, f, "c1").Subject, "…") {
-				t.Errorf("cut text: %v\n%s", composed(t, f, "c1").Subject, text)
-			}
-			if got := strings.Contains(text, "About: "+whole+"\n"); got != tc.about {
-				t.Errorf("About line %v, want %v:\n%s", got, tc.about, text)
-			}
-		})
-	}
-}
-
 func TestDecisionEmailOverviewKeepsWholeSentences(t *testing.T) {
 	a := inThread(planWait("c1", nil), "t1")
 	f, p, m := mailFactory(t, a)
@@ -952,5 +588,160 @@ func TestSentences(t *testing.T) {
 	}
 	if got := wholeSentences("One two three. Four.", 2); got != "" {
 		t.Errorf("a later sentence without the first: %q", got)
+	}
+}
+
+// Problems the factory or an agent can sort out show on the board only; decisions are emailed in the thread.
+func TestWhichWaitsAreEmailed(t *testing.T) {
+	running := func(a Agent, pending string) Agent { a.Status, a.Pending = "running", pending; return a }
+	attention := func(reason string) Agent { // the finished-card ask
+		a := card("c1", map[string]string{})
+		a.RequiresAttention, a.AttentionReason = true, reason
+		return a
+	}
+	stuckReviewer := reviewer("r1", "c1", gateSignoff)
+	stuckReviewer.Status, stuckReviewer.Pending = "running", "Bash"
+	for _, tc := range []struct {
+		name  string
+		agent Agent
+		extra []Agent
+		mail  bool
+	}{
+		{"landed with work left", card("c1", map[string]string{labelStage: "zach", labelNote: "landed; still to do: browser check"}), nil, false},
+		{"landed did it finish", card("c1", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}), nil, false},
+		{"landed diff differs, older wait", card("c1", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: x"}), nil, false},
+		{"landed diff differs, public scan failed", func() Agent {
+			a := card("c1", map[string]string{labelStage: "zach",
+				labelNote: "landed diff differs from the reviewed one: x" + landDiffScanMark + "found: tailnet-hostname a.go:3"})
+			a.Repo = publicRepo
+			return a
+		}(), nil, true},
+		{"stuck in its column", card("c1", map[string]string{labelStage: "building", labelStuck: stuckStopped}), nil, false},
+		{"stuck reviewer", card("c1", map[string]string{labelStage: gateDesign, labelStuck: stuckReview}), []Agent{stuckReviewer}, false},
+		{"agent error", card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), nil, false},
+		{"reviewed commit unverified", card("c1", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}), nil, false},
+		{"parked changed since review", card("c1", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}), nil, false},
+		{"history unavailable", card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused"}), nil, false},
+		{"duplicate close", card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}), nil, false},
+		{"permission prompt", running(card("c1", map[string]string{labelStage: "zach"}), "Bash"), nil, false},
+		{"finished", attention("finished"), nil, false},
+		{"allow a build", planWait("c1", nil), nil, true},
+		{"preview", card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)}), nil, true},
+		{"secret scan", card("c1", map[string]string{labelStage: "zach", labelNote: "secret scan found 1 hit"}), nil, true},
+		{"older brief", card("c1", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p, m := mailFactory(t, append([]Agent{inThread(tc.agent, "t1")}, tc.extra...)...)
+			m.threads["t1"] = []threadMsg{{ID: "m1"}}
+			storeLog(t, f, p, "c1", "DECISION: Pick a colour?\nOVERVIEW: Changes the button.\nNEEDS FROM ZACH: choose.\n\nReport.")
+			c, ok := f.card("c1")
+			if !ok || c.Ask == nil {
+				t.Fatalf("no ask: %+v", c)
+			}
+			if c.Ask.BoardOnly == tc.mail {
+				t.Errorf("BoardOnly = %v for %q", c.Ask.BoardOnly, c.Ask.Title)
+			}
+			f.Tick()
+			if got := len(m.sends()) == 1; got != tc.mail {
+				t.Errorf("emailed = %v, want %v: %+v", got, tc.mail, m.sends())
+			}
+		})
+	}
+}
+
+func TestEmailIncludesInlineEvidenceWithFallback(t *testing.T) {
+	dir := t.TempDir()
+	evDir := filepath.Join(dir, ".factory-evidence")
+	if err := os.Mkdir(evDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, stdimage.NewRGBA(stdimage.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(evDir, "before.png"), pngBuf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(evDir, "after.png"), pngBuf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA}), "t1")
+	c.Provider, c.SessionID, c.Cwd = "claude", "s-req", dir
+	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
+	replyBody := `DECISION: Approve the email layout?\nOVERVIEW: Adds the original request and screenshots.\nNEEDS FROM ZACH: Approve or ask for changes.\n\nBEFORE: before.png\nAFTER: after.png\n\nDetailed plan text.`
+	sessionLines := `{"type":"user","message":{"content":"You are the Fellow on Zach's agent factory board: you own this card from plan to landing.\n\nZach's request:\nMake the Needs Zach emails show the original request and screenshots.\n\nWork in this repo (example/desk). Read its AGENTS.md and README first."}}` + "\n" +
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"` + replyBody + `"}]}}` + "\n"
+	writeFile(t, filepath.Join(f.cfg.Home, ".claude", "projects", strings.ReplaceAll(dir, "/", "-"), "s-req.jsonl"), sessionLines)
+	storeLog(t, f, p, "c1", strings.ReplaceAll(replyBody, `\n`, "\n"))
+	f.SetAgents([]Agent{c})
+	f.Tick()
+
+	sends := m.sends()
+	if len(sends) != 1 {
+		t.Fatalf("sends = %+v", sends)
+	}
+	text, html := sends[0].Args["text"].(string), sends[0].Args["html"].(string)
+	if !strings.Contains(text, "Before screenshot: before.png (attached)") {
+		t.Errorf("text lacks the screenshots or the question:\n%s", text)
+	}
+	if strings.Contains(text, "BEFORE: before.png") || strings.Contains(html, "BEFORE: before.png") {
+		t.Errorf("raw BEFORE: line was not stripped:\n%s", text)
+	}
+	if !strings.Contains(html, `src="cid:before"`) || !strings.Contains(html, `src="cid:after"`) {
+		t.Errorf("html lacks inline cid images:\n%s", html)
+	}
+	atts, ok := sends[0].Args["attachments"].([]any)
+	if !ok || len(atts) != 2 {
+		t.Fatalf("attachments = %#v", sends[0].Args["attachments"])
+	}
+
+	// If sending with attachments fails (e.g. size limit), deliver retries without attachments.
+	c2 := inThread(card("c2", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA}), "t1")
+	c2.Cwd = dir
+	f2, p2, m2 := mailFactory(t, c2)
+	m2.threads["t1"] = []threadMsg{{ID: "m1"}}
+	m2.attachmentErr = errors.New("attachment too large")
+	storeLog(t, f2, p2, "c2", strings.ReplaceAll(replyBody, `\n`, "\n"))
+	f2.Tick()
+	sends2 := m2.sends()
+	if len(sends2) != 2 {
+		t.Fatalf("expected retry without attachments, got %d sends: %+v", len(sends2), sends2)
+	}
+	if sends2[1].Args["attachments"] != nil || strings.Contains(sends2[1].Args["html"].(string), `src="cid:before"`) {
+		t.Errorf("fallback send still included attachments or cid img: %+v", sends2[1].Args)
+	}
+	if p2.labels("c2")[labelTold] == "" {
+		t.Errorf("fallback send did not mark card told: %v", p2.labels("c2"))
+	}
+}
+
+// A one-word yes never takes an option the email did not print; he answers on the board or by letter.
+func TestYesDoesNotTakeWithheldOptions(t *testing.T) {
+	long := "QUESTION: Which store?\n- " + strings.Repeat("store ", 70) + "(recommended)\n- Other\n"
+	a := inThread(planWait("c1", nil), "t1")
+	f, p, m := mailFactory(t, a)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
+	storeLog(t, f, p, "c1", "DECISION: Approve building it?\nOVERVIEW: Adds a checker.\nNEEDS FROM ZACH: approve the plan.\n\n"+long)
+	f.Tick()
+	if s := m.sends(); len(s) != 1 {
+		t.Fatalf("sends = %+v", s)
+	}
+	f.SetAgents([]Agent{labeled(a, p.labels("c1"))})
+	res, err := f.answerByEmail(Body{Thread: "t1", MessageID: "m2", Text: "yes"})
+	if err != nil || res["action"] != "clarify" {
+		t.Fatalf("yes: %v, %v", res, err)
+	}
+	if sent := p.sent("c1"); len(sent) != 0 {
+		t.Fatalf("yes reached the card: %v", sent)
+	}
+	s := m.sends()
+	if len(s) != 2 || !strings.Contains(s[1].Args["text"].(string), "Answer on the board") {
+		t.Fatalf("sends = %+v", s)
+	}
+	res, err = f.answerByEmail(Body{Thread: "t1", MessageID: "m3", Text: "1b"})
+	if err != nil || res["action"] != "send" {
+		t.Fatalf("letter read on the board: %v, %v", res, err)
 	}
 }

@@ -156,7 +156,7 @@ func dryPost(t *testing.T, f *Factory, agents []Agent, action, body string) int 
 }
 
 func TestDryRunActionsChangeNothing(t *testing.T) {
-	agents := []Agent{card("c1", map[string]string{labelStage: "plan"}), card("c2", map[string]string{labelStage: "building"})}
+	agents := []Agent{card("c1", map[string]string{labelStage: "building"}), card("c2", map[string]string{labelStage: "building"})}
 	f, p, gitCalls := newDryRunFactory(t, agents...)
 	idea, err := f.addIdea(Body{Repo: "example/desk", Title: "An idea", Summary: "s", Request: "r"})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestDryRunActionsChangeNothing(t *testing.T) {
 
 func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 	f, p, gitCalls := newDryRunFactory(t, publicCard("c1", map[string]string{labelStage: "zach",
-		labelVerdict: "code approve", labelCodeRounds: "1", labelNote: "review passed: approve to land",
+		labelVerdict: "code approve", labelRoundsDesign: "1", labelNote: "review passed: approve to land",
 		labelReviewed: reviewedSHA}))
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) { return nil, nil }
 	// rev-parse and status are reads, so the dry run passes them through: HEAD is still the reviewed
@@ -218,7 +218,7 @@ func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 }
 
 func TestDryRunRunMakesOnlyReads(t *testing.T) {
-	f, p, _ := newDryRunFactory(t, card("c1", map[string]string{labelStage: "plan-review"}))
+	f, p, _ := newDryRunFactory(t, card("c1", map[string]string{labelStage: gateRequest}))
 	f.cfg.Poll = time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()

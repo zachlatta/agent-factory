@@ -55,10 +55,10 @@ func TestDecisionPreview(t *testing.T) {
 		storeLog(t, f, p, id, "[User] go\n"+reply)
 		agents = append(agents, a)
 	}
-	add("plan-card", "Approve a visible change", map[string]string{labelStage: "zach", labelAwaiting: "plan"}, "DECISION: Approve this layout?\nOVERVIEW: Fewer controls and clearer choices.\nNEEDS FROM ZACH: Approve to build, or send instructions.\n\nBEFORE: before.png\nAFTER: after.png\n\nThe full plan appears here.\n\nBEFORE: Old wording\nAFTER: New wording\n\nQUESTION: Which spacing?\n- Comfortable (recommended)\n- Compact\n\nQUESTION: Which accent?\n- Blue (recommended)\n- Green")
+	add("plan-card", "Approve a visible change", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA}, "DECISION: Approve this layout?\nOVERVIEW: Fewer controls and clearer choices.\nNEEDS FROM ZACH: Approve to build, or send instructions.\n\nBEFORE: before.png\nAFTER: after.png\n\nThe full plan appears here.\n\nBEFORE: Old wording\nAFTER: New wording\n\nQUESTION: Which spacing?\n- Comfortable (recommended)\n- Compact\n\nQUESTION: Which accent?\n- Blue (recommended)\n- Green")
 	add("brief-card", "Choose a recommendation", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}, "DECISION: Which fix should we apply?\nNEEDS FROM ZACH: Choose a fix; code review follows.\n\nQUESTION: Retry policy?\n- Once (recommended)\n- Twice")
 	add("repo-card", "Choose a repo", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelRouting: "1", labelCandidates: "example/desk example/app"}, "The request could fit either repo.")
-	add("retry-card", "Retry a review", map[string]string{labelStage: "review", labelStuck: stuckReview}, "Review did not finish.")
+	add("retry-card", "Retry a review", map[string]string{labelStage: gateDesign, labelStuck: stuckReview}, "Review did not finish.")
 	add("error-card", "Agent keeps failing", map[string]string{labelStage: "building", labelStuck: stuckAgentError}, "Building the change.")
 	agents[len(agents)-1].LastError = "API error 500: overloaded"
 	add("land-card", "Landing keeps failing", map[string]string{labelStage: "landing", labelStuck: stuckLanding}, "Landing failed: conflict in a.go.")

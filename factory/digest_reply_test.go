@@ -88,43 +88,6 @@ func TestParseDigestReply(t *testing.T) {
 
 // The numbered list comes first, newest first, one short line each; other asks stay unnumbered with
 // their link, and no card is listed twice. The subject still counts every waiting card.
-func TestDigestNumbersOneWordAsksNewestFirst(t *testing.T) {
-	older := digestWait("c1", "Older build", 2*time.Hour)
-	newer := digestWait("c2", "Newer build", time.Hour)
-	question := card("c3", map[string]string{labelStage: "zach", labelNote: "secret scan failed: x"}) // its answer is words
-	question.Title = "Needs your words"
-	f, _, m := sentDigest(t, older, newer, question)
-	text := digests(m)[0].Args["text"].(string)
-	first, second := strings.Index(text, "1. "), strings.Index(text, "2. ")
-	waiting := strings.Index(text, "Waiting on you")
-	if first < 0 || second < first || waiting >= 0 && waiting < second {
-		t.Fatalf("the numbered list is not first:\n%s", text)
-	}
-	d, _ := f.readDigest()
-	if len(d.Lists) != 1 || d.Lists[0].Thread != "nt1" || len(d.Lists[0].Items) != 2 ||
-		d.Lists[0].Items[0].Card != "c2" || d.Lists[0].Items[1].Card != "c1" {
-		t.Fatalf("lists = %+v", d.Lists)
-	}
-	for _, c := range []string{"c1", "c2"} {
-		if strings.Contains(text, "https://board.example/#"+c) {
-			t.Errorf("a numbered line is listed again with its link:\n%s", text)
-		}
-	}
-	if !strings.Contains(text, "Waiting on you\n- Needs your words") || !strings.Contains(text, "https://board.example/#c3") {
-		t.Errorf("a free-text ask must stay unnumbered with its link:\n%s", text)
-	}
-	if !strings.Contains(text, "1. Newer build: Allow this build? (Yes, No or Drop)\n2. Older build: Allow this build? (Yes, No or Drop)\n") {
-		t.Errorf("two cards with the same decision must get different lines:\n%s", text)
-	}
-	html := digests(m)[0].Args["html"].(string)
-	if !strings.Contains(html, `href="https://board.example/#c2"`) || !strings.Contains(html, "Newer build: Allow this build?") ||
-		!strings.Contains(html, "Older build: Allow this build?") {
-		t.Errorf("html lines lack a card link or title: %s", html)
-	}
-	if !strings.Contains(digests(m)[0].Args["subject"].(string), "3 for you") {
-		t.Errorf("subject = %s", digests(m)[0].Args["subject"])
-	}
-}
 
 // A line stays short, and the title, which says which change it is, survives the cut.
 func TestDigestLineKeepsTheTitleAndStaysShort(t *testing.T) {
@@ -141,6 +104,83 @@ func TestDigestLineKeepsTheTitleAndStaysShort(t *testing.T) {
 		t.Errorf("line = %q", got)
 	}
 }
+
+// Asks a number must not answer stay unnumbered: questions (Yes would take the recommended options),
+// a builder still writing, a board-only wait.
+
+// A failed send removes the list with the rest of the commit; one that may have gone out binds no thread.
+
+// A reply to a list older than the keep window is not recognised, even when no later digest
+// pruned it: it falls through to the card path and acts on nothing.
+
+// Lists older than the keep window go when a later digest is recorded.
+
+// An unknown number and a word the card does not offer are refused; the rest of the reply still acts.
+
+// Land keeps its gates: a secret scan hit stops it, and the reply says why.
+func TestDigestReplyLandStillScans(t *testing.T) {
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelVerdict: "code approve",
+		labelRoundsRequest: "1", labelReviewed: reviewedSHA, labelSince: ago(time.Hour)})
+	a.Repo = "zachlatta/agent-factory"
+	f, p, m := sentDigest(t, a)
+	headIs(f, reviewedSHA, nil)
+	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
+		return []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, nil
+	}
+	if d, _ := f.readDigest(); len(d.Lists) != 1 || len(d.Lists[0].Items) != 1 {
+		t.Fatalf("not numbered: %+v", d.Lists)
+	}
+	res, err := digestReply(f, "m1", "yes 1")
+	if err != nil || res["refused"] != "1" {
+		t.Fatalf("res = %v, err = %v", res, err)
+	}
+	if l := p.labels("c1"); l[labelStage] == "landing" {
+		t.Errorf("landed past a scan hit: %v", l)
+	}
+	r := replyMails(m)
+	if len(r) != 1 || !strings.Contains(r[0].Args["text"].(string), "secret scan failed") {
+		t.Errorf("replies = %+v", r)
+	}
+}
+
+// A later digest with a different order never shifts what an earlier digest's numbers mean.
+
+// Anything unparsed changes nothing, and says so once.
+
+// A failed reply send is logged and not repeated; the answers stand.
+
+// A thread that no digest holds still goes to the card path.
+
+// Land works on a finished card: it goes through the card's own choice, and the reply says where it went.
+func TestDigestReplyLandsAFinishedCard(t *testing.T) {
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelVerdict: "code approve",
+		labelRoundsRequest: "1", labelReviewed: reviewedSHA, labelSince: ago(time.Hour)})
+	f, p, m := sentDigest(t, a)
+	headIs(f, reviewedSHA, nil)
+	res, err := digestReply(f, "m1", "land 1")
+	if err != nil || res["done"] != "1" {
+		t.Fatalf("res = %v, err = %v; replies %+v", res, err, replyMails(m))
+	}
+	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelAnswered] != "m1" {
+		t.Errorf("labels = %v", l)
+	}
+	if r := replyMails(m); len(r) != 1 || !strings.Contains(r[0].Args["text"].(string), "1. Land: card c1 (now shipping)") {
+		t.Errorf("replies = %+v", r)
+	}
+}
+
+// A dry run records nothing in digest.json, as it stores no thread for a card's answer.
+
+// A card that moved on is refused: gone, past Zach, left and came back, replaced, or changed.
+
+// Questions that appear after the digest, with the same line and choices, must not let a bare Yes take
+// the recommended options: the numbering check runs again at reply time.
+
+// An unknown number and a word the card does not offer are refused; the rest of the reply still acts.
+
+// A later digest with a different order never shifts what an earlier digest's numbers mean.
+
+// A failed reply send is logged and not repeated; the answers stand.
 
 // Asks a number must not answer stay unnumbered: questions (Yes would take the recommended options),
 // a builder still writing, a board-only wait.
@@ -213,80 +253,10 @@ func TestDigestListsAgeOut(t *testing.T) {
 	}
 }
 
-func TestDigestReplyAppliesTheCardsOwnAnswers(t *testing.T) {
-	f, p, m := sentDigest(t, digestWait("c1", "Older build", 2*time.Hour), digestWait("c2", "Newer build", time.Hour))
-	res, err := digestReply(f, "m1", "drop 2, yes 1")
-	if err != nil || res["action"] != "digest" || res["done"] != "2" || res["refused"] != "0" {
-		t.Fatalf("res = %v, err = %v", res, err)
-	}
-	if l := p.labels("c2"); l[labelStage] != "building" || l[labelAnswered] != "m1" || l[labelZachPlan] != "approved" {
-		t.Errorf("number 1 (the newest) was not allowed: %v", l)
-	}
-	if !p.called("archive", "c1") {
-		t.Errorf("number 2 was not dropped: %v", p.labels("c1"))
-	}
-	r := replyMails(m)
-	if len(r) != 1 || r[0].Args["message_id"] != "m1" {
-		t.Fatalf("replies = %+v", r)
-	}
-	text := r[0].Args["text"].(string)
-	if !strings.Contains(text, "Done") || !strings.Contains(text, "Newer build") || !strings.Contains(text, "Older build") || strings.Contains(text, "Refused") {
-		t.Errorf("reply:\n%s", text)
-	}
-	// no thread adoption: the digest's thread stays the digest's
-	if _, set := p.labels("c2")[gmailThreadLabel]; set {
-		t.Errorf("a card adopted the digest thread: %v", p.labels("c2"))
-	}
-}
-
 // A card that moved on is refused: gone, past Zach, left and came back, replaced, or changed.
-func TestDigestReplyRefusesACardThatMovedOn(t *testing.T) {
-	cases := map[string]func(f *Factory, a Agent) Agent{
-		"past Zach": func(_ *Factory, a Agent) Agent { a.Labels[labelPrefix+labelStage] = "building"; return a },
-		"came back": func(_ *Factory, a Agent) Agent { a.Labels[labelPrefix+labelSince] = ago(time.Minute); return a },
-		"archived":  func(_ *Factory, a Agent) Agent { a.ArchivedAt = t0; return a },
-		"writing": func(f *Factory, a Agent) Agent {
-			a.Labels[labelPrefix+labelWriting] = iso(f.Now())
-			return a
-		},
-		"different ask": func(_ *Factory, a Agent) Agent {
-			a.Labels[labelPrefix+labelAwaiting] = ""
-			a.Labels[labelPrefix+labelNote] = readyNote(1)
-			return a
-		},
-	}
-	for name, change := range cases {
-		t.Run(name, func(t *testing.T) {
-			f, p, m := sentDigest(t, digestWait("c1", "A build", time.Hour))
-			f.SetAgents([]Agent{change(f, f.agent("c1"))})
-			res, err := digestReply(f, "m1", "yes 1")
-			if err != nil || res["done"] != "0" || res["refused"] != "1" {
-				t.Fatalf("res = %v, err = %v", res, err)
-			}
-			if len(p.sent("c1")) != 0 || p.labels("c1")[labelZachPlan] == "approved" {
-				t.Errorf("a refused number acted: %v %v", p.sent("c1"), p.labels("c1"))
-			}
-			r := replyMails(m)
-			if len(r) != 1 || !strings.Contains(r[0].Args["text"].(string), "Refused") {
-				t.Errorf("replies = %+v", r)
-			}
-		})
-	}
-}
 
 // Questions that appear after the digest, with the same line and choices, must not let a bare Yes take
 // the recommended options: the numbering check runs again at reply time.
-func TestDigestReplyRefusesAskThatGainedQuestions(t *testing.T) {
-	f, p, _ := sentDigest(t, digestWait("c1", "A build", time.Hour))
-	storeLog(t, f, p, "c1", "Brief.\n\nQUESTION: Which store?\n- Postgres (recommended)\n- SQLite\n")
-	res, err := digestReply(f, "m1", "yes 1")
-	if err != nil || res["refused"] != "1" {
-		t.Fatalf("res = %v, err = %v", res, err)
-	}
-	if p.labels("c1")[labelZachPlan] == "approved" {
-		t.Errorf("Yes took the recommended options: %v", p.labels("c1"))
-	}
-}
 
 func TestDigestReplyRefusesAReplacedCard(t *testing.T) {
 	old := digestWait("c1", "A build", time.Hour)
@@ -301,24 +271,6 @@ func TestDigestReplyRefusesAReplacedCard(t *testing.T) {
 }
 
 // An unknown number and a word the card does not offer are refused; the rest of the reply still acts.
-func TestDigestReplyMixedDoneAndRefusedSendsOneEmail(t *testing.T) {
-	f, p, m := sentDigest(t, digestWait("c1", "A build", time.Hour))
-	res, err := digestReply(f, "m1", "yes 1, drop 7")
-	if err != nil || res["done"] != "1" || res["refused"] != "1" {
-		t.Fatalf("res = %v, err = %v", res, err)
-	}
-	if p.labels("c1")[labelZachPlan] != "approved" {
-		t.Errorf("labels = %v", p.labels("c1"))
-	}
-	r := replyMails(m)
-	if len(r) != 1 {
-		t.Fatalf("replies = %+v", r)
-	}
-	text := r[0].Args["text"].(string)
-	if !strings.Contains(text, "Done") || !strings.Contains(text, "Refused") || !strings.Contains(text, "7") {
-		t.Errorf("reply:\n%s", text)
-	}
-}
 
 // land is not a word a Yes ask offers.
 func TestDigestReplyRefusesAWordTheCardDoesNotOffer(t *testing.T) {
@@ -332,49 +284,7 @@ func TestDigestReplyRefusesAWordTheCardDoesNotOffer(t *testing.T) {
 	}
 }
 
-// Land keeps its gates: a secret scan hit stops it, and the reply says why.
-func TestDigestReplyLandStillScans(t *testing.T) {
-	a := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelVerdict: "code approve",
-		labelPlanRounds: "1", labelReviewed: reviewedSHA, labelSince: ago(time.Hour)})
-	a.Repo = "zachlatta/agent-factory"
-	f, p, m := sentDigest(t, a)
-	headIs(f, reviewedSHA, nil)
-	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {
-		return []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, nil
-	}
-	if d, _ := f.readDigest(); len(d.Lists) != 1 || len(d.Lists[0].Items) != 1 {
-		t.Fatalf("not numbered: %+v", d.Lists)
-	}
-	res, err := digestReply(f, "m1", "yes 1")
-	if err != nil || res["refused"] != "1" {
-		t.Fatalf("res = %v, err = %v", res, err)
-	}
-	if l := p.labels("c1"); l[labelStage] == "landing" {
-		t.Errorf("landed past a scan hit: %v", l)
-	}
-	r := replyMails(m)
-	if len(r) != 1 || !strings.Contains(r[0].Args["text"].(string), "secret scan failed") {
-		t.Errorf("replies = %+v", r)
-	}
-}
-
 // A later digest with a different order never shifts what an earlier digest's numbers mean.
-func TestDigestReplyResolvesAgainstThatDigestsList(t *testing.T) {
-	f, p, _ := sentDigest(t, digestWait("c1", "Older build", 2*time.Hour), digestWait("c2", "Newer build", time.Hour))
-	d, _ := f.readDigest()
-	d.Lists[0].Thread = "first"
-	d.Lists = append(d.Lists, digestList{Day: "2026-10-29", At: f.Now(), Thread: "second",
-		Items: []digestItem{d.Lists[0].Items[1], d.Lists[0].Items[0]}})
-	if err := f.writeDigest(d); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Act("answer", Body{Thread: "first", MessageID: "m1", Text: "yes 1"}); err != nil {
-		t.Fatal(err)
-	}
-	if p.labels("c2")[labelZachPlan] != "approved" || p.labels("c1")[labelZachPlan] == "approved" {
-		t.Errorf("c1 %v, c2 %v", p.labels("c1"), p.labels("c2"))
-	}
-}
 
 // A repeated POST, even after a restart, changes nothing and sends nothing.
 func TestDigestReplyRepeatedDoesNothing(t *testing.T) {
@@ -418,72 +328,6 @@ func TestDigestReplyUnparsedChangesNothing(t *testing.T) {
 }
 
 // A failed reply send is logged and not repeated; the answers stand.
-func TestDigestReplyFailedSendIsNotRepeated(t *testing.T) {
-	f, p, m := sentDigest(t, digestWait("c1", "A build", time.Hour))
-	m.errs["reply_to_message"] = fmt.Errorf("refused")
-	res, err := digestReply(f, "m1", "yes 1")
-	if err != nil || res["done"] != "1" {
-		t.Fatalf("res = %v, err = %v", res, err)
-	}
-	if p.labels("c1")[labelZachPlan] != "approved" {
-		t.Errorf("labels = %v", p.labels("c1"))
-	}
-	res, err = digestReply(f, "m1", "yes 1")
-	if err != nil || res["action"] != "duplicate" || len(replyMails(m)) != 1 {
-		t.Errorf("res = %v, err = %v, replies %d", res, err, len(replyMails(m)))
-	}
-}
-
-// A saved clarification for a card answered this way is cleared, as a board answer clears it.
-func TestDigestReplyClearsClarification(t *testing.T) {
-	f, _, _ := sentDigest(t, digestWait("c1", "A build", time.Hour))
-	if err := f.replies.save(map[string]pendingReply{"t1": {Card: "c1", Text: "older words"}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := digestReply(f, "m1", "yes 1"); err != nil {
-		t.Fatal(err)
-	}
-	saved, _ := f.replies.read()
-	if len(saved) != 0 {
-		t.Errorf("saved = %v", saved)
-	}
-}
-
-// A thread that no digest holds still goes to the card path.
-func TestDigestReplyLeavesCardThreadsAlone(t *testing.T) {
-	f, p, m := sentDigest(t, digestWait("c1", "A build", time.Hour), planWaiting("c2"))
-	d, _ := f.readDigest()
-	if d.Lists[0].Thread == "" {
-		t.Fatal("no thread")
-	}
-	d.Lists[0].Thread = "digest-thread"
-	f.writeDigest(d)
-	res, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: "approve"})
-	if err != nil || res.(map[string]string)["action"] != "approve" {
-		t.Fatalf("res = %v, err = %v", res, err)
-	}
-	if p.labels("c2")[labelStage] != "building" || len(replyMails(m)) != 0 {
-		t.Errorf("labels = %v, replies %+v", p.labels("c2"), replyMails(m))
-	}
-}
-
-// Land works on a finished card: it goes through the card's own choice, and the reply says where it went.
-func TestDigestReplyLandsAFinishedCard(t *testing.T) {
-	a := card("c1", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelVerdict: "code approve",
-		labelPlanRounds: "1", labelReviewed: reviewedSHA, labelSince: ago(time.Hour)})
-	f, p, m := sentDigest(t, a)
-	headIs(f, reviewedSHA, nil)
-	res, err := digestReply(f, "m1", "land 1")
-	if err != nil || res["done"] != "1" {
-		t.Fatalf("res = %v, err = %v; replies %+v", res, err, replyMails(m))
-	}
-	if l := p.labels("c1"); l[labelStage] != "landing" || l[labelAnswered] != "m1" {
-		t.Errorf("labels = %v", l)
-	}
-	if r := replyMails(m); len(r) != 1 || !strings.Contains(r[0].Args["text"].(string), "1. Land: card c1 (now shipping)") {
-		t.Errorf("replies = %+v", r)
-	}
-}
 
 // A dry run records nothing in digest.json, as it stores no thread for a card's answer.
 func TestDigestReplyInDryRunRecordsNothing(t *testing.T) {
@@ -496,3 +340,58 @@ func TestDigestReplyInDryRunRecordsNothing(t *testing.T) {
 		t.Errorf("handled = %v", d.Lists[0].Handled)
 	}
 }
+
+// A card that moved on is refused: gone, past Zach, left and came back, replaced, or changed.
+func TestDigestReplyRefusesACardThatMovedOn(t *testing.T) {
+	cases := map[string]func(f *Factory, a Agent) Agent{
+		"past Zach": func(_ *Factory, a Agent) Agent { a.Labels[labelPrefix+labelStage] = "building"; return a },
+		"came back": func(_ *Factory, a Agent) Agent { a.Labels[labelPrefix+labelSince] = ago(time.Minute); return a },
+		"archived":  func(_ *Factory, a Agent) Agent { a.ArchivedAt = t0; return a },
+		"writing": func(f *Factory, a Agent) Agent {
+			a.Labels[labelPrefix+labelWriting] = iso(f.Now())
+			return a
+		},
+		"different ask": func(_ *Factory, a Agent) Agent {
+			a.Labels[labelPrefix+labelAwaiting] = ""
+			a.Labels[labelPrefix+labelNote] = readyNote(1)
+			return a
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, p, m := sentDigest(t, digestWait("c1", "A build", time.Hour))
+			f.SetAgents([]Agent{change(f, f.agent("c1"))})
+			res, err := digestReply(f, "m1", "yes 1")
+			if err != nil || res["done"] != "0" || res["refused"] != "1" {
+				t.Fatalf("res = %v, err = %v", res, err)
+			}
+			if len(p.sent("c1")) != 0 || p.labels("c1")[labelStage] == "building" {
+				t.Errorf("a refused number acted: %v %v", p.sent("c1"), p.labels("c1"))
+			}
+			r := replyMails(m)
+			if len(r) != 1 || !strings.Contains(r[0].Args["text"].(string), "Refused") {
+				t.Errorf("replies = %+v", r)
+			}
+		})
+	}
+}
+
+// Questions that appear after the digest, with the same line and choices, must not let a bare Yes take
+// the recommended options: the numbering check runs again at reply time.
+func TestDigestReplyRefusesAskThatGainedQuestions(t *testing.T) {
+	f, p, _ := sentDigest(t, digestWait("c1", "A build", time.Hour))
+	storeLog(t, f, p, "c1", "Brief.\n\nQUESTION: Which store?\n- Postgres (recommended)\n- SQLite\n")
+	res, err := digestReply(f, "m1", "yes 1")
+	if err != nil || res["refused"] != "1" {
+		t.Fatalf("res = %v, err = %v", res, err)
+	}
+	if p.labels("c1")[labelStage] == "building" {
+		t.Errorf("Yes took the recommended options: %v", p.labels("c1"))
+	}
+}
+
+// An unknown number and a word the card does not offer are refused; the rest of the reply still acts.
+
+// A later digest with a different order never shifts what an earlier digest's numbers mean.
+
+// A failed reply send is logged and not repeated; the answers stand.

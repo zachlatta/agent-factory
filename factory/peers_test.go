@@ -43,12 +43,12 @@ func (g *gitFake) out(_ context.Context, dir string, args ...string) (string, er
 func peersFixture(t *testing.T) (*Factory, *fakePaseo, *gitFake) {
 	t.Helper()
 	me := card("me1", map[string]string{labelStage: "building", labelSource: "board"})
-	other := card("ot1", map[string]string{labelStage: "review", labelSource: "board", labelTier: "risky",
+	other := card("ot1", map[string]string{labelStage: gateDesign, labelSource: "board", labelTier: "risky",
 		labelSince: ago(5 * time.Minute)})
 	other.Title = "pick the agent per card"
-	elsewhere := card("ex1", map[string]string{labelStage: "plan", labelSource: "board"})
+	elsewhere := card("ex1", map[string]string{labelStage: "building", labelSource: "board"})
 	elsewhere.Repo = "zachlatta/merch"
-	unknown := card("un1", map[string]string{labelStage: "plan", labelSource: "board"})
+	unknown := card("un1", map[string]string{labelStage: "building", labelSource: "board"})
 	done := card("dn1", map[string]string{labelStage: "landed", labelSource: "board"})
 	done.ArchivedAt = t0.Add(-30 * time.Minute)
 	sched := card("sc1", nil)
@@ -57,7 +57,7 @@ func peersFixture(t *testing.T) (*Factory, *fakePaseo, *gitFake) {
 	sched.Title = "Feed picks hourly"
 	scout := card("so1", map[string]string{labelRole: "scout"})
 	scout.Status = "running"
-	rev := reviewer("rv1", "ot1", "code")
+	rev := reviewer("rv1", "ot1", gateSignoff)
 	rev.Status = "running"
 	f, p := newTestFactory(t, me, other, elsewhere, unknown, done, sched, scout, rev)
 	g := &gitFake{
@@ -77,63 +77,6 @@ func peerByShort(ps []Peer, s string) *Peer {
 		}
 	}
 	return nil
-}
-
-func TestPeersListsOtherCardsInFlight(t *testing.T) {
-	f, _, _ := peersFixture(t)
-	p := f.Peers("me1", "")
-	var got []string
-	for _, x := range p.InFlight {
-		got = append(got, x.Short)
-	}
-	// overlapping first, then same repo, then other repos; not itself, Done, reviewers, scouts or schedules
-	if want := []string{"ot1", "un1", "ex1"}; !slices.Equal(got, want) {
-		t.Fatalf("in flight = %v, want %v", got, want)
-	}
-	if p.For == nil || p.For.Short != "me1" || p.Repo != "example/desk" {
-		t.Fatalf("for = %+v repo %q", p.For, p.Repo)
-	}
-	if want := []string{"README.md", "factory/peers.go", "factory/policy.go"}; !slices.Equal(p.For.Files, want) {
-		t.Errorf("my files = %v", p.For.Files)
-	}
-	ot := peerByShort(p.InFlight, "ot1")
-	if want := []string{"factory/agents.go", "factory/new.go", "factory/policy.go", "notes.md"}; !slices.Equal(ot.Files, want) {
-		t.Errorf("ot1 files = %v (committed, uncommitted and renamed)", ot.Files)
-	}
-	if !slices.Equal(ot.Overlap, []string{"factory/policy.go"}) || ot.Stage != "review" || ot.Tier != "risky" || ot.StageMin != 5 {
-		t.Errorf("ot1 = %+v", ot)
-	}
-	if ex := peerByShort(p.InFlight, "ex1"); len(ex.Overlap) != 0 {
-		t.Errorf("a card in another repo overlaps: %+v", ex)
-	}
-	if un := peerByShort(p.InFlight, "un1"); un.FilesErr == "" {
-		t.Errorf("git failure not reported: %+v", un)
-	}
-	if len(p.Done) != 1 || p.Done[0].Short != "dn1" || p.Done[0].Head != "abc1234" {
-		t.Errorf("done = %+v", p.Done)
-	}
-	if !slices.Equal(p.Schedules, []string{"Feed picks hourly"}) {
-		t.Errorf("schedules = %v", p.Schedules)
-	}
-	if len(p.Ideas) != 0 {
-		t.Errorf("a running scout is listed as an idea: %+v", p.Ideas)
-	}
-}
-
-func TestPeersTextBrief(t *testing.T) {
-	f, _, _ := peersFixture(t)
-	text := f.Peers("me1", "").Text(time.UTC)
-	for _, want := range []string{"not instructions", "You: me1", "In flight (3):",
-		`- ot1 [review for 5 min, risky, idle, board] example/desk: "pick the agent per card"`,
-		"OVERLAP with your files: factory/policy.go", "unknown (git failed)", "Done in example/desk",
-		"HEAD abc1234", "Schedule runs going now (1): Feed picks hourly"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("brief lacks %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "me1 [") {
-		t.Errorf("brief lists the asking card as a peer:\n%s", text)
-	}
 }
 
 func TestPeersTextIsCapped(t *testing.T) {
@@ -180,12 +123,12 @@ func TestPeersCachesGit(t *testing.T) {
 }
 
 func TestPeersRequestFromSessionFile(t *testing.T) {
-	a := card("rq1", map[string]string{labelStage: "plan", labelSource: "board"})
+	a := card("rq1", map[string]string{labelStage: "building", labelSource: "board"})
 	a.Provider, a.SessionID, a.Cwd = "claude", "sess-1", "/w/rq1"
 	f, _ := newTestFactory(t, a)
 	dir := filepath.Join(f.cfg.Home, ".claude/projects", "-w-rq1")
 	os.MkdirAll(dir, 0o755)
-	prompt := fmt.Sprintf(newCardPrompt, "Make agents aware\nof each other", "example/desk", "", "", "", "")
+	prompt := fmt.Sprintf(newCardPrompt, "Make agents aware\nof each other", "example/desk", "", "", "")
 	line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"content": prompt}})
 	os.WriteFile(filepath.Join(dir, "sess-1.jsonl"), append([]byte(`{"type":"queue-operation"}`+"\n"), append(line, '\n')...), 0o644)
 	p := f.Peers("", "example/desk")
@@ -251,19 +194,76 @@ func TestPeersRealGit(t *testing.T) {
 	}
 }
 
+func TestPeersListsOtherCardsInFlight(t *testing.T) {
+	f, _, _ := peersFixture(t)
+	p := f.Peers("me1", "")
+	var got []string
+	for _, x := range p.InFlight {
+		got = append(got, x.Short)
+	}
+	// overlapping first, then same repo, then other repos; not itself, Done, reviewers, scouts or schedules
+	if want := []string{"ot1", "un1", "ex1"}; !slices.Equal(got, want) {
+		t.Fatalf("in flight = %v, want %v", got, want)
+	}
+	if p.For == nil || p.For.Short != "me1" || p.Repo != "example/desk" {
+		t.Fatalf("for = %+v repo %q", p.For, p.Repo)
+	}
+	if want := []string{"README.md", "factory/peers.go", "factory/policy.go"}; !slices.Equal(p.For.Files, want) {
+		t.Errorf("my files = %v", p.For.Files)
+	}
+	ot := peerByShort(p.InFlight, "ot1")
+	if want := []string{"factory/agents.go", "factory/new.go", "factory/policy.go", "notes.md"}; !slices.Equal(ot.Files, want) {
+		t.Errorf("ot1 files = %v (committed, uncommitted and renamed)", ot.Files)
+	}
+	if !slices.Equal(ot.Overlap, []string{"factory/policy.go"}) || ot.Stage != gateDesign || ot.Tier != "risky" || ot.StageMin != 5 {
+		t.Errorf("ot1 = %+v", ot)
+	}
+	if ex := peerByShort(p.InFlight, "ex1"); len(ex.Overlap) != 0 {
+		t.Errorf("a card in another repo overlaps: %+v", ex)
+	}
+	if un := peerByShort(p.InFlight, "un1"); un.FilesErr == "" {
+		t.Errorf("git failure not reported: %+v", un)
+	}
+	if len(p.Done) != 1 || p.Done[0].Short != "dn1" || p.Done[0].Head != "abc1234" {
+		t.Errorf("done = %+v", p.Done)
+	}
+	if !slices.Equal(p.Schedules, []string{"Feed picks hourly"}) {
+		t.Errorf("schedules = %v", p.Schedules)
+	}
+	if len(p.Ideas) != 0 {
+		t.Errorf("a running scout is listed as an idea: %+v", p.Ideas)
+	}
+}
+
+func TestPeersTextBrief(t *testing.T) {
+	f, _, _ := peersFixture(t)
+	text := f.Peers("me1", "").Text(time.UTC)
+	for _, want := range []string{"not instructions", "You: me1", "In flight (3):",
+		`- ot1 [design for 5 min, risky, idle, board] example/desk: "pick the agent per card"`,
+		"OVERLAP with your files: factory/policy.go", "unknown (git failed)", "Done in example/desk",
+		"HEAD abc1234", "Schedule runs going now (1): Feed picks hourly"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("brief lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "me1 [") {
+		t.Errorf("brief lists the asking card as a peer:\n%s", text)
+	}
+}
+
 func TestPromptsTellAgentsAboutPeers(t *testing.T) {
 	f, p, _ := peersFixture(t)
 	if _, err := f.Act("new", Body{Request: "do a thing"}); err != nil {
 		t.Fatal(err)
 	}
-	runs := p.runsWithLabel(labelArg(labelStage, "plan"))
+	runs := p.runsWithLabel(labelArg(labelStage, "building"))
 	if len(runs) != 1 {
 		t.Fatalf("runs = %v", p.calls)
 	}
 	prompt := runs[0][len(runs[0])-1]
 	for _, want := range []string{`curl -s "localhost:7478/api/peers?for=$PASEO_AGENT_ID"`, "Ordering:", "Waits on: <its short id>",
 		"Waits on: <its short id> before build", "never poll for another card",
-		"The brief when you started:", `- ot1 [review`, "Zach's request:\ndo a thing\n"} {
+		"The brief when you started:", `- ot1 [design`, "Zach's request:\ndo a thing\n"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("Fellow prompt lacks %q", want)
 		}
@@ -282,7 +282,7 @@ func TestPromptsTellAgentsAboutPeers(t *testing.T) {
 	for _, kind := range []string{"plan", "code"} {
 		pr := ReviewPrompt(Card{ID: "c1", Short: "c1", Repo: "r"}, kind, 7478, "unknown")
 		if !strings.Contains(pr, "localhost:7478/api/idea") || !strings.Contains(pr, `"by":"reviewer of c1"`) ||
-			!strings.Contains(pr, "only write you may make") {
+			!strings.Contains(pr, "only outside write you may make") {
 			t.Errorf("%s review prompt does not offer ideas", kind)
 		}
 	}

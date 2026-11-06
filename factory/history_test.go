@@ -231,21 +231,6 @@ func TestCloseReadsSessionFilesOnly(t *testing.T) {
 	noLogsCalls(t, p)
 }
 
-// When a plan review ends, the builder (idle all review, maybe unloaded) is read from its file.
-func TestPlanReviewReadsBuilderFromSessionFile(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "plan: replace the storage layer\nWaits on: keep123\nTIER: architecture")
-	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelTier] != "architecture" {
-		t.Errorf("builder tier not read from its file: %v", l)
-	}
-	if p.called("logs", "c1") {
-		t.Errorf("asked Paseo for the builder: %v", p.calls)
-	}
-}
-
 // Retry on a stuck picker reads its file; with none it fails at once, saying why.
 func TestRetryStuckPickerReadsSessionFileOnly(t *testing.T) {
 	a := picker("pk", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})

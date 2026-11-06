@@ -8,63 +8,6 @@ import (
 	"time"
 )
 
-func TestDecisionHistoryWaitsThenAsks(t *testing.T) {
-	for _, stage := range []string{"plan", "landing", "building", "review"} {
-		t.Run(stage, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: stage, labelSource: "board", labelSince: ago(10 * time.Minute)})
-			c.LastActivityAt = t0.Add(-time.Minute)
-			if stage == "building" {
-				c.Labels[labelPrefix+labelAutoReview] = "code"
-			}
-			r := reviewer("r1", "c1", "code")
-			f, p := newTestFactory(t, c, r)
-			run := func() {
-				t.Helper()
-				a := c
-				if stage == "review" {
-					a = r
-				}
-				if err := f.tickAgent(a, f.Now()); err != nil {
-					t.Fatal(err)
-				}
-			}
-			run()
-			if p.labels(c.ID)[labelStage] != "" || p.runs != 0 || p.labels(r.ID)[labelApplied] != "" {
-				t.Fatalf("missing history advanced card: %v", p.calls)
-			}
-			f.Now = func() time.Time { return t0.Add(time.Minute) }
-			run()
-			l := p.labels(c.ID)
-			if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "history unavailable") {
-				t.Fatalf("missing history did not escalate: %v", p.calls)
-			}
-			if p.runs != 0 || p.labels(r.ID)[labelApplied] != "" || p.called("archive", r.ID) {
-				t.Fatalf("missing history applied or restarted review: %v", p.calls)
-			}
-			noLogsCalls(t, p)
-		})
-	}
-}
-
-func TestDecisionHistoryLateFileResumesPlan(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
-	f, p := newTestFactory(t, c)
-	if err := f.tickAgent(c, t0); err != nil {
-		t.Fatal(err)
-	}
-	if p.runs != 0 {
-		t.Fatal("review started without history")
-	}
-	storeLog(t, f, p, c.ID, "Plan.\nTITLE: A clearer title\nTIER: low")
-	if err := f.tickAgent(c, t0); err != nil {
-		t.Fatal(err)
-	}
-	if p.labels(c.ID)[labelStage] != "plan-review" {
-		t.Fatalf("late file not used: %v", p.calls)
-	}
-	noLogsCalls(t, p)
-}
-
 func TestDecisionHistoryMissingDoesNotNameOrQualifyDirect(t *testing.T) {
 	c := card("c1", map[string]string{labelSource: "board"})
 	f, p := newTestFactory(t, c)
@@ -84,8 +27,8 @@ func TestDecisionHistoryDryRunBlocksLogs(t *testing.T) {
 func TestDecisionHistoryReviewerLateFileAndHumanGate(t *testing.T) {
 	for _, expired := range []bool{false, true} {
 		t.Run(map[bool]string{false: "retry", true: "asked"}[expired], func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "review", labelPlanRounds: "1"})
-			r := reviewer("r1", c.ID, "code")
+			c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1"})
+			r := reviewer("r1", c.ID, gateDesign)
 			f, p := newTestFactory(t, c, r)
 			if expired {
 				f.Now = func() time.Time { return t0.Add(time.Minute) }
@@ -107,7 +50,7 @@ func TestDecisionHistoryReviewerLateFileAndHumanGate(t *testing.T) {
 				if p.labels(r.ID)[labelApplied] != "" || len(p.sent(c.ID)) != 0 {
 					t.Fatal("late history answered the human gate")
 				}
-			} else if p.labels(r.ID)[labelApplied] != "1" || p.labels(c.ID)[labelCodeRounds] != "1" {
+			} else if p.labels(r.ID)[labelApplied] != "1" || p.labels(c.ID)[labelRoundsDesign] != "1" {
 				t.Fatalf("late verdict not applied: %v", p.labels(c.ID))
 			}
 			noLogsCalls(t, p)
@@ -115,31 +58,10 @@ func TestDecisionHistoryReviewerLateFileAndHumanGate(t *testing.T) {
 	}
 }
 
-func TestDecisionHistoryPlanMustBeReadBeforeReviewConsumed(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan-review"})
-	r := reviewer("r1", c.ID, "plan")
-	f, p := newTestFactory(t, c, r)
-	storeLog(t, f, p, r.ID, "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
-	if err := f.ApplyVerdict(r); err != nil {
-		t.Fatal(err)
-	}
-	if p.labels(r.ID)[labelApplied] != "" || len(p.sent(c.ID)) != 0 {
-		t.Fatal("review consumed without plan")
-	}
-	storeLog(t, f, p, c.ID, "Plan.\nTIER: risky\nWaits on: d0e1234")
-	if err := f.ApplyVerdict(r); err != nil {
-		t.Fatal(err)
-	}
-	if l := p.labels(c.ID); l[labelTier] != "risky" || l[labelWaitsOn] != "d0e1234" || l[labelStage] != "building" {
-		t.Fatalf("stored plan decisions lost: %v", l)
-	}
-	noLogsCalls(t, p)
-}
-
 func TestDecisionHistoryUnavailableKinds(t *testing.T) {
 	for _, kind := range []string{"missing", "no-session", "unsupported", "invalid", "empty"} {
 		t.Run(kind, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: ago(10 * time.Minute)})
+			c := card("c1", map[string]string{labelStage: "building", labelSource: "email", labelSince: ago(10 * time.Minute)})
 			f, p := newTestFactory(t)
 			switch kind {
 			case "no-session":
@@ -183,7 +105,7 @@ func TestDecisionHistoryLandingWaitDoesNotWriteTiming(t *testing.T) {
 }
 
 func TestDecisionHistoryAskExplainsPause(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused", labelStuckFrom: "review"})
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused", labelStuckFrom: gateDesign})
 	ask := askFor(Card{Stage: "zach"}, c)
 	if ask == nil || !strings.Contains(ask.Title, "History unavailable") || !strings.Contains(ask.Why, "two minutes") || ask.Actions[0].ID != "rerun" {
 		t.Fatalf("history wait misrepresented: %+v", ask)
@@ -250,8 +172,8 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 		{"archived history stays missing", false, true}, {"archived history appears", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "review", labelSource: "board", labelTier: "low", labelPlanRounds: "1", labelVerdict: "plan approve"})
-			r := reviewer("r1", c.ID, "code")
+			c := card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelTier: "low", labelRoundsRequest: "1", labelVerdict: "plan approve"})
+			r := reviewer("r1", c.ID, gateDesign)
 			if tc.archived {
 				r = archived(r)
 			}
@@ -275,7 +197,7 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 			c.Status, p.status[c.ID] = "running", "running"
 			f.SetAgents([]Agent{c, r})
 			if tc.lateFile {
-				storeLog(t, f, p, r.ID, "TIER: low\nVERDICT: approve")
+				storeLog(t, f, p, r.ID, "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 			}
 			if err := f.tickAgent(r, f.Now()); err != nil {
 				t.Fatal(err)
@@ -297,8 +219,46 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 			if err := f.tickAgent(c, f.Now()); err != nil {
 				t.Fatal(err)
 			}
-			if p.labels(r.ID)[labelVerdict] != "superseded" || p.labels(c.ID)[labelCodeRounds] != "" || p.labels(c.ID)[labelStage] != "review" || p.runs != 1 {
+			if p.labels(r.ID)[labelVerdict] != "superseded" || p.labels(c.ID)[labelRoundsDesign] != "" || p.labels(c.ID)[labelStage] != gateRequest || p.runs != 1 {
 				t.Fatalf("reply did not get a fresh review: %v, old reviewer: %v", p.labels(c.ID), p.labels(r.ID))
+			}
+			noLogsCalls(t, p)
+		})
+	}
+}
+
+func TestDecisionHistoryWaitsThenAsks(t *testing.T) {
+	for _, stage := range []string{"landing", "building", gateDesign} {
+		t.Run(stage, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: stage, labelSource: "board", labelSince: ago(10 * time.Minute)})
+			c.LastActivityAt = t0.Add(-time.Minute)
+			if stage == "building" {
+				c.Labels[labelPrefix+labelAutoReview] = gateRequest
+			}
+			r := reviewer("r1", "c1", gateSignoff)
+			f, p := newTestFactory(t, c, r)
+			run := func() {
+				t.Helper()
+				a := c
+				if stage == gateDesign {
+					a = r
+				}
+				if err := f.tickAgent(a, f.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run()
+			if p.labels(c.ID)[labelStage] != "" || p.runs != 0 || p.labels(r.ID)[labelApplied] != "" {
+				t.Fatalf("missing history advanced card: %v", p.calls)
+			}
+			f.Now = func() time.Time { return t0.Add(time.Minute) }
+			run()
+			l := p.labels(c.ID)
+			if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "history unavailable") {
+				t.Fatalf("missing history did not escalate: %v", p.calls)
+			}
+			if p.runs != 0 || p.labels(r.ID)[labelApplied] != "" || p.called("archive", r.ID) {
+				t.Fatalf("missing history applied or restarted review: %v", p.calls)
 			}
 			noLogsCalls(t, p)
 		})

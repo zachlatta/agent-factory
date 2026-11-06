@@ -96,7 +96,7 @@ func TestParseOverviewKeepsDueOutOfNeeds(t *testing.T) {
 // directCard is a card in its one-pass errand whose last reply is reply, on main with only its work item.
 func directCard(t *testing.T, labels map[string]string, reply string) (*Factory, *fakePaseo, *fakeMail, Agent) {
 	t.Helper()
-	l := map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)}
+	l := map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute)}
 	for k, v := range labels {
 		l[k] = v
 	}
@@ -245,44 +245,6 @@ func TestDirectAskTitleComesFromTheOverview(t *testing.T) {
 	f.Tick()
 	if s := m.sends(); len(s) != 1 || composed(t, f, "c1").Subject != want {
 		t.Errorf("sends = %+v", s)
-	}
-}
-
-func TestReplyToDirectAskStaysDirect(t *testing.T) {
-	for _, tc := range []struct {
-		name, source, via string
-	}{
-		{"board", "board", ""},
-		{"board card answered by email", "board", "email"},
-		{"inbox", "email", "email"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "zach", labelSource: tc.source, labelTrack: "direct",
-				labelNote: directAskNote("Send it?"), labelDue: askDue, labelSince: ago(10 * time.Minute)})
-			c.Labels["gmail-thread"] = "t1"
-			c.Cwd = t.TempDir()
-			f, p := newTestFactory(t, c)
-			f.GitOut = gitStub(directOK)
-			if _, err := f.Act("send", Body{ID: "c1", Message: "yes, the larger one", Via: tc.via}); err != nil {
-				t.Fatal(err)
-			}
-			l := p.labels("c1")
-			if l[labelStage] != "plan" || l[labelNote] != "answering Zach" || l[labelAutoReview] != "" {
-				t.Fatalf("after the reply: %v", l)
-			}
-			sent := p.sent("c1")
-			if len(sent) != 1 || !strings.Contains(sent[0], "yes, the larger one") || !strings.Contains(sent[0], "TRACK: direct") {
-				t.Fatalf("sent = %v", sent)
-			}
-			stopsAfterReply(t, f, p, c, "Sent it.\n\n"+doneReply)
-			f.Tick()
-			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
-				t.Fatalf("review started: %v", runs)
-			}
-			if l := p.labels("c1"); l[labelStage] != "landed" || l[labelDue] != "" {
-				t.Errorf("labels = %v", l)
-			}
-		})
 	}
 }
 
@@ -458,7 +420,7 @@ func TestDirectAskFromAnArchivedAgentShowsAndEmailsOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		l := p.labels("c1")
-		if l[labelStage] != "plan" || l[labelParked] != "" || l[labelNote] != "answering Zach" {
+		if l[labelStage] != "building" || l[labelParked] != "" || l[labelNote] != "answering Zach" {
 			t.Fatalf("labels = %v", l)
 		}
 	})
@@ -721,32 +683,6 @@ func TestDigestPutsDueFirst(t *testing.T) {
 	}
 }
 
-func TestDigestPutsDueAboveTheNumberedList(t *testing.T) {
-	asked := card("c9", map[string]string{labelStage: "zach", labelSource: "board",
-		labelNote: directAskNote("Send the booth form?"), labelDue: "2026-10-28T22:00:00-04:00"})
-	asked.Title = "Fill in the booth form"
-	f, _, m := sentDigest(t, digestWait("c1", "Newer build", time.Hour), asked)
-	text := digests(m)[0].Args["text"].(string)
-	if !strings.HasPrefix(text, "Due\n- Fill in the booth form") {
-		t.Errorf("Due is not first:\n%s", text)
-	}
-	html := digests(m)[0].Args["html"].(string)
-	due, list := strings.Index(html, ">Due<"), strings.Index(html, ">Answer by reply<")
-	if due < 0 || list < 0 || due > list {
-		t.Errorf("Due is not above the numbered list: %s", html)
-	}
-	if !strings.Contains(text, "1. Newer build:") {
-		t.Errorf("the one-word ask lost its number:\n%s", text)
-	}
-	d, _ := f.readDigest()
-	if len(d.Lists) != 1 || len(d.Lists[0].Items) != 1 || d.Lists[0].Items[0].Card != "c1" {
-		t.Errorf("a question that needs words got a number: %+v", d.Lists)
-	}
-	if subj := digests(m)[0].Args["subject"].(string); !strings.HasPrefix(subj, "Factory today: 1 due, 1 for you") {
-		t.Errorf("subject = %q", subj)
-	}
-}
-
 func TestDueText(t *testing.T) {
 	loc, _ := time.LoadLocation("America/New_York")
 	due := time.Date(2026, 10, 28, 22, 0, 0, 0, loc)
@@ -781,5 +717,69 @@ func TestNewCardPromptTeachesDue(t *testing.T) {
 		if !strings.Contains(newCardPrompt, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
+	}
+}
+
+func TestReplyToDirectAskStaysDirect(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, via string
+	}{
+		{"board", "board", ""},
+		{"board card answered by email", "board", "email"},
+		{"inbox", "email", "email"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "zach", labelSource: tc.source, labelTrack: "direct",
+				labelNote: directAskNote("Send it?"), labelDue: askDue, labelSince: ago(10 * time.Minute)})
+			c.Labels["gmail-thread"] = "t1"
+			c.Cwd = t.TempDir()
+			f, p := newTestFactory(t, c)
+			f.GitOut = gitStub(directOK)
+			if _, err := f.Act("send", Body{ID: "c1", Message: "yes, the larger one", Via: tc.via}); err != nil {
+				t.Fatal(err)
+			}
+			l := p.labels("c1")
+			if l[labelStage] != "building" || l[labelNote] != "answering Zach" || l[labelAutoReview] != gateRequest {
+				t.Fatalf("after the reply: %v", l)
+			}
+			sent := p.sent("c1")
+			if len(sent) != 1 || !strings.Contains(sent[0], "yes, the larger one") || !strings.Contains(sent[0], "TRACK: direct") {
+				t.Fatalf("sent = %v", sent)
+			}
+			stopsAfterReply(t, f, p, c, "Sent it.\n\n"+doneReply)
+			f.Tick()
+			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
+				t.Fatalf("review started: %v", runs)
+			}
+			if l := p.labels("c1"); l[labelStage] != "landed" || l[labelDue] != "" {
+				t.Errorf("labels = %v", l)
+			}
+		})
+	}
+}
+
+func TestDigestPutsDueAboveTheNumberedList(t *testing.T) {
+	asked := card("c9", map[string]string{labelStage: "zach", labelSource: "board",
+		labelNote: directAskNote("Send the booth form?"), labelDue: "2026-10-28T22:00:00-04:00"})
+	asked.Title = "Fill in the booth form"
+	f, _, m := sentDigest(t, digestWait("c1", "Newer build", time.Hour), asked)
+	text := digests(m)[0].Args["text"].(string)
+	if !strings.HasPrefix(text, "Due\n- Fill in the booth form") {
+		t.Errorf("Due is not first:\n%s", text)
+	}
+	html := digests(m)[0].Args["html"].(string)
+	due, list := strings.Index(html, ">Due<"), strings.Index(html, ">Answer by reply<")
+	if due < 0 || list < 0 || due > list {
+		t.Errorf("Due is not above the numbered list: %s", html)
+	}
+	if !strings.Contains(text, "1. Newer build:") {
+		t.Errorf("the one-word ask lost its number:\n%s", text)
+	}
+	d, _ := f.readDigest()
+	if len(d.Lists) != 1 || len(d.Lists[0].Items) != 1 || d.Lists[0].Items[0].Card != "c1" {
+		t.Errorf("a question that needs words got a number: %+v", d.Lists)
+	}
+	if subj := digests(m)[0].Args["subject"].(string); !strings.HasPrefix(subj, "Factory today: 1 due, 1 for you") {
+		t.Errorf("subject = %q", subj)
 	}
 }

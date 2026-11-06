@@ -77,29 +77,11 @@ func TestApprovedParkedHeldCardDroppedDependencyRebuilds(t *testing.T) {
 	headIs(f, reviewedSHA, nil)
 	f.Tick()
 	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" || l[labelHeldApproved] != "" || l[labelWaitsOn] != "" {
+	if l[labelStage] != "building" || l[labelAutoReview] == "" || l[labelHeld] != "" || l[labelHeldApproved] != "" || l[labelWaitsOn] != "" {
 		t.Errorf("labels = %v", l)
 	}
 	if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "rebuild without it") {
 		t.Errorf("sent = %v", s)
-	}
-}
-
-// A parked card cannot wait for a fresh review in a working column while archived: it stops for
-// Zach with Re-run the review instead, and nothing is sent.
-func TestApprovedParkedHeldCardWithMovedHeadStopsForReview(t *testing.T) {
-	f, p, with := parkedHeld(t, true, nil)
-	with(dep("landed", false))
-	headIs(f, movedSHA, nil)
-	f.Tick()
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelStuckFrom] != "review" || !strings.Contains(l[labelNote], "work changed after review") ||
-		l[labelAutoReview] != "" || l[labelHeld] != "" || l[labelHeldApproved] != "" {
-		t.Errorf("labels = %v", l)
-	}
-	noLandPrompt(t, "moved", p)
-	if len(p.sent("c1")) != 0 {
-		t.Errorf("woken: %v", p.sent("c1"))
 	}
 }
 
@@ -269,27 +251,20 @@ func (p *fakePaseo) labelUpdates(id string) [][]string {
 	return out
 }
 
-func TestApprovedParkedBeforeBuildHeldCardIsReleasedWhenDependencyLands(t *testing.T) {
-	f, p, with := parkedHeld(t, true, map[string]string{
-		labelStage: "building", labelWaitsBefore: "build", labelAutoReview: "",
-	})
-	if err := f.saveHeldBuild("c1", buildMsg("Zach allowed this build.", "(none)")); err != nil {
-		t.Fatal(err)
-	}
-	with(dep("building", false))
-	f.Tick()
-	if len(p.sent("c1")) != 0 || len(p.labels("c1")) != 0 {
-		t.Fatalf("moved while dependency in flight: sent %v labels %v", p.sent("c1"), p.labels("c1"))
-	}
+// A parked card cannot wait for a fresh review in a working column while archived: it stops for
+// Zach with Re-run the review instead, and nothing is sent.
+func TestApprovedParkedHeldCardWithMovedHeadStopsForReview(t *testing.T) {
+	f, p, with := parkedHeld(t, true, nil)
 	with(dep("landed", false))
+	headIs(f, movedSHA, nil)
 	f.Tick()
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "Card d0e0001, which this card waited on before building, has landed") ||
-		!strings.Contains(msgs[0], "Zach allowed this build.") {
-		t.Fatalf("sent = %v", msgs)
-	}
-	if l := p.labels("c1"); l[labelHeld] != "" || l[labelHeldApproved] != "" || !labelSent(l, labelHeldApproved) ||
-		l[labelParked] != "" || l[labelAutoReview] != "code" || l[labelWaitsDone] != "1" {
+	l := p.labels("c1")
+	if l[labelStage] != "zach" || l[labelStuckFrom] != gateDesign || !strings.Contains(l[labelNote], "work changed after review") ||
+		l[labelAutoReview] != "" || l[labelHeld] != "" || l[labelHeldApproved] != "" {
 		t.Errorf("labels = %v", l)
+	}
+	noLandPrompt(t, "moved", p)
+	if len(p.sent("c1")) != 0 {
+		t.Errorf("woken: %v", p.sent("c1"))
 	}
 }

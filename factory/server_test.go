@@ -103,27 +103,6 @@ func TestServer(t *testing.T) {
 }
 
 // every action a Needs Zach button posts is routed (rerun was missing: its button got a 404)
-func TestServerRoutesEveryAskAction(t *testing.T) {
-	f, p := newDiskFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-		labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}),
-		card("c2", map[string]string{labelStage: "review", labelStuck: stuckReview}))
-	h := f.Handler()
-	for _, tc := range []struct{ action, id string }{{"arbiter", "c1"}, {"rerun", "c2"}} {
-		req := httptest.NewRequest("POST", "/api/"+tc.action, strings.NewReader(`{"id":"`+tc.id+`"}`))
-		req.Header.Set("X-Factory", "1")
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != 200 {
-			t.Errorf("%s: %d %s", tc.action, rec.Code, rec.Body)
-		}
-	}
-	if len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 || len(p.runsWithLabel(labelArg(labelReviewOf, "c2"))) != 1 {
-		t.Errorf("calls = %v", p.calls)
-	}
-}
-
-// On a phone a text field left focused brings the keyboard back (tab resumed, window
-// refocused), so both pages drop focus when the page hides or the keyboard closes.
 func TestPagesReleaseKeyboard(t *testing.T) {
 	f, _ := newTestFactory(t, card("c1", nil))
 	h := f.Handler()
@@ -139,7 +118,7 @@ func TestPagesReleaseKeyboard(t *testing.T) {
 // Gzip covers only the allowlisted GET routes; anything else (actions today, a future
 // streaming route) is served plain unless it opts in.
 func TestGzipAllowlist(t *testing.T) {
-	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "plan"}))
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "building"}))
 	h := f.Handler()
 	get := func(path string, gz bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", path, nil)
@@ -244,7 +223,7 @@ func benchFactory(b *testing.B, cards int) *Factory {
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
 	var agents []Agent
 	for i := range cards {
-		agents = append(agents, card(fmt.Sprintf("c%d", i), map[string]string{labelStage: "plan"}))
+		agents = append(agents, card(fmt.Sprintf("c%d", i), map[string]string{labelStage: "building"}))
 	}
 	f.SetAgents(agents)
 	return f
@@ -322,5 +301,31 @@ func TestServerSeen(t *testing.T) {
 	f.cfg.ReadOnly = true
 	if code := seen("c1", true); code != 403 || len(p.calls) != n {
 		t.Errorf("read-only: %d, calls %v", code, p.calls[n:])
+	}
+}
+
+// every action a Needs Zach button posts is routed (rerun was missing: its button got a 404)
+
+// every action a Needs Zach button posts is routed (rerun was missing: its button got a 404)
+
+// every action a Needs Zach button posts is routed (rerun was missing: its button got a 404)
+
+// every action a Needs Zach button posts is routed (rerun was missing: its button got a 404)
+func TestServerRoutesEveryAskAction(t *testing.T) {
+	f, p := newDiskFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
+		labelVerdict: "code changes", labelRoundsRequest: "1", labelRoundsDesign: "3"}),
+		card("c2", map[string]string{labelStage: gateDesign, labelStuck: stuckReview}))
+	h := f.Handler()
+	for _, tc := range []struct{ action, id string }{{"rerun", "c2"}} {
+		req := httptest.NewRequest("POST", "/api/"+tc.action, strings.NewReader(`{"id":"`+tc.id+`"}`))
+		req.Header.Set("X-Factory", "1")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Errorf("%s: %d %s", tc.action, rec.Code, rec.Body)
+		}
+	}
+	if len(p.runsWithLabel(labelArg(labelReviewOf, "c2"))) != 1 {
+		t.Errorf("calls = %v", p.calls)
 	}
 }

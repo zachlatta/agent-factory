@@ -120,7 +120,7 @@ func pickHandoff(failing string, statuses map[string]string, usages map[string]A
 	ordered, _ := rankAgentChoices(statuses, usages, now)
 	ok := func(c AgentChoice) bool {
 		p := c.providerID()
-		return c.Frontier && p != failing && statuses[p] == "available" && usageScore(usages[p], now).tier > 0
+		return c.Frontier && p != failing && statuses[p] == "available" && usageScore(usages[p], now, capacityWeight(p)).tier > 0
 	}
 	if opus, found := agentByID(defaultAgent); found && ok(opus) {
 		return opus, true
@@ -234,7 +234,7 @@ func (f *Factory) startHandoff(a Agent, s handoffState, choice AgentChoice, prom
 	labels[labelPrefix+labelReplaces] = a.ID
 	if s.Kind == "stage" {
 		// the new stage's own labels, already on a: the swap is invisible on the board
-		for _, k := range []string{labelSince, labelNote, labelZachPlan, labelAwaiting} {
+		for _, k := range []string{labelSince, labelNote, labelAwaiting} {
 			if v := a.L(k); v != "" {
 				labels[labelPrefix+k] = v
 			}
@@ -398,16 +398,16 @@ func (f *Factory) handoffPrompt(a Agent, choice AgentChoice, why string) (string
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are taking over this factory card from %s, which failed: %s. The factory moved the card to you, %s, "+
 		"in the same worktree and branch, with its labels, thread and review rounds. This happens once per card.\n\n"+
-		"First check where the work stands: git status, git log --oneline origin/main..HEAD, and the files the plan names. "+
+		"First check where the work stands: git status, git log --oneline origin/main..HEAD, and the files the work names. "+
 		"Do not start over. Your step now: %s\n\n"+
 		"The card's original instructions follow verbatim. They still apply (rules, gates, the public-repo scan, the "+
-		"three opening lines), but the step above replaces their \"Step 1\".\n\n"+
+		"three opening lines), but the step above replaces their first step.\n\n"+
 		"=== Original instructions ===\n%s\n",
 		modelLabel(a), strings.TrimSpace(why), choice.Label, step, first)
 	if plan != "" {
-		fmt.Fprintf(&b, "\n=== Approved plan ===\n%s\n", trunc(plan, handoffTextCap))
+		fmt.Fprintf(&b, "\n=== Proposed solution ===\n%s\n", trunc(plan, handoffTextCap))
 		if notes != "" {
-			fmt.Fprintf(&b, "\n=== Reviewer notes when the plan was approved ===\n%s\n", trunc(notes, handoffTextCap))
+			fmt.Fprintf(&b, "\n=== Reviewer notes ===\n%s\n", trunc(notes, handoffTextCap))
 		}
 	}
 	if last = strings.TrimSpace(last); last != "" && last != strings.TrimSpace(plan) {
@@ -419,11 +419,9 @@ func (f *Factory) handoffPrompt(a Agent, choice AgentChoice, why string) (string
 
 func handoffStep(stage string) string {
 	switch stage {
-	case "plan":
-		return "planning. Write the plan as the instructions say, then stop."
 	case "building":
-		return "building the approved plan. Finish it, commit on the branch, leave the worktree clean, do NOT land, " +
-			"and stop with a short summary (including deploy steps, if any). A code reviewer checks it next."
+		return "building the proposed solution. Finish it, commit on the branch, leave the worktree clean, do NOT land, " +
+			"and stop with a short summary ending in the RESULT: line. The gates check it next."
 	case "landing":
 		return "landing. The factory had told the previous agent to land. Check whether it already landed " +
 			"(git fetch, then git log origin/main); if not, land it as the instructions say, then report as they say."
@@ -431,8 +429,8 @@ func handoffStep(stage string) string {
 	return "continue the interrupted step, then stop with a short summary."
 }
 
-// handoffParts reads a session's first user message, the approved plan (the reply just before the
-// last "Build it now, as planned" message) and that message's reviewer notes.
+// handoffParts reads a session's first user message and, for a card from before the gates, its approved
+// plan (the reply just before the last "Build it now, as planned" message) and that message's reviewer notes.
 func handoffParts(evs []Event) (first, plan, notes string) {
 	var run []string
 	lastReply := ""

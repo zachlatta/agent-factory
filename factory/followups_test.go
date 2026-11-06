@@ -91,13 +91,13 @@ func appendSession(t *testing.T, path string, b []byte) {
 }
 
 func reqCard(id, source string) Agent {
-	a := card(id, map[string]string{labelStage: "plan", labelSource: source})
+	a := card(id, map[string]string{labelStage: "building", labelSource: source})
 	a.Provider, a.SessionID = "claude", "sess-"+id
 	return a
 }
 
 func TestRequestOfFormats(t *testing.T) {
-	board := fmt.Sprintf(newCardPrompt, "Make agents aware\nof each other", "example/desk", "", "", "", "")
+	board := fmt.Sprintf(newCardPrompt, "Make agents aware\nof each other", "example/desk", "", "", "")
 	for name, tc := range map[string]struct{ prompt, want string }{
 		"board":     {board, "Make agents aware\nof each other"},
 		"email":     {fakeEmailPrompt, "Paint the shed blue,\nand the door too."},
@@ -239,64 +239,6 @@ func TestPeersRequestReadsOnlyWhatWasAdded(t *testing.T) {
 	}
 }
 
-func TestReviewPromptShowsRequestAndFollowUps(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Cwd: "/w", Repo: "r", Tier: "low", Request: &CardRequest{
-		Base: "Paint the shed blue.",
-		FollowUps: []FollowUp{{Date: "Sun, 25 Oct 2026 20:01:00 -0400", Text: "Make it green."},
-			{Date: "Sun, 25 Oct 2026 20:30:00 -0400", Text: "Two coats."}},
-	}}
-	for _, kind := range []string{"plan", "code"} {
-		pr := ReviewPrompt(c, kind, 7478, "unknown")
-		if strings.Contains(pr, "first message") {
-			t.Errorf("%s rubric still points at the first message", kind)
-		}
-		head := "Zach's request and follow-ups (newest last; a follow-up overrides the first request where they conflict):"
-		i := strings.Index(pr, head)
-		if i < 0 || !strings.Contains(pr, "against Zach's request and follow-ups (section below)") {
-			t.Fatalf("%s prompt lacks the section:\n%s", kind, pr)
-		}
-		sec := pr[i:]
-		a, b := strings.Index(sec, "Make it green."), strings.Index(sec, "Two coats.")
-		if !strings.Contains(sec, "Paint the shed blue.") || a < 0 || b < a ||
-			!strings.Contains(sec, "Follow-up (Sun, 25 Oct 2026 20:30:00 -0400):") {
-			t.Errorf("%s section:\n%s", kind, sec)
-		}
-	}
-	none := ReviewPrompt(Card{ID: "c2"}, "code", 7478, "unknown")
-	if !strings.Contains(none, "read the builder's first message and any later messages from Zach") {
-		t.Errorf("no-request prompt lacks the fallback")
-	}
-	var many []FollowUp
-	for n := range reviewFollowUpCap + 3 {
-		many = append(many, FollowUp{Date: "d", Text: fmt.Sprintf("change %02d", n)})
-	}
-	pr := ReviewPrompt(Card{ID: "c3", Request: &CardRequest{Base: "b", FollowUps: many}}, "code", 7478, "unknown")
-	if strings.Contains(pr, "change 02") || !strings.Contains(pr, "change 03") || !strings.Contains(pr, "3 earlier follow-ups") {
-		t.Errorf("follow-up cap:\n%s", pr)
-	}
-	big := strings.Repeat("x", reviewBlockCap+500)
-	if pr := ReviewPrompt(Card{ID: "c4", Request: &CardRequest{Base: big}}, "code", 7478, "unknown"); strings.Contains(pr, big[:reviewBlockCap+1]) {
-		t.Errorf("block not cut at %d", reviewBlockCap)
-	}
-}
-
-func TestReviewerGetsTheCardsFollowUps(t *testing.T) {
-	a := reqCard("em5", "email")
-	f, p := newTestFactory(t, a)
-	writeSession(t, f.cfg.Home, a.Cwd, a.SessionID, sessionLine(fakeEmailPrompt, false),
-		sessionLine(fakeFollowUp("Sun, 25 Oct 2026 20:01:00 -0400", "Make it green instead."), false))
-	if _, err := f.runReviewer(Card{ID: a.ID, Title: "x", Cwd: a.Cwd, Repo: a.Repo}, "plan", reviewSpec{}, "unknown", "t", "", ""); err != nil {
-		t.Fatal(err)
-	}
-	runs := p.runsWithLabel(labelArg(labelReviewKind, "plan"))
-	if len(runs) != 1 {
-		t.Fatalf("runs = %v", p.calls)
-	}
-	if pr := runs[0][len(runs[0])-1]; !strings.Contains(pr, "Paint the shed blue,") || !strings.Contains(pr, "Make it green instead.") {
-		t.Errorf("reviewer prompt lacks the request and follow-up:\n%s", pr)
-	}
-}
-
 func TestAppCardRequestFromFirstUserPrompt(t *testing.T) {
 	t.Run("plain claude prompt", func(t *testing.T) {
 		a := Agent{ID: "app1", Host: "host1", Title: "Warehouse fix", Cwd: "/w/app1", Repo: "example/desk",
@@ -367,4 +309,45 @@ func TestAppCardRequestFromFirstUserPrompt(t *testing.T) {
 			t.Fatalf("board card Base = %q, want empty", got)
 		}
 	})
+}
+
+func TestReviewPromptShowsRequestAndFollowUps(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Cwd: "/w", Repo: "r", Tier: "low", Request: &CardRequest{
+		Base: "Paint the shed blue.",
+		FollowUps: []FollowUp{{Date: "Sun, 25 Oct 2026 20:01:00 -0400", Text: "Make it green."},
+			{Date: "Sun, 25 Oct 2026 20:30:00 -0400", Text: "Two coats."}},
+	}}
+	for _, kind := range []string{"plan", "code"} {
+		pr := ReviewPrompt(c, kind, 7478, "unknown")
+		if strings.Contains(pr, "first message") {
+			t.Errorf("%s rubric still points at the first message", kind)
+		}
+		head := "Zach's request and follow-ups (newest last; a follow-up overrides the first request where they conflict):"
+		i := strings.Index(pr, head)
+		if i < 0 || !strings.Contains(pr, "request and follow-ups") {
+			t.Fatalf("%s prompt lacks the section:\n%s", kind, pr)
+		}
+		sec := pr[i:]
+		a, b := strings.Index(sec, "Make it green."), strings.Index(sec, "Two coats.")
+		if !strings.Contains(sec, "Paint the shed blue.") || a < 0 || b < a ||
+			!strings.Contains(sec, "Follow-up (Sun, 25 Oct 2026 20:30:00 -0400):") {
+			t.Errorf("%s section:\n%s", kind, sec)
+		}
+	}
+	none := ReviewPrompt(Card{ID: "c2"}, "code", 7478, "unknown")
+	if !strings.Contains(none, "read the builder's first message and any later messages from Zach") {
+		t.Errorf("no-request prompt lacks the fallback")
+	}
+	var many []FollowUp
+	for n := range reviewFollowUpCap + 3 {
+		many = append(many, FollowUp{Date: "d", Text: fmt.Sprintf("change %02d", n)})
+	}
+	pr := ReviewPrompt(Card{ID: "c3", Request: &CardRequest{Base: "b", FollowUps: many}}, "code", 7478, "unknown")
+	if strings.Contains(pr, "change 02") || !strings.Contains(pr, "change 03") || !strings.Contains(pr, "3 earlier follow-ups") {
+		t.Errorf("follow-up cap:\n%s", pr)
+	}
+	big := strings.Repeat("x", reviewBlockCap+500)
+	if pr := ReviewPrompt(Card{ID: "c4", Request: &CardRequest{Base: big}}, "code", 7478, "unknown"); strings.Contains(pr, big[:reviewBlockCap+1]) {
+		t.Errorf("block not cut at %d", reviewBlockCap)
+	}
 }

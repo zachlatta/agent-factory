@@ -18,7 +18,7 @@ func TestArchiveStopsRunningAgentThenArchives(t *testing.T) {
 		{"stage", Body{ID: "c1", Stage: "landed"}},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "plan", labelSource: "board"})
+			c := card("c1", map[string]string{labelStage: "building", labelSource: "board"})
 			c.Status = "running"
 			f, p := newTestFactory(t, c)
 			p.busy["c1"] = 1 // Paseo refuses to archive a running agent
@@ -61,7 +61,7 @@ func TestArchiveRetriesWhileAgentWindsDown(t *testing.T) {
 
 func TestTickAfterArchiveStartsNoReview(t *testing.T) {
 	// idle, acted since its last move: without the archive this card gets a plan review
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 	f, p := newTestFactory(t, c)
 	if _, err := f.Act("archive", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
@@ -93,38 +93,6 @@ func TestArchiveMarkSurvivesStaleRefresh(t *testing.T) {
 	}
 }
 
-func TestReplyKeepsCardWhereTheAnswerBelongs(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		labels     map[string]string
-		stage      string // "" = no stage label written
-		autoReview string
-	}{
-		{"landing stays landing", map[string]string{labelStage: "landing", labelNote: "auto-landing (low)", labelVerdict: "code approve", labelPlanRounds: "1"}, "landing", ""},
-		{"plan at rework cap goes back to plan", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "plan changes", labelPlanRounds: "3"}, "plan", ""},
-		{"after plan passed, code review queued", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached", labelVerdict: "code changes", labelPlanRounds: "1", labelCodeRounds: "3"}, "building", "code"},
-		{"unlabeled done card, code review queued", map[string]string{labelStage: "landed", labelSource: "board", labelNote: "done in one pass"}, "building", "code"},
-		{"direct card done, back to plan", map[string]string{labelStage: "landed", labelSource: "board", labelNote: "done in one pass", labelTrack: "direct"}, "plan", ""},
-		{"board errand on its first pass stays in plan", map[string]string{labelStage: "plan", labelSource: "board"}, "plan", ""},
-		{"inbox errand on its first pass stays in plan", map[string]string{labelStage: "plan", labelSource: "email"}, "plan", ""},
-		{"direct card whose plan passed, code review queued", map[string]string{labelStage: "landed", labelSource: "email", labelTrack: "direct", labelPlanRounds: "1"}, "building", "code"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f, p := newTestFactory(t, card("c1", tc.labels))
-			if _, err := f.Act("send", Body{ID: "c1", Message: "what do you need from me?"}); err != nil {
-				t.Fatal(err)
-			}
-			l := p.labels("c1")
-			if l[labelStage] != tc.stage || l[labelAutoReview] != tc.autoReview || l[labelSince] == "" {
-				t.Errorf("labels = %v", l)
-			}
-			if len(p.sent("c1")) != 1 {
-				t.Errorf("sent = %v", p.sent("c1"))
-			}
-		})
-	}
-}
-
 func TestReplyToUnlabeledCardSetsNoStage(t *testing.T) {
 	a := Agent{ID: "c1", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}}
 	f, p := newTestFactory(t, a)
@@ -137,7 +105,7 @@ func TestReplyToUnlabeledCardSetsNoStage(t *testing.T) {
 }
 
 func TestReplyThenTickFinishesLanding(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "landing", labelPlanRounds: "1"})
+	c := card("c1", map[string]string{labelStage: "landing", labelRoundsRequest: "1"})
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	f.Act("send", Body{ID: "c1", Message: "why is this under landing?"})
@@ -155,46 +123,6 @@ func TestReplyThenTickFinishesLanding(t *testing.T) {
 	f.Tick()
 	if l := p.labels("c1"); l[labelStage] != "landed" {
 		t.Errorf("labels = %v", l)
-	}
-}
-
-func TestApproveUnpassedPlanBuildsInsteadOfLanding(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelNote: "rework cap reached",
-		labelVerdict: "plan changes", labelPlanRounds: "3", labelTier: "architecture"}))
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelZachPlan] != "approved" {
-		t.Errorf("labels = %v", l)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") || strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
-func TestRerunRestartsTheStuckStep(t *testing.T) {
-	for _, tc := range []struct{ from, kind, stage string }{
-		{"plan", "plan", "plan-review"}, {"plan-review", "plan", "plan-review"},
-		{"building", "code", "review"}, {"review", "code", "review"}, {"landing", "", "landing"},
-	} {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: tc.from, labelReviewed: reviewedSHA}))
-		headIs(f, reviewedSHA, nil)
-		if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
-			t.Fatalf("%s: %v", tc.from, err)
-		}
-		runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
-		if tc.kind == "" {
-			if len(runs) != 0 || len(p.sent("c1")) != 1 || !strings.Contains(p.sent("c1")[0], "Land it now") {
-				t.Errorf("%s: calls = %v", tc.from, p.calls)
-			}
-		} else if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, tc.kind)) {
-			t.Errorf("%s: runs = %v", tc.from, runs)
-		}
-		if l := p.labels("c1"); l[labelStage] != tc.stage {
-			t.Errorf("%s: labels = %v", tc.from, l)
-		}
 	}
 }
 

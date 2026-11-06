@@ -149,6 +149,19 @@ func (p *fakePaseo) Run(_ context.Context, args ...string) (string, error) {
 
 // countCalls counts recorded calls whose first two words match ("" matches any word).
 // Safe while a background refresh is running; the other accessors are not.
+// promptOfKind is the prompt of the newest reviewer started with review kind.
+func (p *fakePaseo) promptOfKind(kind string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := len(p.calls) - 1; i >= 0; i-- {
+		c := p.calls[i]
+		if c[0] == "run" && strings.Contains(strings.Join(c, " "), labelArg(labelReviewKind, kind)) {
+			return c[len(c)-1]
+		}
+	}
+	return ""
+}
+
 func (p *fakePaseo) countCalls(a, b string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -290,7 +303,7 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	f.Sleep = func(time.Duration) {}
 	// Lifecycle fixtures fetch successfully and have reviewed work still absent from main.
 	f.Git = func(context.Context, string, ...string) error { return nil }
-	// An empty diff for the always-ask file check (alwaysask.go) hits nothing
+	// An empty diff
 	f.GitOut = gitStub(cleanDiff)
 	f.Usage = func(context.Context, string) AgentUsage { return unknownUsage() }
 	f.runner, f.GoEnv = nil, nil // previews run only in tests that set a fake runner (tryout_test.go)
@@ -313,7 +326,7 @@ func newTestFactory(t *testing.T, agents ...Agent) (*Factory, *fakePaseo) {
 	return f, p
 }
 
-// cleanDiff answers the always-ask file check (alwaysask.go): the card changes no file on the list,
+// cleanDiff answers a diff read: the card changes no file,
 // and its worktree has no uncommitted work (reviewHold).
 var cleanDiff = map[string]string{"diff --no-renames --name-only origin/main...HEAD": "", "status --porcelain": ""}
 
@@ -339,7 +352,7 @@ func card(id string, labels map[string]string) Agent {
 func ago(d time.Duration) string { return t0.Add(-d).Format(time.RFC3339) }
 
 func reviewer(id, of, kind string) Agent {
-	return Agent{ID: id, Host: "host1", Title: "review", Status: "idle", CreatedAt: t0.Add(-5 * time.Minute),
+	return Agent{ID: id, Host: "host1", Title: gateDesign, Status: "idle", CreatedAt: t0.Add(-5 * time.Minute),
 		Provider: "claude", SessionID: testSession(id),
 		LastActivityAt: t0.Add(-time.Minute), LastUserMessageAt: t0.Add(-5*time.Minute + 600*time.Millisecond), // its prompt
 		Labels: map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: of, labelPrefix + labelReviewKind: kind}}

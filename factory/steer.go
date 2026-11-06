@@ -13,7 +13,7 @@ import (
 
 // A card Zach closes as a duplicate of another card passes its request on: the factory records a
 // Steer when he presses Close on a close verdict, and the Tick sends it to the kept card once that
-// card is planning or building, as a follow-up block (dupPrefix) its reviewers also see. A kept card
+// card is building, as a follow-up block (dupPrefix) its reviewers also see. A kept card
 // already landing, landed or dropped gets it as an idea instead.
 
 // Steer is a closed duplicate's request waiting to reach the card it duplicates.
@@ -83,7 +83,7 @@ func ParseDuplicate(text string) string {
 	return m[len(m)-1][1]
 }
 
-// newestReviewer is the most recently started reviewer of card id (in a split panel round, its arbiter).
+// newestReviewer is the most recently started reviewer of card id.
 func (f *Factory) newestReviewer(id string) (Agent, bool) {
 	var best Agent
 	found := false
@@ -154,7 +154,7 @@ func (f *Factory) tickSteer(id string, st Steer) error {
 	switch {
 	case !ok || k.gone() || stage == "landing" || stage == "landed":
 		return f.steerToIdea(id, st)
-	case k.archived() || k.L(labelRouting) != "" || (stage != "plan" && stage != "building"):
+	case k.archived() || k.L(labelRouting) != "" || stage != "building":
 		return nil // under review, waiting on Zach (maybe parked) or still picking its repo: wait
 	}
 	if err := f.setLabels(k.ID, map[string]string{labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}); err != nil {
@@ -171,10 +171,8 @@ func (f *Factory) tickSteer(id string, st Steer) error {
 		return nil // the message waits for its next turn; its stage moves on as usual
 	}
 	// idle: the agent answers the message, then the review of its own stage runs again
-	kind := "code"
-	if stage == "plan" {
-		kind = "plan"
-	} else if heldBeforeBuild(k) {
+	kind := gateRequest
+	if heldBeforeBuild(k) {
 		kind = ""
 	}
 	return f.setLabels(k.ID, map[string]string{labelStage: stage, labelSince: iso(f.Now()), labelAutoReview: kind, labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""})

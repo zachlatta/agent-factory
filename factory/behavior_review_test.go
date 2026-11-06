@@ -28,48 +28,6 @@ func TestParseApprovedBehavior(t *testing.T) {
 	}
 }
 
-func TestPanelApprovedBehaviorRequiresEveryFinding(t *testing.T) {
-	for _, tc := range []struct{ second, want string }{
-		{"APPROVED BEHAVIOR: unchanged: outputs match", "unchanged"},
-		{"No assessment", "unsure"},
-		{"APPROVED BEHAVIOR: changed: output differs", "unsure"},
-		{strings.Repeat("long review text ", 500) + "\nAPPROVED BEHAVIOR: changed: output differs", "unsure"},
-	} {
-		a := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA})
-		r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
-		r2 := lensReviewer("r2", "c1", lensArchitecture, "1")
-		f, p := newTestFactory(t, a, r1, r2)
-		storeLog(t, f, p, "r1", "APPROVED BEHAVIOR: unchanged: outputs match\nVERDICT: approve")
-		storeLog(t, f, p, "r2", tc.second+"\nVERDICT: approve")
-		reports, err := f.panelReports(a, "1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := ParseApprovedBehavior(reports); got != tc.want {
-			t.Errorf("second=%q got %s want %s", tc.second, got, tc.want)
-		}
-	}
-}
-
-func TestArbiterGetsApprovedBaseline(t *testing.T) {
-	a := card("c1", map[string]string{labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ"})
-	f, p := newTestFactory(t, a)
-	f.GitOut = gitStub(map[string]string{"merge-base " + reviewedSHA + " origin/main": "base", "range-diff --no-color --no-ext-diff base.." + reviewedSHA + " origin/main..HEAD": "fixture repair"})
-	if err := f.startArbiter(a, "code", "Review findings", false); err != nil {
-		t.Fatal(err)
-	}
-	runs := p.runsWithLabel(labelPrefix + labelArbiter + "=1")
-	if len(runs) != 1 {
-		t.Fatalf("arbiter runs=%d", len(runs))
-	}
-	prompt := runs[0][len(runs[0])-1]
-	for _, want := range []string{reviewedSHA, "summary", "fixture repair", "APPROVED BEHAVIOR:"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-}
-
 func TestRepairComparisonAfterMainAdvances(t *testing.T) {
 	dir := t.TempDir()
 	git := func(args ...string) string {
@@ -114,43 +72,20 @@ func TestRepairComparisonAfterMainAdvances(t *testing.T) {
 		out, err := c.Output()
 		return string(out), err
 	}
-	files, err := f.repairFiles(context.Background(), dir, approved)
-	if err != nil || files != "fixture_test.go" {
-		t.Fatalf("repair files %q: %v", files, err)
-	}
 	diff, err := f.repairRangeDiff(context.Background(), dir, approved)
 	if err != nil || strings.Contains(diff, "unrelated rule") || !strings.Contains(diff, "repair") {
 		t.Fatalf("range diff %q: %v", diff, err)
 	}
-	if reason := f.alwaysAskFilesSince(dir, "repair:"+approved); reason != "" {
-		t.Fatal(reason)
-	}
-	write("AGENTS.md", "new repair rule")
-	git("add", ".")
-	git("commit", "-m", "repair rule")
-	if reason := f.alwaysAskFilesSince(dir, "repair:"+approved); !strings.Contains(reason, "AGENTS.md") {
-		t.Fatal(reason)
-	}
 }
 
-func TestPanelRepairApprovalReasons(t *testing.T) {
-	for _, second := range []string{"none", "new service", ""} {
-		a := panelCard(map[string]string{labelBehaviorApproval: reviewedSHA})
-		r1 := lensReviewer("r1", "c1", lensCorrectness, "1")
-		r2 := lensReviewer("r2", "c1", lensArchitecture, "1")
-		f, p := newTestFactory(t, a, r1, r2)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: old gate change\nREPAIR ALWAYS ASK: none\nVERDICT: approve")
-		report := "ALWAYS ASK: old architecture reason\nVERDICT: approve"
-		if second != "" {
-			report += "\nREPAIR ALWAYS ASK: " + second
-		}
-		storeLog(t, f, p, "r2", report)
-		reports, err := f.panelReports(a, "1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := repairAlwaysAsk(reports); (got == "none") != (second == "none") {
-			t.Fatalf("%q: %q", second, got)
+func TestApprovedBehaviorPromptShowsTheRepairDiff(t *testing.T) {
+	f, _ := newTestFactory(t)
+	f.GitOut = gitStub(map[string]string{"merge-base abc origin/main": "base\n", "range-diff --no-color --no-ext-diff base..abc origin/main..HEAD": "the repair diff\n"})
+	a := card("c1", map[string]string{labelBehaviorApproval: "abc", labelBehaviorSummary: "c3VtbWFyeQ"})
+	got := f.approvedBehaviorPrompt(a)
+	for _, want := range []string{"APPROVED BEHAVIOR:", "REPAIR SIGN OFF:", "the repair diff", "summary"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt lacks %q: %s", want, got)
 		}
 	}
 }

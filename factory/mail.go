@@ -354,8 +354,7 @@ func (f *Factory) replyInThread(ctx context.Context, id, thread string, m email,
 	return err
 }
 
-// askSource is the agent whose last message is the ask's Detail: the card, or its latest reviewer. In a
-// split panel round that is the arbiter, which starts after the round's other reviewers.
+// askSource is the agent whose last message is the ask's Detail: the card, or its latest reviewer.
 func askSource(c Card, ask *Ask) string {
 	src := c.ID
 	if ask.From == "reviewer" {
@@ -381,7 +380,7 @@ func (f *Factory) askDetail(c Card, ask *Ask) (string, []Question, *Overview) {
 		ask.Evidence = ev
 	}
 	rest, qs, ov := parseReply(text)
-	return rest, askQuestions(ask, qs), ov
+	return rest, qs, ov
 }
 
 // replyWord is one word Zach can answer with by email and what it does.

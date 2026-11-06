@@ -9,38 +9,6 @@ import (
 	"testing"
 )
 
-func TestOutsideArchiveKeepsUnfinishedStage(t *testing.T) {
-	for _, stage := range []string{"plan", "plan-review", "building", "review"} {
-		t.Run(stage, func(t *testing.T) {
-			a := Agent{ID: "interrupted", Status: "closed", ArchivedAt: t0, Labels: map[string]string{
-				"factory.stage": stage, "factory.archive-watch": "1", "factory.auto-review": "code",
-			}}
-			if got := Derive(a); got != stage {
-				t.Fatalf("stage = %s; want %s", got, stage)
-			}
-			if a.gone() {
-				t.Fatal("interrupted work is finished")
-			}
-			f, p := newTestFactory(t, a)
-			for range 2 {
-				if err := f.tickAgent(a, t0); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if got := p.labels(a.ID)[labelStuck]; got != "Agent archived before this step finished." {
-				t.Fatalf("reason = %q", got)
-			}
-			if len(p.sent(a.ID)) != 0 {
-				t.Fatal("automatic recovery woke archived work")
-			}
-			cards := BuildBoard([]Agent{a}, nil, t0)
-			if len(cards) != 1 || cards[0].Stage != stage || cards[0].Ask == nil {
-				t.Fatalf("missing stuck presentation: %+v", cards)
-			}
-		})
-	}
-}
-
 func TestArchiveClassificationBoundaries(t *testing.T) {
 	base := card("boundary", map[string]string{labelStage: "building", labelArchiveWatch: "1"})
 	base.ArchivedAt = t0
@@ -80,38 +48,6 @@ func TestArchiveEnrollmentAndRestart(t *testing.T) {
 	}
 	if depOf([]Agent{a}, a.ID) != depWaiting {
 		t.Fatal("dependency no longer waiting")
-	}
-}
-
-func TestInterruptedRecoveryAndDrop(t *testing.T) {
-	for _, action := range []string{"resume", "send", "rerun", "close", "archive", "stage"} {
-		t.Run(action, func(t *testing.T) {
-			a := card("recover", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
-			a.Cwd = t.TempDir()
-			a.ArchivedAt = t0
-			f, p := newTestFactory(t, a)
-			p.archived[a.ID] = true
-			if _, err := f.Act(action, Body{ID: a.ID, Message: "Continue the work", Stage: "landed"}); err != nil {
-				t.Fatal(err)
-			}
-			a = withLabels(f.agent(a.ID), p.labels(a.ID))
-			if action == "resume" || action == "send" || action == "rerun" {
-				if a.archived() || stuckReason(a) != "" || a.L(labelAutoReview) != "code" {
-					t.Fatalf("not recovered: %+v", a)
-				}
-			} else {
-				if Derive(a) != "landed" || interruptedArchive(a) {
-					t.Fatalf("not finished: %+v", a)
-				}
-				f, _ = newTestFactory(t, a)
-				if err := f.tickAgent(a, t0); err != nil {
-					t.Fatal(err)
-				}
-				if Derive(f.agent(a.ID)) != "landed" {
-					t.Fatal("drop reopened")
-				}
-			}
-		})
 	}
 }
 
@@ -156,7 +92,7 @@ func TestDeliberateFinishPersistsBeforeArchive(t *testing.T) {
 func TestFailedArchiveRecoveryStaysStuck(t *testing.T) {
 	for _, action := range []string{"resume", "send", "rerun"} {
 		t.Run(action, func(t *testing.T) {
-			a := card("failed", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+			a := card("failed", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
 			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0
 			f, p := newTestFactory(t, a)
@@ -217,12 +153,12 @@ func TestArchivePromptExplainsInterruption(t *testing.T) {
 }
 
 func TestLateVerdictCannotAdvanceInterruptedWork(t *testing.T) {
-	a := card("interrupted-review", map[string]string{labelStage: "review", labelArchiveWatch: "1"})
+	a := card("interrupted-review", map[string]string{labelStage: gateDesign, labelArchiveWatch: "1"})
 	a.ArchivedAt = t0
-	r := reviewer("late-review", a.ID, "code")
+	r := reviewer("late-review", a.ID, gateDesign)
 	f, p := newTestFactory(t, a, r)
 	p.archived[a.ID] = true
-	storeLog(t, f, p, r.ID, "[Assistant] Approved.\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, r.ID, "[Assistant] Approved.\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(r); err != nil {
 		t.Fatal(err)
 	}
@@ -257,73 +193,17 @@ func TestFinishedArchiveRetriesOnlyWhileLive(t *testing.T) {
 	}
 }
 
-func TestInterruptedReplyUsesNormalSend(t *testing.T) {
-	for _, via := range []string{"board", "email"} {
-		t.Run(via, func(t *testing.T) {
-			a := card("reply", map[string]string{labelStage: "review", labelArchiveWatch: "1", labelStuck: stuckArchived,
-				labelCodeRounds: "4", labelCodeRoundsFrom: "1", labelArbitrated: "code", labelReviewerRetries: "2"})
-			a.Cwd = t.TempDir()
-			a.ArchivedAt = t0
-			f, p := newTestFactory(t, a)
-			if _, err := f.Act("send", Body{ID: a.ID, Message: "Update the work", Via: via}); err != nil {
-				t.Fatal(err)
-			}
-			messages := strings.Join(p.sent(a.ID), "\n")
-			want := "Message from Zach via the factory board:"
-			if via == "email" {
-				want = "Zach answered by email while the card waited on him:"
-			}
-			if !strings.Contains(messages, want) {
-				t.Fatalf("missing reply format: %s", messages)
-			}
-			l := p.labels(a.ID)
-			if l[labelCodeRoundsFrom] != "4" || l[labelArbitrated] != "" || l[labelReviewerRetries] != "" {
-				t.Fatalf("review generation not reset: %v", l)
-			}
-		})
-	}
-}
-
 func TestArchivedPickerIsNotInterrupted(t *testing.T) {
-	a := card("picker", map[string]string{labelStage: "plan", labelRouting: "1", labelArchiveWatch: "1"})
+	a := card("picker", map[string]string{labelStage: stageRoute, labelRouting: "1", labelArchiveWatch: "1"})
 	a.ArchivedAt = t0
 	if archiveStage(a) || interruptedArchive(a) {
 		t.Fatal("picker enrolled in stage recovery")
 	}
 }
 
-func TestInterruptedReplyKeepsReplyInstructions(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		labels      map[string]string
-		want, stage string
-	}{
-		{"landing report", map[string]string{labelNote: "landed; did not say what remains"}, remainingRule, "landing"},
-		{"plan", map[string]string{labelStage: "plan"}, "Message from Zach via the factory board:", "plan"},
-		{"picker", map[string]string{labelRouting: "1", labelStage: "plan"}, "Pick the repo again and end with the REPO: line.", "plan"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a := card("instructions", map[string]string{labelStage: "building", labelArchiveWatch: "1"})
-			a = withLabels(a, tc.labels)
-			a.Cwd = t.TempDir()
-			a.ArchivedAt = t0
-			f, p := newTestFactory(t, a)
-			if _, err := f.Act("send", Body{ID: a.ID, Message: "Continue"}); err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(strings.Join(p.sent(a.ID), ""), tc.want) {
-				t.Fatal("missing reply instructions")
-			}
-			if p.labels(a.ID)[labelStage] != tc.stage {
-				t.Fatalf("wrong step: %v", p.labels(a.ID))
-			}
-		})
-	}
-}
-
 func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
 	t.Run("verified on main when worktree exists", func(t *testing.T) {
-		a := card("direct-ok", map[string]string{labelStage: "plan", labelSource: "board", labelArchiveWatch: "1"})
+		a := card("direct-ok", map[string]string{labelStage: "building", labelSource: "board", labelArchiveWatch: "1"})
 		a.Cwd = t.TempDir()
 		a.ArchivedAt = t0
 		f, p := newTestFactory(t, a)
@@ -346,11 +226,11 @@ func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
 
 	t.Run("already stuck with removed worktree finishes with unverified note", func(t *testing.T) {
 		a := card("direct-gone", map[string]string{
-			labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived,
+			labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived,
 		})
 		a.Cwd = filepath.Join(t.TempDir(), "removed-worktree")
 		a.ArchivedAt = t0
-		r := reviewer("rev1", a.ID, "plan")
+		r := reviewer("rev1", a.ID, gateRequest)
 		f, p := newTestFactory(t, a, r)
 		storeLog(t, f, p, a.ID, "[User] Move the call to 4 PM\n[Assistant] Queued for approval.\nTRACK: direct")
 		if err := f.tickAgent(a, t0); err != nil {
@@ -372,7 +252,7 @@ func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
 	})
 
 	t.Run("worktree exists but not on main wakes direct card", func(t *testing.T) {
-		a := card("direct-unpushed", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+		a := card("direct-unpushed", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
 		a.Cwd = t.TempDir()
 		a.ArchivedAt = t0
 		f, p := newTestFactory(t, a)
@@ -398,7 +278,7 @@ func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
 	})
 
 	t.Run("guarded repo waits in Needs Zach", func(t *testing.T) {
-		a := card("direct-guarded", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+		a := card("direct-guarded", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
 		a.Repo = "zachlatta/agent-factory"
 		a.Cwd = filepath.Join(t.TempDir(), "removed-worktree")
 		a.ArchivedAt = t0
@@ -419,8 +299,8 @@ func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
 			labels map[string]string
 			log    string
 		}{
-			{"has tier", map[string]string{labelStage: "plan", labelArchiveWatch: "1"}, "[User] Build it\n[Assistant] Plan.\nTIER: low\nTRACK: direct"},
-			{"has plan-rounds", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelPlanRounds: "1"}, "[User] Build it\n[Assistant] Done.\nTRACK: direct"},
+			{"has tier", map[string]string{labelStage: "building", labelArchiveWatch: "1"}, "[User] Build it\n[Assistant] Plan.\nRESULT: code\nTRACK: direct"},
+			{"has plan-rounds", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelRoundsRequest: "1"}, "[User] Build it\n[Assistant] Done.\nTRACK: direct"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				a := card("not-direct", tc.labels)
@@ -456,8 +336,101 @@ func (p missingCwdSend) Run(ctx context.Context, args ...string) (string, error)
 	return p.fakePaseo.Run(ctx, args...)
 }
 
+func TestOutsideArchiveKeepsUnfinishedStage(t *testing.T) {
+	for _, stage := range []string{"building", gateRequest, gateDesign, gateSignoff} {
+		t.Run(stage, func(t *testing.T) {
+			a := Agent{ID: "interrupted", Status: "closed", ArchivedAt: t0, Labels: map[string]string{
+				"factory.stage": stage, "factory.archive-watch": "1", "factory.auto-review": gateRequest,
+			}}
+			if got := Derive(a); got != stage {
+				t.Fatalf("stage = %s; want %s", got, stage)
+			}
+			if a.gone() {
+				t.Fatal("interrupted work is finished")
+			}
+			f, p := newTestFactory(t, a)
+			for range 2 {
+				if err := f.tickAgent(a, t0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := p.labels(a.ID)[labelStuck]; got != "Agent archived before this step finished." {
+				t.Fatalf("reason = %q", got)
+			}
+			if len(p.sent(a.ID)) != 0 {
+				t.Fatal("automatic recovery woke archived work")
+			}
+			cards := BuildBoard([]Agent{a}, nil, t0)
+			if len(cards) != 1 || cards[0].Stage != stage || cards[0].Ask == nil {
+				t.Fatalf("missing stuck presentation: %+v", cards)
+			}
+		})
+	}
+}
+
+func TestInterruptedRecoveryAndDrop(t *testing.T) {
+	for _, action := range []string{"resume", "send", "rerun", "close", "archive", "stage"} {
+		t.Run(action, func(t *testing.T) {
+			a := card("recover", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
+			a.Cwd = t.TempDir()
+			a.ArchivedAt = t0
+			f, p := newTestFactory(t, a)
+			p.archived[a.ID] = true
+			if _, err := f.Act(action, Body{ID: a.ID, Message: "Continue the work", Stage: "landed"}); err != nil {
+				t.Fatal(err)
+			}
+			a = withLabels(f.agent(a.ID), p.labels(a.ID))
+			if action == "resume" || action == "send" || action == "rerun" {
+				if a.archived() || stuckReason(a) != "" || a.L(labelAutoReview) != gateRequest {
+					t.Fatalf("not recovered: %+v", a)
+				}
+			} else {
+				if Derive(a) != "landed" || interruptedArchive(a) {
+					t.Fatalf("not finished: %+v", a)
+				}
+				f, _ = newTestFactory(t, a)
+				if err := f.tickAgent(a, t0); err != nil {
+					t.Fatal(err)
+				}
+				if Derive(f.agent(a.ID)) != "landed" {
+					t.Fatal("drop reopened")
+				}
+			}
+		})
+	}
+}
+
+func TestInterruptedReplyKeepsReplyInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		labels      map[string]string
+		want, stage string
+	}{
+		{"landing report", map[string]string{labelNote: "landed; did not say what remains"}, remainingRule, "landing"},
+		{"plan", map[string]string{labelStage: "building"}, "Message from Zach via the factory board:", "building"},
+		{"picker", map[string]string{labelRouting: "1", labelStage: stageRoute}, "Pick the repo again and end with the REPO: line.", stageRoute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := card("instructions", map[string]string{labelStage: "building", labelArchiveWatch: "1"})
+			a = withLabels(a, tc.labels)
+			a.Cwd = t.TempDir()
+			a.ArchivedAt = t0
+			f, p := newTestFactory(t, a)
+			if _, err := f.Act("send", Body{ID: a.ID, Message: "Continue"}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(p.sent(a.ID), ""), tc.want) {
+				t.Fatal("missing reply instructions")
+			}
+			if p.labels(a.ID)[labelStage] != tc.stage {
+				t.Fatalf("wrong step: %v", p.labels(a.ID))
+			}
+		})
+	}
+}
+
 func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
-	a := card("gone-cwd", map[string]string{labelStage: "plan", labelArchiveWatch: "1", labelStuck: stuckArchived})
+	a := card("gone-cwd", map[string]string{labelStage: "building", labelArchiveWatch: "1", labelStuck: stuckArchived})
 	a.Cwd = filepath.Join(t.TempDir(), "missing-worktree")
 	a.ArchivedAt = t0
 	f, p := newTestFactory(t, a)
@@ -467,8 +440,8 @@ func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name   string
-		run    func() error
+		name string
+		run  func() error
 	}{
 		{"choose resume", func() error { _, err := f.choose(Body{ID: a.ID, Choice: "resume"}); return err }},
 		{"choose rerun", func() error { _, err := f.choose(Body{ID: a.ID, Choice: "rerun"}); return err }},
@@ -477,8 +450,7 @@ func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
 		{"act rerun", func() error { _, err := f.Act("rerun", Body{ID: a.ID}); return err }},
 		{"act send", func() error { _, err := f.Act("send", Body{ID: a.ID, Message: "try again"}); return err }},
 		{"act approve", func() error { _, err := f.Act("approve", Body{ID: a.ID}); return err }},
-		{"act review", func() error { _, err := f.Act("review", Body{ID: a.ID, Kind: "plan"}); return err }},
-		{"act arbiter", func() error { _, err := f.Act("arbiter", Body{ID: a.ID}); return err }},
+		{"act review", func() error { _, err := f.Act("review", Body{ID: a.ID, Kind: gateRequest}); return err }},
 		{"act stage building", func() error { _, err := f.Act("stage", Body{ID: a.ID, Stage: "building"}); return err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -509,5 +481,32 @@ func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
 	f.p = missingCwdSend{p}
 	if err := f.send(a.ID, "retry"); !errors.Is(err, errWorktreeGone) {
 		t.Fatalf("send error = %v; want %v", err, errWorktreeGone)
+	}
+}
+
+func TestInterruptedReplyUsesNormalSend(t *testing.T) {
+	for _, via := range []string{"board", "email"} {
+		t.Run(via, func(t *testing.T) {
+			a := card("reply", map[string]string{labelStage: gateDesign, labelArchiveWatch: "1", labelStuck: stuckArchived,
+				labelRoundsDesign: "4", labelReviewerRetries: "2"})
+			a.Cwd = t.TempDir()
+			a.ArchivedAt = t0
+			f, p := newTestFactory(t, a)
+			if _, err := f.Act("send", Body{ID: a.ID, Message: "Update the work", Via: via}); err != nil {
+				t.Fatal(err)
+			}
+			messages := strings.Join(p.sent(a.ID), "\n")
+			want := "Message from Zach via the factory board:"
+			if via == "email" {
+				want = "Zach answered by email while the card waited on him:"
+			}
+			if !strings.Contains(messages, want) {
+				t.Fatalf("missing reply format: %s", messages)
+			}
+			l := p.labels(a.ID)
+			if l[labelRoundsDesign] != "" || l[labelReviewerRetries] != "" {
+				t.Fatalf("review generation not reset: %v", l)
+			}
+		})
 	}
 }

@@ -52,51 +52,10 @@ func TestParseQuestions(t *testing.T) {
 	}
 }
 
-// Each ask's buttons and what they run: Yes or Land only where they approve, allow or check something,
-// and none on asks whose answer is the factory's own action.
-func TestAskButtons(t *testing.T) {
-	cases := []struct {
-		name string
-		a    Agent
-		want string // each choice as id=action
-	}{
-		{"architecture plan", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan"}), "yes=approve no=send change=send drop=close"},
-		{"ready to land", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}), "land=approve change=send drop=close"},
-		{"architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}), "land=approve change=send drop=close"},
-		{"rework cap brief", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}), "arbiter=arbiter change=send drop=close"},
-		{"stuck in its column", card("c", map[string]string{labelStage: "review", labelStuck: stuckReview}), "rerun=rerun change=send drop=close"},
-		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close"}), "drop=close change=send"},
-		{"escalated brief", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}), "arbiter=arbiter change=send drop=close"},
-		{"agent error stuck", card("c", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), "resume=resume change=send drop=close"},
-		{"landing unverified", card("c", map[string]string{labelStage: "zach", labelNote: "landing not verified"}), "change=send done=done"},
-		{"moved by hand", card("c", map[string]string{labelStage: "zach"}), "change=send done=done"},
-		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: x"}), "finish=send done=done drop=close"},
-		{"landed with a test for Zach", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: Zach: tap it"}), "works=done broken=send skip=done"},
-		{"open question", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}}, "answer=send drop=close"},
-		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}}, "done=done change=send"},
-		{"repo picker", card("c", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelCandidates: "example/desk"}),
-			"pick:example/desk=approve pick=pickrepo change=send drop=close"},
-	}
-	for _, c := range cases {
-		ask := BuildBoard([]Agent{c.a}, nil, t0)[0].Ask
-		if ask == nil {
-			t.Errorf("%s: no ask", c.name)
-			continue
-		}
-		var got []string
-		for _, ch := range ask.Choices {
-			got = append(got, ch.ID+"="+ch.action)
-		}
-		if strings.Join(got, " ") != c.want {
-			t.Errorf("%s: buttons %q, want %q", c.name, strings.Join(got, " "), c.want)
-		}
-	}
-}
-
 func TestAskQuestionsFromLongReply(t *testing.T) {
 	// finished work: the builder's preview is the detail
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)})
-	r := reviewer("r1", "c1", "code")
+	r := reviewer("r1", "c1", gateSignoff)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
 	// the question sits past the 6000-character cut of Detail
@@ -115,43 +74,12 @@ func TestAskQuestionsFromLongReply(t *testing.T) {
 	}
 }
 
-func TestApproveCarriesZachsAnswers(t *testing.T) {
-	answers := "1. Where should it live?\n   → Keep it where it is"
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelTier: "architecture"}))
-	if _, err := f.Act("approve", Body{ID: "c1", Message: answers}); err != nil {
-		t.Fatal(err)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") ||
-		!strings.Contains(msgs[0], answers) || !strings.Contains(msgs[0], "Build it now") {
-		t.Errorf("plan approve sent = %v", msgs)
-	}
-
-	f, p = newTestFactory(t, card("c2", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land", labelReviewed: reviewedSHA}))
-	headIs(f, reviewedSHA, nil)
-	if _, err := f.Act("approve", Body{ID: "c2", Message: answers}); err != nil {
-		t.Fatal(err)
-	}
-	if msgs := p.sent("c2"); len(msgs) != 1 || !strings.Contains(msgs[0], answers) || !strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("land approve sent = %v", msgs)
-	}
-
-	// no answers: messages as before
-	f, p = newTestFactory(t, card("c3", map[string]string{labelStage: "zach", labelAwaiting: "plan"}))
-	if _, err := f.Act("approve", Body{ID: "c3"}); err != nil {
-		t.Fatal(err)
-	}
-	if msgs := p.sent("c3"); len(msgs) != 1 || strings.Contains(msgs[0], "answers") {
-		t.Errorf("plain approve sent = %v", msgs)
-	}
-}
-
 func TestPromptsTeachQuestionFormat(t *testing.T) {
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	for name, p := range map[string]string{
-		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", tierRules, wholeChangeRule, questionRule),
-		"plan review": ReviewPrompt(c, "plan", 7478, "unknown"),
-		"code review": ReviewPrompt(c, "code", 7478, "unknown"),
-		"arbiter":     ArbiterPrompt(c, "plan", 7478, "unknown", "notes", true),
+		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", wholeChangeRule, questionRule),
+		"plan review": ReviewPrompt(c, gateRequest, 7478, "unknown"),
+		"code review": ReviewPrompt(c, gateRequest, 7478, "unknown"),
 		"preview":     readyMsg("you asked for it"),
 	} {
 		if !strings.Contains(p, "QUESTION:") {

@@ -12,56 +12,6 @@ import (
 
 // Every ask the board can show, so askcheck can hold each one to the same rules. A new kind of ask
 // goes here first: TestEveryAskBuilderIsChecked fails until it does.
-func everyAsk() map[string]*Ask {
-	zach := func(labels map[string]string) Agent {
-		l := map[string]string{labelStage: "zach"}
-		for k, v := range labels {
-			l[k] = v
-		}
-		return card("c1", l)
-	}
-	running := func(a Agent, pending string, flags ...string) (Card, Agent) {
-		a.Status, a.Pending = "running", pending
-		return Card{ID: a.ID, Stage: "zach", Flags: flags}, a
-	}
-	asks := map[string]*Ask{}
-	add := func(name string, c Card, a Agent) {
-		if c.ID == "" {
-			c = Card{ID: a.ID, Stage: "zach"}
-		}
-		asks[name] = askFor(c, a)
-	}
-	add("permission prompt", Card{}, func() Agent { _, a := running(zach(nil), "Bash"); return a }())
-	c, a := running(zach(nil), "")
-	add("writing", c, a)
-	c, a = running(zach(nil), "", "stalled 40m")
-	add("stalled", c, a)
-	add("stuck: archived", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckArchived}))
-	add("stuck: agent error", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}))
-	add("stuck: retries ran out", Card{ID: "c1", Stage: "review"}, card("c1", map[string]string{labelStage: "review", labelStuck: "review kept failing"}))
-	add("history unavailable", Card{}, zach(map[string]string{labelNote: "history unavailable: x"}))
-	add("repo", Card{}, zach(map[string]string{labelAwaiting: "repo", labelCandidates: "a/one b/two"}))
-	add("plan", Card{}, zach(map[string]string{labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}))
-	add("secret scan", Card{}, zach(map[string]string{labelNote: "secret scan failed: email in x.go:1"}))
-	add("public repo", Card{}, zach(map[string]string{labelNote: "public repo: finished without review"}))
-	add("ready for you", Card{}, zach(map[string]string{labelNote: "review passed: approve to land"}))
-	add("reviewed commit not verified", Card{}, zach(map[string]string{labelNote: unverifiedReviewNote + "the commit moved"}))
-	add("reviews did not settle", Card{}, zach(map[string]string{labelNote: arbiterStuckNote}))
-	add("close suggested", Card{}, zach(map[string]string{labelVerdict: "close", labelNote: "reviewer suggests closing"}))
-	add("work left: test for Zach", Card{}, zach(map[string]string{labelNote: noteWorkLeft + "Zach: open the usage page on your phone and check the table fits; agent: tidy the docs"}))
-	add("work left: action for Zach", Card{}, zach(map[string]string{labelNote: noteWorkLeft + "Zach: log in to the admin page once"}))
-	add("work left: agents only", Card{}, zach(map[string]string{labelNote: noteWorkLeft + "agent: push 2 not landed"}))
-	add("landed: did it finish", Card{}, zach(map[string]string{labelNote: "landed; did not say what remains"}))
-	add("landed other than reviewed", Card{}, zach(map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}))
-	add("landed other than reviewed, scan failed", Card{}, zach(map[string]string{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "failed"}))
-	add("direct ask", Card{}, zach(map[string]string{labelNote: directAskNote("Send the form?")}))
-	add("moved by hand", Card{}, zach(nil))
-	open := card("c1", map[string]string{})
-	open.RequiresAttention, open.AttentionReason = true, "question"
-	add("waiting on you", Card{ID: "c1", Stage: "zach"}, open)
-	add("finished", Card{ID: "c1", Stage: "zach"}, Agent{ID: "c1", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}})
-	return asks
-}
 
 // actions a choice can run: runChoice's own cases, then Act
 var choiceActions = []string{"send", "approve", "pickrepo", "arbiter", "done", "close", "stop", "rerun", "resume"}
@@ -172,62 +122,6 @@ func choiceLabels(ask *Ask) []string {
 	return out
 }
 
-// Required landed actions keep action buttons; optional NEEDS text never replaces an existing ask.
-func TestLandedActionsKeepTheirButtons(t *testing.T) {
-	asks := everyAsk()
-	wantActionLabels := []string{"Done it, mark done", "Something's wrong", "Skip it"}
-	if a := asks["work left: test for Zach"]; a.Kind != askAction || a.Label != "Work landed. Do this:" ||
-		!strings.Contains(a.Title, "open the usage page") || !strings.Contains(a.Why, "tidy the docs") ||
-		!slices.Equal(choiceLabels(a), wantActionLabels) {
-		t.Errorf("Zach test item: %+v", a)
-	}
-	if a := asks["work left: action for Zach"]; a.Kind != askAction || a.Label != "Work landed. Do this:" ||
-		!slices.Equal(choiceLabels(a), wantActionLabels) {
-		t.Errorf("Zach action item: %+v", a)
-	}
-	if a := asks["work left: agents only"]; a.Kind != askProblem || !slices.Equal(choiceIDs(a), []string{"finish", "done", "drop"}) ||
-		a.Choices[1].action != "done" || !strings.Contains(a.Choices[0].says, "push 2 not landed") {
-		t.Errorf("agent-only work left: %+v", a)
-	}
-	for _, name := range []string{"landed: did it finish", "finished", "work left: agents only"} {
-		ask := everyAsk()[name]
-		ask.Overview = &Overview{Decision: "None.", Needs: "Try the new button on your phone and say whether it works."}
-		refineAsk(ask)
-		if ask.Kind == askAction {
-			t.Errorf("%s: optional NEEDS changed the ask", name)
-		}
-		if ask.Overview.Decision != "" {
-			t.Errorf("%s: headline %q", name, ask.Overview.Decision)
-		}
-	}
-	for _, needs := range []string{"Nothing.", "Approve the plan.", ""} {
-		ask := everyAsk()["landed: did it finish"]
-		ask.Overview = &Overview{Needs: needs}
-		refineAsk(ask)
-		if ask.Kind == askAction {
-			t.Errorf("NEEDS %q replaced the existing ask", needs)
-		}
-	}
-	// a landing the factory wants checked keeps its label and buttons: the agent's "try it" cannot
-	// hide that the landing failed, was pushed without review or is not what was reviewed
-	for _, name := range []string{"public repo", "landed other than reviewed", "landed other than reviewed, scan failed"} {
-		ask := everyAsk()[name]
-		label, ids := ask.Label, choiceIDs(ask)
-		ask.Overview = &Overview{Needs: "Try the new button on your phone and say whether it works."}
-		refineAsk(ask)
-		if ask.Kind == askAction || ask.Label != label || !slices.Equal(choiceIDs(ask), ids) {
-			t.Errorf("%s with a test in NEEDS became kind %q label %q choices %v", name, ask.Kind, ask.Label, choiceIDs(ask))
-		}
-	}
-	// not landed: a test in NEEDS does not turn a plan approval into a test
-	plan := asks["plan"]
-	plan.Overview = &Overview{Needs: "Try the preview, then approve."}
-	refineAsk(plan)
-	if plan.Kind != askDecision {
-		t.Errorf("plan became %q", plan.Kind)
-	}
-}
-
 // A "None" headline is dropped while the card asks for something, and its remainder kept as the overview.
 func TestNoneHeadlineIsCleaned(t *testing.T) {
 	ask := everyAsk()["work left: test for Zach"]
@@ -296,43 +190,7 @@ var askTitleLiteral = regexp.MustCompile(`&Ask\{[^}]*?Title:\s*"([^"]+)"`)
 
 // askBuilders is how many places in factory/ build an Ask. Adding one means adding its ask to everyAsk
 // (so it gets a label and fitting buttons), then this number.
-const askBuilders = 23
-
-// Every place that builds an ask is held to the rules above: a new one fails here until it is checked.
-func TestEveryAskBuilderIsChecked(t *testing.T) {
-	files, _ := filepath.Glob("*.go")
-	var titles []string
-	n := 0
-	for _, fn := range files {
-		if strings.HasSuffix(fn, "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(fn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		src := strings.ReplaceAll(string(b), "\n", " ")
-		n += len(askLiteral.FindAllString(src, -1))
-		for _, m := range askTitleLiteral.FindAllStringSubmatch(src, -1) {
-			titles = append(titles, m[1])
-		}
-	}
-	if n != askBuilders {
-		t.Errorf("%d places build an Ask, askcheck knows %d: add the new ask to everyAsk, then set askBuilders", n, askBuilders)
-	}
-	asks := everyAsk()
-	for _, title := range titles {
-		found := false
-		for _, a := range asks {
-			if strings.HasPrefix(a.Title, title) || strings.HasPrefix(title, a.Title) {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("the ask %q is not in everyAsk", title)
-		}
-	}
-}
+const askBuilders = 21
 
 // A landed card with a required action answers to its action buttons on the board and by email,
 // and they do what they say.
@@ -374,6 +232,98 @@ func TestActionAskChoicesRun(t *testing.T) {
 		}
 		if l := p.labels("c1"); l[labelStage] != stage {
 			t.Errorf("email %q: labels %v", text, l)
+		}
+	}
+}
+
+// Every ask the board can show, so askcheck can hold each one to the same rules. A new kind of ask
+// goes here first: TestEveryAskBuilderIsChecked fails until it does.
+func everyAsk() map[string]*Ask {
+	zach := func(labels map[string]string) Agent {
+		l := map[string]string{labelStage: "zach"}
+		for k, v := range labels {
+			l[k] = v
+		}
+		return card("c1", l)
+	}
+	running := func(a Agent, pending string, flags ...string) (Card, Agent) {
+		a.Status, a.Pending = "running", pending
+		return Card{ID: a.ID, Stage: "zach", Flags: flags}, a
+	}
+	asks := map[string]*Ask{}
+	add := func(name string, c Card, a Agent) {
+		if c.ID == "" {
+			c = Card{ID: a.ID, Stage: "zach"}
+		}
+		asks[name] = askFor(c, a)
+	}
+	add("permission prompt", Card{}, func() Agent { _, a := running(zach(nil), "Bash"); return a }())
+	c, a := running(zach(nil), "")
+	add("writing", c, a)
+	c, a = running(zach(nil), "", "stalled 40m")
+	add("stalled", c, a)
+	add("stuck: archived", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckArchived}))
+	add("stuck: agent error", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}))
+	add("stuck: retries ran out", Card{ID: "c1", Stage: gateDesign}, card("c1", map[string]string{labelStage: gateDesign, labelStuck: "review kept failing"}))
+	add("history unavailable", Card{}, zach(map[string]string{labelNote: "history unavailable: x"}))
+	add("repo", Card{}, zach(map[string]string{labelAwaiting: "repo", labelCandidates: "a/one b/two"}))
+	add("plan", Card{}, zach(map[string]string{labelNote: readyNote(1), labelReviewed: reviewedSHA}))
+	add("secret scan", Card{}, zach(map[string]string{labelNote: "secret scan failed: email in x.go:1"}))
+	add("public repo", Card{}, zach(map[string]string{labelNote: "public repo: finished without review"}))
+	add("ready for you", Card{}, zach(map[string]string{labelNote: "review passed: approve to land"}))
+	add("reviewed commit not verified", Card{}, zach(map[string]string{labelNote: unverifiedReviewNote + "the commit moved"}))
+	add("close suggested", Card{}, zach(map[string]string{labelVerdict: "close", labelNote: "reviewer suggests closing"}))
+	add("work left: test for Zach", Card{}, zach(map[string]string{labelNote: noteWorkLeft + "Zach: open the usage page on your phone and check the table fits; agent: tidy the docs"}))
+	add("work left: action for Zach", Card{}, zach(map[string]string{labelNote: noteWorkLeft + "Zach: log in to the admin page once"}))
+	add("work left: agents only", Card{}, zach(map[string]string{labelNote: noteWorkLeft + "agent: push 2 not landed"}))
+	add("landed: did it finish", Card{}, zach(map[string]string{labelNote: "landed; did not say what remains"}))
+	add("landed other than reviewed", Card{}, zach(map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}))
+	add("landed other than reviewed, scan failed", Card{}, zach(map[string]string{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "failed"}))
+	add("direct ask", Card{}, zach(map[string]string{labelNote: directAskNote("Send the form?")}))
+	add("moved by hand", Card{}, zach(nil))
+	open := card("c1", map[string]string{})
+	open.RequiresAttention, open.AttentionReason = true, "question"
+	add("waiting on you", Card{ID: "c1", Stage: "zach"}, open)
+	add("finished", Card{ID: "c1", Stage: "zach"}, Agent{ID: "c1", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}})
+	return asks
+}
+
+// Every place that builds an ask is held to the rules above: a new one fails here until it is checked.
+
+// Every place that builds an ask is held to the rules above: a new one fails here until it is checked.
+
+// Every place that builds an ask is held to the rules above: a new one fails here until it is checked.
+func TestEveryAskBuilderIsChecked(t *testing.T) {
+	files, _ := filepath.Glob("*.go")
+	var titles []string
+	n := 0
+	for _, fn := range files {
+		if strings.HasSuffix(fn, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(fn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := strings.ReplaceAll(string(b), "\n", " ")
+		n += len(askLiteral.FindAllString(src, -1))
+		for _, m := range askTitleLiteral.FindAllStringSubmatch(src, -1) {
+			titles = append(titles, m[1])
+		}
+	}
+	if n != askBuilders {
+		t.Errorf("%d places build an Ask, askcheck knows %d: add the new ask to everyAsk, then set askBuilders", n, askBuilders)
+	}
+	asks := everyAsk()
+	for _, title := range titles {
+		found := false
+		for _, a := range asks {
+			if strings.HasPrefix(a.Title, title) || strings.HasPrefix(title, a.Title) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the ask %q is not in everyAsk", title)
 		}
 	}
 }

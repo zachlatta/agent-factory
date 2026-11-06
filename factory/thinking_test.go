@@ -16,45 +16,6 @@ func thinkingBody(t *testing.T, raw string) Body {
 	return b
 }
 
-func TestThinkingLaunchAndValidation(t *testing.T) {
-	for _, tc := range []struct {
-		agent, level, want string
-		invalid            bool
-	}{
-		{"opus", "", "medium", false},
-		{"sonnet", "", "medium", false},
-		{"codex-sol", "", "medium", false},
-		{"codex-sol", "high", "high", false},
-		{"opus", "low", "low", false},
-		{"sonnet", "xhigh", "xhigh", false},
-		{"codex-astra", "max", "max", false},
-		{"codex-sol", "ultra", "ultra", false},
-		{"codex-sol", "off", "", true},
-		{"opus", "ultra", "", true},
-		{"gemini-argon", "medium", "", true},
-		{"muse-wonder", "low", "", true},
-	} {
-		t.Run(tc.agent+"/"+tc.level, func(t *testing.T) {
-			f, p := newTestFactory(t)
-			b := thinkingBody(t, `{"request":"test","agent":"`+tc.agent+`","thinking":"`+tc.level+`"}`)
-			_, err := f.Act("new", b)
-			runs := p.runsWithLabel(labelArg(labelStage, "plan"))
-			if tc.invalid {
-				if err == nil || len(runs) != 0 {
-					t.Fatalf("invalid choice launched: %v %v", err, runs)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(runs) != 1 || flag(runs[0], "--thinking") != tc.want {
-				t.Fatalf("runs = %v, want thinking %s", runs, tc.want)
-			}
-		})
-	}
-}
-
 func TestThinkingSurvivesRepoAuto(t *testing.T) {
 	f, p := newTestFactory(t)
 	withRepos(t, f, "example/desk")
@@ -132,5 +93,44 @@ func TestThinkingMetadataAndPreferredModels(t *testing.T) {
 		if suggested != want || ranked[0].ID != want {
 			t.Errorf("%s suggestion=%s, first=%s", provider, suggested, ranked[0].ID)
 		}
+	}
+}
+
+func TestThinkingLaunchAndValidation(t *testing.T) {
+	for _, tc := range []struct {
+		agent, level, want string
+		invalid            bool
+	}{
+		{"opus", "", "medium", false},
+		{"sonnet", "", "medium", false},
+		{"codex-sol", "", "medium", false},
+		{"codex-sol", "high", "high", false},
+		{"opus", "low", "low", false},
+		{"sonnet", "xhigh", "xhigh", false},
+		{"codex-astra", "max", "max", false},
+		{"codex-sol", "ultra", "ultra", false},
+		{"codex-sol", "off", "", true},
+		{"opus", "ultra", "", true},
+		{"gemini-argon", "medium", "", true},
+		{"muse-wonder", "low", "", true},
+	} {
+		t.Run(tc.agent+"/"+tc.level, func(t *testing.T) {
+			f, p := newTestFactory(t)
+			b := thinkingBody(t, `{"request":"test","agent":"`+tc.agent+`","thinking":"`+tc.level+`"}`)
+			_, err := f.Act("new", b)
+			runs := p.runsWithLabel(labelArg(labelStage, "building"))
+			if tc.invalid {
+				if err == nil || len(runs) != 0 {
+					t.Fatalf("invalid choice launched: %v %v", err, runs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(runs) != 1 || flag(runs[0], "--thinking") != tc.want {
+				t.Fatalf("runs = %v, want thinking %s", runs, tc.want)
+			}
+		})
 	}
 }

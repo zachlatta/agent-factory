@@ -111,7 +111,7 @@ func post(t *testing.T, f *Factory, action, body string) {
 
 func zachCard() Agent {
 	return card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelVerdict: "code approve",
-		labelNote: "review passed: approve to land", labelPlanRounds: "1", labelCodeRounds: "1", labelReviewed: reviewedSHA})
+		labelNote: "review passed: approve to land", labelRoundsRequest: "1", labelRoundsDesign: "1", labelReviewed: reviewedSHA})
 }
 
 // A button press shows on the next board read, not after the factory's next loop.
@@ -157,10 +157,10 @@ func TestStaleRefreshKeepsActionOnBoard(t *testing.T) {
 }
 
 func TestOlderReadIsNotStored(t *testing.T) {
-	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "plan"}))
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "building"}))
 	old := f.nextRead()
 	f.SetAgents([]Agent{card("c1", map[string]string{labelStage: "building"})})
-	if f.setAgents([]Agent{card("c1", map[string]string{labelStage: "plan"})}, old, true) {
+	if f.setAgents([]Agent{card("c1", map[string]string{labelStage: "building"})}, old, true) {
 		t.Error("older read stored over a newer one")
 	}
 	if st := f.agent("c1").L(labelStage); st != "building" {

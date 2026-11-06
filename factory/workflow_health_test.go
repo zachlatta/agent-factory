@@ -49,7 +49,7 @@ func TestWorkflowHealthParkedReplacedAndFinishedCards(t *testing.T) {
 	done := card("ddd0004", map[string]string{labelStage: "landed"})
 	dropped := card("eee0005", map[string]string{labelStage: "building"})
 	dropped.ArchivedAt = t0
-	f, _ := newTestFactory(t, old, current, held, done, dropped, reviewer("r1", "ccc0003", "code"))
+	f, _ := newTestFactory(t, old, current, held, done, dropped, reviewer("r1", "ccc0003", gateSignoff))
 	f.noteRefreshed()
 	code, health := health(t, f)
 	if code != 200 || !health.OK {

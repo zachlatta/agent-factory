@@ -123,7 +123,7 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	return idea, nil
 }
 
-// startIdea turns a waiting idea into a planning card. When Zach starts it, repo, agent and thinking
+// startIdea turns a waiting idea into a building card. When Zach starts it, repo, agent and thinking
 // (his picks in the panel) win, else the idea's own repo and the Frontier pick (pickIdeaAgent). The
 // factory's own starts (by "auto") always use the idea's repo and the Frontier pick at its default thinking.
 // note is Zach's own changes typed before starting; it follows the brief and overrides it.
@@ -349,11 +349,9 @@ Rules:
 
 %s
 
-%s
-
 Submit each idea:
 curl -s -X POST localhost:%d/api/idea -H 'X-Factory: 1' -H 'Content-Type: application/json' \
-  -d '{"repo":"%s","by":"scout","tier":"<low|risky|architecture>","priority":"<high|normal|low>","title":"<outcome>","summary":"<plain words>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
+  -d '{"repo":"%s","by":"scout","priority":"<high|normal|low>","title":"<outcome>","summary":"<plain words>","why":"<evidence>","doneWhen":"<check>","request":"<technical brief>"}'
 Priority is normal unless your evidence shows it is urgent (high) or can wait (low); ideas start on their own by priority, then age.
 
 Then stop with a one-line list of what you submitted.
@@ -371,7 +369,7 @@ func (f *Factory) startScout(repo, guidance string) (map[string]string, error) {
 		return f.startPicker(Route{Request: guidance, Title: truncWords("Scout: "+strings.SplitN(strings.TrimSpace(guidance), "\n", 2)[0], 70), Scout: true})
 	}
 	cwd := f.repoDir(repo)
-	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, tierRules, wholeChangeRule,
+	prompt := strings.ReplaceAll(fmt.Sprintf(scoutPrompt, 3, repo, cwd, f.cfg.Port, f.cfg.Port, wholeChangeRule,
 		f.cfg.Port, repo), "<repo>", repo)
 	title := "Scout: ideas for " + repo
 	if strings.TrimSpace(guidance) != "" {

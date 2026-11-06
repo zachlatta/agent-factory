@@ -29,6 +29,33 @@ func checkComputerUsePrompt(t *testing.T, prompt string) {
 	}
 }
 
+func TestScoutsAndPickersDoNotGetComputerUse(t *testing.T) {
+	f, p := newTestFactory(t)
+	withRepos(t, f, "example/desk", "example/ops")
+	if _, err := f.Act("scout", Body{Repo: "example/desk"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Act("new", Body{Request: "Choose a repo", Repo: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runArgs(p) {
+		if strings.Contains(run[len(run)-1], computerUseHeading) {
+			t.Error("Scout or picker received browser instructions")
+		}
+	}
+}
+
+func TestUIReviewRulesExcludeBuildApprovalGuidance(t *testing.T) {
+	for name, prompt := range map[string]string{"generic": uiReviewRule, "board": boardLayoutRule} {
+		checkComputerUsePrompt(t, prompt)
+		for _, unwanted := range []string{"every build-side-effect condition", "Dry-run servers that read real data still require approval"} {
+			if strings.Contains(prompt, unwanted) {
+				t.Errorf("%s UI rule received builder approval guidance %q", name, unwanted)
+			}
+		}
+	}
+}
+
 func TestFellowsGetComputerUseForEveryAgent(t *testing.T) {
 	for _, a := range AgentChoices {
 		t.Run(a.ID, func(t *testing.T) {
@@ -36,16 +63,16 @@ func TestFellowsGetComputerUseForEveryAgent(t *testing.T) {
 			if _, err := f.Act("new", Body{Request: "Check a public page", Agent: a.ID}); err != nil {
 				t.Fatal(err)
 			}
-			runs := p.runsWithLabel(labelArg(labelStage, "plan"))
+			runs := p.runsWithLabel(labelArg(labelStage, "building"))
 			if len(runs) != 1 {
 				t.Fatalf("runs = %v", runs)
 			}
 			prompt := runs[0][len(runs[0])-1]
 			checkComputerUsePrompt(t, prompt)
 			for _, want := range []string{
-				"Temporary private-network test servers meeting every build-side-effect condition need no separate approval.",
-				"Dry-run servers that read real data still require approval, even on the tailnet.",
-				"direct track", "Click through your own UI changes", "before code review", "do NOT land",
+				"Nothing here may write to production.",
+				"may read production",
+				"direct track", "Click through your own UI changes", "before the gates", "Do NOT land",
 			} {
 				if !strings.Contains(prompt, want) {
 					t.Errorf("Fellow prompt lacks %q", want)
@@ -56,7 +83,7 @@ func TestFellowsGetComputerUseForEveryAgent(t *testing.T) {
 }
 
 func TestUIReviewsShareComputerUseAndKeepRestrictions(t *testing.T) {
-	for _, kind := range []string{"code", "land"} {
+	for _, kind := range []string{gateRequest, "land"} {
 		prompt, _ := reviewPrompt(t, kind, diffFiles("web/page.html\n"))
 		checkComputerUsePrompt(t, prompt)
 		for _, unwanted := range []string{
@@ -83,33 +110,6 @@ func TestUIReviewsShareComputerUseAndKeepRestrictions(t *testing.T) {
 		prompt, _ := reviewPrompt(t, tc.kind, diffFiles(tc.files))
 		if strings.Contains(prompt, computerUseHeading) {
 			t.Errorf("%s review of %q received browser instructions", tc.kind, tc.files)
-		}
-	}
-}
-
-func TestScoutsAndPickersDoNotGetComputerUse(t *testing.T) {
-	f, p := newTestFactory(t)
-	withRepos(t, f, "example/desk", "example/ops")
-	if _, err := f.Act("scout", Body{Repo: "example/desk"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Act("new", Body{Request: "Choose a repo", Repo: "auto"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, run := range runArgs(p) {
-		if strings.Contains(run[len(run)-1], computerUseHeading) {
-			t.Error("Scout or picker received browser instructions")
-		}
-	}
-}
-
-func TestUIReviewRulesExcludeBuildApprovalGuidance(t *testing.T) {
-	for name, prompt := range map[string]string{"generic": uiReviewRule, "board": boardLayoutRule} {
-		checkComputerUsePrompt(t, prompt)
-		for _, unwanted := range []string{"every build-side-effect condition", "Dry-run servers that read real data still require approval"} {
-			if strings.Contains(prompt, unwanted) {
-				t.Errorf("%s UI rule received builder approval guidance %q", name, unwanted)
-			}
 		}
 	}
 }

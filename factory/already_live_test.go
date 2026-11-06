@@ -11,7 +11,7 @@ import (
 func TestAlreadyLiveRequestsBuilderCompletion(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1"}))
-		f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"))
+		f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff))
 		f.Git = func(context.Context, string, ...string) error { return nil }
 		f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
 			switch strings.Join(args, " ") {
@@ -29,7 +29,7 @@ func TestAlreadyLiveRequestsBuilderCompletion(t *testing.T) {
 			}
 			return "", errors.New("unexpected git read")
 		}
-		storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +77,7 @@ func TestAlreadyLiveAllPrelandCallers(t *testing.T) {
 				if route == "held" {
 					a = heldCard(labels)
 				}
-				f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"), dep("landed", false))
+				f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff), dep("landed", false))
 				head, status := reviewedSHA, ""
 				var statusErr error
 				switch state {
@@ -94,7 +94,7 @@ func TestAlreadyLiveAllPrelandCallers(t *testing.T) {
 				var err error
 				switch route {
 				case "review":
-					storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+					storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 					err = f.ApplyVerdict(f.agent("r1"))
 				case "approve":
 					_, err = f.Act("approve", Body{ID: "c1"})
@@ -227,19 +227,6 @@ func TestLiveCompletionTickFinishesWithoutFactoryMail(t *testing.T) {
 	}
 }
 
-func TestNoOwnCommitsPreservesApproval(t *testing.T) {
-	a := freshCard(false, reviewLabels(map[string]string{labelBase: reviewedSHA}))
-	f, p := newTestFactory(t, a, reviewer("r1", "c1", "code"))
-	stubPublished(f, reviewedSHA, "", nil)
-	storeLog(t, f, p, "r1", "TIER: risky\nVERDICT: approve")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelLiveCompletion] != "" {
-		t.Fatalf("labels=%v", l)
-	}
-}
-
 func TestPublishedCompletionUsesNormalEmailRules(t *testing.T) {
 	a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1"}))
 	a.Labels[gmailThreadLabel] = "test-thread"
@@ -276,5 +263,18 @@ func TestApproveWithFetchFailureStillStartsNormalLanding(t *testing.T) {
 	}
 	if msg := strings.Join(p.sent("c1"), ""); !strings.Contains(msg, "Land") {
 		t.Fatal(msg)
+	}
+}
+
+func TestNoOwnCommitsPreservesApproval(t *testing.T) {
+	a := freshCard(false, reviewLabels(map[string]string{labelBase: reviewedSHA}))
+	f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff))
+	stubPublished(f, reviewedSHA, "", nil)
+	storeLog(t, f, p, "r1", "SIGN OFF: he should see this\nVERDICT: approve")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.labels("c1"); l[labelStage] != "zach" || l[labelLiveCompletion] != "" {
+		t.Fatalf("labels=%v", l)
 	}
 }

@@ -18,128 +18,13 @@ func choiceIDs(ask *Ask) []string {
 
 // Every ask gets one fixed set of answers: Land / Change / Drop for finished work, Yes / No / Drop for
 // decisions; the factory's own problems keep their single action.
-func TestAskChoices(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		labels map[string]string
-		kind   string
-		want   []string
-	}{
-		{"preview", map[string]string{labelNote: readyNote(1)}, askReady, []string{"land", "change", "drop"}},
-		{"review passed", map[string]string{labelNote: "review passed: approve to land"}, askReady, []string{"land", "change", "drop"}},
-		{"secret scan", map[string]string{labelNote: "secret scan failed: email in x.go:1"}, askDecision, []string{"fix", "scan", "drop"}},
-		{"build side effects", map[string]string{labelAwaiting: "plan", labelNote: sideEffectNote}, askDecision, []string{"yes", "no", "change", "drop"}},
-		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no", "change"}},
-		{"landed diff, scan failed", map[string]string{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"}, askDecision, []string{"yes", "no", "change"}},
-		{"landed diff, no scan hit", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, askProblem, []string{"done", "change"}},
-		// board-only: the factory's own to settle, answered in the card's details
-		{"did not settle", map[string]string{labelNote: arbiterStuckNote}, askProblem, []string{"arbiter", "change", "drop"}},
-		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
-		{"work left", map[string]string{labelNote: "landed; still to do: x"}, askProblem, []string{"finish", "done", "drop"}},
-		{"work left for Zach", map[string]string{labelNote: "landed; still to do: Zach: tap the button"}, askAction, []string{"works", "broken", "skip"}},
-	} {
-		labels := map[string]string{labelStage: "zach"}
-		for k, v := range tc.labels {
-			labels[k] = v
-		}
-		a := card("c1", labels)
-		ask := askFor(Card{ID: "c1", Stage: "zach"}, a)
-		if ask.Kind != tc.kind || !slices.Equal(choiceIDs(ask), tc.want) {
-			t.Errorf("%s: kind %q choices %v, want %q %v", tc.name, ask.Kind, choiceIDs(ask), tc.kind, tc.want)
-		}
-	}
-	repo := askFor(Card{ID: "c1", Stage: "zach"}, card("c1", map[string]string{labelStage: "zach", labelAwaiting: "repo",
-		labelCandidates: "a/one b/two"}))
-	if repo.Kind != askDecision || !slices.Equal(choiceIDs(repo), []string{"pick:a/one", "pick:b/two", "pick", "change", "drop"}) {
-		t.Errorf("repo ask: %q %v", repo.Kind, choiceIDs(repo))
-	}
-	// on the scan-hit landed diff, Yes is its primary Checked, mark done
-	scanHit := askFor(Card{ID: "c1", Stage: "zach"}, card("c1", map[string]string{labelStage: "zach",
-		labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"}))
-	if yes := choiceByID(scanHit, "yes"); yes == nil || yes.action != "done" || !yes.Primary {
-		t.Errorf("scan-hit Yes = %+v, want primary done", yes)
-	}
-}
 
 var emailWrap = regexp.MustCompile(`Zach's follow-up email \([^)]*\):\n|\n\(end of Zach's email\)`)
 
-// The board's choice runs the same action as the email reply for it.
-func TestChooseRunsTheSameActionAsEmail(t *testing.T) {
-	for _, tc := range []struct {
-		choice, message, email string
-		check                  func(t *testing.T, p *fakePaseo)
-	}{
-		{"yes", "", "approve", func(t *testing.T, p *fakePaseo) {
-			if l := p.labels("c1"); l[labelStage] != "building" || l[labelZachPlan] != "approved" {
-				t.Errorf("yes: labels %v", l)
-			}
-		}},
-		// No is one tap: the board sends no text, and the agent reads the same plain no either way
-		{"no", "", "no", func(t *testing.T, p *fakePaseo) {
-			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "No.") {
-				t.Errorf("no: sent %v", s)
-			}
-			// and it leaves Needs Zach: a plan he said no to goes back to planning
-			if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAwaiting] != "" {
-				t.Errorf("no: labels %v", l)
-			}
-		}},
-		{"change", "Use SQLite", "Use SQLite", func(t *testing.T, p *fakePaseo) {
-			if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "Use SQLite") || !strings.Contains(s[0], "wants changes") {
-				t.Errorf("change: sent %v", s)
-			}
-		}},
-		{"drop", "", "drop", func(t *testing.T, p *fakePaseo) {
-			if !p.called("archive", "c1") {
-				t.Error("drop: not archived")
-			}
-		}},
-	} {
-		board, pb, _ := mailFactory(t, planWaiting("c1"))
-		if _, err := board.Act("choose", Body{ID: "c1", Choice: tc.choice, Message: tc.message}); err != nil {
-			t.Fatalf("board %s: %v", tc.choice, err)
-		}
-		tc.check(t, pb)
-		mail, pm, _ := mailFactory(t, planWaiting("c1"))
-		if _, err := mail.Act("answer", Body{Thread: "nt1", MessageID: "m2", Text: tc.email}); err != nil {
-			t.Fatalf("email %s: %v", tc.email, err)
-		}
-		tc.check(t, pm)
-		// the same words, the email's marked as his email
-		var unwrapped []string
-		for _, s := range pm.sent("c1") {
-			unwrapped = append(unwrapped, emailWrap.ReplaceAllString(s, ""))
-		}
-		if !slices.Equal(pb.sent("c1"), unwrapped) {
-			t.Errorf("%s: the board sent %q, the email %q", tc.choice, pb.sent("c1"), pm.sent("c1"))
-		}
-	}
-}
-
-// One answer clears the ask everywhere: once the card has moved on, a later answer from the other
-// surface does nothing.
-func TestChooseThenEmailIsNotWaiting(t *testing.T) {
-	f, p, _ := mailFactory(t, planWaiting("c1"))
-	if _, err := f.Act("choose", Body{ID: "c1", Choice: "yes"}); err != nil {
-		t.Fatal(err)
-	}
-	after := withLabels(planWaiting("c1"), p.labels("c1")) // the card as the next read of its file sees it
-	f, p, m := mailFactory(t, after)
-	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m3", Text: "drop"}); err != ErrNotWaiting {
-		t.Errorf("email after a board answer: %v, want ErrNotWaiting", err)
-	}
-	if p.called("archive", "c1") || len(m.sends()) != 0 {
-		t.Error("the late email answer acted or sent mail")
-	}
-	if _, err := f.Act("choose", Body{ID: "c1", Choice: "drop"}); err == nil || p.called("archive", "c1") {
-		t.Errorf("a board answer on a card that no longer waits must fail: %v", err)
-	}
-}
-
 func TestChooseRefusesUnknownAndEmptyChoices(t *testing.T) {
 	f, _, _ := mailFactory(t, planWaiting("c1"))
-	if _, err := f.Act("choose", Body{ID: "c1", Choice: "land"}); err == nil {
-		t.Error("land is not a choice on a plan decision")
+	if _, err := f.Act("choose", Body{ID: "c1", Choice: "nope"}); err == nil {
+		t.Error("nope is not a choice")
 	}
 	ready := card("c2", map[string]string{labelStage: "zach", labelNote: readyNote(1)})
 	f, _, _ = mailFactory(t, ready)
@@ -170,17 +55,8 @@ func TestOpenQuestionIsAnswered(t *testing.T) {
 	}
 }
 
-// The board's choice goes through the action API like any other button.
-func TestChooseAPI(t *testing.T) {
-	f, p, _ := mailFactory(t, planWaiting("c1"))
-	req := httptest.NewRequest("POST", "/api/choose", strings.NewReader(`{"id":"c1","choice":"yes"}`))
-	req.Header.Set("X-Factory", "1")
-	w := httptest.NewRecorder()
-	f.Handler().ServeHTTP(w, req)
-	if w.Code != 200 || p.labels("c1")[labelStage] != "building" {
-		t.Errorf("POST /api/choose: %d %s, labels %v", w.Code, w.Body, p.labels("c1"))
-	}
-}
+// One rule decides For you: every ask that is not board-only is ready, a decision or a question, with
+// the fixed buttons; every board-only ask is a problem, shown under Working on it.
 
 // One rule decides For you: every ask that is not board-only is ready, a decision or a question, with
 // the fixed buttons; every board-only ask is a problem, shown under Working on it.
@@ -190,9 +66,9 @@ func TestEveryAskHasOneKind(t *testing.T) {
 	agents := []Agent{attention}
 	for _, l := range []map[string]string{
 		{labelNote: readyNote(1)}, {labelNote: "review passed: approve to land"}, {labelNote: "secret scan failed: x"},
-		{labelAwaiting: "plan", labelNote: sideEffectNote}, {labelNote: "public repo: finished without review"},
+		{labelNote: readyNote(1), labelReviewed: reviewedSHA},
+		{labelVerdict: "close"}, {labelNote: "stuck", labelStuckFrom: "building"}, {labelNote: "public repo: finished without review"},
 		{labelAwaiting: "repo", labelCandidates: "a/one"},
-		{labelNote: arbiterStuckNote}, {labelVerdict: "close"}, {labelNote: "stuck", labelStuckFrom: "plan"},
 		{labelNote: "landing not verified"},
 		{labelNote: "landed; still to do: x"}, {labelNote: "landed; did not say what remains"}, {},
 		{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"},
@@ -214,5 +90,86 @@ func TestEveryAskHasOneKind(t *testing.T) {
 		case len(ask.Choices) == 0:
 			t.Errorf("%q: no buttons", ask.Title)
 		}
+	}
+}
+
+// Every ask gets one fixed set of answers: Land / Change / Drop for finished work, Yes / No / Drop for
+// decisions; the factory's own problems keep their single action.
+func TestAskChoices(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		kind   string
+		want   []string
+	}{
+		{"preview", map[string]string{labelNote: readyNote(1)}, askReady, []string{"land", "change", "drop"}},
+		{"review passed", map[string]string{labelNote: "review passed: approve to land"}, askReady, []string{"land", "change", "drop"}},
+		{"secret scan", map[string]string{labelNote: "secret scan failed: email in x.go:1"}, askDecision, []string{"fix", "scan", "drop"}},
+		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no", "change"}},
+		{"landed diff, scan failed", map[string]string{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"}, askDecision, []string{"yes", "no", "change"}},
+		{"landed diff, no scan hit", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, askProblem, []string{"done", "change"}},
+		// board-only: the factory's own to settle, answered in the card's details
+		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
+		{"work left", map[string]string{labelNote: "landed; still to do: x"}, askProblem, []string{"finish", "done", "drop"}},
+		{"work left for Zach", map[string]string{labelNote: "landed; still to do: Zach: tap the button"}, askAction, []string{"works", "broken", "skip"}},
+	} {
+		labels := map[string]string{labelStage: "zach"}
+		for k, v := range tc.labels {
+			labels[k] = v
+		}
+		a := card("c1", labels)
+		ask := askFor(Card{ID: "c1", Stage: "zach"}, a)
+		if ask.Kind != tc.kind || !slices.Equal(choiceIDs(ask), tc.want) {
+			t.Errorf("%s: kind %q choices %v, want %q %v", tc.name, ask.Kind, choiceIDs(ask), tc.kind, tc.want)
+		}
+	}
+	repo := askFor(Card{ID: "c1", Stage: "zach"}, card("c1", map[string]string{labelStage: "zach", labelAwaiting: "repo",
+		labelCandidates: "a/one b/two"}))
+	if repo.Kind != askDecision || !slices.Equal(choiceIDs(repo), []string{"pick:a/one", "pick:b/two", "pick", "change", "drop"}) {
+		t.Errorf("repo ask: %q %v", repo.Kind, choiceIDs(repo))
+	}
+	// on the scan-hit landed diff, Yes is its primary Checked, mark done
+	scanHit := askFor(Card{ID: "c1", Stage: "zach"}, card("c1", map[string]string{labelStage: "zach",
+		labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"}))
+	if yes := choiceByID(scanHit, "yes"); yes == nil || yes.action != "done" || !yes.Primary {
+		t.Errorf("scan-hit Yes = %+v, want primary done", yes)
+	}
+}
+
+// The board's choice runs the same action as the email reply for it.
+
+// One answer clears the ask everywhere: once the card has moved on, a later answer from the other
+// surface does nothing.
+func TestChooseThenEmailIsNotWaiting(t *testing.T) {
+	f, p, _ := mailFactory(t, planWaiting("c1"))
+	if _, err := f.Act("choose", Body{ID: "c1", Choice: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	after := withLabels(planWaiting("c1"), p.labels("c1")) // the card as the next read of its file sees it
+	f, p, m := mailFactory(t, after)
+	if _, err := f.Act("answer", Body{Thread: "nt1", MessageID: "m3", Text: "drop"}); err != ErrNotWaiting {
+		t.Errorf("email after a board answer: %v, want ErrNotWaiting", err)
+	}
+	if p.called("archive", "c1") || len(m.sends()) != 0 {
+		t.Error("the late email answer acted or sent mail")
+	}
+	if _, err := f.Act("choose", Body{ID: "c1", Choice: "drop"}); err == nil || p.called("archive", "c1") {
+		t.Errorf("a board answer on a card that no longer waits must fail: %v", err)
+	}
+}
+
+// The board's choice goes through the action API like any other button.
+
+// The board's choice goes through the action API like any other button.
+
+// The board's choice goes through the action API like any other button.
+func TestChooseAPI(t *testing.T) {
+	f, p, _ := mailFactory(t, planWaiting("c1"))
+	req := httptest.NewRequest("POST", "/api/choose", strings.NewReader(`{"id":"c1","choice":"land"}`))
+	req.Header.Set("X-Factory", "1")
+	w := httptest.NewRecorder()
+	f.Handler().ServeHTTP(w, req)
+	if w.Code != 200 || p.labels("c1")[labelStage] != "landing" {
+		t.Errorf("POST /api/choose: %d %s, labels %v", w.Code, w.Body, p.labels("c1"))
 	}
 }

@@ -79,7 +79,7 @@ func delegateText(opts []delegateOption, reviewer bool) string {
   returns within 100 seconds (inside Claude Code's 120-second shell limit); a timed-out wait is not a
   failure, just run it again.
 - Read its answer with ` + "`paseo logs <id> --filter text --tail 1`" + `, then archive it: ` + "`paseo archive <id>`" + `.
-- Before you end any turn (a plan, a summary, a rework, a verdict), list the sub-agents you started with
+- Before you end any turn (a summary, a rework, a verdict), list the sub-agents you started with
   ` + "`paseo ls -g -q --label paseo.parent-agent-id=$PASEO_AGENT_ID`" + ` and run ` + "`paseo archive <id>`" + ` for each,
   so nothing you started keeps running after you stop.
 `)

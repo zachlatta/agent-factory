@@ -17,8 +17,8 @@ const (
 	directAskFallback = "The agent needs your answer"
 	dueReminderLead   = 6 * time.Hour
 	directAnswerRule  = "This answers the question you stopped on. Do what it asks and land any new work item " +
-		"the way the repo's AGENTS.md says, then end with TRACK: direct. If it now needs a code change, write a plan " +
-		"ending with its TIER: line instead."
+		"the way the repo's AGENTS.md says, then end with TRACK: direct. If it now needs a code change, build it, commit on your branch and " +
+		"end with the RESULT: line instead."
 )
 
 // directAskNote is the wait note of a direct result asking title: one capped line, for a label.
@@ -36,7 +36,7 @@ func directAskStop(a Agent) bool {
 func directAskFor(note string) *Ask {
 	return &Ask{Kind: askQuestion, directAsk: true, From: "builder",
 		Title: cmp.Or(strings.TrimSpace(strings.TrimPrefix(note, noteDirectAsk)), directAskFallback),
-		Why:   "The agent finished this and stopped on a question for you. Answer it and the agent carries on; mark it done if it needs no answer.",
+		Why:   "The agent stopped on a question for you. Answer it and the agent carries on; mark it done if it needs no answer.",
 		Actions: []Action{{ID: "reply", Label: "Answer", Primary: true, Hint: "Your answer"},
 			act("done", "Mark done"), act("close", "Drop")},
 		Choices: []Choice{

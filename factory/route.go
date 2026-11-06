@@ -32,6 +32,7 @@ type Route struct {
 	Titled    bool      `json:"titled,omitempty"` // the caller gave Title; otherwise it came from Request
 	Thread    string    `json:"thread,omitempty"`
 	Origin    string    `json:"origin,omitempty"`
+	By        string    `json:"submittedBy,omitempty"` // "system" for an automatic submission
 	Tier      string    `json:"tier,omitempty"`
 	Agent     string    `json:"agent,omitempty"` // AgentChoice id for the real card ("" = default)
 	Thinking  string    `json:"thinking,omitempty"`
@@ -181,9 +182,9 @@ func (f *Factory) startPicker(r Route) (map[string]string, error) {
 		req = scoutPickRequest + req
 	}
 	prompt := fmt.Sprintf(strings.ReplaceAll(pickerPrompt, "<default repo>", def), req, dev, strings.Join(list, "\n"))
-	out, err := f.paseo("run", "--provider", ReviewerModel, "--thinking", "low", "--mode", "bypassPermissions",
+	out, err := f.paseo("run", "--provider", ReviewerModel, "--thinking", "medium", "--mode", "bypassPermissions",
 		"--cwd", dev, "--title", r.Title,
-		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, "plan"), "--label", labelArg(labelArchiveWatch, "1"),
+		"--label", labelArg(labelSource, "board"), "--label", labelArg(labelStage, stageRoute), "--label", labelArg(labelArchiveWatch, "1"),
 		"--label", labelArg(labelRouting, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--background", "--quiet", prompt)
 	if err != nil {
@@ -258,7 +259,7 @@ func (f *Factory) startRouted(a Agent, repo string) error {
 		if r.Titled {
 			title = r.Title
 		}
-		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, Tier: r.Tier, Agent: r.Agent, Thinking: r.Thinking})
+		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, SubmittedBy: r.By, Tier: r.Tier, Agent: r.Agent, Thinking: r.Thinking})
 	}
 	if err != nil {
 		return failed(err)

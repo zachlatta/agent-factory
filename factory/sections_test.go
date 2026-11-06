@@ -16,71 +16,6 @@ func sectionIDs(ls []SectionLine) []string {
 	return out
 }
 
-// Sections sorts the board into what waits on Zach, what is working, what is stuck and what shipped today.
-func TestBuildSections(t *testing.T) {
-	loc, _ := time.LoadLocation("America/New_York")
-	now := time.Date(2026, 10, 27, 18, 0, 0, 0, loc)
-	at := func(h, m int) string { return time.Date(2026, 10, 27, h, m, 0, 0, loc).Format(time.RFC3339) }
-	yesterday := time.Date(2026, 10, 26, 23, 30, 0, 0, loc).Format(time.RFC3339)
-	ready := &Ask{Kind: askReady, Title: "Try it, then approve landing?", Overview: &Overview{Decision: "Ship the phone board?"}}
-	problem := &Ask{Kind: askProblem, Title: "Landing didn't reach main"}
-	done := func(id, title, landed string) Card {
-		return Card{ID: id, Title: title, Stage: "landed", Source: "board",
-			Timing: &TimingView{LandedAt: landed, Stages: []StageSpan{{Stage: "landed", Start: landed}}}}
-	}
-	cards := []Card{
-		{ID: "z1", Title: "Phone board", Stage: "zach", Source: "board", Ask: ready},
-		{ID: "z2", Title: "Broken landing", Stage: "zach", Source: "board", Ask: problem},
-		{ID: "w1", Title: "Retries", Stage: "building", Source: "board"},
-		{ID: "w2", Title: "Hung", Stage: "review", Source: "board", Flags: []string{"stalled 40 min"}},
-		{ID: "w3", Title: "Follower", Stage: "landing", Source: "board", WaitsOn: "w1abcde", Flags: []string{"waits on w1abcde"}},
-		{ID: "w1abcdef", Title: "Retries 2", Stage: "plan", Source: "board"},
-		done("d1", "Shipped this morning", at(9, 15)),
-		done("d2", "Shipped last night", yesterday),
-		{ID: "d3", Title: "Dropped", Stage: "landed", Source: "board", Note: "closed by Zach",
-			Timing: &TimingView{Stages: []StageSpan{{Stage: "landed", Start: at(10, 0)}}}},
-		{ID: "e1", Title: "Email errand", Stage: "landed", Source: "email",
-			Timing: &TimingView{RepliedAt: at(11, 0), Stages: []StageSpan{{Stage: "landed", Start: at(11, 0)}}}},
-		{ID: "e2", Title: "Unanswered errand", Stage: "landed", Source: "email",
-			Timing: &TimingView{NoReply: true, RequestedAt: at(8, 0), Stages: []StageSpan{{Stage: "landed", Start: at(12, 0)}}}},
-		{ID: "r1", Title: "Hourly feed", Stage: "landed", Source: "schedule", Tier: "routine", CreatedAt: at(12, 0)},
-		{ID: "r2", Title: "Hourly feed", Stage: "building", Source: "schedule", Tier: "routine", CreatedAt: at(17, 0)},
-		{ID: "i1", Title: "An idea", Stage: "idea", Source: "idea"},
-	}
-	s := BuildSections(cards, now, loc)
-	if got := sectionIDs(s.ForYou); !slices.Equal(got, []string{"z1"}) {
-		t.Errorf("forYou = %v", got)
-	}
-	if s.ForYou[0].State != "Ship the phone board?" {
-		t.Errorf("forYou state = %q, want the agent's decision line", s.ForYou[0].State)
-	}
-	if got := sectionIDs(s.Stuck); !slices.Equal(got, []string{"z2", "w2"}) {
-		t.Errorf("stuck = %v", got)
-	}
-	if got := sectionIDs(s.Working); !slices.Equal(got, []string{"w1", "w3", "w1abcdef"}) {
-		t.Errorf("working = %v", got)
-	}
-	states := map[string]string{}
-	for _, l := range append(s.Working, s.Stuck...) {
-		states[l.ID] = l.State
-	}
-	for id, want := range map[string]string{"w1": "building", "w3": "waiting on Retries 2", "w1abcdef": "planning",
-		"w2": "no activity for 40 min", "z2": "Landing didn't reach main"} {
-		if states[id] != want {
-			t.Errorf("%s state = %q, want %q", id, states[id], want)
-		}
-	}
-	if got := sectionIDs(s.Shipped); !slices.Equal(got, []string{"e1", "d1"}) {
-		t.Errorf("shipped today = %v, want newest first, no drops, nothing from yesterday", got)
-	}
-	if len(s.NoAnswer) != 0 {
-		t.Errorf("noAnswer = %v, want none: only the dispatcher's watchdog flags requests", sectionIDs(s.NoAnswer))
-	}
-	if got := sectionIDs(s.Routine); !slices.Equal(got, []string{"r2", "r1"}) {
-		t.Errorf("routine = %v", got)
-	}
-}
-
 // "Today" is the local day in Zach's time zone, across midnight and the daylight saving change.
 func TestSectionsToday(t *testing.T) {
 	loc, _ := time.LoadLocation("America/New_York")
@@ -203,13 +138,78 @@ func TestSectionsBeforeBuildWaitState(t *testing.T) {
 	blocker.Title = "Blocker title"
 	blocker.ArchivedAt = t0.Add(-time.Minute)
 	released := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelTier: "low",
-		labelPlanRounds: "1", labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelWaitsDone: "1",
-		labelAutoReview: "code", labelNote: "building: d0e0001 landed", labelSince: ago(10 * time.Minute)})
+		labelRoundsRequest: "1", labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelWaitsDone: "1",
+		labelAutoReview: gateRequest, labelNote: "building: d0e0001 landed", labelSince: ago(10 * time.Minute)})
 	released.Status = "running"
 	f, _ := newTestFactory(t, released, blocker)
 	f.SetAgents([]Agent{released, blocker})
 	fs := f.sections()
 	if len(fs.Working) != 1 || fs.Working[0].State != "building" {
 		t.Errorf("released card Working = %+v, want state \"building\"", fs.Working)
+	}
+}
+
+// Sections sorts the board into what waits on Zach, what is working, what is stuck and what shipped today.
+func TestBuildSections(t *testing.T) {
+	loc, _ := time.LoadLocation("America/New_York")
+	now := time.Date(2026, 10, 27, 18, 0, 0, 0, loc)
+	at := func(h, m int) string { return time.Date(2026, 10, 27, h, m, 0, 0, loc).Format(time.RFC3339) }
+	yesterday := time.Date(2026, 10, 26, 23, 30, 0, 0, loc).Format(time.RFC3339)
+	ready := &Ask{Kind: askReady, Title: "Try it, then approve landing?", Overview: &Overview{Decision: "Ship the phone board?"}}
+	problem := &Ask{Kind: askProblem, Title: "Landing didn't reach main"}
+	done := func(id, title, landed string) Card {
+		return Card{ID: id, Title: title, Stage: "landed", Source: "board",
+			Timing: &TimingView{LandedAt: landed, Stages: []StageSpan{{Stage: "landed", Start: landed}}}}
+	}
+	cards := []Card{
+		{ID: "z1", Title: "Phone board", Stage: "zach", Source: "board", Ask: ready},
+		{ID: "z2", Title: "Broken landing", Stage: "zach", Source: "board", Ask: problem},
+		{ID: "w1", Title: "Retries", Stage: "building", Source: "board"},
+		{ID: "w2", Title: "Hung", Stage: gateDesign, Source: "board", Flags: []string{"stalled 40 min"}},
+		{ID: "w3", Title: "Follower", Stage: "landing", Source: "board", WaitsOn: "w1abcde", Flags: []string{"waits on w1abcde"}},
+		{ID: "w1abcdef", Title: "Retries 2", Stage: "building", Source: "board"},
+		done("d1", "Shipped this morning", at(9, 15)),
+		done("d2", "Shipped last night", yesterday),
+		{ID: "d3", Title: "Dropped", Stage: "landed", Source: "board", Note: "closed by Zach",
+			Timing: &TimingView{Stages: []StageSpan{{Stage: "landed", Start: at(10, 0)}}}},
+		{ID: "e1", Title: "Email errand", Stage: "landed", Source: "email",
+			Timing: &TimingView{RepliedAt: at(11, 0), Stages: []StageSpan{{Stage: "landed", Start: at(11, 0)}}}},
+		{ID: "e2", Title: "Unanswered errand", Stage: "landed", Source: "email",
+			Timing: &TimingView{NoReply: true, RequestedAt: at(8, 0), Stages: []StageSpan{{Stage: "landed", Start: at(12, 0)}}}},
+		{ID: "r1", Title: "Hourly feed", Stage: "landed", Source: "schedule", Tier: "routine", CreatedAt: at(12, 0)},
+		{ID: "r2", Title: "Hourly feed", Stage: "building", Source: "schedule", Tier: "routine", CreatedAt: at(17, 0)},
+		{ID: "i1", Title: "An idea", Stage: "idea", Source: "idea"},
+	}
+	s := BuildSections(cards, now, loc)
+	if got := sectionIDs(s.ForYou); !slices.Equal(got, []string{"z1"}) {
+		t.Errorf("forYou = %v", got)
+	}
+	if s.ForYou[0].State != "Ship the phone board?" {
+		t.Errorf("forYou state = %q, want the agent's decision line", s.ForYou[0].State)
+	}
+	if got := sectionIDs(s.Stuck); !slices.Equal(got, []string{"z2", "w2"}) {
+		t.Errorf("stuck = %v", got)
+	}
+	if got := sectionIDs(s.Working); !slices.Equal(got, []string{"w1", "w3", "w1abcdef"}) {
+		t.Errorf("working = %v", got)
+	}
+	states := map[string]string{}
+	for _, l := range append(s.Working, s.Stuck...) {
+		states[l.ID] = l.State
+	}
+	for id, want := range map[string]string{"w1": "building", "w3": "waiting on Retries 2", "w1abcdef": "building",
+		"w2": "no activity for 40 min", "z2": "Landing didn't reach main"} {
+		if states[id] != want {
+			t.Errorf("%s state = %q, want %q", id, states[id], want)
+		}
+	}
+	if got := sectionIDs(s.Shipped); !slices.Equal(got, []string{"e1", "d1"}) {
+		t.Errorf("shipped today = %v, want newest first, no drops, nothing from yesterday", got)
+	}
+	if len(s.NoAnswer) != 0 {
+		t.Errorf("noAnswer = %v, want none: only the dispatcher's watchdog flags requests", sectionIDs(s.NoAnswer))
+	}
+	if got := sectionIDs(s.Routine); !slices.Equal(got, []string{"r2", "r1"}) {
+		t.Errorf("routine = %v", got)
 	}
 }

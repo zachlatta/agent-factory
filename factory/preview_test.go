@@ -60,7 +60,7 @@ func TestPreviewIsolatedRealHandler(t *testing.T) {
 		if route == "/api/hosts" && !strings.Contains(r.Body.String(), `"cpuCount":4`) {
 			t.Fatal("host metrics did not use fake reader")
 		}
-		if route == "/api/transcript/preview-zach" && (strings.Contains(r.Body.String(), `"fallback":true`) || !strings.Contains(r.Body.String(), "restart the test board service once?")) {
+		if route == "/api/transcript/preview-zach" && (strings.Contains(r.Body.String(), `"fallback":true`) || !strings.Contains(r.Body.String(), "Land the board rewrite")) {
 			t.Fatal("real transcript reader did not load fixture session")
 		}
 		if route == "/api/board" {
@@ -111,119 +111,6 @@ func TestPreviewRequiresEmptyRoot(t *testing.T) {
 	}
 	if _, err := PreviewHandler(root); err == nil {
 		t.Fatal("preview reused existing state")
-	}
-}
-
-func TestPreviewSimulatesOnlyFabricatedCardActions(t *testing.T) {
-	h, err := PreviewHandler(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := func(action, body string, header bool) int {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/"+action, strings.NewReader(body))
-		if header {
-			req.Header.Set("X-Factory", "1")
-		}
-		h.ServeHTTP(rec, req)
-		return rec.Code
-	}
-	if got := request("approve", `{"id":"preview-zach"}`, false); got != 403 {
-		t.Fatalf("no header: %d", got)
-	}
-	if got := request("approve", `{"id":"not-a-fixture"}`, true); got != 404 {
-		t.Fatalf("unknown card: %d", got)
-	}
-	for _, tc := range []struct{ action, body string }{
-		{"approve", `{"id":"preview-zach"}`}, {"send", `{"id":"preview-building","message":"Sample answer"}`},
-		{"stage", `{"id":"preview-plan","stage":"review"}`}, {"close", `{"id":"preview-review"}`},
-	} {
-		if got := request(tc.action, tc.body, true); got != 200 {
-			t.Fatalf("%s: %d", tc.action, got)
-		}
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
-	var board struct{ Cards []Card }
-	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
-		t.Fatal(err)
-	}
-	stages := map[string]string{}
-	for _, c := range board.Cards {
-		stages[c.ID] = c.Stage
-	}
-	if stages["preview-zach"] != "building" || stages["preview-plan"] != "review" || stages["preview-review"] != "landed" {
-		t.Fatalf("fake changes not reflected: %v", stages)
-	}
-	// the board's shared buttons resolve to the same simulated actions: Land on finished work, Drop
-	if got := request("choose", `{"id":"preview-ready","choice":"land"}`, true); got != 200 {
-		t.Fatalf("choose land: %d", got)
-	}
-	if got := request("choose", `{"id":"preview-ready","choice":"yes"}`, true); got != 400 {
-		t.Errorf("a button the card does not have: %d", got)
-	}
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
-	board.Cards = nil
-	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range board.Cards {
-		if c.ID == "preview-ready" && c.Stage != "landing" {
-			t.Errorf("Land on the finished-work card: stage %q", c.Stage)
-		}
-	}
-	for _, a := range []string{"new", "scout", "review", "answer", "land-review", "recommend"} {
-		if got := request(a, `{"id":"preview-plan"}`, true); got != 403 {
-			t.Errorf("unsafe %s: %d", a, got)
-		}
-	}
-}
-
-// No and Change on the sample cards move them where the real send moves them (answerLabels): out of
-// For you, into Working on it.
-func TestPreviewAnswersLeaveForYou(t *testing.T) {
-	h, err := PreviewHandler(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	board := func() map[string]Card {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
-		var b struct {
-			Cards    []Card
-			Sections Sections
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
-			t.Fatal(err)
-		}
-		out := map[string]Card{}
-		for _, c := range b.Cards {
-			out[c.ID] = c
-		}
-		for _, l := range b.Sections.ForYou {
-			out["forYou:"+l.ID] = Card{}
-		}
-		return out
-	}
-	if b := board(); b["preview-ready"].Ask == nil || b["preview-ready"].Ask.Kind != askReady {
-		t.Fatalf("the Ready sample is not finished work: %+v", b["preview-ready"].Ask)
-	}
-	for _, tc := range []struct{ id, body, stage string }{
-		{"preview-zach", `{"id":"preview-zach","choice":"no"}`, "plan"},
-		{"preview-ready", `{"id":"preview-ready","choice":"change","message":"Make Drop red"}`, "building"},
-	} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/choose", strings.NewReader(tc.body))
-		req.Header.Set("X-Factory", "1")
-		h.ServeHTTP(rec, req)
-		if rec.Code != 200 {
-			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
-		}
-		b := board()
-		if _, waiting := b["forYou:"+tc.id]; waiting || b[tc.id].Stage != tc.stage {
-			t.Errorf("%s after %s: stage %q, still for you %v", tc.id, tc.body, b[tc.id].Stage, waiting)
-		}
 	}
 }
 
@@ -368,5 +255,118 @@ func TestPreviewUsageHasDatedHistoryAndEvidence(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/usage/evidence/preview-usage-old", nil))
 	if rec.Code != 200 {
 		t.Fatalf("archived preview evidence: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPreviewSimulatesOnlyFabricatedCardActions(t *testing.T) {
+	h, err := PreviewHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(action, body string, header bool) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/"+action, strings.NewReader(body))
+		if header {
+			req.Header.Set("X-Factory", "1")
+		}
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := request("approve", `{"id":"preview-zach"}`, false); got != 403 {
+		t.Fatalf("no header: %d", got)
+	}
+	if got := request("approve", `{"id":"not-a-fixture"}`, true); got != 404 {
+		t.Fatalf("unknown card: %d", got)
+	}
+	for _, tc := range []struct{ action, body string }{
+		{"approve", `{"id":"preview-zach"}`}, {"send", `{"id":"preview-building","message":"Sample answer"}`},
+		{"stage", `{"id":"preview-building","stage":"design"}`}, {"close", `{"id":"preview-design"}`},
+	} {
+		if got := request(tc.action, tc.body, true); got != 200 {
+			t.Fatalf("%s: %d", tc.action, got)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+	var board struct{ Cards []Card }
+	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
+		t.Fatal(err)
+	}
+	stages := map[string]string{}
+	for _, c := range board.Cards {
+		stages[c.ID] = c.Stage
+	}
+	if stages["preview-zach"] != "building" || stages["preview-building"] != "design" || stages["preview-design"] != "landed" {
+		t.Fatalf("fake changes not reflected: %v", stages)
+	}
+	// the board's shared buttons resolve to the same simulated actions: Land on finished work, Drop
+	if got := request("choose", `{"id":"preview-ready","choice":"land"}`, true); got != 200 {
+		t.Fatalf("choose land: %d", got)
+	}
+	if got := request("choose", `{"id":"preview-ready","choice":"yes"}`, true); got != 400 {
+		t.Errorf("a button the card does not have: %d", got)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+	board.Cards = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &board); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range board.Cards {
+		if c.ID == "preview-ready" && c.Stage != "landing" {
+			t.Errorf("Land on the finished-work card: stage %q", c.Stage)
+		}
+	}
+	for _, a := range []string{"new", "scout", "review", "answer", "land-review", "recommend"} {
+		if got := request(a, `{"id":"preview-plan"}`, true); got != 403 {
+			t.Errorf("unsafe %s: %d", a, got)
+		}
+	}
+}
+
+// No and Change on the sample cards move them where the real send moves them (answerLabels): out of
+// For you, into Working on it.
+func TestPreviewAnswersLeaveForYou(t *testing.T) {
+	h, err := PreviewHandler(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := func() map[string]Card {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
+		var b struct {
+			Cards    []Card
+			Sections Sections
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]Card{}
+		for _, c := range b.Cards {
+			out[c.ID] = c
+		}
+		for _, l := range b.Sections.ForYou {
+			out["forYou:"+l.ID] = Card{}
+		}
+		return out
+	}
+	if b := board(); b["preview-ready"].Ask == nil || b["preview-ready"].Ask.Kind != askReady {
+		t.Fatalf("the Ready sample is not finished work: %+v", b["preview-ready"].Ask)
+	}
+	for _, tc := range []struct{ id, body, stage string }{
+		{"preview-zach", `{"id":"preview-zach","choice":"change","message":"Smaller please"}`, "building"},
+		{"preview-ready", `{"id":"preview-ready","choice":"change","message":"Make Drop red"}`, "building"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/choose", strings.NewReader(tc.body))
+		req.Header.Set("X-Factory", "1")
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
+		}
+		b := board()
+		if _, waiting := b["forYou:"+tc.id]; waiting || b[tc.id].Stage != tc.stage {
+			t.Errorf("%s after %s: stage %q, still for you %v", tc.id, tc.body, b[tc.id].Stage, waiting)
+		}
 	}
 }

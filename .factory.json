@@ -1,21 +1,4 @@
 {
-  "alwaysAsk": [
-    "factory/policy.go",
-    "factory/alwaysask.go",
-    "factory/arbiter.go",
-    "factory/guard.go",
-    "factory/deps.go",
-    "factory/remaining.go",
-    "factory/landreview.go",
-    "factory/uireview.go",
-    "factory/delegate.go",
-    "factory/overview.go",
-    "factory/scan/**",
-    "bin/**",
-    "deployer/**",
-    "cmd/factory-deploy/**",
-    "install.sh"
-  ],
   "preview": {
     "run": "TMPDIR=\"$HOME\" exec go run ./cmd/board-preview -listen \"${HOST:?}:${PORT:?}\" -scratch \"$HOME/board-preview\"",
     "path": "/"

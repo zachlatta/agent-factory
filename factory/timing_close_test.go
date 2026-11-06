@@ -168,7 +168,7 @@ func TestReadStartedBeforeACloseDoesNotUndoIt(t *testing.T) {
 				if ct.asks() != 1 || !ct.ClosedAt.Equal(closeAt) || !ct.doneAt().Equal(closeAt) {
 					t.Fatalf("%s: asks = %d, timing = %+v", when, ct.asks(), ct)
 				}
-				if got := strings.Join(stages(ct), " "); got != "plan zach landed" {
+				if got := strings.Join(stages(ct), " "); got != "building zach landed" {
 					t.Fatalf("%s: stages = %s", when, got)
 				}
 			}

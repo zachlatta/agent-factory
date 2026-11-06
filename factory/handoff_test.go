@@ -22,7 +22,7 @@ func farCard(t *testing.T) (Agent, *Factory, *fakePaseo) {
 	a.WorkspaceID = "ws-1"
 	a.Labels[labelPrefix+labelAgent] = "opus"
 	a.Labels[labelPrefix+labelTier] = "architecture"
-	a.Labels[labelPrefix+labelPlanRounds] = "2"
+	a.Labels[labelPrefix+labelRoundsRequest] = "2"
 	a.Labels[labelPrefix+labelWaitsOn] = "abc1234"
 	a.Labels[gmailThreadLabel] = "thread-1"
 	a.LastError = "Individual quota reached. Resets in 3h."
@@ -48,54 +48,6 @@ func handoffRuns(p *fakePaseo) [][]string {
 		}
 	}
 	return out
-}
-
-func TestHandoffFarResetStartsOpusAlternativeInSameWorkspace(t *testing.T) {
-	a, f, p := farCard(t)
-	if err := f.tickAgent(a, t0); err != nil {
-		t.Fatal(err)
-	}
-	runs := handoffRuns(p)
-	if len(runs) != 1 {
-		t.Fatalf("runs = %v", p.calls)
-	}
-	run := runs[0]
-	joined := strings.Join(run, " ")
-	if runArg(run, "--provider") != "codex/gpt-6.1-sol" {
-		t.Fatalf("Opus failing should go to the best-ranked non-Claude Frontier model: %v", run)
-	}
-	if runArg(run, "--workspace") != "ws-1" || strings.Contains(joined, "--new-workspace") {
-		t.Fatalf("not the same worktree: %v", run)
-	}
-	for _, want := range []string{
-		labelPrefix + labelReplaces + "=old-card", labelPrefix + labelStage + "=building",
-		labelPrefix + labelAgent + "=codex-sol", labelPrefix + labelTier + "=architecture",
-		labelPrefix + labelPlanRounds + "=2", labelPrefix + labelWaitsOn + "=abc1234",
-		labelPrefix + labelAutoReview + "=code", gmailThreadLabel + "=thread-1",
-	} {
-		if !strings.Contains(joined, "--label "+want) {
-			t.Errorf("missing label %s", want)
-		}
-	}
-	if strings.Contains(joined, labelPrefix+labelHandoff) {
-		t.Errorf("hand-off state carried to the replacement: %v", run)
-	}
-	prompt := run[len(run)-1]
-	for _, want := range []string{"Fellow instructions: plan, then build", "PLAN: add the widget", "SMALL FIX: name the widget",
-		"Half the widget is in", "Opus 5.5", "building the approved plan", "do NOT land"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("prompt lacks %q:\n%s", want, prompt)
-		}
-	}
-	if l := p.labels(a.ID); parseHandoff(l[labelHandoff]).Phase != "started" || parseHandoff(l[labelHandoff]).New != "new-agent-1" {
-		t.Fatalf("hand-off state = %v", l)
-	}
-	if p.called("archive", a.ID) || len(p.sent(a.ID)) != 0 {
-		t.Fatal("old agent archived or resumed before the replacement was confirmed")
-	}
-	if l := p.labels(a.ID); l[labelStage] == "zach" || l[labelStuck] != "" {
-		t.Fatal("hand-off sent the card to Zach or marked it stuck")
-	}
 }
 
 func TestHandoffNearResetStillWaits(t *testing.T) {
@@ -386,5 +338,53 @@ func TestFailedHandoffArchivePersistsCompletion(t *testing.T) {
 				t.Fatal("retired predecessor became interrupted without successor")
 			}
 		})
+	}
+}
+
+func TestHandoffFarResetStartsOpusAlternativeInSameWorkspace(t *testing.T) {
+	a, f, p := farCard(t)
+	if err := f.tickAgent(a, t0); err != nil {
+		t.Fatal(err)
+	}
+	runs := handoffRuns(p)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %v", p.calls)
+	}
+	run := runs[0]
+	joined := strings.Join(run, " ")
+	if runArg(run, "--provider") != "codex/gpt-6.1-sol" {
+		t.Fatalf("Opus failing should go to the best-ranked non-Claude Frontier model: %v", run)
+	}
+	if runArg(run, "--workspace") != "ws-1" || strings.Contains(joined, "--new-workspace") {
+		t.Fatalf("not the same worktree: %v", run)
+	}
+	for _, want := range []string{
+		labelPrefix + labelReplaces + "=old-card", labelPrefix + labelStage + "=building",
+		labelPrefix + labelAgent + "=codex-sol", labelPrefix + labelTier + "=architecture",
+		labelPrefix + labelRoundsRequest + "=2", labelPrefix + labelWaitsOn + "=abc1234",
+		labelPrefix + labelAutoReview + "=code", gmailThreadLabel + "=thread-1",
+	} {
+		if !strings.Contains(joined, "--label "+want) {
+			t.Errorf("missing label %s", want)
+		}
+	}
+	if strings.Contains(joined, labelPrefix+labelHandoff) {
+		t.Errorf("hand-off state carried to the replacement: %v", run)
+	}
+	prompt := run[len(run)-1]
+	for _, want := range []string{"Fellow instructions: plan, then build", "PLAN: add the widget", "SMALL FIX: name the widget",
+		"Half the widget is in", "Opus 5.5", "building the proposed solution", "do NOT land"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if l := p.labels(a.ID); parseHandoff(l[labelHandoff]).Phase != "started" || parseHandoff(l[labelHandoff]).New != "new-agent-1" {
+		t.Fatalf("hand-off state = %v", l)
+	}
+	if p.called("archive", a.ID) || len(p.sent(a.ID)) != 0 {
+		t.Fatal("old agent archived or resumed before the replacement was confirmed")
+	}
+	if l := p.labels(a.ID); l[labelStage] == "zach" || l[labelStuck] != "" {
+		t.Fatal("hand-off sent the card to Zach or marked it stuck")
 	}
 }

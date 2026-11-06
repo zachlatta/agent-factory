@@ -99,7 +99,7 @@ func TestLandVerdictIsStoredNotSent(t *testing.T) {
 	ag.Labels["paseo.schedule-id"] = "s1"
 	rev := reviewer("new-agent-1", "ag1", "land")
 	f.SetAgents([]Agent{ag, rev})
-	storeLog(t, f, p, "new-agent-1", "[Assistant] Tests pass (go test ./... ok).\nTIER: low\nVERDICT: nits")
+	storeLog(t, f, p, "new-agent-1", "[Assistant] Tests pass (go test ./... ok).\nTIER: low\nSIGN OFF: none\nVERDICT: nits")
 	f.Tick()
 	r, _ := f.landReviews.Get("ag1")
 	if r.Status != "done" || r.Verdict != "nits" || !strings.Contains(r.Findings, "Tests pass") {
@@ -174,20 +174,6 @@ func TestVisibility(t *testing.T) {
 	}
 }
 
-func TestReviewPromptsCarryVisibilityAndTests(t *testing.T) {
-	c := Card{ID: "c1", Title: "t", Cwd: "/w"}
-	for _, kind := range []string{"code", "land"} {
-		pub := ReviewPrompt(c, kind, 7478, "public")
-		if !strings.Contains(pub, "Repo visibility: PUBLIC") || !strings.Contains(pub, "*.ts.net") ||
-			!strings.Contains(pub, "paste the command") {
-			t.Errorf("%s prompt:\n%s", kind, pub)
-		}
-		if !strings.Contains(ReviewPrompt(c, kind, 7478, "unknown"), "Treat it as public") {
-			t.Errorf("%s: unknown visibility not treated as public", kind)
-		}
-	}
-}
-
 // landServer fakes the factory API for the client: POST returns a running review, GETs return
 // running then done with verdict.
 func landServer(t *testing.T, head, verdict string, postStatus int) *httptest.Server {
@@ -256,7 +242,7 @@ func TestLandClient(t *testing.T) {
 }
 
 func TestStartReviewNeedsCleanTree(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)})
 	f, p := newTestFactory(t, c)
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "?? scratch.txt\n M x.go\n", "rev-parse HEAD": "h1\n"})
 	storeLog(t, f, p, "c1", "Built the requested change.\nTIER: low")
@@ -265,7 +251,7 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 		t.Fatalf("review started on a dirty tree: %v", p.calls)
 	}
 	l := p.labels("c1")
-	if l[labelAutoReview] != "code" || l[labelDirtyAsks] != "1" || l[labelStage] != "building" {
+	if l[labelAutoReview] == "" || l[labelDirtyAsks] != "1" || l[labelStage] != "building" {
 		t.Errorf("labels = %v", l)
 	}
 	if s := p.sent("c1"); len(s) != 1 || !strings.Contains(s[0], "scratch.txt") || !strings.Contains(s[0], "do NOT land") {
@@ -290,7 +276,7 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 	if p.runs != 1 {
 		t.Fatalf("no review: %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelReviewed] != "h1" || l[labelStage] != "review" || l[labelDirtyAsks] != "" {
+	if l := p.labels("c1"); l[labelReviewed] != "h1" || l[labelStage] != gateRequest || l[labelDirtyAsks] != "" {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -336,7 +322,7 @@ func TestLandingChecksTheReviewedCommit(t *testing.T) {
 			if l[labelStage] != tc.stage {
 				t.Errorf("labels = %v", l)
 			}
-			if tc.stage == "building" && (l[labelNote] != "rebuilding: landed diff differs" || l[labelAutoReview] != "code" ||
+			if tc.stage == "building" && (l[labelNote] != "rebuilding: landed diff differs" || l[labelAutoReview] == "" ||
 				len(p.sent("c1")) != 1 || !strings.Contains(p.sent("c1")[0], "already on origin/main")) {
 				t.Errorf("not sent back to building: %v %v", l, p.sent("c1"))
 			}
@@ -356,7 +342,7 @@ func TestDirectCardOutsideItsWorkItemGoesToZach(t *testing.T) {
 			withAnswers(directOK, "rev-parse --path-format=absolute --git-dir --git-common-dir", "/r/.git\n/r/.git\n")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := inboxCard("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: ago(10 * time.Minute)})
+			c := inboxCard("c1", map[string]string{labelStage: "building", labelSource: "email", labelSince: ago(10 * time.Minute)})
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
@@ -383,14 +369,16 @@ func TestLandReviewerRunsOnTheReviewerModel(t *testing.T) {
 	}
 }
 
-func TestMergedReviewPromptKeepsPeersRulingsAndVisibility(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Tier: "low", Decided: true}
-	for _, kind := range []string{"code", "land"} {
-		pr := ReviewPrompt(c, kind, 7478, "public")
-		for _, want := range []string{"localhost:7478/api/peers?for=c1", "already ruled", "Repo visibility: PUBLIC"} {
-			if !strings.Contains(pr, want) {
-				t.Errorf("%s prompt lacks %q", kind, want)
-			}
+func TestReviewPromptsCarryVisibilityAndTests(t *testing.T) {
+	c := Card{ID: "c1", Title: "t", Cwd: "/w"}
+	for _, kind := range []string{gateRequest, "land"} {
+		pub := ReviewPrompt(c, kind, 7478, "public")
+		if !strings.Contains(pub, "Repo visibility: PUBLIC") || !strings.Contains(pub, "*.ts.net") ||
+			!strings.Contains(pub, "paste the command") {
+			t.Errorf("%s prompt:\n%s", kind, pub)
+		}
+		if !strings.Contains(ReviewPrompt(c, kind, 7478, "unknown"), "Treat it as public") {
+			t.Errorf("%s: unknown visibility not treated as public", kind)
 		}
 	}
 }

@@ -152,7 +152,7 @@ func TestBoardPageReviewChipsCollapse(t *testing.T) {
 	// the panel still lists every child and both round counts
 	for _, want := range []string{
 		"kidsHtml(c)",
-		"plan ${c.rounds.plan} · code ${c.rounds.code}",
+		"request ${c.rounds.request} · design ${c.rounds.design} · sign-off ${c.rounds.signoff}",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("panel lost %q", want)
@@ -171,25 +171,16 @@ func TestBoardPageReviewChipsCollapse(t *testing.T) {
 const rv = (kind, status, verdict, archived) => ({role:'reviewer', kind, status, verdict, archived:!!archived});
 const labels = (kids, rounds) => latestReviews(kids).map(k => reviewLabel(k, rounds));
 console.log(JSON.stringify([
-  labels([rv('plan','closed','changes',1), rv('plan','closed','changes',1), rv('plan','closed','nits',1),
-          {role:'subagent', status:'running'}, rv('code','closed','nits',1)], {plan:3, code:1}),
-  labels([rv('plan','closed','changes',1), rv('plan','closed','nits',1), rv('plan','running','')], {plan:2, code:0}),
-  labels([rv('','closed','')], {plan:0, code:0}),
-  labels([rv('plan','closed','approve',1), rv('code','closed','changes',1),
-          {...rv('code','closed','approve',1), lens:'correctness', panel:'2'},
-          {...rv('code','running',''), lens:'architecture', panel:'2'}], {plan:1, code:1}),
-  labels([{...rv('code','closed','approve',1), lens:'correctness', panel:'1'},
-          {...rv('code','closed','changes',1), lens:'architecture', panel:'1'},
-          {...rv('code','closed','approve',1), lens:'ux', panel:'1'},
-          {...rv('code','closed','changes',1), lens:'arbiter', panel:'1'},
-          {...rv('code','running',''), lens:'correctness', panel:'2'},
-          {...rv('code','running',''), lens:'architecture', panel:'2'}], {plan:1, code:1}),
+  labels([rv('request','closed','changes',1), rv('request','closed','nits',1),
+          {role:'subagent', status:'running'}, rv('design','closed','nits',1)], {request:2, design:1}),
+  labels([rv('request','closed','nits',1), rv('request','running','')], {request:1}),
+  labels([rv('signoff','running','')], {}),
 ]));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
-	want := `[["plan round 3: nits","code round 1: nits"],["plan round 3 (running)"],["review"],["plan round 1: approve","correctness round 2: approve","architecture round 2 (running)"],["correctness round 2 (running)","architecture round 2 (running)","phone UX round 1: approve"]]`
+	want := `[["request gate round 2: nits","design gate round 1: nits"],["request gate round 2 (running)"],["sign-off gate round 1 (running)"]]`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("labels = %s, want %s", got, want)
 	}
@@ -318,7 +309,7 @@ func TestBoardPageIdeaRepoPicker(t *testing.T) {
 	for _, want := range []string{
 		`const curRepo = ($('pRepo')&&!fresh) ? $('pRepo').value : (c.repo||'auto');`,
 		`<select id="pRepo" title="Repo where this idea runs">${repoOptions(curRepo)}</select>`,
-		`<select id="pAgent" title="Agent that plans and builds it">${agentOptions(curAg)}</select>`,
+		`<select id="pAgent" title="Agent that builds it">${agentOptions(curAg)}</select>`,
 		`act('approve',{repo:$('pRepo').value, agent:$('pAgent').value, thinking:$('pThinking').value, message:$('pMsg').value})`,
 	} {
 		if !strings.Contains(page, want) {
@@ -418,7 +409,7 @@ const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new 
  assert.equal($('newDlg').open,false); assert.equal($('newStarting').hidden,false);
  assert.match($('newStartingText').textContent,/Starting/);
  assert.equal($('newStartingTitle').textContent,'Test request');
- assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol',thinking:'high'});
+ assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol',thinking:'high',submittedBy:'zach'});
  await $('nGo').onclick(); $('newBtn').onclick();
  assert.equal(calls,1); assert.equal($('newDlg').open,false);
  B={cards:[]}; renderNewSubmission(); assert.equal($('newStarting').hidden,false);

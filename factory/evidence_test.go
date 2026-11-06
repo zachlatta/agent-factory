@@ -53,7 +53,7 @@ func TestEvidenceServing(t *testing.T) {
 	outside := filepath.Join(dir, "outside.png")
 	os.WriteFile(outside, b.Bytes(), 0600)
 	os.Symlink(outside, filepath.Join(evidence, "link.png"))
-	a := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA})
 	a.Cwd = dir
 	f, p := newTestFactory(t)
 	for _, tc := range []struct {
@@ -82,7 +82,7 @@ func TestEvidenceServing(t *testing.T) {
 }
 
 func TestAskRequestAndEvidenceCache(t *testing.T) {
-	a := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t)
 	storeLog(t, f, p, "c1", "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\nBEFORE: before.png\nAFTER: after.png\n\nDetails.")
 	f.SetAgents([]Agent{a})
@@ -109,7 +109,7 @@ func TestAskOriginalRequest(t *testing.T) {
 }
 
 func TestAskFullReport(t *testing.T) {
-	a := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan"})
+	a := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t)
 	report := strings.Repeat("Plan detail. ", 700) + "End of plan."
 	storeLog(t, f, p, a.ID, "[User] go\nDECISION: Go?\nNEEDS FROM ZACH: Choose.\n\n"+report)
@@ -117,25 +117,6 @@ func TestAskFullReport(t *testing.T) {
 	c, _ := f.card(a.ID)
 	if c.Ask.Report != report || len(c.Ask.Detail) > 6100 {
 		t.Fatal("full report missing or email detail changed")
-	}
-}
-
-func TestEvidencePrompts(t *testing.T) {
-	for name, prompt := range map[string]string{
-		"new card": fmt.Sprintf(newCardPrompt, "task", "example/repo", "", tierRules, wholeChangeRule, questionRule),
-		"review":   ReviewPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown"),
-		"arbiter":  ArbiterPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown", "notes", true),
-	} {
-		for _, want := range []string{"BEFORE:", "AFTER:", ".factory-evidence/", "never commit"} {
-			if strings.Count(prompt, want) != 1 {
-				t.Errorf("%s must teach %s once", name, want)
-			}
-		}
-	}
-	for name, prompt := range map[string]string{"reminder": overviewReminder, "side effects": sideEffectMsg} {
-		if strings.Contains(prompt, "BEFORE:") {
-			t.Errorf("%s repeats attachment instructions", name)
-		}
 	}
 }
 
@@ -157,5 +138,23 @@ func TestEvidenceRejectsDirectorySymlinkAndPixels(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".factory-evidence", "before.png"), b.Bytes(), 0600)
 	if _, _, err := readEvidence(dir, "before.png"); err == nil {
 		t.Fatal("accepted over 20 megapixels")
+	}
+}
+
+func TestEvidencePrompts(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"new card": fmt.Sprintf(newCardPrompt, "task", "example/repo", "", wholeChangeRule, questionRule),
+		"review":   ReviewPrompt(Card{ID: "c", Repo: "example/repo"}, "code", 7478, "unknown"),
+	} {
+		for _, want := range []string{"BEFORE:", "AFTER:", ".factory-evidence/", "never commit"} {
+			if strings.Count(prompt, want) != 1 {
+				t.Errorf("%s must teach %s once", name, want)
+			}
+		}
+	}
+	for name, prompt := range map[string]string{"reminder": overviewReminder, "side effects": readyMsg("x")} {
+		if strings.Contains(prompt, "BEFORE:") {
+			t.Errorf("%s repeats attachment instructions", name)
+		}
 	}
 }

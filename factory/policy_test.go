@@ -12,12 +12,9 @@ import (
 )
 
 func TestParseVerdictAndTier(t *testing.T) {
-	text := "[Assistant] looks fine\nTIER: **risky**\nVERDICT: approve\n"
+	text := "[Assistant] looks fine\nTIER: **risky**\nSIGN OFF: none\nVERDICT: approve\n"
 	if got := ParseVerdict(text); got != "approve" {
 		t.Errorf("verdict = %q", got)
-	}
-	if got := ParseTier(text); got != "risky" {
-		t.Errorf("tier = %q", got)
 	}
 	if got := ParseTrack("[User] prompt\nTRACK: direct\nAnything else\nPlan...\nTIER: low"); got != "" {
 		t.Errorf("track mid-text = %q, want empty", got)
@@ -51,64 +48,13 @@ func TestMaxTier(t *testing.T) {
 	}
 }
 
-func TestPlanApprovedLowTierStartsBuild(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "[Assistant] plan is sound\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "[Assistant] Plan ... TIER: low")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelTier] != "low" || l[labelPlanRounds] != "1" {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Plan approved") {
-		t.Errorf("sent = %v", msgs)
-	}
-	if p.labels("r1")[labelApplied] != "1" || !p.called("archive", "r1") {
-		t.Errorf("reviewer not marked applied and archived: %v", p.calls)
-	}
-}
-
-func TestBuilderTierCanRaiseReviewerTier(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "plan: replace the storage layer\nTIER: architecture")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelTier] != "architecture" {
-		t.Errorf("architecture plan should wait for Zach: %v", l)
-	}
-	for _, m := range p.sent("c1") {
-		if strings.Contains(m, "Build it now") {
-			t.Errorf("builder must not be told to build before Zach approves: %v", m)
-		}
-	}
-}
-
-func TestZachApprovesArchitecturePlan(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelTier: "architecture"}))
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelZachPlan] != "approved" || l[labelAutoReview] != "code" || l[labelAwaiting] != "" {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Zach allowed this build") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
 func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	// work the factory started lands after the gates when nothing is on the always-ask list
 	for _, tier := range []string{"low", "risky"} {
-		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: tier, labelPlanRounds: "1", labelReviewed: reviewedSHA}),
-			reviewer("r1", "c1", "code"))
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: tier, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
+			reviewer("r1", "c1", gateSignoff))
 		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nVERDICT: nits")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nSIGN OFF: none\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "landing" {
@@ -120,148 +66,10 @@ func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	}
 }
 
-func TestAllowedBuildStillComesToZachFinished(t *testing.T) {
-	// allowing a build's side effects is not approving the finished work he asked for
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelZachPlan: "approved", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
-		reviewer("r1", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || l[labelAskWhy] != "you asked for it" {
-		t.Errorf("labels = %v", l)
-	}
-}
-
-func TestCodeReviewFindsArchitectureOnLowCard(t *testing.T) {
-	// raised to architecture at code review: the same preview stop before landing
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
-		reviewer("r1", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "it swapped the database\nTIER: architecture\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelTier] != "architecture" || l[labelNote] != readyNote(1) {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("must ask for the preview, not land: %v", msgs)
-	}
-}
-
-func TestUntieredCardGoesToZachAfterReview(t *testing.T) {
-	// a session sent to review by hand: no plan review, no tier; even one the factory started stops
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) || l[labelAskWhy] != "it had no plan review" || l[labelTier] != "low" {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("must not land: %v", msgs)
-	}
-}
-
-func TestHandReviewedCardWaitsForZachAfterRework(t *testing.T) {
-	// a hand-sent card whose first code review asked for changes now has a tier label, but no plan review
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelCodeRounds: "1", labelReviewed: reviewedSHA}),
-		reviewer("r1", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	if l := p.labels("c1"); l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
-		t.Errorf("labels = %v", l)
-	}
-	for _, m := range p.sent("c1") {
-		if strings.Contains(m, "Land it now") {
-			t.Errorf("must not land: %v", m)
-		}
-	}
-}
-
-func TestChangesGoBackUntilReworkCap(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "1"}),
-		reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "[Assistant] - test is missing\nVERDICT: changes")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelCodeRounds] != "2" {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "test is missing") {
-		t.Errorf("findings not sent: %v", msgs)
-	}
-
-	f, p = newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "2"}),
-		reviewer("r1", "c1", "code"))
-	storeLog(t, f, p, "r1", "VERDICT: changes")
-	f.ApplyVerdict(f.agent("r1"))
-	// at the cap an arbiter agent rules, not Zach
-	if l := p.labels("c1"); l[labelStage] != "review" || l[labelNote] != arbiterNote || l[labelArbitrated] != "code" {
-		t.Errorf("at cap: labels = %v", l)
-	}
-	if len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
-		t.Errorf("no arbiter started: %v", p.calls)
-	}
-}
-
-func TestMissingVerdictReplacesReviewerTwiceThenTheArbiterThenStuck(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "review", labelTier: "low"})
-	f, p, m := mailFactory(t, c, reviewer("r1", "c1", "code"))
-	arbiterRuns := func() [][]string { return p.runsWithLabel(labelPrefix + labelLens + "=" + lensArbiter) }
-	steps := []Agent{reviewer("r1", "c1", "code"), reviewer("r2", "c1", "code"), reviewer("r3", "c1", "code"),
-		lensReviewer("a1", "c1", lensArbiter, "solo-code-1"), lensReviewer("a2", "c1", lensArbiter, "solo-code-1")}
-	for n, r := range steps {
-		if n > 0 {
-			f.SetAgents([]Agent{withLabels(c, p.labels("c1")), r})
-		}
-		storeLog(t, f, p, r.ID, "I ran out of time")
-		if err := f.ApplyVerdict(f.agent(r.ID)); err != nil {
-			t.Fatal(err)
-		}
-		l := p.labels("c1")
-		if p.labels(r.ID)[labelApplied] != "1" || !p.called("archive", r.ID) {
-			t.Errorf("%s not marked applied and archived: %v", r.ID, p.calls)
-		}
-		if l[labelStage] != "review" || l[labelCodeRounds] != "" {
-			t.Fatalf("%s: a missing verdict left review or counted a round: %v", r.ID, l)
-		}
-		runs, arb, stuck := len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))), len(arbiterRuns()), ""
-		want := map[int][3]int{0: {1, 0}, 1: {2, 0}, 2: {3, 1}, 3: {4, 2}, 4: {4, 2}}[n]
-		if n == len(steps)-1 {
-			stuck = stuckReview
-		}
-		if runs != want[0] || arb != want[1] || l[labelStuck] != stuck {
-			t.Fatalf("%s: %d reviews (%d arbiters), stuck %q; labels %v", r.ID, runs, arb, l[labelStuck], l)
-		}
-	}
-	prompt := arbiterRuns()[0][len(arbiterRuns()[0])-1]
-	if argLabel(arbiterRuns()[0], labelPanel) != "solo-code-1" || !strings.Contains(prompt, "you are the reviewer that is missing") {
-		t.Errorf("arbiter not told the reviewer is missing: %s", prompt)
-	}
-	if len(p.sent("c1")) != 0 || len(m.sends()) != 0 {
-		t.Errorf("a review that could not finish messaged the builder or emailed Zach: %v %v", p.sent("c1"), m.sends())
-	}
-	stuck := withLabels(c, p.labels("c1"))
-	if ask := BuildBoard([]Agent{stuck}, nil, t0)[0].Ask; ask == nil || ask.Title != "Stuck: "+stuckReview || mailable(ask) {
-		t.Errorf("stuck ask = %+v", ask)
-	}
-
-	// Zach's Re-run starts a fresh review with its replacements reset.
-	f.SetAgents([]Agent{stuck})
-	if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	if l := p.labels("c1"); l[labelStuck] != "" || l[labelReviewerRetries] != "" || len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) != 5 {
-		t.Errorf("rerun: labels %v", l)
-	}
-}
-
 func TestCardBeforeArchivedClosedReviewerStartsOnlyOneReviewer(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.LastActivityAt = t0.Add(-time.Hour)
-	r := reviewer("r1", "c1", "plan")
+	r := reviewer("r1", "c1", gateRequest)
 	r.Status = "closed"
 	r.ArchivedAt = t0.Add(-time.Minute)
 	f, p := newTestFactory(t, c, r)
@@ -272,74 +80,15 @@ func TestCardBeforeArchivedClosedReviewerStartsOnlyOneReviewer(t *testing.T) {
 		t.Fatalf("started %d reviewers in one Tick, want 1: %v", len(runs), p.calls)
 	}
 	l := p.labels("c1")
-	if l[labelStage] != "plan-review" || l[labelReviewerRetries] != "1" {
+	if l[labelStage] != gateRequest || l[labelReviewerRetries] != "1" {
 		t.Errorf("labels = %v", l)
 	}
 }
 
-func TestCheckStuckReplacesMissingReviewer(t *testing.T) {
-	since := ago(10 * time.Minute)
-	for _, tc := range []struct {
-		name  string
-		stage string
-		extra []Agent
-	}{
-		{"archived while running", "plan-review", []Agent{func() Agent {
-			r := reviewer("r1", "c1", "plan")
-			r.Status = "running"
-			r.ArchivedAt = t0.Add(-time.Minute)
-			return r
-		}()}},
-		{"gone from agent list", "review", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: tc.stage, labelSince: since})
-			c.LastActivityAt = t0.Add(-time.Hour)
-			f, p := newTestFactory(t, append([]Agent{c}, tc.extra...)...)
-			f.Tick()
-			l := p.labels("c1")
-			if l[labelStage] != tc.stage || l[labelReviewerRetries] != "1" {
-				t.Fatalf("first stuck check should replace the reviewer in %s: labels = %v", tc.stage, l)
-			}
-			if len(tc.extra) > 0 && p.labels("r1")[labelApplied] != "1" {
-				t.Errorf("archived running reviewer not marked applied: %v", p.labels("r1"))
-			}
-			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
-				t.Fatalf("runs = %d, want 1", len(runs))
-			}
-			// each replacement that disappears too is replaced, up to the cap; then the card is marked stuck
-			for n := 2; n <= reviewerRetryCap+1; n++ {
-				c2 := withLabels(c, p.labels("c1"))
-				c2.Labels[labelPrefix+labelSince] = since
-				f.SetAgents([]Agent{c2})
-				f.Tick()
-			}
-			l = p.labels("c1")
-			if l[labelStuck] != "" || len(p.runsWithLabel(labelPrefix+labelLens+"="+lensArbiter)) != 1 {
-				t.Fatalf("after the replacements the arbiter should review: labels = %v", l)
-			}
-			// arbiters that vanish too: one replacement, then stuck, counted on the card
-			for n := 0; n < 2; n++ {
-				c2 := withLabels(c, p.labels("c1"))
-				c2.Labels[labelPrefix+labelSince] = since
-				f.SetAgents([]Agent{c2})
-				f.Tick()
-			}
-			l = p.labels("c1")
-			if l[labelStage] != tc.stage || l[labelStuck] != stuckReview || l[labelNote] == "stuck" {
-				t.Errorf("after the arbiters: labels = %v", l)
-			}
-			if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != reviewerRetryCap+2 {
-				t.Errorf("runs = %d, want %d", len(runs), reviewerRetryCap+2)
-			}
-		})
-	}
-}
-
 func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.LastActivityAt = t0.Add(-time.Hour)
-	r := reviewer("r1", "c1", "plan")
+	r := reviewer("r1", "c1", gateRequest)
 	f, p := newTestFactory(t, c, r)
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	storeLog(t, f, p, "r1", "Review interrupted before a verdict.")
@@ -356,7 +105,7 @@ func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
 	f.SetAgents([]Agent{withLabels(c, l), rApplied})
 	f.Tick()
 	l = p.labels("c1")
-	if l[labelStage] != "plan-review" || l[labelReviewerRetries] != "2" || l[labelStuck] != "" {
+	if l[labelStage] != gateRequest || l[labelReviewerRetries] != "2" || l[labelStuck] != "" {
 		t.Errorf("after failed auto-rerun, next Tick should start the second replacement: labels = %v", l)
 	}
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 2 {
@@ -365,8 +114,8 @@ func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
 }
 
 func TestVerdictAndDirtyCommitClearReviewerRetries(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelReviewerRetries: "1"})
-	r := reviewer("r1", "c1", "plan")
+	c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelReviewerRetries: "1"})
+	r := reviewer("r1", "c1", gateRequest)
 	f, p := newTestFactory(t, c, r)
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: changes\n- fix x")
@@ -374,16 +123,16 @@ func TestVerdictAndDirtyCommitClearReviewerRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := p.labels("c1")
-	if v, ok := l[labelReviewerRetries]; !ok || v != "" || l[labelStage] != "plan" {
+	if v, ok := l[labelReviewerRetries]; !ok || v != "" || l[labelStage] != "building" {
 		t.Errorf("valid verdict did not clear reviewer retries: %v", l)
 	}
 
 	// Same-pass dirty worktree: ApplyVerdict counts a replacement, then StartReview sees a dirty tree and calls
 	// askToCommit in the same pass. askToCommit must clear the count so the next code review round gets its
 	// own replacements.
-	cDirty := card("c2", map[string]string{labelStage: "review", labelSource: "board"})
+	cDirty := card("c2", map[string]string{labelStage: gateDesign, labelSource: "board"})
 	cDirty.Cwd = "/w/c2"
-	rDirty := reviewer("r2", "c2", "code")
+	rDirty := reviewer("r2", "c2", gateSignoff)
 	f2, p2 := newTestFactory(t, cDirty, rDirty)
 	storeLog(t, f2, p2, "r2", "Review interrupted before a verdict.")
 	f2.GitOut = gitStub(map[string]string{
@@ -409,31 +158,17 @@ func TestApproveLandsOtherwise(t *testing.T) {
 }
 
 func TestTickAppliesFinishedReviewersOnce(t *testing.T) {
-	r := reviewer("r1", "c1", "code")
-	done := reviewer("r2", "c1", "code")
+	r := reviewer("r1", "c1", gateSignoff)
+	done := reviewer("r2", "c1", gateSignoff)
 	done.Labels[labelPrefix+labelApplied] = "1"
-	young := reviewer("r3", "c1", "code")
+	young := reviewer("r3", "c1", gateSignoff)
 	young.CreatedAt = t0.Add(-10 * time.Second)
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low"}), r, done, young)
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelTier: "low"}), r, done, young)
 	storeLog(t, f, p, "r1", "VERDICT: approve")
 	f.Tick()
 	// r2's verdict is not read again (the idle reap archives it); r3 is too young to apply
 	if !p.called("archive", "r1") || p.called("logs", "r2") || p.called("archive", "r3") {
 		t.Errorf("calls = %v", p.calls)
-	}
-}
-
-func TestTickStartsPlanReviewWhenPlannerStops(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
-	f, p := newTestFactory(t, c)
-	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	f.Tick()
-	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
-	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "plan")) {
-		t.Fatalf("plan review not started: %v", p.calls)
-	}
-	if l := p.labels("c1"); l[labelStage] != "plan-review" {
-		t.Errorf("labels = %v", l)
 	}
 }
 
@@ -446,7 +181,7 @@ func TestTickFinishesDirectCardWithoutReview(t *testing.T) {
 		{name: "not on main: told to land again", stage: "", note: "landing its result again", mergeBase: errors.New("exit status 1")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
+			c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)
 			storeLog(t, f, p, "c1", "Emailed Zach the answer and landed the work item.\nTRACK: direct")
@@ -470,7 +205,7 @@ func TestTickFinishesDirectCardWithoutReview(t *testing.T) {
 
 func TestTickWaitsForAgentToActAfterMove(t *testing.T) {
 	// moved 10 s ago, no activity since: the agent has not picked up the message yet
-	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: t0.Add(-10 * time.Second).Format(time.RFC3339)})
+	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: t0.Add(-10 * time.Second).Format(time.RFC3339)})
 	c.LastActivityAt = t0.Add(-time.Hour)
 	f, p := newTestFactory(t, c)
 	f.Tick()
@@ -511,7 +246,7 @@ func TestTickFinishesLanding(t *testing.T) {
 			if l[labelStage] != tc.stage {
 				t.Errorf("labels = %v", l)
 			}
-			if tc.stage == "building" && (l[labelNote] != "rebuilding: landing not verified" || l[labelAutoReview] != "code" ||
+			if tc.stage == "building" && (l[labelNote] != "rebuilding: landing not verified" || l[labelAutoReview] == "" ||
 				len(p.sent("c1")) != 1 || !strings.Contains(p.sent("c1")[0], "Rebase on origin/main")) {
 				t.Errorf("not sent back to building: %v %v", l, p.sent("c1"))
 			}
@@ -537,46 +272,8 @@ func TestTickArchivesFinishedScout(t *testing.T) {
 	}
 }
 
-func TestReviewPromptCarriesRules(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
-	for _, kind := range []string{"plan", "code"} {
-		pr := ReviewPrompt(c, kind, 7478, "unknown")
-		for _, want := range []string{"DIFFERENT agent", "TIER:", "VERDICT:", "Read-only", wholeChangeRule,
-			"Scope: nothing outside the area of the ask", "- Whole change", "A partial change is a blocking finding"} {
-			if !strings.Contains(pr, want) {
-				t.Errorf("%s prompt lacks %q", kind, want)
-			}
-		}
-		if strings.Contains(pr, "unasked-for") || strings.Contains(pr, "no unrelated files") {
-			t.Errorf("%s prompt keeps the old scope rule", kind)
-		}
-	}
-}
-
 // Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
 // ask does not raise the tier; outside it, it is architecture Zach did not ask for.
-func TestWholeChangeRules(t *testing.T) {
-	for _, want := range []string{"one way", "caller, test, doc and README", "no old path", "blocking finding"} {
-		if !strings.Contains(wholeChangeRule, want) {
-			t.Errorf("wholeChangeRule lacks %q", want)
-		}
-	}
-	for _, want := range []string{"Refactoring inside the area of the ask is part of the change and does not raise its tier",
-		"a refactor or cleanup outside the area of the ask"} {
-		if !strings.Contains(strings.Join(strings.Fields(tierRules), " "), want) {
-			t.Errorf("tierRules lacks %q", want)
-		}
-	}
-	if strings.Contains(tierRules, "any refactor") {
-		t.Error("tierRules still makes any refactor architecture")
-	}
-	if !strings.Contains(TierHelp["architecture"], "inside the area of the ask") {
-		t.Errorf("TierHelp architecture = %q", TierHelp["architecture"])
-	}
-	if !strings.Contains(ideaRule(7478, "x", ""), "outside the area of the ask") {
-		t.Error("ideaRule still invites follow-ups of the card's own work")
-	}
-}
 
 func contains(xs []string, s string) bool {
 	for _, x := range xs {
@@ -593,8 +290,8 @@ func TestTickSkipsCardArchivedSinceSnapshot(t *testing.T) {
 		name   string
 		labels map[string]string
 	}{
-		{"plan", map[string]string{labelStage: "plan", labelSource: "board", labelSince: since}},
-		{"auto-review", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: since}},
+		{"plan", map[string]string{labelStage: "building", labelSource: "board", labelSince: since}},
+		{"auto-review", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: since}},
 		{"landing", map[string]string{labelStage: "landing", labelSince: since}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -613,7 +310,7 @@ func TestTickSkipsCardArchivedSinceSnapshot(t *testing.T) {
 }
 
 func TestTickSkipsMoveWhenInspectFails(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 	f, p := newTestFactory(t, c)
 	p.inspectErr = errors.New("daemon down")
 	f.Tick()
@@ -624,11 +321,11 @@ func TestTickSkipsMoveWhenInspectFails(t *testing.T) {
 
 func TestVerdictForArchivedTargetIsNotSent(t *testing.T) {
 	for _, snapshot := range []bool{true, false} {
-		c := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"})
+		c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board"})
 		if snapshot {
 			c.ArchivedAt = t0.Add(-time.Minute)
 		}
-		f, p := newTestFactory(t, c, reviewer("r1", "c1", "plan"))
+		f, p := newTestFactory(t, c, reviewer("r1", "c1", gateRequest))
 		p.archived["c1"] = true
 		storeLog(t, f, p, "r1", "[Assistant] fix it\nTIER: risky\nVERDICT: changes")
 		f.Tick()
@@ -648,8 +345,8 @@ func TestVerdictForArchivedTargetIsNotSent(t *testing.T) {
 }
 
 func TestVerdictWaitsWhenInspectFails(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board"}),
+		reviewer("r1", "c1", gateRequest))
 	storeLog(t, f, p, "r1", "VERDICT: approve")
 	p.inspectErr = errors.New("daemon down")
 	if err := f.ApplyVerdict(f.agent("r1")); err == nil {
@@ -662,7 +359,7 @@ func TestVerdictWaitsWhenInspectFails(t *testing.T) {
 
 func TestTickReadsTrackOnlyFromTheAgentsReply(t *testing.T) {
 	// the Fellow prompt has a line "TRACK: direct"; a short plan leaves it in the log tail
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	storeLog(t, f, p, "c1", "[User] You are the Fellow...\nTRACK: direct\nAnything else is the build track\n"+
@@ -672,13 +369,13 @@ func TestTickReadsTrackOnlyFromTheAgentsReply(t *testing.T) {
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
 		t.Fatalf("want a plan review, calls = %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelStage] != "plan-review" {
+	if l := p.labels("c1"); l[labelStage] != gateRequest {
 		t.Errorf("labels = %v", l)
 	}
 }
 
 func TestTickRecordsBaseCommitOfNewBoardCard(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Second)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Second)})
 	c.Status = "running"
 	f, p := newTestFactory(t, c)
 	f.GitOut = func(_ context.Context, dir string, args ...string) (string, error) {
@@ -695,7 +392,7 @@ func TestTickRecordsBaseCommitOfNewBoardCard(t *testing.T) {
 
 func TestDirectCardNeedsACommitOfItsOwn(t *testing.T) {
 	for _, tc := range []struct{ head, stage string }{{"base1", ""}, {"new2", "landed"}} {
-		c := card("c1", map[string]string{labelStage: "plan", labelSource: "board", labelSince: ago(10 * time.Minute), labelBase: "base1"})
+		c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelSince: ago(10 * time.Minute), labelBase: "base1"})
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
 		storeLog(t, f, p, "c1", "Answered Zach and landed the work item.\nTRACK: direct")
@@ -717,13 +414,17 @@ func TestStoppedCardsRecoverInTheirColumn(t *testing.T) {
 		want   string // "nudge", "stuck" or "" (nothing)
 	}{
 		{"building, nothing queued", map[string]string{labelStage: "building", labelSince: since}, nil, "nudge"},
-		{"building, review queued", map[string]string{labelStage: "building", labelAutoReview: "code", labelSince: ago(10 * time.Second)}, nil, ""},
-		{"plan, not a board card", map[string]string{labelStage: "plan", labelSince: since}, nil, "nudge"},
-		{"plan review, reviewer running", map[string]string{labelStage: "plan-review", labelSince: since},
-			[]Agent{func() Agent { r := reviewer("r1", "c1", "plan"); r.Status = "running"; return r }()}, ""},
-		{"code review, no reviewer after the replacements and arbiters", map[string]string{labelStage: "review", labelSince: since, labelReviewerRetries: "4"}, nil, "stuck"},
-		{"code review, reviewer applied after the replacements and arbiters", map[string]string{labelStage: "review", labelSince: since, labelReviewerRetries: "4"},
-			[]Agent{func() Agent { r := reviewer("r1", "c1", "code"); r.Labels[labelPrefix+labelApplied] = "1"; return r }()}, "stuck"},
+		{"building, review queued", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: ago(10 * time.Second)}, nil, ""},
+		{"plan, not a board card", map[string]string{labelStage: "building", labelSince: since}, nil, "nudge"},
+		{"plan review, reviewer running", map[string]string{labelStage: gateRequest, labelSince: since},
+			[]Agent{func() Agent { r := reviewer("r1", "c1", gateRequest); r.Status = "running"; return r }()}, ""},
+		{"code review, no reviewer after the replacements and arbiters", map[string]string{labelStage: gateDesign, labelSince: since, labelReviewerRetries: "4"}, nil, "stuck"},
+		{"code review, reviewer applied after the replacements and arbiters", map[string]string{labelStage: gateDesign, labelSince: since, labelReviewerRetries: "4"},
+			[]Agent{func() Agent {
+				r := reviewer("r1", "c1", gateSignoff)
+				r.Labels[labelPrefix+labelApplied] = "1"
+				return r
+			}()}, "stuck"},
 		{"landing, agent never acted", map[string]string{labelStage: "landing", labelSince: since}, nil, "nudge"},
 		{"building, inside the grace period", map[string]string{labelStage: "building", labelSince: ago(time.Minute)}, nil, ""},
 		{"needs zach already", map[string]string{labelStage: "zach", labelSince: since}, nil, ""},
@@ -816,14 +517,14 @@ func TestNudgesStartAfreshAfterTheCardMoves(t *testing.T) {
 }
 
 func TestReviewPending(t *testing.T) {
-	running := reviewer("r1", "c1", "code")
+	running := reviewer("r1", "c1", gateSignoff)
 	running.Status = "running"
-	unapplied := reviewer("r2", "c1", "code")
-	applied := reviewer("r3", "c1", "code")
+	unapplied := reviewer("r2", "c1", gateSignoff)
+	applied := reviewer("r3", "c1", gateSignoff)
 	applied.Labels[labelPrefix+labelApplied] = "1"
-	gone := reviewer("r4", "c1", "code")
+	gone := reviewer("r4", "c1", gateSignoff)
 	gone.ArchivedAt = t0.Add(-time.Minute) // archived without a verdict
-	other := reviewer("r5", "c2", "code")
+	other := reviewer("r5", "c2", gateSignoff)
 	other.Status = "running"
 	for _, tc := range []struct {
 		name   string
@@ -849,17 +550,6 @@ func TestStuckCheckSkipsCardArchivedSinceSnapshot(t *testing.T) {
 	f.Tick()
 	if l := p.labels("c1"); len(l) != 0 {
 		t.Errorf("labels changed: %v", l)
-	}
-}
-
-func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelSince: ago(10 * time.Minute)}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
-	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != "building" {
-		t.Errorf("labels = %v", l)
 	}
 }
 
@@ -894,246 +584,17 @@ func longReview(t *testing.T, f *Factory, id, of, kind, verdict string, p *fakeP
 	return r
 }
 
-func TestReviewerNotesReachBuilderWhole(t *testing.T) {
-	f, p := newTestFactory(t)
-	c := card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelCodeRounds: "1"})
-	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", "code", "changes", p)})
-	f.ApplyVerdict(f.agent("r1"))
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "FIRST finding") || !strings.Contains(msgs[0], "LAST finding") ||
-		strings.Contains(msgs[0], "VERDICT") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
 func TestReviewPromptTreatsZachsRulingsAsSettled(t *testing.T) {
 	c := Card{ID: "c1", Title: "x", Tier: "low"}
-	if strings.Contains(ReviewPrompt(c, "code", 7478, "unknown"), "already ruled") {
+	if strings.Contains(ReviewPrompt(c, gateDesign, 7478, "unknown"), "already ruled") {
 		t.Error("rule without a ruling")
 	}
 	c.Decided = true
-	if !strings.Contains(ReviewPrompt(c, "code", 7478, "unknown"), "already ruled") {
+	if !strings.Contains(ReviewPrompt(c, gateDesign, 7478, "unknown"), "already ruled") {
 		t.Error("ruling not passed to the reviewer")
 	}
 }
 
-func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
-	planPrompt := fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "", "")
-	for name, s := range map[string]string{
-		"newCardPrompt": planPrompt,
-		"plan rubric":   ReviewPrompt(c, "plan", 7478, "unknown"),
-	} {
-		if !strings.Contains(s, "deploy steps") {
-			t.Errorf("%s lacks deploy steps requirement: %q", name, s)
-		}
-	}
-
-	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
-	dirtyCard, _ := f.card("c-dirty")
-	if err := f.askToCommit(dirtyCard, " M a.go"); err != nil {
-		t.Fatal(err)
-	}
-
-	noLivePrompts := map[string]string{
-		"newCardPrompt":  planPrompt,
-		"buildMsg":       buildMsg("Plan approved.", "(none)"),
-		"reworkMsg plan": reworkMsg("plan", 1, 3, "fix it"),
-		"reworkMsg code": reworkMsg("code", 1, 3, "fix it"),
-		"askToCommit":    p.sent("c-dirty")[0],
-		"arbiter fixes":  arbiterFixMsg("fix it"),
-		"code rubric":    ReviewPrompt(c, "code", 7478, "unknown"),
-	}
-	for name, s := range noLivePrompts {
-		if !strings.Contains(s, "live changes") {
-			t.Errorf("%s lacks no-live-changes rule: %q", name, s)
-		}
-	}
-	for name, s := range map[string]string{
-		"buildMsg":       noLivePrompts["buildMsg"],
-		"reworkMsg code": noLivePrompts["reworkMsg code"],
-		"askToCommit":    noLivePrompts["askToCommit"],
-		"arbiter fixes":  noLivePrompts["arbiter fixes"],
-	} {
-		if !strings.Contains(s, "deploy steps") {
-			t.Errorf("%s does not ask the summary to restate deploy steps: %q", name, s)
-		}
-	}
-	codeRubric := noLivePrompts["code rubric"]
-	for _, want := range []string{"deploy steps", "fails part-way", "run twice"} {
-		if !strings.Contains(codeRubric, want) {
-			t.Errorf("code rubric lacks %q: %q", want, codeRubric)
-		}
-	}
-	for name, s := range map[string]string{
-		"landMsg":        landMsg,
-		"guardedLandMsg": guardedLandMsg,
-	} {
-		for _, want := range []string{"deploy steps", "stop and report", "improvise"} {
-			if !strings.Contains(s, want) {
-				t.Errorf("%s lacks %q: %q", name, want, s)
-			}
-		}
-	}
-}
-
-func TestParseSmallFix(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-	}{
-		{"plain", "- missing sender\nSMALL FIX: add confirmAnswer to factoryMails\nTIER: risky\nVERDICT: changes", "add confirmAnswer to factoryMails"},
-		{"markdown and commas", "**SMALL FIX:** `a, b` and c\nTIER: low\nVERDICT: changes", "a; b and c"},
-		{"placeholder ignored", "SMALL FIX: <one-line summary of the fixes the builder must apply>\nTIER: low\nVERDICT: changes", ""},
-		{"placeholder then real", "SMALL FIX: <summary>\nSMALL FIX: record deliver in factoryMails\n", "record deliver in factoryMails"},
-		{"negative values ignored", "SMALL FIX: none\nSMALL FIX: no\nSMALL FIX: false\nSMALL FIX: n/a", ""},
-		{"mid-line mention ignored", "A line starting with SMALL FIX: lets the plan go to build.\nTIER: low\nVERDICT: changes", ""},
-		{"unprompted aliases ignored", "FIX SIZE: small\nBLOCKER SIZE: small\nVERDICT: changes (small)", ""},
-		{"absent", "- design disagreement\nTIER: risky\nVERDICT: changes", ""},
-	}
-	for _, tc := range cases {
-		if got := ParseSmallFix(tc.in); got != tc.want {
-			t.Errorf("%s: ParseSmallFix = %q, want %q", tc.name, got, tc.want)
-		}
-	}
-}
-
-func TestPlanSmallFixGoesToBuild(t *testing.T) {
-	reviewText := "- confirmAnswer is missing from factoryMails\n" +
-		"SMALL FIX: add confirmAnswer to factoryMails\nBUILD SIDE EFFECTS: none\nTIER: risky\nVERDICT: changes"
-
-	for _, prev := range []string{"0", "1", "2"} {
-		t.Run("previous rounds "+prev, func(t *testing.T) {
-			f, p := newTestFactory(t,
-				card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelPlanRounds: prev}),
-				reviewer("r1", "c1", "plan"))
-			storeLog(t, f, p, "r1", reviewText)
-			storeLog(t, f, p, "c1", "[Assistant] Plan...\nWaits on: abc1234\nTIER: risky")
-			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-				t.Fatal(err)
-			}
-			l := p.labels("c1")
-			if l[labelStage] != "building" || l[labelVerdict] != "plan fixes" || l[labelAutoReview] != "code" ||
-				l[labelPlanRounds] != fmt.Sprint(atoi(prev)+1) || l[labelTier] != "risky" ||
-				l[labelPlanFix] != "add confirmAnswer to factoryMails" || l[labelWaitsOn] != "abc1234" {
-				t.Fatalf("with small fix: labels = %v", l)
-			}
-			msgs := p.sent("c1")
-			if len(msgs) != 1 {
-				t.Fatalf("sent = %v", msgs)
-			}
-			for _, want := range []string{"Apply these fixes, then build", "confirmAnswer is missing", "live changes", "deploy steps"} {
-				if !strings.Contains(msgs[0], want) {
-					t.Errorf("build message lacks %q:\n%s", want, msgs[0])
-				}
-			}
-
-			// Once in building via plan fixes, planPending is false even if the card later visits Needs Zach.
-			built := withLabels(f.agent("c1"), l)
-			stuckInZach := withLabels(built, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "building"})
-			if planPending(stuckInZach) {
-				t.Errorf("planPending should be false after moving to build with plan fixes: %v", stuckInZach.Labels)
-			}
-
-			// Code review must verify every plan fix.
-			f.SetAgents([]Agent{built})
-			cCard, _ := f.card("c1")
-			codePrompt := ReviewPrompt(cCard, "code", 7478, "unknown")
-			for _, want := range []string{"add confirmAnswer to factoryMails", "plan review", "blocking finding"} {
-				if !strings.Contains(codePrompt, want) {
-					t.Errorf("code review prompt lacks %q:\n%s", want, codePrompt)
-				}
-			}
-			planPrompt := ReviewPrompt(cCard, "plan", 7478, "unknown")
-			if !strings.Contains(planPrompt, "SMALL FIX: <") {
-				t.Errorf("plan review prompt does not teach SMALL FIX:\n%s", planPrompt)
-			}
-			if got := ParseSmallFix(planPrompt); got != "" {
-				t.Errorf("plan review prompt matched its own SMALL FIX rule: %q", got)
-			}
-
-			// Code review at the rework cap goes to the arbiter even if SMALL FIX is present.
-			f, p = newTestFactory(t,
-				card("c-code", map[string]string{labelStage: "review", labelSource: "board", labelTier: "risky", labelPlanRounds: "1", labelCodeRounds: "2"}),
-				reviewer("r-code", "c-code", "code"))
-			storeLog(t, f, p, "r-code", reviewText)
-			if err := f.ApplyVerdict(f.agent("r-code")); err != nil {
-				t.Fatal(err)
-			}
-			if l := p.labels("c-code"); l[labelNote] != arbiterNote || len(p.runsWithLabel(labelArg(labelArbiter, "1"))) != 1 {
-				t.Errorf("code review at cap should go to the arbiter: %v", l)
-			}
-		})
-	}
-}
-
-func TestPlanSmallFixWithSideEffectsWaitsForZach(t *testing.T) {
-	for _, prev := range []string{"0", "1", "2"} {
-		t.Run("previous rounds "+prev, func(t *testing.T) {
-			// the reviewer did not rule out build side effects: Zach allows the build first, whatever the tier
-			archReview := "- missing Ordering line for overlapping card\n" +
-				"SMALL FIX: add Ordering line for overlapping card\nTIER: architecture\nVERDICT: changes"
-			base := card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: prev})
-			f, p := newTestFactory(t, base, reviewer("r1", "c1", "plan"))
-			storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-			storeLog(t, f, p, "r1", archReview)
-			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-				t.Fatal(err)
-			}
-			l := p.labels("c1")
-			if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelVerdict] != "plan side effects" ||
-				l[labelNote] != sideEffectNote || l[labelPlanFix] != "add Ordering line for overlapping card" {
-				t.Fatalf("architecture with small fix: labels = %v", l)
-			}
-			msgs := p.sent("c1")
-			if len(msgs) != 1 || !strings.Contains(msgs[0], "add Ordering line") || !strings.Contains(msgs[0], "DECISION:") {
-				t.Errorf("summary message = %v", msgs)
-			}
-
-			// Path A: Zach approves the architecture plan -> goes to building, keeping plan-fix for code review.
-			waiting := withLabels(base, l)
-			f, p = newTestFactory(t, waiting)
-			if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-				t.Fatal(err)
-			}
-			al := p.labels("c1")
-			if al[labelStage] != "building" || al[labelZachPlan] != "approved" || al[labelAutoReview] != "code" {
-				t.Errorf("after Zach approves: labels = %v", al)
-			}
-			if sent := p.sent("c1"); len(sent) != 1 || !strings.Contains(sent[0], "add Ordering line for overlapping card") {
-				t.Errorf("approve build message lacks small fix: %v", sent)
-			}
-			approvedCard := BuildBoard([]Agent{withLabels(waiting, al)}, nil, t0)[0]
-			if !strings.Contains(ReviewPrompt(approvedCard, "code", 7478, "unknown"), "add Ordering line for overlapping card") {
-				t.Error("code review prompt after architecture approve lacks small fix")
-			}
-
-			// Path B: small fix -> Zach replies with changes -> stuck in plan -> approve must build, not land.
-			f, p = newTestFactory(t, waiting)
-			if _, err := f.Act("send", Body{ID: "c1", Message: "shrink the batch size"}); err != nil {
-				t.Fatal(err)
-			}
-			sl := p.labels("c1")
-			if sl[labelStage] != "plan" || sl[labelAwaiting] != "" || sl[labelPlanFix] != "" {
-				t.Fatalf("after Zach reply with changes: labels = %v", sl)
-			}
-			revising := withLabels(waiting, sl)
-			stuckPlan := withLabels(revising, map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})
-			if !planPending(stuckPlan) {
-				t.Fatalf("planPending must stay true when stuck before plan approval: %v", stuckPlan.Labels)
-			}
-			f.SetAgents([]Agent{stuckPlan})
-			if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-				t.Fatal(err)
-			}
-			if got := p.labels("c1"); got[labelStage] != "building" || got[labelZachPlan] != "approved" {
-				t.Errorf("approve on stuck unapproved architecture plan must build, not land: %v", got)
-			}
-		})
-	}
-}
-
-// stopsAfterReply plays a card agent answering Zach's message: it acts a minute after the move the
-// reply made, then stops with reply as its last message.
 func stopsAfterReply(t *testing.T, f *Factory, p *fakePaseo, c Agent, reply string) {
 	c.Labels = maps.Clone(c.Labels)
 	for k, v := range p.labels(c.ID) {
@@ -1145,6 +606,60 @@ func stopsAfterReply(t *testing.T, f *Factory, p *fakePaseo, c Agent, reply stri
 	storeLog(t, f, p, c.ID, reply)
 }
 
+// throwawayConditions are the conditions every plan prompt must carry.
+var throwawayConditions = []string{
+	"the build or its tests start and remove them",
+	"they run on the build machine only",
+	"they use no live data or credentials, not even a temporary copy",
+	"bound to loopback or this host's tailnet IP, never a wildcard or public address",
+	"no public exposure or persistent host configuration changes",
+	"they send no messages and spend no money",
+}
+
+// Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
+// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+
+func TestReviewPromptCarriesRules(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	for _, kind := range []string{gateRequest, gateDesign} {
+		pr := ReviewPrompt(c, kind, 7478, "unknown")
+		for _, want := range []string{"DIFFERENT agent", "VERDICT:", wholeChangeRule, "is a blocking finding"} {
+			if !strings.Contains(pr, want) {
+				t.Errorf("%s prompt lacks %q", kind, want)
+			}
+		}
+		if strings.Contains(pr, "unasked-for") || strings.Contains(pr, "no unrelated files") {
+			t.Errorf("%s prompt keeps the old scope rule", kind)
+		}
+	}
+}
+
+// Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
+// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+
+func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)}),
+		reviewer("r1", "c1", gateRequest))
+	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
+	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	f.Tick()
+	if l := p.labels("c1"); l[labelStage] != gateDesign {
+		t.Errorf("labels = %v", l)
+	}
+}
+
+func TestReviewerNotesReachBuilderWhole(t *testing.T) {
+	f, p := newTestFactory(t)
+	c := card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelRoundsDesign: "1"})
+	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", gateDesign, "changes", p)})
+	f.ApplyVerdict(f.agent("r1"))
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "FIRST finding") || !strings.Contains(msgs[0], "LAST finding") ||
+		strings.Contains(msgs[0], "VERDICT") {
+		t.Errorf("sent = %v", msgs)
+	}
+}
+
 func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, via, reply string
@@ -1153,16 +668,16 @@ func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
 		{"inbox card, email follow-up, no TIER line", "email", "email", "Sent Zach the fixed deck."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "plan", labelSource: tc.source, labelSince: ago(10 * time.Minute)})
+			c := card("c1", map[string]string{labelStage: "building", labelSource: tc.source, labelSince: ago(10 * time.Minute)})
 			c.Labels["gmail-thread"] = "t1"
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)
 			f.Git = func(context.Context, string, ...string) error { return nil }
-			f.GitOut = gitStub(directOK)
+			f.GitOut = gitStub(directOK, map[string]string{"rev-list origin/main..HEAD": ""})
 			if _, err := f.Act("send", Body{ID: "c1", Message: "include the memos from this morning", Via: tc.via}); err != nil {
 				t.Fatal(err)
 			}
-			if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "" {
+			if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
 				t.Fatalf("after the message: labels = %v", l)
 			}
 			stopsAfterReply(t, f, p, c, tc.reply)
@@ -1178,7 +693,7 @@ func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
 }
 
 func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "email", labelSince: ago(10 * time.Minute)})
 	c.Labels["gmail-thread"] = "t1"
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
@@ -1192,7 +707,7 @@ func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
 	if _, err := f.Act("send", Body{ID: "c1", Message: "The file is corrupted", Via: "email"}); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelStage] != "plan" || l[labelAutoReview] != "" {
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
 		t.Fatalf("after the follow-up: labels = %v", l)
 	}
 	stopsAfterReply(t, f, p, c, "Sent Zach a fixed copy.\nTRACK: direct")
@@ -1205,21 +720,7 @@ func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
 	}
 }
 
-func TestDirectCardWithAPlanAfterAFollowUpGetsPlanReview(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "landed", labelSource: "board", labelTrack: "direct", labelSince: ago(10 * time.Minute)})
-	f, p := newTestFactory(t, c)
-	if _, err := f.Act("send", Body{ID: "c1", Message: "now change the code too"}); err != nil {
-		t.Fatal(err)
-	}
-	stopsAfterReply(t, f, p, c, "PLAN\nGoal: ...\nTIER: low")
-	f.Tick()
-	runs := p.runsWithLabel(labelArg(labelReviewOf, "c1"))
-	if len(runs) != 1 || !contains(runs[0], labelArg(labelReviewKind, "plan")) {
-		t.Fatalf("plan review not started: %v", p.calls)
-	}
-}
-
-func TestTickFinishesDirectCardQueuedForCodeReview(t *testing.T) {
+func TestTickFinishesDirectCardQueuedForTheGates(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply string
 		labels      map[string]string
@@ -1227,11 +728,10 @@ func TestTickFinishesDirectCardQueuedForCodeReview(t *testing.T) {
 	}{
 		{"TRACK: direct, no plan review", "Sent Zach the files.\nTRACK: direct", nil, false},
 		{"no TRACK line", "Fixed it and committed.", nil, true},
-		{"a plan with TIER", "PLAN\nGoal: ...\nTIER: low\nTRACK: direct", nil, true},
-		{"its plan passed review", "Sent Zach the files.\nTRACK: direct", map[string]string{labelPlanRounds: "1"}, true},
+		{"it already passed the request gate", "Sent Zach the files.\nTRACK: direct", map[string]string{labelRoundsRequest: "1"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			l := map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: "code", labelSince: ago(10 * time.Minute)}
+			l := map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)}
 			for k, v := range tc.labels {
 				l[k] = v
 			}
@@ -1259,23 +759,50 @@ func TestTickFinishesDirectCardQueuedForCodeReview(t *testing.T) {
 	}
 }
 
+// Only a bare none means building has no side effects; its reason goes on the next line. Anything else on
+// the line, even a reason that sounds safe, is a side effect, so no reading of free text can skip Zach.
+
+// The planner, plan reviewer and plan arbiter all read the same exception: every condition, the naming duty
+// on services a plan adds or runs itself, the short note for an existing suite, and that anything else stops.
+
+func TestNewCardPromptDirectTrackPDWMutation(t *testing.T) {
+	flat := strings.Join(strings.Fields(newCardPrompt), " ")
+	for _, want := range []string{
+		"Direct track: the request is an errand that changes nothing",
+		"Anything else (code, config, infra, deletes, money, bulk sends, or messages to anyone but Zach sent without a PDW review) is the build track:",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("newCardPrompt lacks %q", want)
+		}
+	}
+	if strings.Contains(flat, "messages to anyone but Zach) is the build track") {
+		t.Error("newCardPrompt still has unqualified messages to anyone but Zach on the build track")
+	}
+}
+
+// Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
+// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+
+// Only a bare none means building has no side effects; its reason goes on the next line. Anything else on
+// the line, even a reason that sounds safe, is a side effect, so no reading of free text can skip Zach.
+
+// The planner, plan reviewer and plan arbiter all read the same exception: every condition, the naming duty
+// on services a plan adds or runs itself, the short note for an existing suite, and that anything else stops.
+
 func TestWorktreeNotTmpRule(t *testing.T) {
 	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
-	planPrompt := strings.ReplaceAll(fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "", ""), "<errands>", "desk")
+	planPrompt := strings.ReplaceAll(fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", ""), "<errands>", "desk")
 
 	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
 	dirtyCard, _ := f.card("c-dirty")
-	if err := f.askToCommit(dirtyCard, " M a.go"); err != nil {
+	if err := f.askToCommit(dirtyCard, " M a.go", gateRequest); err != nil {
 		t.Fatal(err)
 	}
 
 	worktreePrompts := map[string]string{
-		"newCardPrompt":  planPrompt,
-		"buildMsg":       buildMsg("Plan approved.", "(none)"),
-		"reworkMsg plan": reworkMsg("plan", 1, 3, "fix it"),
-		"reworkMsg code": reworkMsg("code", 1, 3, "fix it"),
-		"askToCommit":    p.sent("c-dirty")[0],
-		"arbiter fixes":  arbiterFixMsg("fix it"),
+		"newCardPrompt": planPrompt,
+		"reworkMsg":     reworkGateMsg(gateDesign, 1, 3, "fix it"),
+		"askToCommit":   p.sent("c-dirty")[0],
 	}
 	for name, s := range worktreePrompts {
 		for _, want := range []string{"worktree", "/tmp", ".factory-scratch/", ".git/info/exclude", "Never run commands from inside .factory-scratch/", "from the worktree root using its literal absolute path", "Never run cd X && git", "use git -C X"} {
@@ -1292,7 +819,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		"delegate builder":  delegateText(nil, false),
 		"delegate reviewer": delegateText(nil, true),
 		"review plan":       ReviewPrompt(c, "plan", 7478, "unknown"),
-		"review code":       ReviewPrompt(c, "code", 7478, "unknown"),
+		"review code":       ReviewPrompt(c, gateDesign, 7478, "unknown"),
 		"review land":       ReviewPrompt(c, "land", 7478, "unknown"),
 	}
 	for name, s := range sharedScratchPrompts {
@@ -1327,7 +854,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		}
 	}
 
-	codeRubric := ReviewPrompt(c, "code", 7478, "unknown")
+	codeRubric := ReviewPrompt(c, gateDesign, 7478, "unknown")
 	for _, want := range []string{"must not use /tmp for work that belongs in the worktree", "t.TempDir()"} {
 		if !strings.Contains(codeRubric, want) {
 			t.Errorf("code rubric lacks %q:\n%s", want, codeRubric)
@@ -1335,349 +862,56 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 	}
 }
 
-func TestParseSideEffects(t *testing.T) {
-	cases := map[string]string{
-		"BUILD SIDE EFFECTS: none":                                "none",
-		"**BUILD SIDE EFFECTS:** None.":                           "none",
-		"- BUILD SIDE EFFECTS: backfills prod rows\nTIER: risky":  "backfills prod rows",
-		"BUILD SIDE EFFECTS: <none, or what building changes>":    "",
-		"BUILD SIDE EFFECTS: <x>\nplan\nBUILD SIDE EFFECTS: none": "none",
-		"no line here": "",
-	}
-	for in, want := range cases {
-		if got := ParseSideEffects(in); got != want {
-			t.Errorf("ParseSideEffects(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// Only a bare none means building has no side effects; its reason goes on the next line. Anything else on
-// the line, even a reason that sounds safe, is a side effect, so no reading of free text can skip Zach.
-func TestParseSideEffectsOnlyBareNone(t *testing.T) {
-	for _, s := range []string{"none", "None.", "** None.", "`none`", "NOTHING", "n/a", "no"} {
-		if got := ParseSideEffects("BUILD SIDE EFFECTS: " + s + "\nBecause code and tests stay in the worktree."); got != "none" {
-			t.Errorf("%q = %q, want none", s, got)
-		}
-	}
-	effects := []string{
-		// a none with a reason on the same line, even a safe-sounding one
-		"none (code, test and README changes in the worktree only; deploy happens only at landing)",
-		"none; build uses only worktree changes and fake test data.",
-		"none (code and tests in the worktree only; nothing is sent, deployed or written to prod while building)",
-		"none (synthetic fixtures and temporary-directory stores only; no scheduler, host config, receipt or service changes before landing)",
-		"None — code and tests only.",
-		"none: unit tests on fake data",
-		"nothing. Only the worktree changes.",
-		"none. agents get created only after landing",
-		"none. The change is Go code and unit tests only, with read-only queries.",
-		"none (tests use temporary folders; mail stays untouched)",
-		"none (starting nothing; the UI check uses dry-run, which sends no email and answers no prompts)",
-		// reviewers' counterexamples: real effects behind a none
-		"none to prod; sends a test email",
-		"none outside the worktree; writes one row to the live database",
-		"none; sends a test email to Zach",
-		"none. posts a test message to Slack",
-		"none. archives the old agents",
-		"none, once the fix is applied (the dry run moves to landing). As written, the build copies a jar to the phone and runs it.",
-		"none for the plan as written. A reworked plan would write production data.",
-		"none, except one test email to Zach",
-		"none (but it restarts the dev service)",
-		"no production changes during build. Landing will migrate outbox state.",
-		"writes prod rows",
-		"sends a test email",
-		"none. Starts a scheduler on the host and publishes a release.",
-		"none; rotates the test token and kills the old agent",
-		"none; no review needed, sends Zach a test email",
-		"none. Deploys at landing, and posts to Slack now",
-		"none. Not a big change: emails the team",
-		"none. Runs terraform apply on the prod VPC",
-		"none. Calls the Stripe refund API",
-		"none. Opens a pull request and comments on issues",
-		"none. Nothing is written, and it sends a test email",
-		"none. Posts to Slack, not email",
-		"none. Deploys at landing, and posts to Slack",
-		"none. The live factory is untouched, and it posts to Slack now",
-		"none. Sends no email but posts to Slack",
-		"none. Posts to Slack, and deploys at landing",
-		"none. Restarts the live service and mail is untouched",
-		"none. Existing agents get relabelled, and any anchor agent gets created, only after landing.",
-		"none. The schedule prompt rewrites and the backup happen only in the landing step.",
-		"none (the fake-data server runs on scratch state; the live factory, its stores and mail are untouched)",
-		"none. Writes to prod, the dev database stays unchanged",
-		"none. Sends Zach an email, then the rest happens at landing",
-		"none. No new code, just deploys to prod",
-		"none. No schema change, only restarts the dev service",
-		"none. Nothing big happens until it deploys to prod",
-		"none. Changes the DNS records",
-		"none. Overwrites the config on the server",
-		"none. Reboots the phone",
-		"none. Edits the systemd unit and reloads it",
-		"none. Texts Zach a link",
-		"none. Inserts rows into the Postgres database",
-		"none. Texts Zach before the deploy happens at landing",
-		"none. Code and tests, and changes production",
-		"none (sends nothing to prod, but writes the live table)",
-		"none. No schema change, will restart the prod service",
-		"none. No new tests, will change the prod config",
-		"none. No tests, deploy to prod",
-		"none. Nothing faked, the deploy runs on prod",
-		"none. No mocks, changes go to prod",
-		"none. Sends the email before the deploy happens at landing",
-		"none. Writes to prod before it happens at landing",
-		"none. Changes the card store",
-		"none. Changes data",
-		"none. Restarts prod",
-		// a throwaway test service counts as none, but its reason still goes on the next line
-		"none (throwaway database, removed by the tests)",
-		"none. Temporary Postgres in a local container, removed by the tests",
-		"none, only a local test server on fake data",
-	}
-	for _, s := range effects {
-		if got := ParseSideEffects("BUILD SIDE EFFECTS: " + s); got == "none" || got == "" {
-			t.Errorf("%q = %q, want it read as a side effect", s, got)
-		}
-	}
-}
-
-// A reviewer that writes a bare none with its reason on the next line lets the plan build first; the same
-// reason on the line stops it for Zach.
-func TestBareNoneWithReasonBelowBuildsFirst(t *testing.T) {
-	for _, tc := range []struct {
-		review string
-		build  bool
-	}{
-		{"BUILD SIDE EFFECTS: none\nCode, tests and README stay in the worktree; the deploy happens only at landing.", true},
-		{"BUILD SIDE EFFECTS: none (code, tests and README in the worktree; the deploy happens only at landing)", false},
+func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	planPrompt := fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "")
+	for name, s := range map[string]string{
+		"newCardPrompt": planPrompt,
 	} {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-			reviewer("r1", "c1", "plan"))
-		storeLog(t, f, p, "r1", "plan is fine\n"+tc.review+"\nTIER: architecture\nVERDICT: approve")
-		storeLog(t, f, p, "c1", "plan: new page\nBUILD SIDE EFFECTS: none\nBuilding changes only the worktree.\nTIER: architecture")
-		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-			t.Fatal(err)
-		}
-		l := p.labels("c1")
-		if built := l[labelStage] == "building" && l[labelAwaiting] == ""; built != tc.build {
-			t.Errorf("%q: built first = %v, want %v: %v", tc.review, built, tc.build, l)
+		if !strings.Contains(s, "deploy steps") {
+			t.Errorf("%s lacks deploy steps requirement: %q", name, s)
 		}
 	}
-}
 
-func TestArchitecturePlanWithNoBuildSideEffectsBuildsFirst(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "plan is fine\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "plan: new page\nBUILD SIDE EFFECTS: none\nTIER: architecture")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
+	dirtyCard, _ := f.card("c-dirty")
+	if err := f.askToCommit(dirtyCard, " M a.go", gateRequest); err != nil {
 		t.Fatal(err)
 	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelAwaiting] != "" || l[labelTier] != "architecture" {
-		t.Errorf("architecture plan with no build side effects should build: %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Build it now") || !strings.Contains(msgs[0], "before it lands") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
 
-func TestArchitecturePlanStopsEarlyUnlessReviewerFindsNoSideEffects(t *testing.T) {
-	cases := map[string][2]string{
-		"reviewer has no line":       {"TIER: architecture\nVERDICT: approve", "plan\nBUILD SIDE EFFECTS: none\nTIER: architecture"},
-		"reviewer lists one":         {"BUILD SIDE EFFECTS: writes prod rows\nTIER: architecture\nVERDICT: approve", "plan\nBUILD SIDE EFFECTS: none"},
-		"builder lists one":          {"BUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: approve", "plan\nBUILD SIDE EFFECTS: sends a test email\nTIER: architecture"},
-		"reviewer none, builder old": {"BUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: nits", "plan\nTIER: architecture"},
+	noLivePrompts := map[string]string{
+		"newCardPrompt": planPrompt,
+		"reworkMsg":     reworkGateMsg(gateDesign, 1, 3, "fix it"),
+		"askToCommit":   p.sent("c-dirty")[0],
+		"code rubric":   ReviewPrompt(c, gateDesign, 7478, "unknown"),
 	}
-	for name, logs := range cases {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-			reviewer("r1", "c1", "plan"))
-		storeLog(t, f, p, "r1", logs[0])
-		storeLog(t, f, p, "c1", logs[1])
-		f.ApplyVerdict(f.agent("r1"))
-		l := p.labels("c1")
-		wantStop := name != "reviewer none, builder old"
-		if stopped := l[labelStage] == "zach" && l[labelAwaiting] == "plan"; stopped != wantStop {
-			t.Errorf("%s: early stop = %v, want %v: %v", name, stopped, wantStop, l)
+	for name, s := range noLivePrompts {
+		if !strings.Contains(s, "live changes") {
+			t.Errorf("%s lacks no-live-changes rule: %q", name, s)
 		}
 	}
-}
-
-// A throwaway test service is only an exception in the wording: the gate still reads the bare none. Named
-// on the next line it builds; listed on the line by the builder or the reviewer it stops for Zach.
-func TestThrowawayTestServiceAtTheGate(t *testing.T) {
-	const below = "BUILD SIDE EFFECTS: none\nThe tests start and remove a temporary Postgres in a local container on fake data; it listens on loopback only.\nTIER: risky"
-	const onLine = "BUILD SIDE EFFECTS: a temporary Postgres in a local container, removed by the tests\nTIER: risky"
-	cases := []struct {
-		name, review, plan string
-		wantBuild          bool
-	}{
-		{"named below the line by both", below + "\nVERDICT: approve", "plan\n" + below, true},
-		{"on the line in the plan", below + "\nVERDICT: approve", "plan\n" + onLine, false},
-		{"on the line in the review", onLine + "\nVERDICT: approve", "plan\n" + below, false},
-	}
-	private := "BUILD SIDE EFFECTS: none\nThe build starts and removes a fake-data test server on this host's tailnet IP, with no live credentials, public exposure, host configuration changes, messages or spending.\nTIER: risky"
-	cases = append(cases, struct {
-		name, review, plan string
-		wantBuild          bool
-	}{"private server below the line", private + "\nVERDICT: approve", private, true})
-	// The gate preserves declared effects; these cases test parsing, not agent judgement.
-	for _, effect := range []string{
-		"temporary test server on the private network",
-		"public test server",
-		"public tunnel to a test server",
-		"dry-run server reading real data on the tailnet",
-		"production writes", "messages sent", "money spent",
+	for name, s := range map[string]string{
+		"reworkMsg code": noLivePrompts["reworkMsg"],
+		"askToCommit":    noLivePrompts["askToCommit"],
 	} {
-		for _, inReview := range []bool{false, true} {
-			plan, review := private, private
-			declared := "BUILD SIDE EFFECTS: " + effect + "\nTIER: risky"
-			if inReview {
-				review = declared
-			} else {
-				plan = declared
-			}
-			cases = append(cases, struct {
-				name, review, plan string
-				wantBuild          bool
-			}{effect, review + "\nVERDICT: approve", plan, false})
+		if !strings.Contains(s, "deploy steps") {
+			t.Errorf("%s does not ask the summary to restate deploy steps: %q", name, s)
 		}
 	}
-	for _, tc := range cases {
-		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-			reviewer("r1", "c1", "plan"))
-		storeLog(t, f, p, "r1", tc.review)
-		storeLog(t, f, p, "c1", tc.plan)
-		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-			t.Fatal(err)
-		}
-		l := p.labels("c1")
-		if tc.wantBuild && l[labelStage] != "building" {
-			t.Errorf("%s: should build: %v", tc.name, l)
-		}
-		if !tc.wantBuild && (l[labelStage] != "zach" || l[labelAwaiting] != "plan") {
-			t.Errorf("%s: should stop at Allow this build?: %v", tc.name, l)
+	codeRubric := noLivePrompts["code rubric"]
+	for _, want := range []string{"deploy steps", "fails part-way", "run twice"} {
+		if !strings.Contains(codeRubric, want) {
+			t.Errorf("code rubric lacks %q: %q", want, codeRubric)
 		}
 	}
-}
-
-// throwawayConditions are the conditions every plan prompt must carry.
-var throwawayConditions = []string{
-	"the build or its tests start and remove them",
-	"they run on the build machine only",
-	"they use no live data or credentials, not even a temporary copy",
-	"bound to loopback or this host's tailnet IP, never a wildcard or public address",
-	"no public exposure or persistent host configuration changes",
-	"they send no messages and spend no money",
-}
-
-// The planner, plan reviewer and plan arbiter all read the same exception: every condition, the naming duty
-// on services a plan adds or runs itself, the short note for an existing suite, and that anything else stops.
-func TestThrowawayTestServiceRuleReachesEveryPlanPrompt(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
-	prompts := map[string]string{
-		"planner":  newCardPrompt,
-		"reviewer": ReviewPrompt(c, "plan", 7478, "unknown"),
-		"arbiter":  ArbiterPrompt(c, "plan", 7478, "unknown", "the last review", false),
-	}
-	wants := append([]string{
-		"local containers, temporary databases and test servers",
-		"A plan that adds or runs such a service itself names it and shows how it meets every condition.",
-		"An existing test suite's own loopback servers that meet these conditions need at most a short note, such as \"the test suite's own loopback servers\".",
-		"Anything else is a side effect, and so is a service the plan adds or runs without every condition shown.",
-		"Write none alone on that line",
-		"Temporary private-network test servers meeting every condition need no separate approval.",
-		"Dry-run servers that read real data still require approval, even on the tailnet.",
-	}, throwawayConditions...)
-	for name, pr := range prompts {
-		flat := strings.Join(strings.Fields(pr), " ")
-		for _, want := range wants {
-			if !strings.Contains(flat, want) {
-				t.Errorf("%s prompt lacks %q", name, want)
+	for name, s := range map[string]string{
+		"landMsg":        landMsg,
+		"guardedLandMsg": guardedLandMsg,
+	} {
+		for _, want := range []string{"deploy steps", "stop and report", "improvise"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s lacks %q: %q", name, want, s)
 			}
 		}
-		if strings.Contains(flat, "nothing at all happens") || strings.Contains(flat, "nothing is reachable from outside") {
-			t.Errorf("%s prompt keeps the old wording", name)
-		}
-	}
-}
-
-// The reviewer checks each condition itself rather than taking the plan's word, and an ordinary test run
-// does not stop a plan.
-func TestPlanReviewerChecksEachThrowawayCondition(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
-	flat := strings.Join(strings.Fields(ReviewPrompt(c, "plan", 7478, "unknown")), " ")
-	for _, want := range []string{
-		"A throwaway test service the plan adds or runs counts as none only if the plan names it and you checked every condition above against its approach. If one fails or is not shown, list it on the line.",
-		"Do not stop a plan for an existing test suite's own loopback servers that meet the conditions.",
-		"Any other answer, or no line, stops it for Zach",
-	} {
-		if !strings.Contains(flat, want) {
-			t.Errorf("plan review prompt lacks %q", want)
-		}
-	}
-	if code := ReviewPrompt(c, "code", 7478, "unknown"); strings.Contains(code, "throwaway test service") {
-		t.Error("the code review prompt has no build gate to apply the exception to")
-	}
-}
-
-func TestArchitectureSmallFixWithNoSideEffectsBuilds(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board", labelTier: "architecture", labelPlanRounds: "2"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "SMALL FIX: add Ordering line\nBUILD SIDE EFFECTS: none\nTIER: architecture\nVERDICT: changes")
-	storeLog(t, f, p, "c1", "plan\nBUILD SIDE EFFECTS: none")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelPlanFix] != "add Ordering line" || l[labelAwaiting] != "" {
-		t.Errorf("labels = %v", l)
-	}
-}
-
-func TestArchitectureCodeApprovedWithoutZachStopsWithPreview(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1", labelReviewed: reviewedSHA}),
-		reviewer("r1", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelNote] != readyNote(1) || l[labelReady] != "1" || l[labelWriting] == "" {
-		t.Errorf("labels = %v", l)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "CHANGED: ") || !strings.Contains(msgs[0], "phone") ||
-		!strings.Contains(msgs[0], "Do not start a server") || strings.Contains(msgs[0], "file-share") ||
-		strings.Contains(msgs[0], "timeout 24h") || !strings.Contains(msgs[0], "DECISION:") || strings.Contains(msgs[0], "Land it now") {
-		t.Errorf("ready message = %v", msgs)
-	}
-
-	// approving the preview lands it; a reply sends it back to building and code review
-	waiting := withLabels(card("c1", map[string]string{labelStage: "review", labelTier: "architecture", labelPlanRounds: "1", labelCodeRounds: "1", labelSource: "board", labelReviewed: reviewedSHA}), l)
-	f, p = newTestFactory(t, waiting)
-	headIs(f, reviewedSHA, nil)
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.labels("c1"); got[labelStage] != "landing" {
-		t.Errorf("approve on preview: %v", got)
-	}
-	f, p = newTestFactory(t, waiting)
-	if _, err := f.Act("send", Body{ID: "c1", Message: "make the chart bigger"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.labels("c1"); got[labelStage] != "building" || got[labelAutoReview] != "code" {
-		t.Errorf("reply on preview: %v", got)
-	}
-}
-
-func TestNewCardPromptDirectTrackPDWMutation(t *testing.T) {
-	flat := strings.Join(strings.Fields(newCardPrompt), " ")
-	for _, want := range []string{
-		"Direct track: the request is an errand that changes no code: a question, suggestions, research, a report or a note for Zach, or a PDW mutation he approves himself (including an email or message to someone other than Zach that is sent only through a PDW mutation he approves, such as gmail.send_email: write the message, queue the mutation, reply to Zach with an Approve button, and end TRACK: direct).",
-		"Anything else (code, config, infra, deletes, money, bulk sends, or messages to anyone but Zach sent without a PDW review) is the build track:",
-	} {
-		if !strings.Contains(flat, want) {
-			t.Errorf("newCardPrompt lacks %q", want)
-		}
-	}
-	if strings.Contains(flat, "messages to anyone but Zach) is the build track") {
-		t.Error("newCardPrompt still has unqualified messages to anyone but Zach on the build track")
 	}
 }

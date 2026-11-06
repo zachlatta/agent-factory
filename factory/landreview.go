@@ -16,7 +16,7 @@ import (
 
 // Landing reviews: a separate agent reviews the diff and the tests before anything lands on main in a
 // git repo, especially a public one. Factory cards get one
-// through their code review. Any other Paseo agent (a scheduled job, say) asks for one with
+// through their gates. Any other Paseo agent (a scheduled job, say) asks for one with
 // POST /api/land-review {"by": "<its PASEO_AGENT_ID>", "why": "..."} once its work is committed, waits
 // on GET /api/land-review/<by>, and lands only on approve or nits for the same HEAD. The `land-review`
 // command (this binary under that name) does both; bin/land and the pre-push hook run it for every
@@ -24,7 +24,7 @@ import (
 //
 // A factory card asks too, and only while it is authorized to land (cardLandBlock, on the board's
 // snapshot and on the card's current agent file and Paseo state). When its HEAD is the commit a
-// completed code review passed (factory.code-approved, which every new review clears), that approval
+// completed sign-off gate passed (factory.code-approved, which every new review clears), that approval
 // is the answer and no reviewer runs. Any other HEAD (a rebase, a conflict fix, a card approved before
 // the marker existed) gets a fresh landing review of the actual candidate; its approval, if the card
 // is still authorized when it finishes, becomes the card's reviewed and approved commit. A card's
@@ -173,7 +173,7 @@ func (f *Factory) startLandReview(b Body) (LandReview, error) {
 	case isCard && head == strings.TrimSpace(a.L(labelReviewed)) && head == strings.TrimSpace(a.L(labelCodeOK)):
 		r := LandReview{By: by, Head: head, Cwd: cwd, Repo: a.Repo, Visibility: f.visibility(cwd), Card: true,
 			Why: trunc(strings.TrimSpace(b.Why), 500), Status: "done", Verdict: "approve", StartedAt: f.Now(), DoneAt: f.Now(),
-			Findings: "HEAD is the commit the card's code review approved for landing: no new review."}
+			Findings: "HEAD is the commit the card's gates approved for landing: no new review."}
 		if err := f.landReviews.put(r, f.Now()); err != nil {
 			return LandReview{}, err
 		}
@@ -188,7 +188,7 @@ func (f *Factory) startLandReview(b Body) (LandReview, error) {
 	}
 	why := trunc(strings.TrimSpace(b.Why), 500)
 	vis := f.visibility(cwd)
-	rid, err := f.runReviewer(c, "land", reviewSpec{}, vis, "Landing review: "+trunc(c.Title, 50), why, head)
+	rid, err := f.runReviewer(c, "land", vis, "Landing review: "+trunc(c.Title, 50), why, head)
 	if err != nil {
 		return LandReview{}, err
 	}
@@ -273,7 +273,7 @@ func cardLandBlock(a Agent) string {
 
 // currentCardLandBlock checks card id from current state, not only the board's snapshot (a Drop, a
 // move or a new review since the last read looks the same there): the snapshot, the card's Paseo agent
-// file and Paseo's archive state must each pass cardLandBlock, and no code or plan reviewer of the card
+// file and Paseo's archive state must each pass cardLandBlock, and no gate reviewer of the card
 // may be pending. It returns the card with its current labels; a failed read blocks.
 func (f *Factory) currentCardLandBlock(id string) (Agent, string) {
 	snap, ok := f.agentOK(id)

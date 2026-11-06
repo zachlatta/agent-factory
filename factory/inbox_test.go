@@ -16,12 +16,13 @@ func inboxCard(id string, labels map[string]string) Agent {
 }
 
 func TestInboxCardWithoutPlanFinishesDirect(t *testing.T) {
+	// no commits of its own: an errand
 	for _, src := range []string{"email", "voice"} {
-		c := inboxCard("c1", map[string]string{labelStage: "plan", labelSource: src, labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
+		c := inboxCard("c1", map[string]string{labelStage: "building", labelSource: src, labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
 		c.Cwd = t.TempDir()
 		f, p := newTestFactory(t, c)
 		f.Git = func(context.Context, string, ...string) error { return nil }
-		f.GitOut = gitStub(directOK)                                                        // no factory.base on inbox cards: the reflog still shows its own commits
+		f.GitOut = gitStub(directOK, map[string]string{"rev-list origin/main..HEAD": ""})   // no factory.base on inbox cards: the reflog still shows its own commits
 		storeLog(t, f, p, "c1", "Replied to Zach with the answer and archived the thread.") // no TRACK or TIER line
 		f.Tick()
 		if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
@@ -33,45 +34,11 @@ func TestInboxCardWithoutPlanFinishesDirect(t *testing.T) {
 	}
 }
 
-func TestInboxCardWithPlanGetsPlanReview(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "plan", labelSource: "email", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
-	f, p := newTestFactory(t, c)
-	storeLog(t, f, p, "c1", "PLAN\nGoal: ...\nTIER: risky")
-	f.Tick()
-	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
-		t.Fatalf("plan review not started: %v", p.calls)
-	}
-}
-
-func TestInboxCardComesToZachThenLandsAndEmails(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "review", labelSource: "email", labelTier: "low", labelPlanRounds: "1",
-		labelReviewed: reviewedSHA})
-	f, p := newTestFactory(t, c, reviewer("r1", "c1", "code"))
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || !isReadyNote(l[labelNote]) {
-		t.Fatalf("he asked for it, so he sees it first: %v", l)
-	}
-	f, p = newTestFactory(t, withLabels(c, l))
-	headIs(f, reviewedSHA, nil)
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], "reply_to_message") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
 func TestBoardCardLandMessageHasNoEmail(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
-		labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+		labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "reply_to_message") {
 		t.Errorf("sent = %v", msgs)
@@ -184,8 +151,8 @@ func TestNewCardRejectsBadInboxFields(t *testing.T) {
 }
 
 func TestFactoryMessagesAreSentUnchanged(t *testing.T) {
-	inbox := inboxCard("c1", map[string]string{labelStage: "plan", labelSource: "email"})
-	board := card("b1", map[string]string{labelStage: "plan", labelSource: "board"})
+	inbox := inboxCard("c1", map[string]string{labelStage: "building", labelSource: "email"})
+	board := card("b1", map[string]string{labelStage: "building", labelSource: "board"})
 	f, p := newTestFactory(t, inbox, board)
 	for _, id := range []string{"c1", "b1"} {
 		if err := f.send(id, "Plan approved. Build it."); err != nil {
@@ -196,6 +163,24 @@ func TestFactoryMessagesAreSentUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxCardWithAResultGetsTheRequestGate(t *testing.T) {
+	c := inboxCard("c1", map[string]string{labelStage: "building", labelSource: "email", labelSince: t0.Add(-10 * time.Minute).Format(time.RFC3339)})
+	f, p := newTestFactory(t, c)
+	storeLog(t, f, p, "c1", "PLAN\nGoal: ...\nTIER: risky")
+	f.Tick()
+	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
+		t.Fatalf("plan review not started: %v", p.calls)
+	}
+}
+
+// An email or voice request started through /api/new keeps what the intake gave it when the card's next
+// stage starts in a fresh agent: Zach's words verbatim, the dispatcher's section, its source, thread
+// and own labels, and the one sub-agent section its first prompt already has.
+
+// An email or voice request started through /api/new keeps what the intake gave it when the card's next
+// stage starts in a fresh agent: Zach's words verbatim, the dispatcher's section, its source, thread
+// and own labels, and the one sub-agent section its first prompt already has.
 
 // An email or voice request started through /api/new keeps what the intake gave it when the card's next
 // stage starts in a fresh agent: Zach's words verbatim, the dispatcher's section, its source, thread
@@ -224,9 +209,9 @@ func TestInboxIntakeCarriesIntoFreshStages(t *testing.T) {
 	plan, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]string{
 		{"type": "text", "text": "PLAN: rename it and keep a redirect\nBUILD SIDE EFFECTS: none\nTIER: low"}}}})
 	writeFile(t, f.cfg.Home+"/.claude/projects/-test/"+testSession("c1")+".jsonl", string(user)+"\n"+string(plan)+"\n")
-	r := reviewer("r1", "c1", "plan")
+	r := reviewer("r1", "c1", gateRequest)
 	f.SetAgents([]Agent{a, r})
-	storeLog(t, f, p, "r1", "plan is sound\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "- fix it\nVERDICT: changes")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}

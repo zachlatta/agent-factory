@@ -307,8 +307,8 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 				continue // finished before timing saw it: nothing to time
 			}
 			t = &CardTiming{Source: timingSource(a), Version: timingVersion, CloseVersion: closeVersion}
-			if c.Stage == "plan" && !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) >= 0 && now.Sub(a.CreatedAt) <= timingFreshCard {
-				t.Events = []TimingEvent{{Stage: "plan", At: a.CreatedAt}}
+			if c.Stage == "building" && !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) >= 0 && now.Sub(a.CreatedAt) <= timingFreshCard {
+				t.Events = []TimingEvent{{Stage: "building", At: a.CreatedAt}}
 			} else {
 				t.Partial = true
 				t.Events = []TimingEvent{{Stage: c.Stage, At: movedAt(a, time.Time{}, now)}}

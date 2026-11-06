@@ -17,7 +17,7 @@ func TestDerive(t *testing.T) {
 		want string
 	}{
 		{"archived", Agent{ArchivedAt: arch, Labels: map[string]string{labelPrefix + labelStage: "building"}}, "landed"},
-		{"label wins", Agent{Status: "running", Labels: map[string]string{labelPrefix + labelStage: "review"}}, "review"},
+		{"label wins", Agent{Status: "running", Labels: map[string]string{labelPrefix + labelStage: gateDesign}}, gateDesign},
 		{"running", Agent{Status: "running"}, "building"},
 		{"unread finish", Agent{Status: "idle", RequiresAttention: true, AttentionReason: "finished"}, "zach"},
 		{"seen and idle", Agent{Status: "idle"}, "landed"},
@@ -43,7 +43,7 @@ func TestBuildBoardFoldsChildren(t *testing.T) {
 	parent := Agent{ID: "p", Title: "parent", Status: "running", LastActivityAt: now, Labels: map[string]string{}}
 	sub := Agent{ID: "s", Title: "sub", Status: "idle", CreatedAt: now.Add(-time.Hour), LastActivityAt: now.Add(-time.Minute),
 		Labels: map[string]string{"paseo.parent-agent-id": "p"}}
-	rev := Agent{ID: "r", Title: "rev", Status: "running", Labels: map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: "p", labelPrefix + labelReviewKind: "code"}}
+	rev := Agent{ID: "r", Title: "rev", Status: "running", Labels: map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: "p", labelPrefix + labelReviewKind: gateRequest}}
 	anchor := Agent{ID: "a", Labels: map[string]string{"role": "mail-anchor"}}
 	sched := Agent{ID: "sc", Title: "Nightly check", Status: "running", LastActivityAt: now, Labels: map[string]string{"paseo.schedule-id": "x"}}
 	cards := BuildBoard([]Agent{parent, sub, rev, anchor, sched}, nil, now)

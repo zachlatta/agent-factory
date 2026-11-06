@@ -2,7 +2,6 @@ package factory
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -48,23 +47,10 @@ func TestParseWaitsOn(t *testing.T) {
 	}
 }
 
-func TestPlanApprovalRecordsWaitsOn(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001\nTIER: low")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	if l := p.labels("c1"); l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "" || l[labelStage] != "building" {
-		t.Errorf("labels = %v", l)
-	}
-}
-
 func TestRevisedPlanWithoutWaitsOnClearsIt(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board",
-		labelWaitsOn: "d0e0001", labelWaitsDone: "1", labelWaitsBefore: "build"}), reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board",
+		labelWaitsOn: "d0e0001", labelWaitsDone: "1", labelWaitsBefore: "build"}), reviewer("r1", "c1", gateRequest))
+	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[User] revise\nThe revised plan, no dependency.\nTIER: low")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelWaitsOn] != "" || l[labelWaitsDone] != "" || l[labelWaitsBefore] != "" {
@@ -82,7 +68,7 @@ func dep(stage string, archived bool) Agent {
 }
 
 func heldCard(extra map[string]string) Agent {
-	l := map[string]string{labelStage: "landing", labelTier: "low", labelPlanRounds: "1", labelWaitsOn: "d0e0001",
+	l := map[string]string{labelStage: "landing", labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
 		labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)}
 	for k, v := range extra {
 		l[k] = v
@@ -91,10 +77,10 @@ func heldCard(extra map[string]string) Agent {
 }
 
 func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"), dep("building", false))
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff), dep("building", false))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -109,9 +95,9 @@ func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
 
 func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 	for name, d := range map[string]Agent{"landed": dep("landed", true), "marked": {}} {
-		labels := map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1", labelWaitsOn: "d0e0001",
+		labels := map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
 			labelReviewed: reviewedSHA}
-		agents := []Agent{reviewer("r1", "c1", "code")}
+		agents := []Agent{reviewer("r1", "c1", gateSignoff)}
 		if name == "marked" {
 			labels[labelWaitsDone] = "1" // landed long ago: no longer in the list
 		} else {
@@ -119,7 +105,7 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 		}
 		f, p := newTestFactory(t, append(agents, idea("c1", labels))...)
 		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "landing" || l[labelHeld] != "" {
 			t.Errorf("%s: labels = %v", name, l)
@@ -131,10 +117,10 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 }
 
 func TestHeldCardWithUIFeedbackIsToldToWait(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: "review", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", "code"), dep("review", false))
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff), dep(gateDesign, false))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], "the button is small") ||
@@ -147,7 +133,7 @@ func TestHeldCardWaitsWhileDependencyInFlight(t *testing.T) {
 	// it got the feedback message, replied and stopped: still nothing to do, not a landing to verify
 	c := heldCard(nil)
 	c.LastActivityAt = t0.Add(-5 * time.Minute)
-	f, p := newTestFactory(t, c, dep("review", false))
+	f, p := newTestFactory(t, c, dep(gateDesign, false))
 	gitCalls := 0
 	f.Git = func(_ context.Context, _ string, _ ...string) error { gitCalls++; return nil }
 	f.Tick()
@@ -204,13 +190,13 @@ func TestHeldCardRebuildsWhenDependencyDroppedOrMissing(t *testing.T) {
 		f, p, m := mailFactory(t, append(tc.agents, heldCard(nil))...)
 		f.Tick()
 		l := p.labels("c1")
-		if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" || l[labelWaitsOn] != "" ||
+		if l[labelStage] != "building" || l[labelAutoReview] != gateRequest || l[labelHeld] != "" || l[labelWaitsOn] != "" ||
 			l[labelNote] != "rebuilding: d0e0001 "+tc.state {
 			t.Errorf("%s: labels = %v", name, l)
 		}
 		msgs := p.sent("c1")
 		if len(msgs) != 1 || !strings.Contains(msgs[0], tc.says) || !strings.Contains(msgs[0], "rebuild without it") ||
-			!strings.Contains(msgs[0], "Code review runs again") {
+			!strings.Contains(msgs[0], "The gates run again") {
 			t.Errorf("%s: sent = %v", name, msgs)
 		}
 		if len(m.sends()) != 0 {
@@ -454,183 +440,6 @@ func TestFailedLandingDoesNotRecordVerifiedDependency(t *testing.T) {
 	}
 }
 
-func TestPlanApprovalWithWaitsBeforeBuildHoldsWhileDependencyInFlight(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"), dep("building", false))
-	storeLog(t, f, p, "r1", "Check edge case X in foo.go.\nSMALL FIX: guard nil pointer\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: changes")
-	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: none\nTIER: low")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "build" ||
-		l[labelHeld] != "d0e0001" || l[labelAutoReview] != "" || l[labelNote] != "waits on d0e0001 before build" {
-		t.Fatalf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 0 {
-		t.Fatalf("held build was messaged: %v", msgs)
-	}
-	if _, err := os.Stat(f.heldBuildPath("c1")); err != nil {
-		t.Fatalf("held build file missing while held: %v", err)
-	}
-	// While held in building for an hour, it is not nudged or marked stuck.
-	held := withLabels(f.agent("c1"), l)
-	held.Labels[labelPrefix+labelSince] = ago(time.Hour)
-	held.LastActivityAt = t0.Add(-time.Hour)
-	f.SetAgents([]Agent{held, dep("building", false)})
-	f.Tick()
-	if len(p.sent("c1")) != 0 || p.labels("c1")[labelStuck] != "" {
-		t.Fatalf("held before-build card was nudged or marked stuck: sent=%v labels=%v", p.sent("c1"), p.labels("c1"))
-	}
-	// Once the blocker lands, the deferred build message (including full reviewer notes and small fixes) is sent.
-	f.SetAgents([]Agent{held, dep("landed", true)})
-	f.Tick()
-	rl := p.labels("c1")
-	if rl[labelStage] != "building" || rl[labelHeld] != "" || rl[labelAutoReview] != "code" || rl[labelWaitsDone] != "1" ||
-		rl[labelNote] != "building: d0e0001 landed" {
-		t.Fatalf("release labels = %v", rl)
-	}
-	if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {
-		t.Fatalf("held build file not removed after release: %v", err)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "Card d0e0001, which this card waited on before building, has landed") ||
-		!strings.Contains(msgs[0], "git fetch origin main && git rebase origin/main") ||
-		!strings.Contains(msgs[0], "The plan review found only small, concrete blocking fixes") ||
-		!strings.Contains(msgs[0], "Check edge case X in foo.go.") || !strings.Contains(msgs[0], "guard nil pointer") {
-		t.Fatalf("release sent = %v", msgs)
-	}
-}
-
-func TestPlanApprovalWithWaitsBeforeBuildStartsWhenDependencyAlreadyLanded(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"), dep("landed", true))
-	storeLog(t, f, p, "r1", "Looks good.\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: none\nTIER: low")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != "code" || l[labelWaitsDone] != "1" {
-		t.Fatalf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "Build it now, as planned.") {
-		t.Fatalf("sent = %v", msgs)
-	}
-}
-
-func TestPlanApprovalWithWaitsBeforeBuildAndSideEffectsWaitsForZachThenHolds(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"), dep("building", false))
-	storeLog(t, f, p, "r1", "SMALL FIX: add timeout\nBUILD SIDE EFFECTS: sends test email\nTIER: low\nVERDICT: changes")
-	storeLog(t, f, p, "c1", "[User] write a plan\nThe plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: sends test email\nTIER: low")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "zach" || l[labelAwaiting] != "plan" || l[labelWaitsOn] != "d0e0001" ||
-		l[labelWaitsBefore] != "build" || l[labelPlanFix] != "add timeout" {
-		t.Fatalf("side effect stop labels = %v", l)
-	}
-	if len(p.sent("c1")) != 1 {
-		t.Fatalf("expected side effect stop prompt, got %v", p.sent("c1"))
-	}
-	stopped := withLabels(f.agent("c1"), l)
-	f.SetAgents([]Agent{stopped, dep("building", false)})
-	if _, err := f.Act("approve", Body{ID: "c1", Message: "1A: use staging"}); err != nil {
-		t.Fatal(err)
-	}
-	al := p.labels("c1")
-	if al[labelStage] != "building" || al[labelHeld] != "d0e0001" || al[labelAutoReview] != "" ||
-		al[labelZachPlan] != "approved" || al[labelHeldApproved] == "" || al[labelNote] != "waits on d0e0001 before build" {
-		t.Fatalf("approve labels = %v", al)
-	}
-	if al[labelPlanFix] != "add timeout" {
-		t.Fatalf("approve overwrote labelPlanFix: %q", al[labelPlanFix])
-	}
-	if len(p.sent("c1")) != 1 {
-		t.Fatalf("approve messaged held build before blocker landed: %v", p.sent("c1"))
-	}
-	held := withLabels(stopped, al)
-	f.SetAgents([]Agent{held, dep("landed", true)})
-	f.Tick()
-	rl := p.labels("c1")
-	if rl[labelHeld] != "" || rl[labelHeldApproved] != "" || !labelSent(rl, labelHeldApproved) ||
-		rl[labelAutoReview] != "code" || rl[labelWaitsDone] != "1" {
-		t.Fatalf("release labels = %v", rl)
-	}
-	msgs := p.sent("c1")
-	if len(msgs) != 2 || !strings.Contains(msgs[1], "Zach allowed this build.") ||
-		!strings.Contains(msgs[1], "1A: use staging") || !strings.Contains(msgs[1], "add timeout") {
-		t.Fatalf("release sent = %v", msgs)
-	}
-}
-
-func TestHeldBeforeBuildDroppedOrMissingDependencyUsesBeforeBuildWording(t *testing.T) {
-	for name, tc := range map[string]struct {
-		agents []Agent
-		state  string
-		says   string
-	}{
-		"dropped": {[]Agent{dep("building", true)}, depDropped, "was dropped"},
-		"missing": {nil, depMissing, "is not on the board"},
-	} {
-		c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelPlanRounds: "1",
-			labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
-		f, p, m := mailFactory(t, append(tc.agents, c)...)
-		if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "Check X.")); err != nil {
-			t.Fatal(err)
-		}
-		f.Tick()
-		l := p.labels("c1")
-		if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" ||
-			l[labelWaitsOn] != "" || l[labelWaitsBefore] != "" || l[labelNote] != "rebuilding: d0e0001 "+tc.state {
-			t.Errorf("%s: labels = %v", name, l)
-		}
-		msgs := p.sent("c1")
-		if len(msgs) != 1 || !strings.Contains(msgs[0], tc.says) ||
-			!strings.Contains(msgs[0], "which your approved plan waited on before building") ||
-			!strings.Contains(msgs[0], "Nothing is built yet") || !strings.Contains(msgs[0], "Check X.") ||
-			strings.Contains(msgs[0], "say so and change nothing") || strings.Contains(msgs[0], "Code review runs again") {
-			t.Errorf("%s: sent = %v", name, msgs)
-		}
-		if len(m.sends()) != 0 {
-			t.Errorf("%s: emailed Zach: %v", name, m.sends())
-		}
-	}
-}
-
-func TestHeldBeforeBuildKeepHoldOnZachReply(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
-	f, p := newTestFactory(t, c, dep("building", false))
-	if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "(none)")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Act("send", Body{ID: "c1", Message: "keep it small"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	answered := withLabels(c, l)
-	if l[labelStage] != "building" || answered.L(labelHeld) != "d0e0001" || l[labelAutoReview] != "" {
-		t.Fatalf("after send labels = %v (held=%q)", l, answered.L(labelHeld))
-	}
-	// Agent answered Zach and stopped while blocker is still in flight: stays held, no code review starts.
-	answered.LastActivityAt = t0.Add(time.Minute)
-	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
-	f.SetAgents([]Agent{answered, dep("building", false)})
-	f.Tick()
-	if len(p.runsWithLabel(labelArg(labelRole, "reviewer"))) != 0 || len(p.sent("c1")) != 1 {
-		t.Fatalf("started review or sent message while still held: calls=%v", p.calls)
-	}
-	// Once blocker lands, build starts.
-	f.SetAgents([]Agent{answered, dep("landed", true)})
-	f.Tick()
-	if rl := p.labels("c1"); rl[labelHeld] != "" || rl[labelAutoReview] != "code" || len(p.sent("c1")) != 2 {
-		t.Fatalf("after blocker landed: labels=%v sent=%v", rl, p.sent("c1"))
-	}
-}
-
 func TestLandingHeldCardMovedByHandToBuildingIsNotTreatedAsBeforeBuildHold(t *testing.T) {
 	c := heldCard(map[string]string{labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t, c, dep("building", false))
@@ -648,54 +457,10 @@ func TestLandingHeldCardMovedByHandToBuildingIsNotTreatedAsBeforeBuildHold(t *te
 	}
 }
 
-func TestArbiterAndSettledPlanStopsKeepBeforeBuildHold(t *testing.T) {
-	plan := "The plan.\nWaits on: d0e0001 before build\nBUILD SIDE EFFECTS: none\nTIER: low"
-	for name, stop := range map[string]func(*testing.T, *Factory, *fakePaseo){
-		"arbiter escalate": func(t *testing.T, f *Factory, _ *fakePaseo) {
-			if err := f.applyArbiter(f.agent("c1"), "plan", "escalate", "Zach should decide.", "low", plan, plan, map[string]string{}); err != nil {
-				t.Fatal(err)
-			}
-		},
-		"arbiter changes without fixes": func(t *testing.T, f *Factory, _ *fakePaseo) {
-			if err := f.applyArbiter(f.agent("c1"), "plan", "changes", "Still needs rethinking.", "low", plan, plan, map[string]string{}); err != nil {
-				t.Fatal(err)
-			}
-		},
-		"arbitrated plan review stop": func(t *testing.T, f *Factory, p *fakePaseo) {
-			c := withLabels(f.agent("c1"), map[string]string{labelPlanRounds: "3", labelArbitrated: "plan"})
-			r := reviewer("r1", "c1", "plan")
-			f.SetAgents([]Agent{c, r, dep("building", false)})
-			storeLog(t, f, p, "r1", "Still disagree.\nBUILD SIDE EFFECTS: none\nTIER: low\nVERDICT: changes")
-			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-				t.Fatal(err)
-			}
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}), dep("building", false))
-			storeLog(t, f, p, "c1", "[User] write a plan\n"+plan)
-			stop(t, f, p)
-			l := p.labels("c1")
-			if l[labelStage] != "zach" || l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "build" {
-				t.Fatalf("after stop: labels = %v", l)
-			}
-			f.SetAgents([]Agent{withLabels(f.agent("c1"), l), dep("building", false)})
-			before := len(p.sent("c1"))
-			if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-				t.Fatal(err)
-			}
-			al := p.labels("c1")
-			if al[labelStage] != "building" || al[labelHeld] != "d0e0001" || al[labelAutoReview] != "" || len(p.sent("c1")) != before {
-				t.Fatalf("after approve: labels = %v sent = %d (want %d)", al, len(p.sent("c1")), before)
-			}
-		})
-	}
-}
-
 func TestSteerKeepsBeforeBuildHold(t *testing.T) {
 	f, p := dupFactory(t, "building", "idle", map[string]string{
 		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001",
-		labelAutoReview: "", labelPlanRounds: "1", labelSince: ago(10 * time.Minute),
+		labelAutoReview: "", labelRoundsRequest: "1", labelSince: ago(10 * time.Minute),
 	})
 	closeDup(t, f)
 	f.tickSteers()
@@ -722,200 +487,11 @@ func (p errSend) Run(ctx context.Context, args ...string) (string, error) {
 	return p.fakePaseo.Run(ctx, args...)
 }
 
-func TestFailedSendOnBeforeBuildReleaseAndDropRetriesAndMissingWorktreeStops(t *testing.T) {
-	for name, blocker := range map[string]Agent{
-		"release": dep("landed", true),
-		"drop":    dep("building", true),
-	} {
-		t.Run(name+" retries after failed send", func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelPlanRounds: "1",
-				labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
-			f, p := newTestFactory(t, c, blocker)
-			if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "MARKER-NOTES")); err != nil {
-				t.Fatal(err)
-			}
-			f.p = errSend{p}
-			f.Tick()
-			if l := p.labels("c1"); (l[labelHeld] != "" && l[labelHeld] != "d0e0001") || l[labelAutoReview] == "code" {
-				t.Fatalf("failed send cleared hold or armed review: %v", l)
-			}
-			if _, err := os.Stat(f.heldBuildPath("c1")); err != nil {
-				t.Fatalf("failed send deleted held build file: %v", err)
-			}
-			f.p = p
-			f.SetAgents([]Agent{labeled(c, p.labels("c1")), blocker})
-			f.Tick()
-			msgs := p.sent("c1")
-			if len(msgs) != 1 || !strings.Contains(msgs[0], "MARKER-NOTES") {
-				t.Fatalf("retry sent = %v", msgs)
-			}
-			if l := p.labels("c1"); l[labelHeld] != "" || l[labelAutoReview] != "code" {
-				t.Fatalf("retry labels = %v", l)
-			}
-			if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {
-				t.Fatalf("held build file left after retry: %v", err)
-			}
-		})
-		t.Run(name+" stops for Zach on missing worktree", func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelPlanRounds: "1",
-				labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
-			f, p := newTestFactory(t, c, blocker)
-			if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "MARKER-NOTES")); err != nil {
-				t.Fatal(err)
-			}
-			f.p = missingCwdSend{p}
-			f.Tick()
-			l := p.labels("c1")
-			if l[labelStage] != "zach" || l[labelHeld] != "" || l[labelAutoReview] != "" {
-				t.Fatalf("missing worktree labels = %v", l)
-			}
-			if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {
-				t.Fatalf("held build file left after worktree stop: %v", err)
-			}
-			stopped := labeled(c, l)
-			if err := f.tickAgent(stopped, f.Now()); err != nil {
-				t.Fatalf("next tickAgent after missing worktree stop: %v", err)
-			}
-		})
-	}
-}
-
-func TestApproveBeforeBuildHoldNeedsWorktree(t *testing.T) {
-	for _, st := range []string{"", "d0e0001"} {
-		l := map[string]string{labelStage: "zach", labelAwaiting: "plan", labelSource: "board",
-			labelVerdict: "plan side effects", labelParked: ago(time.Hour)}
-		if st != "" {
-			l[labelWaitsOn], l[labelWaitsBefore] = st, "build"
-		}
-		c := card("c1", l)
-		c.Status, c.ArchivedAt, c.Cwd = "closed", t0.Add(-time.Hour), t.TempDir()+"/gone"
-		f, p := newTestFactory(t, c, dep("building", false))
-		_, err := f.Act("approve", Body{ID: "c1"})
-		if !errors.Is(err, errWorktreeGone) {
-			t.Errorf("waits-on=%q: err = %v; want %v", st, err, errWorktreeGone)
-		}
-		if len(p.labelUpdates("c1")) != 0 {
-			t.Errorf("waits-on=%q: updated labels on missing worktree: %v", st, p.labels("c1"))
-		}
-	}
-}
-
-func TestDroppingHeldBuildCardRemovesSavedBuildPrompt(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001"})
-	f, _ := newTestFactory(t, c, dep("building", false))
-	if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "(none)")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Act("close", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {
-		t.Fatalf("held build file left after close: %v", err)
-	}
-}
-
-func TestApproveBeforeBuildWhenBlockerAlreadyLandedStartsImmediately(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelSource: "board",
-		labelVerdict: "plan side effects", labelWaitsOn: "d0e0001", labelWaitsBefore: "build"})
-	f, p := newTestFactory(t, c, dep("landed", true))
-	if _, err := f.Act("approve", Body{ID: "c1"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != "code" || l[labelWaitsDone] != "1" {
-		t.Fatalf("labels = %v", l)
-	}
-	if len(p.sent("c1")) != 1 {
-		t.Fatalf("sent = %v", p.sent("c1"))
-	}
-}
-
-func TestPlanSmallFixRuleExcludesWaitsOnBeforeBuild(t *testing.T) {
-	p := ReviewPrompt(Card{ID: "c1", Title: "Card", Repo: "o/r"}, "plan", 7478, "unknown")
-	if strings.Contains(p, "or Waits on: line") {
-		t.Errorf("plan review prompt still lists Waits on: as a small fix:\n%s", p)
-	}
-	if !strings.Contains(p, "not a missing Waits on: <id> before build line") {
-		t.Errorf("plan review prompt does not exclude Waits on: <id> before build from small fixes:\n%s", p)
-	}
-}
-
-func TestBeforeBuildHandMovedToLandingUsesPostBuildDroppedWording(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "landing", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
-	f, p := newTestFactory(t, c, dep("building", true))
-	f.Tick()
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "which your approved plan lands after") ||
-		strings.Contains(msgs[0], "Nothing is built yet") {
-		t.Fatalf("hand-moved landing card got before-build dropped wording: %v", msgs)
-	}
-}
-
-func TestBeforeBuildStageHandoffOnReleaseAndDrop(t *testing.T) {
-	setup := func(t *testing.T, blocker Agent) (*Factory, *fakePaseo) {
-		a := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAgent: "opus",
-			labelTier: "low", labelBase: "base1", labelTitled: "given", labelPlanRounds: "1",
-			labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001",
-			labelVerdict: "plan approve", labelNote: "waits on d0e0001 before build", labelSince: ago(10 * time.Minute)})
-		a.WorkspaceID = "ws-1"
-		f, p := newTestFactory(t, a, blocker)
-		storeLog(t, f, p, a.ID, planLog+"\nWaits on: d0e0001 before build")
-		f.GitOut = gitStub(map[string]string{"log --oneline origin/main..HEAD": "", "diff --stat origin/main...HEAD": ""})
-		if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "MARKER-NOTES")); err != nil {
-			t.Fatal(err)
-		}
-		return f, p
-	}
-
-	t.Run("release carries waits-before to fresh builder", func(t *testing.T) {
-		f, p := setup(t, dep("landed", true))
-		f.Tick()
-		runs := stageRuns(p)
-		if len(runs) != 1 {
-			t.Fatalf("runs = %v", runs)
-		}
-		args := strings.Join(runs[0], " ")
-		for _, want := range []string{
-			"--label " + labelPrefix + labelWaitsBefore + "=build",
-			"--label " + labelPrefix + labelWaitsOn + "=d0e0001",
-			"--label " + labelPrefix + labelWaitsDone + "=1",
-			"--label " + labelPrefix + labelAutoReview + "=code",
-			"MARKER-NOTES",
-		} {
-			if !strings.Contains(args, want) {
-				t.Errorf("fresh builder args missing %q:\n%s", want, args)
-			}
-		}
-		if strings.Contains(args, "--label "+labelPrefix+labelHeld+"=") {
-			t.Errorf("fresh builder carried held label:\n%s", args)
-		}
-	})
-
-	t.Run("drop clears waits-before on fresh builder", func(t *testing.T) {
-		f, p := setup(t, dep("building", true))
-		f.Tick()
-		runs := stageRuns(p)
-		if len(runs) != 1 {
-			t.Fatalf("runs = %v", runs)
-		}
-		args := strings.Join(runs[0], " ")
-		for _, bad := range []string{labelHeld + "=", labelWaitsOn + "=", labelWaitsBefore + "="} {
-			if strings.Contains(args, "--label "+labelPrefix+bad) {
-				t.Errorf("fresh builder carried %s:\n%s", bad, args)
-			}
-		}
-		if !strings.Contains(args, "Nothing is built yet") || !strings.Contains(args, "MARKER-NOTES") {
-			t.Errorf("fresh builder prompt missing drop notes:\n%s", args)
-		}
-	})
-}
-
 func TestBuildingStopWithWaitsBeforeBuildHoldsAndSkipsAskToCommit(t *testing.T) {
 	t.Run("holds while blocker is in flight even with no commits and dirty worktree", func(t *testing.T) {
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: "code", labelSource: "board",
-			labelTier: "low", labelPlanRounds: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
+			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelTier: "low", labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
 		})
 		f, p := newTestFactory(t, c, dep("building", false))
 		f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
@@ -947,14 +523,14 @@ func TestBuildingStopWithWaitsBeforeBuildHoldsAndSkipsAskToCommit(t *testing.T) 
 
 	t.Run("releases immediately when blocker already landed", func(t *testing.T) {
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: "code", labelSource: "board",
-			labelTier: "low", labelPlanRounds: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
+			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelTier: "low", labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
 		})
 		f, p := newTestFactory(t, c, dep("landed", true))
 		storeLog(t, f, p, "c1", "[User] Build it now.\nPaused before editing.\nWaits on: d0e0001 before build")
 		f.Tick()
 		l := p.labels("c1")
-		if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != "code" ||
+		if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != gateRequest ||
 			l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "build" || l[labelWaitsDone] != "1" ||
 			l[labelDirtyAsks] != "" || l[labelNote] != "building: d0e0001 landed" {
 			t.Fatalf("labels = %v", l)
@@ -987,8 +563,8 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			c := card("c1", map[string]string{
-				labelStage: "building", labelAutoReview: "code", labelSource: "board",
-				labelTier: "low", labelPlanRounds: "1", labelSince: ago(5 * time.Minute),
+				labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+				labelTier: "low", labelRoundsRequest: "1", labelSince: ago(5 * time.Minute),
 			})
 			oldDep := card("d0e0001aaaa", map[string]string{
 				labelStage: "building", labelReplacedBy: "d0e0002bbbb",
@@ -1025,7 +601,7 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 			f.SetAgents(nextAgents)
 			f.Tick()
 			rl := p.labels("c1")
-			if rl[labelStage] != "building" || rl[labelHeld] != "" || rl[labelAutoReview] != "code" ||
+			if rl[labelStage] != "building" || rl[labelHeld] != "" || rl[labelAutoReview] != gateRequest ||
 				rl[labelWaitsDone] != "1" || rl[labelNote] != "building: d0e0001 landed" {
 				t.Fatalf("did not release when replacement landed: labels=%v", rl)
 			}
@@ -1037,75 +613,16 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 	}
 }
 
-func TestBuildingStopWaitsBeforeBuildHonoursCardGateAndManualReview(t *testing.T) {
-	t.Run("does not overwrite card Zach already marked Done", func(t *testing.T) {
-		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: "code", labelSource: "board",
-			labelTier: "low", labelPlanRounds: "1",
-		})
-		f, p := newTestFactory(t, c, dep("building", false))
-		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
-		if _, err := f.Act("done", Body{ID: "c1"}); err != nil {
-			t.Fatal(err)
-		}
-		// Simulate a stale tickAgent snapshot still carrying stage=building, auto-review=code.
-		if err := f.tickAgent(c, f.Now()); err != nil {
-			t.Fatal(err)
-		}
-		l := p.labels("c1")
-		if l[labelStage] != "landed" || l[labelHeld] != "" || l[labelWaitsOn] != "" {
-			t.Fatalf("stale tickAgent overwrote Done card: %v", l)
-		}
-	})
-
-	t.Run("waits for unanswered follow-up delivery before holding", func(t *testing.T) {
-		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: "code", labelSource: "board",
-			labelTier: "low", labelPlanRounds: "1",
-		})
-		c.LastActivityAt = t0.Add(-time.Minute)
-		f, p := newTestFactory(t, c, dep("building", false))
-		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
-		f.gate("c1").delivered = t0
-		if err := f.tickAgent(c, f.Now()); err != nil {
-			t.Fatal(err)
-		}
-		l := p.labels("c1")
-		if l[labelHeld] != "" || l[labelWaitsOn] != "" {
-			t.Fatalf("held before builder answered follow-up: %v", l)
-		}
-	})
-
-	t.Run("manual Review action starts review rather than holding", func(t *testing.T) {
-		c := card("c1", map[string]string{
-			labelStage: "building", labelSource: "board", labelTier: "low", labelPlanRounds: "1",
-		})
-		f, p := newTestFactory(t, c, dep("building", false))
-		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
-		if _, err := f.Act("review", Body{ID: "c1"}); err != nil {
-			t.Fatal(err)
-		}
-		l := p.labels("c1")
-		if l[labelStage] != "review" || l[labelHeld] != "" {
-			t.Fatalf("manual Review action held instead of starting review: %v", l)
-		}
-		if revs := p.runsWithLabel(labelArg(labelRole, "reviewer")); len(revs) != 1 {
-			t.Fatalf("expected 1 reviewer from manual Review action, got %d", len(revs))
-		}
-	})
-}
-
 func TestBuildingStopUnreadableSessionWaitsForHistory(t *testing.T) {
 	c := card("c1", map[string]string{
-		labelStage: "building", labelAutoReview: "code", labelSource: "board",
-		labelTier: "low", labelPlanRounds: "1",
+		labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+		labelTier: "low", labelRoundsRequest: "1",
 	})
 	f, p := newTestFactory(t, c, dep("building", false))
 	// No session file stored yet: first tick waits for history and neither holds nor starts review.
 	f.Tick()
 	l := p.labels("c1")
-	if l[labelStage] == "review" || l[labelStage] == "zach" || l[labelHeld] != "" {
+	if l[labelStage] == gateRequest || l[labelStage] == "zach" || l[labelHeld] != "" {
 		t.Fatalf("first tick with unreadable session: labels = %v", l)
 	}
 	if revs := p.runsWithLabel(labelArg(labelRole, "reviewer")); len(revs) != 0 {
@@ -1137,43 +654,12 @@ func TestBuildingStopUnreadableSessionWaitsForHistory(t *testing.T) {
 	})
 }
 
-func TestBuildingStopDoesNotReholdAfterRebuildWithoutDep(t *testing.T) {
-	c := card("c1", map[string]string{
-		labelStage: "building", labelTier: "low", labelPlanRounds: "1",
-		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute),
-	})
-	f, p := newTestFactory(t, c, dep("building", true)) // dropped blocker
-	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
-	if err := f.saveHeldBuild("c1", buildMsg("Plan approved (low tier).", "Check X.")); err != nil {
-		t.Fatal(err)
-	}
-	// First tick drops the wait via rebuildWithoutDep.
-	f.Tick()
-	l := p.labels("c1")
-	if l[labelStage] != "building" || l[labelAutoReview] != "code" || l[labelHeld] != "" ||
-		l[labelWaitsOn] != "" || !strings.HasPrefix(l[labelNote], "rebuilding: d0e0001 ") {
-		t.Fatalf("after rebuildWithoutDep labels = %v", l)
-	}
-	// If the builder stops with the old "Waits on: d0e0001 before build" still in its last reply,
-	// it must not re-hold on d0e0001; it starts code review.
-	rebuilding := withLabels(c, l)
-	rebuilding.LastActivityAt = t0.Add(time.Minute)
-	f.Now = func() time.Time { return t0.Add(2 * time.Minute) }
-	f.SetAgents([]Agent{rebuilding, dep("building", true)})
-	f.Tick()
-	rl := p.labels("c1")
-	if rl[labelHeld] != "" || rl[labelStage] != "review" {
-		t.Fatalf("re-held after rebuildWithoutDep instead of starting review: %v", rl)
-	}
-}
-
 func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 	t.Run("conflicts with unlanded stored wait", func(t *testing.T) {
 		otherDep := card("e0f0002aaaa", map[string]string{labelStage: "building"})
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: "code", labelSource: "board",
-			labelTier: "low", labelPlanRounds: "1", labelWaitsOn: "e0f0002",
+			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
 		})
 		f, p := newTestFactory(t, c, dep("building", false), otherDep)
 		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
@@ -1194,8 +680,8 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 		landedOther := card("e0f0002aaaa", map[string]string{labelStage: "landed", labelLandedVerified: "1"})
 		landedOther.ArchivedAt = t0.Add(-time.Minute)
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: "code", labelSource: "board",
-			labelTier: "low", labelPlanRounds: "1", labelWaitsOn: "e0f0002",
+			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
 		})
 		f, p := newTestFactory(t, c, dep("building", false), landedOther)
 		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
@@ -1208,36 +694,72 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 	})
 }
 
-func TestStageStepMsgAndHeldBuildMsgFromStageHandoff(t *testing.T) {
-	old := card("old1", map[string]string{labelStage: "building", labelReplacedBy: "c1"})
-	old.Status, old.ArchivedAt = "closed", t0.Add(-5*time.Minute)
-	cur := card("c1", map[string]string{
-		labelStage: "building", labelReplaces: "old1", labelTier: "low", labelPlanRounds: "1",
-	})
-	f, _ := newTestFactory(t, old, cur)
-	wantStep := buildMsg("Plan approved by the plan reviewer (low tier).", "- Update foo.go")
-	prompt := stageHandoffMarker + " header\n\n" +
-		"=== Original instructions ===\nSome quoted text mentioning\n=== This step ===\nin an example.\n\n" +
-		"=== This step ===\n" + wantStep + "\n" + f.delegateRule(false)
-
-	if got := stageStepMsg(prompt); got != wantStep {
-		t.Fatalf("stageStepMsg = %q\nwant %q", got, wantStep)
-	}
-	if got := stageStepMsg("Start by reading the start-here skill: x\n\n" + prompt); got != wantStep {
-		t.Fatalf("stageStepMsg with start-here prefix = %q\nwant %q", got, wantStep)
-	}
-	if got := stageStepMsg("ordinary prompt without marker\n=== This step ===\nhello"); got != "" {
-		t.Fatalf("stageStepMsg on non-handoff prompt = %q, want empty", got)
-	}
-
-	// Verify heldBuildMsg uses stageStepMsg for a fresh stage-handoff builder without reading older lineage agents.
-	uLine, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"content": prompt}})
-	aLine, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "Waits on: d0e0001 before build"}}}})
-	writeFile(t, f.cfg.Home+"/.claude/projects/-test/"+testSession("c1")+".jsonl", string(uLine)+"\n"+string(aLine)+"\n")
-	if got := f.heldBuildMsg(f.agent("c1")); got != wantStep {
-		t.Fatalf("heldBuildMsg = %q\nwant %q", got, wantStep)
+func TestBeforeBuildHandMovedToLandingUsesPostBuildDroppedWording(t *testing.T) {
+	c := card("c1", map[string]string{labelStage: "landing", labelTier: "low", labelRoundsRequest: "1",
+		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
+	f, p := newTestFactory(t, c, dep("building", true))
+	f.Tick()
+	msgs := p.sent("c1")
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "which this card lands after") ||
+		strings.Contains(msgs[0], "Nothing is built yet") {
+		t.Fatalf("hand-moved landing card got before-build dropped wording: %v", msgs)
 	}
 }
 
-
-
+func TestFailedSendOnBeforeBuildReleaseAndDropRetriesAndMissingWorktreeStops(t *testing.T) {
+	for name, blocker := range map[string]Agent{
+		"release": dep("landed", true),
+		"drop":    dep("building", true),
+	} {
+		t.Run(name+" retries after failed send", func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelRoundsRequest: "1",
+				labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
+			f, p := newTestFactory(t, c, blocker)
+			if err := f.saveHeldBuild("c1", "Build it. MARKER-NOTES"); err != nil {
+				t.Fatal(err)
+			}
+			f.p = errSend{p}
+			f.Tick()
+			if l := p.labels("c1"); (l[labelHeld] != "" && l[labelHeld] != "d0e0001") || l[labelAutoReview] == gateRequest {
+				t.Fatalf("failed send cleared hold or armed review: %v", l)
+			}
+			if _, err := os.Stat(f.heldBuildPath("c1")); err != nil {
+				t.Fatalf("failed send deleted held build file: %v", err)
+			}
+			f.p = p
+			f.SetAgents([]Agent{labeled(c, p.labels("c1")), blocker})
+			f.Tick()
+			msgs := p.sent("c1")
+			if len(msgs) != 1 || !strings.Contains(msgs[0], "MARKER-NOTES") {
+				t.Fatalf("retry sent = %v", msgs)
+			}
+			if l := p.labels("c1"); l[labelHeld] != "" || l[labelAutoReview] != gateRequest {
+				t.Fatalf("retry labels = %v", l)
+			}
+			if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {
+				t.Fatalf("held build file left after retry: %v", err)
+			}
+		})
+		t.Run(name+" stops for Zach on missing worktree", func(t *testing.T) {
+			c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelRoundsRequest: "1",
+				labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
+			f, p := newTestFactory(t, c, blocker)
+			if err := f.saveHeldBuild("c1", "Build it. MARKER-NOTES"); err != nil {
+				t.Fatal(err)
+			}
+			f.p = missingCwdSend{p}
+			f.Tick()
+			l := p.labels("c1")
+			if l[labelStage] != "zach" || l[labelHeld] != "" || l[labelAutoReview] != "" {
+				t.Fatalf("missing worktree labels = %v", l)
+			}
+			if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {
+				t.Fatalf("held build file left after worktree stop: %v", err)
+			}
+			stopped := labeled(c, l)
+			if err := f.tickAgent(stopped, f.Now()); err != nil {
+				t.Fatalf("next tickAgent after missing worktree stop: %v", err)
+			}
+		})
+	}
+}

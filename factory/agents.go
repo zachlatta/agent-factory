@@ -130,7 +130,18 @@ type planScore struct {
 	w5   int
 }
 
-func usageScore(u AgentUsage, now time.Time) planScore {
+// planCapacityWeight is how much of a provider's real remaining capacity the balancer counts: Opus keeps
+// headroom for every other step of the flow, which runs on it, and Codex for PDW's operations.
+var planCapacityWeight = map[string]float64{"claude": 0.8, "codex": 0.8}
+
+func capacityWeight(provider string) float64 {
+	if w, ok := planCapacityWeight[provider]; ok {
+		return w
+	}
+	return 1
+}
+
+func usageScore(u AgentUsage, now time.Time, weight float64) planScore {
 	windows := decisionUsageWindows(u, now)
 	if len(windows) == 0 {
 		return planScore{tier: 1}
@@ -169,14 +180,14 @@ func usageScore(u AgentUsage, now time.Time) planScore {
 		}
 	}
 	tier := 3
-	eff := w7.RemainingPct
+	eff := float64(w7.RemainingPct) * weight
 	if has5h && w5Pct <= 20 {
 		tier = 2
-		eff = min(eff, w5Pct)
+		eff = min(eff, float64(w5Pct)*weight)
 	}
 	return planScore{
 		tier: tier,
-		pace: float64(eff) - weekLeftPct,
+		pace: eff - weekLeftPct,
 		w7:   w7.RemainingPct,
 		w5:   w5Pct,
 	}
@@ -198,7 +209,7 @@ func rankAgentChoices(statuses map[string]string, usages map[string]AgentUsage, 
 			choice: a,
 			idx:    i,
 			avail:  statuses[p] == "available",
-			score:  usageScore(usages[p], now),
+			score:  usageScore(usages[p], now, capacityWeight(p)),
 		}
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -227,9 +238,13 @@ func rankAgentChoices(statuses map[string]string, usages map[string]AgentUsage, 
 	for i, it := range items {
 		ordered[i] = it.choice
 	}
+	// the builder is any Frontier model: the suggestion is the best-ranked available one
 	def := defaultAgent
-	if len(items) > 0 && items[0].avail {
-		def = items[0].choice.ID
+	for _, it := range items {
+		if it.avail && it.choice.Frontier {
+			def = it.choice.ID
+			break
+		}
 	}
 	return ordered, def
 }
@@ -288,7 +303,7 @@ func pickIdeaAgent(statuses map[string]string, usages map[string]AgentUsage, now
 			low = append(low, fmt.Sprintf("%s %d%%", c.Label, left))
 			continue
 		}
-		if usageScore(u, now).tier > 0 {
+		if usageScore(u, now, capacityWeight(c.providerID())).tier > 0 {
 			return c, ""
 		}
 		if above == nil {

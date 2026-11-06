@@ -80,15 +80,14 @@ func PreviewHandler(root string) (http.Handler, error) {
 		a := Agent{ID: id, Host: "preview", Provider: "claude", SessionID: id,
 			Cwd: "/preview/example/board", Repo: "example/board", Title: stage[1] + ": check the board layout",
 			Status: "idle", CreatedAt: now.Add(-time.Hour), LastActivityAt: now.Add(-time.Minute),
-			Labels: map[string]string{labelPrefix + labelStage: stage[0], labelPrefix + labelTier: "architecture",
-				labelPrefix + labelSource: "board", labelPrefix + labelSeen: strconv.FormatInt(now.Unix(), 10)}}
+			Labels: map[string]string{labelPrefix + labelStage: stage[0], labelPrefix + labelSource: "board", labelPrefix + labelSeen: strconv.FormatInt(now.Unix(), 10)}}
 		request, reply := previewRequest, previewReply
 		if stage[0] == "zach" {
-			// the one question before building: a reviewed plan whose build has a side effect (sideEffectStop)
+			// a decision for Zach: the sign-off gate sent it to him
 			a.Title, request, reply = "Board card list loads faster", previewDecisionRequest, previewDecisionReply
-			a.Labels[labelPrefix+labelAwaiting] = "plan"
-			a.Labels[labelPrefix+labelVerdict] = "plan side effects"
-			a.Labels[labelPrefix+labelNote] = sideEffectNote
+			a.Labels[labelPrefix+labelVerdict] = "signoff approve"
+			a.Labels[labelPrefix+labelNote] = readyNote(1)
+			a.Labels[labelPrefix+labelAskWhy] = "it changes more than you asked for"
 		}
 		if stage[0] == "landing" {
 			a.Labels[labelPrefix+labelHeld] = "preview-zach"
@@ -121,15 +120,15 @@ func PreviewHandler(root string) (http.Handler, error) {
 	delete(ready.Labels, labelPrefix+labelAwaiting)
 	delete(ready.Labels, labelPrefix+labelVerdict)
 	ready.Labels[labelPrefix+labelNote] = readyNote(1)
-	// built after a reviewed plan and one code review, as real finished work is
-	ready.Labels[labelPrefix+labelPlanRounds], ready.Labels[labelPrefix+labelCodeRounds] = "1", "1"
+	// built and through the gates, as real finished work is
+	ready.Labels[labelPrefix+labelRoundsRequest], ready.Labels[labelPrefix+labelRoundsDesign] = "1", "1"
 	agents = append(agents, ready)
 	// Publication uncertainty is a technical stop, never a claim that nothing was published.
 	uncertain := ready
 	uncertain.ID, uncertain.SessionID, uncertain.Title = "preview-unverified", "preview-unverified", "Verify published work"
 	uncertain.Labels = maps.Clone(ready.Labels)
 	uncertain.Labels[labelPrefix+labelNote] = unverifiedReviewNote + "could not read HEAD. The factory could not verify whether the reviewed work was published."
-	uncertain.Labels[labelPrefix+labelStuckFrom] = "review"
+	uncertain.Labels[labelPrefix+labelStuckFrom] = gateDesign
 	if err := writePreviewSession(home, uncertain.Cwd, uncertain.ID, previewRequest, ""); err != nil {
 		return nil, err
 	}
@@ -150,8 +149,8 @@ func PreviewHandler(root string) (http.Handler, error) {
 		return nil, err
 	}
 	asked.Labels = maps.Clone(ready.Labels)
-	delete(asked.Labels, labelPrefix+labelPlanRounds)
-	delete(asked.Labels, labelPrefix+labelCodeRounds)
+	delete(asked.Labels, labelPrefix+labelRoundsRequest)
+	delete(asked.Labels, labelPrefix+labelRoundsDesign)
 	asked.Labels[labelPrefix+labelTrack] = "direct"
 	asked.Labels[labelPrefix+labelNote] = directAskNote("Send the booth form with the larger table?")
 	asked.Labels[labelPrefix+labelDue] = iso(now.Add(10 * time.Hour))
@@ -280,7 +279,7 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 	case "resume", "rerun":
 		a.ArchivedAt = time.Time{}
 		a.Labels[labelPrefix+labelStuck] = ""
-		a.Labels[labelPrefix+labelAutoReview] = "code"
+		a.Labels[labelPrefix+labelAutoReview] = gateRequest
 	case "send":
 		a.ArchivedAt = time.Time{}
 		a.Labels[labelPrefix+labelStuck] = ""
@@ -372,26 +371,25 @@ QUESTION: Should Drop also ask for a reason?
 - No, one extra tap is enough (recommended)
 - Yes, ask for a short reason
 
-TIER: architecture`
+RESULT: code`
 
-// previewReply is a plan in progress on the other stages' cards: nothing is asked of Zach.
+// previewReply is a build in progress on the other stages' cards: nothing is asked of Zach.
 const previewReply = `DECISION: Nothing for you yet.
 OVERVIEW: The board shows one column on a phone, with the cards waiting on you at the top. Long titles wrap instead of scrolling sideways.
-NEEDS FROM ZACH: Nothing now. You see the finished work with a preview before it lands.
+NEEDS FROM ZACH: Nothing.
 
-The plan changes the board page only, and is checked at phone and desktop widths on sample cards.
+This changes the board page only, and is checked at phone and desktop widths on sample cards.
 
-BUILD SIDE EFFECTS: none
-TIER: architecture`
+RESULT: code`
 
 const previewDecisionRequest = "Make the board's card list load faster on a phone."
 
-// previewDecisionReply is a side-effect decision: allow the build to do one thing outside its worktree.
-const previewDecisionReply = `DECISION: Allow this build to restart the test board service once?
-OVERVIEW: Building it restarts the test board (never the live one) to measure how fast the new card list loads. The test board is down for about ten seconds.
-NEEDS FROM ZACH: Approve to build, or say what to change.
+// previewDecisionReply is a sign-off: it changes more than Zach asked for.
+const previewDecisionReply = `DECISION: Land the board rewrite that loads the card list faster?
+OVERVIEW: It loads the card list faster, but rewrites how the board loads cards, which is more than you asked for. Nothing is live yet.
+NEEDS FROM ZACH: Reply yes or land to approve, ask for a change or drop it.
 
-Measuring on a copy instead avoids the restart, but takes longer to set up.`
+A smaller change would speed up only the first load.`
 
 // previewPaseo never starts a process. Session reads normally satisfy logs; the
 // fallback stays synthetic so changes to transcript discovery cannot reach Paseo.

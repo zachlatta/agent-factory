@@ -33,7 +33,7 @@ func dupFactory(t *testing.T, stage, status string, keepLabels map[string]string
 	t.Helper()
 	dup := card(dupID, map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
 	dup.Title = "Archive idle agents"
-	rev := reviewer("rev1", dupID, "plan")
+	rev := reviewer("rev1", dupID, gateRequest)
 	l := map[string]string{labelStage: stage, labelSource: "board"}
 	for k, v := range keepLabels {
 		l[k] = v
@@ -91,26 +91,10 @@ func TestCloseDuplicateSteersRunningKeptCard(t *testing.T) {
 	}
 }
 
-func TestSteerToIdleKeptCardQueuesItsOwnReview(t *testing.T) {
-	for _, c := range []struct{ stage, source, review string }{
-		{"plan", "idea", "plan"},
-		{"plan", "board", "plan"},
-		{"building", "board", "code"},
-	} {
-		f, p := dupFactory(t, c.stage, "idle", map[string]string{labelSource: c.source})
-		closeDup(t, f)
-		f.tickSteers()
-		got := p.labels(keepID)
-		if len(p.sent(keepID)) != 1 || got[labelStage] != c.stage || got[labelAutoReview] != c.review || got[labelSince] == "" {
-			t.Errorf("%s/%s: sent %d, labels %v", c.stage, c.source, len(p.sent(keepID)), got)
-		}
-	}
-}
-
 func TestSteerWaitsWhileKeptCardIsReviewedOrWaitsOnZach(t *testing.T) {
 	for _, l := range []map[string]string{
-		{labelStage: "plan-review"}, {labelStage: "review"}, {labelStage: "zach"},
-		{labelStage: "plan", labelRouting: "1"}, // still picking its repo
+		{labelStage: gateRequest}, {labelStage: gateDesign}, {labelStage: "zach"},
+		{labelStage: stageRoute, labelRouting: "1"}, // still picking its repo
 	} {
 		f, p := dupFactory(t, l[labelStage], "idle", l)
 		closeDup(t, f)
@@ -183,7 +167,7 @@ func TestCloseWithoutDuplicateVerdictDoesNotSteer(t *testing.T) {
 
 func TestCloseUsesNewestReviewerOrTheCardsOwnLine(t *testing.T) {
 	f, p := dupFactory(t, "building", "running", nil)
-	old := reviewer("rev0", dupID, "plan")
+	old := reviewer("rev0", dupID, gateRequest)
 	old.CreatedAt = t0.Add(-30 * time.Minute)
 	f.SetAgents(append(f.agents(), old))
 	storeLog(t, f, p, "rev0", "DUPLICATE OF: zzz9999\nVERDICT: close")
@@ -212,7 +196,7 @@ func TestDuplicateFollowUpInReviewPromptAndPeers(t *testing.T) {
 		t.Errorf("a header with no end line is no block: %+v", got)
 	}
 	c := Card{ID: "c1", Request: &CardRequest{Base: "Reap idle agents.", FollowUps: fus}}
-	pr := ReviewPrompt(c, "plan", 7478, "unknown")
+	pr := ReviewPrompt(c, gateRequest, 7478, "unknown")
 	if !strings.Contains(pr, "From closed duplicate dup1234 ("+fus[0].Date+"): adds to the request, does not override it:\nReap scouts too.") ||
 		strings.Contains(pr, "agent text") {
 		t.Errorf("review prompt:\n%s", pr)
@@ -220,5 +204,20 @@ func TestDuplicateFollowUpInReviewPromptAndPeers(t *testing.T) {
 	line, list := c.Request.brief()
 	if !strings.Contains(line, "from closed duplicate dup1234: Reap scouts too.") || len(list) != 1 {
 		t.Errorf("peers brief = %q %q", line, list)
+	}
+}
+
+func TestSteerToIdleKeptCardQueuesItsOwnReview(t *testing.T) {
+	for _, c := range []struct{ stage, source, review string }{
+		{"building", "idea", gateRequest},
+		{"building", "board", gateRequest},
+	} {
+		f, p := dupFactory(t, c.stage, "idle", map[string]string{labelSource: c.source})
+		closeDup(t, f)
+		f.tickSteers()
+		got := p.labels(keepID)
+		if len(p.sent(keepID)) != 1 || got[labelStage] != c.stage || got[labelAutoReview] != c.review || got[labelSince] == "" {
+			t.Errorf("%s/%s: sent %d, labels %v", c.stage, c.source, len(p.sent(keepID)), got)
+		}
 	}
 }

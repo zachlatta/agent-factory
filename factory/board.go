@@ -12,12 +12,13 @@ import (
 // Stages are the board's columns, in order: id, name, help text.
 var Stages = [][3]string{
 	{"idea", "Ideas", "Suggested by agents, and Scouts looking for them. Ideas start on their own by priority, a few at a time per repo."},
-	{"plan", "Plan", "Agent writes a plan. No code yet."},
-	{"plan-review", "Plan review", "A different agent tries to find fault with the plan."},
-	{"building", "Building", "Agent is working."},
-	{"review", "Code review", "A different agent checks the work before it lands."},
+	{stageRoute, "Pick repo", "Opus picks the repo this request belongs in."},
+	{"building", "Build", "An agent builds the proposed solution, read-only against production."},
+	{gateRequest, "Meets request", "A different agent checks it meets the request and any unsaid context."},
+	{gateDesign, "Design", "A different agent checks it is well designed, and does small refactors itself."},
+	{gateSignoff, "Sign-off", "A separate agent decides whether you need to sign off before it goes live."},
 	{"zach", "Needs Zach", "Waiting on you: a question, a preview to try, or an approval."},
-	{"landing", "Landing", "Approved. Agent is landing it."},
+	{"landing", "Landing", "Approved. Opus is landing it."},
 	{"landed", "Done", "Landed, answered by email, or finished and seen."},
 }
 
@@ -30,6 +31,9 @@ func validStage(s string) bool {
 	return false
 }
 
+// stageRoute is the column of a repo picker.
+const stageRoute = "route"
+
 const stallMinutes = 20 // running with no activity this long = stalled
 
 // Derive is an agent's column: its factory.stage label first, else from its Paseo status.
@@ -41,7 +45,16 @@ func Derive(a Agent) string {
 	if a.gone() || a.L(labelFinished) == "1" {
 		return "landed"
 	}
-	if st := a.L(labelStage); validStage(st) {
+	st := a.L(labelStage)
+	switch st { // columns of the old flow, on a card not yet moved (migrateFlow), or archived there
+	case "plan":
+		st = "building"
+	case "plan-review":
+		st = gateRequest
+	case "review":
+		st = gateDesign
+	}
+	if validStage(st) {
 		return st
 	}
 	if a.Status == "running" {
@@ -77,6 +90,8 @@ func source(a Agent) string {
 	switch {
 	case a.L(labelOrigin) == "idea":
 		return "idea"
+	case a.L(labelOrigin) == "schedule":
+		return "schedule"
 	case a.L(labelRole) == "scout":
 		return "scout"
 	case a.L(labelSource) == "voice" || a.Labels["voice-memo"] != "":
@@ -141,10 +156,11 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Branch: a.Branch, Cwd: a.Cwd, Model: a.Model, Status: a.Status, Source: source(a), Stage: Derive(a),
 			Labelled: a.L(labelStage) != "", Flags: []string{}, Verdict: a.L(labelVerdict), Note: a.L(labelNote),
 			Tier: a.L(labelTier), Awaiting: a.L(labelAwaiting), Origin: a.L(labelOrigin), Agent: a.L(labelAgent),
-			Replaces:  lineagePredecessorIDs(agentByID, a.ID),
-			Rounds:    Rounds{Plan: atoi(a.L(labelPlanRounds)), Code: atoi(a.L(labelCodeRounds))},
-			CreatedAt: iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
-			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != "", PlanFix: a.L(labelPlanFix)}
+			Replaces:    lineagePredecessorIDs(agentByID, a.ID),
+			Rounds:      Rounds{Request: atoi(a.L(roundsLabel(gateRequest))), Design: atoi(a.L(roundsLabel(gateDesign))), Signoff: atoi(a.L(roundsLabel(gateSignoff)))},
+			SubmittedBy: submittedBy(a),
+			CreatedAt:   iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
+			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != ""}
 		if a.parked() {
 			c.ArchivedAt, c.Parked = "", iso(a.ArchivedAt)
 			c.Flags = append(c.Flags, parkedFlag)
@@ -157,7 +173,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 		}
 		if a.L(labelRouting) != "" {
 			c.Routing, c.Repo = true, autoRepo
-			if c.Stage == "plan" {
+			if c.Stage == stageRoute {
 				c.Flags = append(c.Flags, "picking a repo")
 			}
 		}
@@ -220,7 +236,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 				role = "subagent"
 			}
 			ch := Child{ID: k.ID, Short: short(k.ID), Title: k.Title, Model: k.Model, Status: k.Status,
-				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Lens: k.L(labelLens), Panel: k.L(labelPanel), Verdict: k.L(labelVerdict),
+				Archived: k.archived(), Role: role, Kind: k.L(labelReviewKind), Verdict: k.L(labelVerdict),
 				CreatedAt: iso(k.CreatedAt), LastActivityAt: iso(k.LastActivityAt)}
 			if ch.Model == "" {
 				ch.Model = k.Provider

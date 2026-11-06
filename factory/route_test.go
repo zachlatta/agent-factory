@@ -24,7 +24,7 @@ func withRepos(t *testing.T, f *Factory, repos ...string) {
 
 // picker is a stopped repo picker that answered after its last move.
 func picker(id string, labels map[string]string) Agent {
-	l := map[string]string{labelStage: "plan", labelSource: "board", labelRouting: "1", labelSince: ago(10 * time.Minute)}
+	l := map[string]string{labelStage: stageRoute, labelSource: "board", labelRouting: "1", labelSince: ago(10 * time.Minute)}
 	for k, v := range labels {
 		l[k] = v
 	}
@@ -48,36 +48,6 @@ func argAfter(c []string, flag string) string {
 		return c[i+1]
 	}
 	return ""
-}
-
-func TestAutoNewCardStartsPicker(t *testing.T) {
-	f, p := newTestFactory(t)
-	withRepos(t, f, "example/desk", "example/ops")
-	res, err := f.Act("new", Body{Request: "Rotate the backup key on the backup host", Repo: "auto", Thread: "t1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runs := runArgs(p)
-	if len(runs) != 1 {
-		t.Fatalf("runs = %v", runs)
-	}
-	r := runs[0]
-	if slices.Contains(r, "--new-workspace") || argAfter(r, "--cwd") != filepath.Join(f.cfg.Home, "dev") {
-		t.Errorf("picker should run in ~/dev without a worktree: %v", r)
-	}
-	if !slices.Contains(r, labelArg(labelRouting, "1")) || !slices.Contains(r, labelArg(labelStage, "plan")) {
-		t.Errorf("picker labels missing: %v", r)
-	}
-	prompt := r[len(r)-1]
-	for _, want := range []string{"Rotate the backup key on the backup host", "example/ops: ops: Hosts and runbooks.", "REPO: unsure"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("prompt lacks %q", want)
-		}
-	}
-	rt, ok := f.routes.get(res.(map[string]string)["id"])
-	if !ok || rt.Request != "Rotate the backup key on the backup host" || rt.Thread != "t1" {
-		t.Errorf("saved route = %+v, %v", rt, ok)
-	}
 }
 
 func TestHandPickedRepoSkipsPicker(t *testing.T) {
@@ -280,37 +250,6 @@ func TestInterruptedRoutingGoesToZach(t *testing.T) {
 	}
 }
 
-func TestReplyToPickerRoutesAgain(t *testing.T) {
-	a := picker("pk", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelNote: "pick a repo"})
-	f, p := newTestFactory(t, a)
-	withRepos(t, f, "example/desk", "zachlatta/personal-data-warehouse")
-	f.routes.put("pk", Route{Request: "q", Title: "q"})
-	if _, err := f.Act("send", Body{ID: "pk", Message: "It's the Android app"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("pk")
-	if l[labelStage] != "plan" || l[labelAwaiting] != "" || l[labelNote] != "picking a repo" || l[labelAutoReview] != "" {
-		t.Errorf("labels after reply = %v", l)
-	}
-	if s := p.sent("pk"); len(s) != 1 || !strings.Contains(s[0], "REPO: line") {
-		t.Errorf("sent = %v", s)
-	}
-	// the picker answers; the next Tick routes it instead of starting a plan review
-	b := picker("pk", l)
-	b.LastActivityAt = t0
-	b.Labels[labelPrefix+labelSince] = ago(5 * time.Minute)
-	f.SetAgents([]Agent{b})
-	storeLog(t, f, p, "pk", "[User] Message from Zach\nREPO: zachlatta/personal-data-warehouse")
-	f.Tick()
-	if runs := p.runsWithLabel(labelArg(labelReviewOf, "pk")); len(runs) != 0 {
-		t.Errorf("plan review started for a picker: %v", runs)
-	}
-	runs := runArgs(p)
-	if len(runs) != 1 || argAfter(runs[0], "--cwd") != filepath.Join(f.cfg.Home, "dev", "zachlatta/personal-data-warehouse") {
-		t.Errorf("runs = %v", runs)
-	}
-}
-
 func TestRerunStuckPickerRoutes(t *testing.T) {
 	a := picker("pk", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "plan"})
 	f, p := newTestFactory(t, a)
@@ -426,7 +365,7 @@ func TestScoutPickerStartsScoutInNamedRepo(t *testing.T) {
 	if !slices.Contains(r, labelArg(labelRole, "scout")) || argAfter(r, "--cwd") != filepath.Join(f.cfg.Home, "dev", "example/ops") {
 		t.Errorf("scout not started in ops: %v", r)
 	}
-	if slices.Contains(r, "--new-workspace") || slices.Contains(r, labelArg(labelStage, "plan")) {
+	if slices.Contains(r, "--new-workspace") || slices.Contains(r, labelArg(labelStage, "building")) {
 		t.Errorf("a card was started instead of a scout: %v", r)
 	}
 	if !strings.Contains(r[len(r)-1], "Guidance:\nFind ways to make backups faster") {
@@ -454,5 +393,66 @@ func TestApproveScoutPickerStartsScout(t *testing.T) {
 	}
 	if !p.archived["pk"] {
 		t.Error("picker not archived")
+	}
+}
+
+func TestAutoNewCardStartsPicker(t *testing.T) {
+	f, p := newTestFactory(t)
+	withRepos(t, f, "example/desk", "example/ops")
+	res, err := f.Act("new", Body{Request: "Rotate the backup key on the backup host", Repo: "auto", Thread: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := runArgs(p)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %v", runs)
+	}
+	r := runs[0]
+	if slices.Contains(r, "--new-workspace") || argAfter(r, "--cwd") != filepath.Join(f.cfg.Home, "dev") {
+		t.Errorf("picker should run in ~/dev without a worktree: %v", r)
+	}
+	if !slices.Contains(r, labelArg(labelRouting, "1")) || !slices.Contains(r, labelArg(labelStage, stageRoute)) {
+		t.Errorf("picker labels missing: %v", r)
+	}
+	prompt := r[len(r)-1]
+	for _, want := range []string{"Rotate the backup key on the backup host", "example/ops: ops: Hosts and runbooks.", "REPO: unsure"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	rt, ok := f.routes.get(res.(map[string]string)["id"])
+	if !ok || rt.Request != "Rotate the backup key on the backup host" || rt.Thread != "t1" {
+		t.Errorf("saved route = %+v, %v", rt, ok)
+	}
+}
+
+func TestReplyToPickerRoutesAgain(t *testing.T) {
+	a := picker("pk", map[string]string{labelStage: "zach", labelAwaiting: "repo", labelNote: "pick a repo"})
+	f, p := newTestFactory(t, a)
+	withRepos(t, f, "example/desk", "zachlatta/personal-data-warehouse")
+	f.routes.put("pk", Route{Request: "q", Title: "q"})
+	if _, err := f.Act("send", Body{ID: "pk", Message: "It's the Android app"}); err != nil {
+		t.Fatal(err)
+	}
+	l := p.labels("pk")
+	if l[labelStage] != stageRoute || l[labelAwaiting] != "" || l[labelNote] != "picking a repo" || l[labelAutoReview] != "" {
+		t.Errorf("labels after reply = %v", l)
+	}
+	if s := p.sent("pk"); len(s) != 1 || !strings.Contains(s[0], "REPO: line") {
+		t.Errorf("sent = %v", s)
+	}
+	// the picker answers; the next Tick routes it instead of starting a plan review
+	b := picker("pk", l)
+	b.LastActivityAt = t0
+	b.Labels[labelPrefix+labelSince] = ago(5 * time.Minute)
+	f.SetAgents([]Agent{b})
+	storeLog(t, f, p, "pk", "[User] Message from Zach\nREPO: zachlatta/personal-data-warehouse")
+	f.Tick()
+	if runs := p.runsWithLabel(labelArg(labelReviewOf, "pk")); len(runs) != 0 {
+		t.Errorf("plan review started for a picker: %v", runs)
+	}
+	runs := runArgs(p)
+	if len(runs) != 1 || argAfter(runs[0], "--cwd") != filepath.Join(f.cfg.Home, "dev", "zachlatta/personal-data-warehouse") {
+		t.Errorf("runs = %v", runs)
 	}
 }

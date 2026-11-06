@@ -57,30 +57,6 @@ func TestReplyFailuresClarify(t *testing.T) {
 	}
 }
 
-func TestPendingReplyPrecedenceAndStateChange(t *testing.T) {
-	for _, next := range []string{"approve", "separate", "something", "answer"} {
-		t.Run(next, func(t *testing.T) {
-			f, p, _ := mailFactory(t, planWaiting("c1"))
-			f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "unclear", nil }
-			b := Body{Thread: "nt1", MessageID: "m2", Text: "Saved request"}
-			if _, err := f.answerByEmail(b); err != nil {
-				t.Fatal(err)
-			}
-			if next == "answer" {
-				f.SetAgents([]Agent{withLabels(planWaiting("c1"), map[string]string{labelNote: "different question"})})
-			}
-			res, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: next})
-			want := map[string]string{"approve": "approve", "separate": "separate", "something": "clarify", "answer": "clarify"}[next]
-			if err != nil || res["action"] != want {
-				t.Fatalf("%v %v", res, err)
-			}
-			if want == "clarify" && len(p.sent("c1")) != 0 {
-				t.Fatal("sent stale reply")
-			}
-		})
-	}
-}
-
 func TestCheckerExecutableContract(t *testing.T) {
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args")
@@ -116,30 +92,6 @@ func TestCheckerExecutableContract(t *testing.T) {
 	}
 }
 
-func TestReplyStoreCorruptionAndDryRun(t *testing.T) {
-	f, p, _ := mailFactory(t, planWaiting("c1"))
-	os.WriteFile(f.replies.path, []byte("broken"), 0600)
-	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "", errors.New("must not call") }
-	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "revise it"}); err == nil {
-		t.Fatal("ignored corruption")
-	}
-	f.cfg.DryRun = true
-	f.p = &dryRunPaseo{inner: p, logf: f.logf}
-
-	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "revise it"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: "approve"}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(f.log, "\n"), "dry run: would") {
-		t.Fatalf("missing simulated action: %s", strings.Join(f.log, "\n"))
-	}
-	if len(p.labels("c1")) != 0 {
-		t.Fatal("dry run mutated")
-	}
-}
-
 func TestCheckerDeadline(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\nexec sleep 30\n"), 0700)
@@ -152,16 +104,6 @@ func TestCheckerDeadline(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Fatal("checker did not terminate")
-	}
-}
-
-func TestExactRepliesBypassChecker(t *testing.T) {
-	for _, text := range []string{"approve", "drop"} {
-		f, _, _ := mailFactory(t, planWaiting("c1"))
-		f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { t.Fatal("exact reply classified"); return "", nil }
-		if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: text}); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 
@@ -314,6 +256,64 @@ func TestStaleClarificationCommands(t *testing.T) {
 					t.Fatalf("missing changed-question notice: %+v", got)
 				}
 			})
+		}
+	}
+}
+
+func TestPendingReplyPrecedenceAndStateChange(t *testing.T) {
+	for _, next := range []string{"approve", "separate", "something", "answer"} {
+		t.Run(next, func(t *testing.T) {
+			f, p, _ := mailFactory(t, planWaiting("c1"))
+			f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "unclear", nil }
+			b := Body{Thread: "nt1", MessageID: "m2", Text: "Saved request"}
+			if _, err := f.answerByEmail(b); err != nil {
+				t.Fatal(err)
+			}
+			if next == "answer" {
+				f.SetAgents([]Agent{withLabels(planWaiting("c1"), map[string]string{labelNote: "different question"})})
+			}
+			res, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: next})
+			want := map[string]string{"approve": "approve", "separate": "separate", "something": "clarify", "answer": "clarify"}[next]
+			if err != nil || res["action"] != want {
+				t.Fatalf("%v %v", res, err)
+			}
+			if want == "clarify" && len(p.sent("c1")) != 0 {
+				t.Fatal("sent stale reply")
+			}
+		})
+	}
+}
+
+func TestReplyStoreCorruptionAndDryRun(t *testing.T) {
+	f, p, _ := mailFactory(t, planWaiting("c1"))
+	os.WriteFile(f.replies.path, []byte("broken"), 0600)
+	f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { return "", errors.New("must not call") }
+	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "revise it"}); err == nil {
+		t.Fatal("ignored corruption")
+	}
+	f.cfg.DryRun = true
+	f.p = &dryRunPaseo{inner: p, logf: f.logf}
+
+	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: "revise it"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m3", Text: "approve"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(f.log, "\n"), "dry run: would") {
+		t.Fatalf("missing simulated action: %s", strings.Join(f.log, "\n"))
+	}
+	if len(p.labels("c1")) != 0 {
+		t.Fatal("dry run mutated")
+	}
+}
+
+func TestExactRepliesBypassChecker(t *testing.T) {
+	for _, text := range []string{"approve", "drop"} {
+		f, _, _ := mailFactory(t, planWaiting("c1"))
+		f.ReplyCheck = func(context.Context, ReplyContext) (string, error) { t.Fatal("exact reply classified"); return "", nil }
+		if _, err := f.answerByEmail(Body{Thread: "nt1", MessageID: "m2", Text: text}); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

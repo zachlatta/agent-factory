@@ -14,94 +14,9 @@ func actionIDs(a *Ask) string {
 	return strings.Join(ids, ",")
 }
 
-func TestAskFor(t *testing.T) {
-	cases := []struct {
-		name    string
-		a       Agent
-		title   string
-		from    string
-		actions string
-	}{
-		{"build side effects", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: sideEffectNote}),
-			"Allow this build?", "builder", "approve,reply,close"},
-		{"older plan approval", card("c", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}),
-			"Allow this build?", "builder", "approve,reply,close"},
-		{"older hand-sent landing", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
-			"Ready to try", "builder", "approve,reply,close"},
-		{"older architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
-			"Ready to try", "builder", "approve,reply,close"},
-		{"finished work", card("c", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelAskWhy: "you asked for it"}),
-			"Ready to try", "builder", "approve,reply,close"},
-		{"ready for you, second try", card("c", map[string]string{labelStage: "zach", labelNote: readyNote(2)}),
-			"Ready to try", "builder", "approve,reply,close"},
-		{"older finished work", card("c", map[string]string{labelStage: "zach", labelNote: "built and reviewed: try the preview and approve to land"}),
-			"Ready to try", "builder", "approve,reply,close"},
-		{"did not settle", card("c", map[string]string{labelStage: "zach", labelNote: arbiterStuckNote}),
-			"Reviews didn't settle", "builder", "arbiter,reply,close"},
-		{"older rework cap", card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"}),
-			"Reviews didn't settle", "builder", "arbiter,reply,close"},
-		{"older escalation", card("c", map[string]string{labelStage: "zach", labelNote: "reviewer escalated"}),
-			"Reviews didn't settle", "builder", "arbiter,reply,close"},
-		{"review stuck in its column", card("c", map[string]string{labelStage: "review", labelStuck: stuckReview}),
-			"Stuck: review could not finish", "builder", "rerun,reply,close"},
-		{"no reviewed commit", card("c", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}),
-			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
-		{"reviewed commit unreadable", card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
-			labelNote: unverifiedReviewNote + "could not read HEAD: git broke"}),
-			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
-		{"parked card changed since review", card("c", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}),
-			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
-		{"writing its brief", func() Agent {
-			a := card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"})
-			a.Status = "running"
-			return a
-		}(), "Writing a summary for you…", "builder", "stop"},
-		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}),
-			"Reviewer thinks this isn't needed", "reviewer", "close,reply"},
-		{"agent error stuck in its column", card("c", map[string]string{labelStage: "building", labelStuck: stuckAgentError}),
-			"Stuck: the agent keeps failing", "builder", "resume,reply,close"},
-		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}},
-			"Finished: read the result", "builder", "done,reply"},
-		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}},
-			"Waiting on you: permission", "builder", "reply,close"},
-		{"stopped card stuck in its column", card("c", map[string]string{labelStage: "landing", labelStuck: stuckStopped}),
-			"Stuck: stopped with nothing queued", "builder", "rerun,reply,close"},
-		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),
-			"Moved here by hand", "builder", "reply,done"},
-		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: push 2"}),
-			"The agent stopped with work left", "builder", "finish,done,close"},
-		{"landed with a test for Zach", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: Zach: approve the account setting"}),
-			"Do this: approve the account setting", "builder", "done,reply,done"},
-		{"landed without a REMAINING line", card("c", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}),
-			"Landed: did it finish?", "builder", "done,reply"},
-		{"landed other than reviewed", card("c", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: extra commit"}),
-			"Landed something other than what was reviewed", "builder", "done,reply"},
-	}
-	for _, c := range cases {
-		cards := BuildBoard([]Agent{c.a}, nil, t0)
-		ask := cards[0].Ask
-		if ask == nil {
-			t.Errorf("%s: no ask", c.name)
-			continue
-		}
-		if ask.Title != c.title || ask.From != c.from || actionIDs(ask) != c.actions || ask.Why == "" {
-			t.Errorf("%s: ask = %+v (actions %s)", c.name, ask, actionIDs(ask))
-		}
-	}
-	// the finished-work stop says why it came to Zach
-	fin := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelAskWhy: "you asked for it"})}, nil, t0)[0].Ask
-	if !strings.Contains(fin.Why, "because you asked for it") {
-		t.Errorf("finished-work why = %q", fin.Why)
-	}
-	// only Needs Zach cards carry an ask
-	if BuildBoard([]Agent{card("c", map[string]string{labelStage: "building"})}, nil, t0)[0].Ask != nil {
-		t.Error("building card has an ask")
-	}
-}
-
 func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r := reviewer("r1", "c1", "code")
+	r := reviewer("r1", "c1", gateSignoff)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
 	storeLog(t, f, p, "r1", "[User] review\n- test missing at a.go:3\nVERDICT: changes")
@@ -116,33 +31,6 @@ func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	f.SetAgents([]Agent{c, r})
 	if len(p.calls) != n {
 		t.Errorf("detail refetched without activity: %v", p.calls[n:])
-	}
-}
-
-func TestPlanWithUnclearSideEffectsAsksBuilderForTheDecision(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "plan-review", labelSource: "board"}),
-		reviewer("r1", "c1", "plan"))
-	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", "TIER: architecture\nVERDICT: approve")
-	f.ApplyVerdict(f.agent("r1"))
-	msgs := p.sent("c1")
-	if len(msgs) != 1 || !strings.Contains(msgs[0], "one short decision") || strings.Contains(msgs[0], "Build it now") {
-		t.Errorf("sent = %v", msgs)
-	}
-}
-
-func TestReplyToPlanSendsItBackToPlanning(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelTier: "architecture"}))
-	if _, err := f.Act("send", Body{ID: "c1", Message: "skip the tests rename"}); err != nil {
-		t.Fatal(err)
-	}
-	l := p.labels("c1")
-	if l[labelStage] != "plan" || l[labelAwaiting] != "" || l[labelSince] == "" {
-		t.Errorf("labels = %v", l)
-	}
-	if msgs := p.sent("c1"); len(msgs) != 1 || !strings.Contains(msgs[0], "skip the tests rename") ||
-		!strings.Contains(msgs[0], "whole revised plan") {
-		t.Errorf("sent = %v", msgs)
 	}
 }
 
@@ -215,7 +103,7 @@ func TestLandedAsks(t *testing.T) {
 
 func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r := reviewer("r1", "c1", "plan")
+	r := reviewer("r1", "c1", gateRequest)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Provider, r.SessionID, r.Cwd = "claude", "s-mid", "/w/c1"
 	f, _ := newTestFactory(t)
@@ -274,7 +162,7 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 // The unverified-review ask reports uncertainty, offers a fresh review first, and never offers
 // Mark done or a landing approval: both would skip the review the card still needs.
 func TestUnverifiedReviewAskReRunsTheReview(t *testing.T) {
-	a := card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
+	a := card("c", map[string]string{labelStage: "zach", labelStuckFrom: gateDesign,
 		labelNote: unverifiedReviewNote + "could not read HEAD: git broke"})
 	ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
 	if ask == nil || !ask.Actions[0].Primary || ask.Actions[0].Label != "Re-run the review" ||
@@ -284,26 +172,6 @@ func TestUnverifiedReviewAskReRunsTheReview(t *testing.T) {
 	for _, x := range ask.Actions {
 		if x.ID == "done" || x.ID == "approve" {
 			t.Errorf("offers %s", x.ID)
-		}
-	}
-}
-
-func TestUnverifiedReviewAskDoesNotClaimNothingPublished(t *testing.T) {
-	for _, note := range []string{noReviewedNote, unverifiedReviewNote + "could not read HEAD", parkedStaleNote} {
-		a := card("c", map[string]string{labelStage: "zach", labelNote: note})
-		ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
-		if ask == nil {
-			t.Fatal("missing ask")
-		}
-		if strings.Contains(ask.Title, "Not landed") || strings.Contains(ask.Why, "Nothing was landed") {
-			t.Fatalf("unsupported publication claim: %+v", ask)
-		}
-		if note == parkedStaleNote {
-			if !strings.Contains(ask.Why, "The work changed after review and needs a fresh code review.") {
-				t.Fatalf("changed work: %+v", ask)
-			}
-		} else if !strings.Contains(ask.Why, "The factory could not verify whether the reviewed work was published.") {
-			t.Fatalf("unknown publication: %+v", ask)
 		}
 	}
 }
@@ -323,5 +191,100 @@ func TestReadyAskCompletedWithoutEvidence(t *testing.T) {
 	f.fillReady(ask, "c1", "")
 	if ask.Title != "Approve this change?" || actionIDs(ask) != "approve,reply,close" {
 		t.Fatalf("completed ask = %+v", ask)
+	}
+}
+
+func TestAskFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		a       Agent
+		title   string
+		from    string
+		actions string
+	}{
+		{"older hand-sent landing", card("c", map[string]string{labelStage: "zach", labelNote: "review passed: approve to land"}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"older architecture found in code", card("c", map[string]string{labelStage: "zach", labelNote: "review found an architecture change: approve to land"}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"finished work", card("c", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelAskWhy: "you asked for it"}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"ready for you, second try", card("c", map[string]string{labelStage: "zach", labelNote: readyNote(2)}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"older finished work", card("c", map[string]string{labelStage: "zach", labelNote: "built and reviewed: try the preview and approve to land"}),
+			"Ready to try", "builder", "approve,reply,close"},
+		{"review stuck in its column", card("c", map[string]string{labelStage: gateDesign, labelStuck: stuckReview}),
+			"Stuck: review could not finish", "builder", "rerun,reply,close"},
+		{"no reviewed commit", card("c", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}),
+			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
+		{"reviewed commit unreadable", card("c", map[string]string{labelStage: "zach", labelStuckFrom: "review",
+			labelNote: unverifiedReviewNote + "could not read HEAD: git broke"}),
+			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
+		{"parked card changed since review", card("c", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}),
+			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
+		{"writing its brief", func() Agent {
+			a := card("c", map[string]string{labelStage: "zach", labelNote: "rework cap reached"})
+			a.Status = "running"
+			return a
+		}(), "Writing a summary for you…", "builder", "stop"},
+		{"close suggested", card("c", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"}),
+			"Reviewer thinks this isn't needed", "reviewer", "close,reply"},
+		{"agent error stuck in its column", card("c", map[string]string{labelStage: "building", labelStuck: stuckAgentError}),
+			"Stuck: the agent keeps failing", "builder", "resume,reply,close"},
+		{"finished unread", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "finished", Labels: map[string]string{}},
+			"Finished: read the result", "builder", "done,reply"},
+		{"permission", Agent{ID: "c", Status: "idle", RequiresAttention: true, AttentionReason: "permission", Labels: map[string]string{}},
+			"Waiting on you: permission", "builder", "reply,close"},
+		{"stopped card stuck in its column", card("c", map[string]string{labelStage: "landing", labelStuck: stuckStopped}),
+			"Stuck: stopped with nothing queued", "builder", "rerun,reply,close"},
+		{"moved by hand", card("c", map[string]string{labelStage: "zach"}),
+			"Moved here by hand", "builder", "reply,done"},
+		{"landed with work left", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: push 2"}),
+			"The agent stopped with work left", "builder", "finish,done,close"},
+		{"landed with a test for Zach", card("c", map[string]string{labelStage: "zach", labelNote: "landed; still to do: Zach: approve the account setting"}),
+			"Do this: approve the account setting", "builder", "done,reply,done"},
+		{"landed without a REMAINING line", card("c", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}),
+			"Landed: did it finish?", "builder", "done,reply"},
+		{"landed other than reviewed", card("c", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: extra commit"}),
+			"Landed something other than what was reviewed", "builder", "done,reply"},
+	}
+	for _, c := range cases {
+		cards := BuildBoard([]Agent{c.a}, nil, t0)
+		ask := cards[0].Ask
+		if ask == nil {
+			t.Errorf("%s: no ask", c.name)
+			continue
+		}
+		if ask.Title != c.title || ask.From != c.from || actionIDs(ask) != c.actions || ask.Why == "" {
+			t.Errorf("%s: ask = %+v (actions %s)", c.name, ask, actionIDs(ask))
+		}
+	}
+	// the finished-work stop says why it came to Zach
+	fin := BuildBoard([]Agent{card("c", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelAskWhy: "you asked for it"})}, nil, t0)[0].Ask
+	if !strings.Contains(fin.Why, "because you asked for it") {
+		t.Errorf("finished-work why = %q", fin.Why)
+	}
+	// only Needs Zach cards carry an ask
+	if BuildBoard([]Agent{card("c", map[string]string{labelStage: "building"})}, nil, t0)[0].Ask != nil {
+		t.Error("building card has an ask")
+	}
+}
+
+func TestUnverifiedReviewAskDoesNotClaimNothingPublished(t *testing.T) {
+	for _, note := range []string{noReviewedNote, unverifiedReviewNote + "could not read HEAD", parkedStaleNote} {
+		a := card("c", map[string]string{labelStage: "zach", labelNote: note})
+		ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
+		if ask == nil {
+			t.Fatal("missing ask")
+		}
+		if strings.Contains(ask.Title, "Not landed") || strings.Contains(ask.Why, "Nothing was landed") {
+			t.Fatalf("unsupported publication claim: %+v", ask)
+		}
+		if note == parkedStaleNote {
+			if !strings.Contains(ask.Why, "The work changed after review and needs a fresh pass through the gates.") {
+				t.Fatalf("changed work: %+v", ask)
+			}
+		} else if !strings.Contains(ask.Why, "The factory could not verify whether the reviewed work was published.") {
+			t.Fatalf("unknown publication: %+v", ask)
+		}
 	}
 }

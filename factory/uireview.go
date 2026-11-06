@@ -19,7 +19,7 @@ UI check: this change touches a user interface. Test it with computer use:
   are recorded and not run.
 - If it cannot run safely here, or the computer-use gateway is full, say why and skip the check; a skip alone is not
   a blocking finding.
-- Put usability, copy and layout feedback (not blocking) in your final message, before the TIER line, as:
+- Put usability, copy and layout feedback (not blocking) in your final message, before the VERDICT line, as:
 UI feedback:
 - <one item per line>`
 
@@ -40,7 +40,7 @@ UI check: this change touches the agent-factory board.
 - Blocking: a broken flow, broken layout at either width, or console errors caused by this change.
 - Report failed or skipped checks and the exact reason; never call an incomplete check a pass.
 - Close your tabs and stop your servers. Keep captures in excluded .factory-evidence.
-- Put non-blocking usability, copy and layout feedback before TIER as:
+- Put non-blocking usability, copy and layout feedback before VERDICT as:
 UI feedback:
 - <one item per line>`
 
@@ -129,18 +129,18 @@ func uiFeedback(notes string) string {
 
 // uiFeedbackLandMsg goes after the landing message when the reviewer left UI feedback.
 func uiFeedbackLandMsg(fb string) string {
-	return "\n\nThe code reviewer tested the UI and left this non-blocking feedback. Do not change code for it. " +
+	return "\n\nThe request gate tested the UI and left this non-blocking feedback. Do not change code for it. " +
 		"After you land, end your summary with it under 'UI feedback:', and include it in your email to Zach if " +
 		"there is one.\n\n" + fb
 }
 
 // uiFeedbackHoldMsg tells a builder whose card waits for Zach about the reviewer's UI feedback.
 // uiFeedbackPreviewNote carries a UI reviewer's feedback in the message that asks the builder for Zach's Ready for you.
-const uiFeedbackPreviewNote = "\n\nThe code reviewer tested the UI and left this non-blocking feedback. Do not change anything " +
+const uiFeedbackPreviewNote = "\n\nThe request gate tested the UI and left this non-blocking feedback. Do not change anything " +
 	"for it now: show it to Zach in your message, and when you land later, end your summary with it under 'UI feedback:'.\n\n"
 
 func uiFeedbackHoldMsg(fb string) string {
-	return "Code review passed and the card now waits for Zach. The reviewer tested the UI and left this " +
+	return "The gates passed and the card now waits for Zach. The reviewer tested the UI and left this " +
 		"non-blocking feedback. Do not change anything now. Zach reads your reply on his card: reply with the " +
 		"DECISION:, OVERVIEW: and NEEDS FROM ZACH: lines for him (approve landing of the reviewed work), then stop. When you " +
 		"land later, end your summary with this feedback under 'UI feedback:'.\n\n" + fb

@@ -77,8 +77,8 @@ func TestStuckPromptEmailsAgainAfterAMove(t *testing.T) {
 // A reviewer or sub-agent of a card is reported in the card's thread, once for both; an agent the
 // factory did not start is never reported.
 func TestStuckPromptOfHelpersGoesToTheirCard(t *testing.T) {
-	c := inThread(card("c1", map[string]string{labelStage: "review", labelSince: ago(time.Hour), labelZachThread: "th1"}), "th1")
-	r := reviewer("r1", "c1", "code")
+	c := inThread(card("c1", map[string]string{labelStage: gateDesign, labelSince: ago(time.Hour), labelZachThread: "th1"}), "th1")
+	r := reviewer("r1", "c1", gateSignoff)
 	r.Status, r.Pending, r.LastActivityAt = "running", "Bash: git push", t0.Add(-25*time.Minute)
 	sub := Agent{ID: "s1", Status: "running", Pending: "Edit: y", CreatedAt: t0.Add(-time.Hour),
 		LastActivityAt: t0.Add(-25 * time.Minute), Labels: map[string]string{parentAgentLabel: "c1"}}

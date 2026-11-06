@@ -19,7 +19,7 @@ type Overview struct {
 
 // overviewRule teaches agents the block ParseOverview reads. Every message where an agent stops carries
 // it: the agent cannot tell which of them the factory puts in front of Zach.
-const overviewRule = `Start every message where you stop (plan, build or rework summary, review, brief, handoff,
+const overviewRule = `Start every message where you stop (build or rework summary, review, brief, handoff,
 result) with three lines for Zach. His board shows them on top of the card when it waits on him, and
 he reads them on his phone, so use plain words:
 DECISION: <what Zach decides if this reaches him: one plain question, which is the email subject>
@@ -30,7 +30,7 @@ ask; never write None there while NEEDS FROM ZACH asks him for something.
 For messages written after landing, optional use, feedback and observation of a future live event
 are summary prose, not asks: write DECISION: None., NEEDS FROM ZACH: Nothing., and REMAINING: none
 when only those remain. Required checks and pre-landing previews keep their asks.
-Then the rest of the message. QUESTION: blocks stay as they are, and TIER:, VERDICT: and TRACK:
+Then the rest of the message. QUESTION: blocks stay as they are, and VERDICT:, SIGN OFF:, RESULT: and TRACK:
 lines stay last. ` + plainEmailRule + evidenceRule
 
 // plainEmailRule is how anything that reaches Zach by email is written. The factory's decision email

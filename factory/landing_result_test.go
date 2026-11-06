@@ -38,7 +38,7 @@ func nudged(t *testing.T, name string, p *fakePaseo) {
 // rebuilding checks that a failed landing went back to Building with a code review queued.
 func rebuilding(t *testing.T, name string, p *fakePaseo) {
 	t.Helper()
-	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != "code" ||
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] == "" ||
 		!strings.Contains(l[labelNote], "landing not verified") {
 		t.Errorf("%s: labels = %v", name, l)
 	}

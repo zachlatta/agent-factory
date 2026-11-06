@@ -162,7 +162,7 @@ func TestStartReviewOwnershipSurvivesWorktreeRemoval(t *testing.T) {
 	f.Git, f.GitOut = runGit, runGitOut
 	publicationAgent(t, f, r, "") // Make the main checkout discoverable after worktree removal.
 	c, _ := f.card(a.ID)
-	rid, err := f.StartReview(c, "code")
+	rid, err := f.StartReview(c, gateRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,9 +179,9 @@ func TestStartReviewOwnershipSurvivesWorktreeRemoval(t *testing.T) {
 		t.Fatalf("worktree still exists: %v", err)
 	}
 	a = merged(a, l)
-	rev := reviewer(rid, a.ID, "code")
+	rev := reviewer(rid, a.ID, gateSignoff)
 	f.SetAgents([]Agent{a, rev})
-	storeLog(t, f, p, rid, "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, rid, "TIER: low\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent(rid)); err != nil {
 		t.Fatal(err)
 	}

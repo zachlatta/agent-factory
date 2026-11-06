@@ -76,9 +76,9 @@ func TestTickStartsIdeasWithinCaps(t *testing.T) {
 		t.Fatalf("one idea per tick, got %d", n)
 	}
 	// the started idea is now an agent in flight
-	f.SetAgents([]Agent{card("new-agent-1", map[string]string{labelStage: "plan", labelOrigin: "idea"})})
+	f.SetAgents([]Agent{card("new-agent-1", map[string]string{labelStage: "building", labelOrigin: "idea"})})
 	f.Tick()
-	f.SetAgents([]Agent{card("new-agent-1", map[string]string{labelStage: "plan", labelOrigin: "idea"}),
+	f.SetAgents([]Agent{card("new-agent-1", map[string]string{labelStage: "building", labelOrigin: "idea"}),
 		card("new-agent-2", map[string]string{labelStage: "building", labelOrigin: "idea"})})
 	f.Tick()
 	if n := len(p.runsWithLabel(labelArg(labelOrigin, "idea"))); n != 2 {
@@ -230,7 +230,7 @@ func TestStartIdeaWithZachsChanges(t *testing.T) {
 	if got.Note != "Use a 5s TTL, not forever." {
 		t.Errorf("idea note = %q", got.Note)
 	}
-	f.SetAgents([]Agent{card(got.Card, map[string]string{labelStage: "plan", labelOrigin: "idea"})})
+	f.SetAgents([]Agent{card(got.Card, map[string]string{labelStage: "building", labelOrigin: "idea"})})
 	if c, _ := f.card(got.Card); c.Idea == nil || c.Idea.Note != got.Note {
 		t.Errorf("started card idea = %+v", c.Idea)
 	}
@@ -563,7 +563,7 @@ func TestStartIdeaRepoOverride(t *testing.T) {
 	if got.Repo != "example/ops" || got.Card == pkID || got.Card == "" {
 		t.Errorf("after routing, idea = %+v", got)
 	}
-	cards := BuildBoard([]Agent{card(got.Card, map[string]string{labelStage: "plan", labelOrigin: "idea"})}, f.ideas.List(), t0)
+	cards := BuildBoard([]Agent{card(got.Card, map[string]string{labelStage: "building", labelOrigin: "idea"})}, f.ideas.List(), t0)
 	if len(cards) != 1 || cards[0].Idea == nil || cards[0].Idea.ID != j.ID || cards[0].Idea.Summary != "Runbook update" {
 		t.Errorf("routed card on board = %+v", cards)
 	}

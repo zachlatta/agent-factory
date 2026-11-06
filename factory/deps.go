@@ -9,13 +9,12 @@ import (
 	"strings"
 )
 
-// Card dependencies. An approved plan may name one card this card lands after, with a line
-// "Waits on: <short id>" (ParseWaitsOnSpec; stored as factory.waits-on when the plan review passes),
-// or one its build needs first, with "Waits on: <short id> before build" (ParseWaitsOnSpec; stored
-// with factory.waits-before=build when the plan review passes or when a build turn stops with that
-// line). A before-build dependency holds the card in building after plan review (and any side-effect
-// approval) or during building with no running agent until that card (or its replacement) lands; a
-// plain waits-on holds the land prompt after code review passes. If the blocker was dropped, or the
+// Card dependencies. A builder may name one card this card lands after, with a line
+// "Waits on: <short id>" (ParseWaitsOnSpec; stored as factory.waits-on when a build turn stops),
+// or one its build needs first, with "Waits on: <short id> before build" (stored with
+// factory.waits-before=build when a build turn stops with that line). A before-build dependency holds
+// the card in building with no running agent until that card lands, and a
+// plain waits-on holds the land prompt after the gates passes. If the blocker was dropped, or the
 // factory cannot find it, the card is told and goes to building (rebuildWithoutDep) to decide for itself.
 
 // labelHeldApproved marks a held card Zach approved himself (the time). Only such a card is released
@@ -41,7 +40,7 @@ func ParseWaitsOnSpec(text, self string) (id string, beforeBuild bool) {
 	return id, last[2] != ""
 }
 
-// setPlanWaitsOn records the plan's Waits on: dependency and whether it holds before building in labels.
+// setPlanWaitsOn records the builder's Waits on: dependency and whether it holds before building in labels.
 func setPlanWaitsOn(t Agent, labels map[string]string, builderReply string) (id string, beforeBuild bool) {
 	id, beforeBuild = ParseWaitsOnSpec(builderReply, t.ID)
 	if id != t.L(labelWaitsOn) {
@@ -173,14 +172,7 @@ func (f *Factory) heldBuildMsg(a Agent) string {
 			return step
 		}
 	}
-	notes := "(none)"
-	if fix := a.L(labelPlanFix); fix != "" {
-		notes = "Apply these fixes from the last plan review: " + fix
-	}
-	if fix := a.L(labelPlanFix); fix != "" && strings.HasPrefix(a.L(labelVerdict), "plan fixes") {
-		return buildWithFixesMsg(notes)
-	}
-	return buildMsg(fmt.Sprintf("Plan approved (%s tier).", a.L(labelTier)), notes)
+	return "The card this one waited on has landed. The factory no longer reviews plans: build this now.\n\n" + proposedSolutionRule
 }
 
 // stageStepMsg extracts the "=== This step ===" section from a stage handoff prompt, cutting any
@@ -313,7 +305,7 @@ func waitFlag(agents []Agent, a Agent) string {
 
 // depHoldMsg tells a held builder about the reviewer's UI feedback, and to wait.
 func depHoldMsg(id, fb string) string {
-	return "Code review passed. Do not land yet: the approved plan says this card lands after card " + id +
+	return "The gates passed. Do not land yet: this card lands after card " + id +
 		", and the factory sends you the land prompt once it lands. Do not poll for it, change anything or reply " +
 		"at length now. The reviewer tested the UI and left this non-blocking feedback; when you land, end your " +
 		"summary with it under 'UI feedback:'.\n\n" + fb
@@ -354,7 +346,7 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 		if a.archived() && hold[labelStage] != "zach" {
 			// a parked card cannot wait archived in a working column for its fresh review: it stops for
 			// Zach, whose Re-run starts that review (stuck-from review)
-			hold = map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review",
+			hold = map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: gateDesign,
 				labelHeld: "", labelAutoReview: ""}
 		}
 		return f.setLabels(a.ID, clearHeldApproval(a, hold))
@@ -381,12 +373,12 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	}
 	f.logf("%s released: %s landed", short(a.ID), id)
 	return f.sendLanding(labeled(a, labels), fmt.Sprintf("Card %s, which this card waits on, has landed: rebase on origin/main first. "+
-		"Code review passed (%s tier). %s", id, a.L(labelTier), f.landMsgFor(a)))
+		"All three gates passed. %s", id, f.landMsgFor(a)))
 }
 
 // releaseHeldBuild starts the build of a card held in building once the card it waited on has landed.
 func (f *Factory) releaseHeldBuild(a Agent, id string) error {
-	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
+	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: gateRequest,
 		labelSince: iso(f.Now()), labelHeld: "", labelTold: "", labelWaitsDone: "1",
 		labelNote: "building: " + id + " landed"})
 	if w := a.L(labelWaitsOn); w != "" {
@@ -400,7 +392,7 @@ func (f *Factory) releaseHeldBuild(a Agent, id string) error {
 	}
 	msg := f.heldBuildMsg(a)
 	if err := f.advance(labeled(a, labels), "build", fmt.Sprintf("Card %s, which this card waited on before building, has landed: "+
-		"fetch and rebase on origin/main first (`git fetch origin main && git rebase origin/main`), then build as planned.\n\n%s", id, msg)); err != nil {
+		"fetch and rebase on origin/main first (`git fetch origin main && git rebase origin/main`), then build it.\n\n%s", id, msg)); err != nil {
 		if errors.Is(err, errWorktreeGone) {
 			return f.stopHeldWorktreeGone(a)
 		}

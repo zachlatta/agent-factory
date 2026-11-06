@@ -450,7 +450,7 @@ func tokenStage(e tokenEvent, t CardTiming, now time.Time) (string, int, int) {
 		}
 		round := 0
 		for _, r := range t.Rounds {
-			if !e.From.Before(r.Start) && !r.End.IsZero() && e.At.Before(r.End) && ((span.Stage == "plan-review" && r.Kind == "plan") || (span.Stage == "review" && r.Kind == "code")) {
+			if !e.From.Before(r.Start) && !r.End.IsZero() && e.At.Before(r.End) && ((span.Stage == "plan-review" && r.Kind == "plan") || (span.Stage == "review" && r.Kind == "code") || (isGate(span.Stage) && r.Kind == span.Stage)) {
 				round = r.N
 			}
 		}
@@ -465,9 +465,6 @@ func usageRole(a Agent) string {
 		return "fellow"
 	}
 	if k == "reviewer" {
-		if l := a.L(labelLens); l != "" {
-			return strings.TrimSpace(a.L(labelReviewKind) + " " + l + " reviewer")
-		}
 		return strings.TrimSpace(a.L(labelReviewKind) + " reviewer")
 	}
 	if k == "other" && a.Labels["paseo.parent-agent-id"] != "" {

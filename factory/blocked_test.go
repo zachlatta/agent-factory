@@ -9,13 +9,13 @@ import (
 
 // runningReviewer is a reviewer of card of, running, last active idle ago, with pending permission perm.
 func runningReviewer(id, of string, idle time.Duration, perm string) Agent {
-	r := reviewer(id, of, "code")
+	r := reviewer(id, of, gateDesign)
 	r.Status, r.LastActivityAt, r.Pending = "running", t0.Add(-idle), perm
 	return r
 }
 
 func TestBuildBoardFlagsBlockedChildren(t *testing.T) {
-	parent := card("c1", map[string]string{labelStage: "review"})
+	parent := card("c1", map[string]string{labelStage: gateDesign})
 	sub := Agent{ID: "s1", Status: "running", LastActivityAt: t0.Add(-time.Minute), Pending: "Bash: rm /tmp/x",
 		Labels: map[string]string{"paseo.parent-agent-id": "c1"}}
 	for _, tc := range []struct {
@@ -28,7 +28,7 @@ func TestBuildBoardFlagsBlockedChildren(t *testing.T) {
 			"reviewer waiting on permission", "waiting on permission"},
 		{"reviewer stalled", []Agent{runningReviewer("r1", "c1", 25*time.Minute, "")}, "reviewer stalled 25 min", "stalled 25 min"},
 		{"reviewer working", []Agent{runningReviewer("r1", "c1", time.Minute, "")}, "", ""},
-		{"reviewer finished long ago", []Agent{func() Agent { r := reviewer("r1", "c1", "code"); r.LastActivityAt = t0.Add(-time.Hour); return r }()}, "", ""},
+		{"reviewer finished long ago", []Agent{func() Agent { r := reviewer("r1", "c1", gateSignoff); r.LastActivityAt = t0.Add(-time.Hour); return r }()}, "", ""},
 		{"archived reviewer with a stale prompt", []Agent{func() Agent {
 			r := runningReviewer("r1", "c1", time.Hour, "Bash: rm x")
 			r.ArchivedAt = t0
@@ -99,7 +99,7 @@ func TestBlockedReviewerIsReplacedNotSentToZach(t *testing.T) {
 		{"working", runningReviewer("r1", "c1", time.Minute, ""), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "review", labelSince: ago(time.Hour)})
+			c := card("c1", map[string]string{labelStage: gateDesign, labelSince: ago(time.Hour)})
 			c.LastActivityAt = t0.Add(-time.Hour)
 			f, p := newTestFactory(t, c, tc.r)
 			f.Tick()
@@ -116,37 +116,6 @@ func TestBlockedReviewerIsReplacedNotSentToZach(t *testing.T) {
 				t.Errorf("blocked reviewer not superseded: %v", p.labels("r1"))
 			}
 		})
-	}
-}
-
-func TestRerunSupersedesOldReviewers(t *testing.T) {
-	for _, status := range []string{"idle", "running"} {
-		c := card("c1", map[string]string{labelStage: "review", labelStuck: stuckReview})
-		c.Status = status
-		old := runningReviewer("r1", "c1", time.Hour, "Bash: rm x")
-		done := reviewer("r0", "c1", "code")
-		done.Labels[labelPrefix+labelApplied] = "1"
-		f, p := newTestFactory(t, c, old, done)
-		p.busy["r1"] = 1 // Paseo refuses to archive the running reviewer until it is stopped
-		if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
-			t.Fatalf("%s: %v", status, err)
-		}
-		if l := p.labels("r1"); l[labelApplied] != "1" || l[labelVerdict] != "superseded" {
-			t.Errorf("%s: old reviewer labels = %v", status, l)
-		}
-		// marked applied before it is stopped, so no Tick can apply its verdict in between
-		if v := strings.Join(p.verbs("r1"), ","); v != "update,inspect,archive,stop,inspect,archive,inspect" {
-			t.Errorf("%s: old reviewer calls = %s", status, v)
-		}
-		if len(p.labels("r0")) != 0 || p.called("stop", "r0") || p.called("archive", "r0") {
-			t.Errorf("%s: applied reviewer touched: %v", status, p.verbs("r0"))
-		}
-		if status == "idle" && len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) != 1 {
-			t.Errorf("no fresh review: %v", p.calls)
-		}
-		if status == "running" && p.labels("c1")[labelAutoReview] != "code" {
-			t.Errorf("review not queued: %v", p.labels("c1"))
-		}
 	}
 }
 
@@ -229,27 +198,6 @@ func TestRefreshSkipsPermitsWhenNothingRuns(t *testing.T) {
 	}
 }
 
-func TestPromptsCarryRmRule(t *testing.T) {
-	want := "no cd earlier in the same command"
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
-	for _, kind := range []string{"plan", "code", "land"} {
-		if !strings.Contains(ReviewPrompt(c, kind, 7478, "unknown"), want) {
-			t.Errorf("%s review prompt lacks the rm rule", kind)
-		}
-	}
-	if !strings.Contains(newCardPrompt, want) {
-		t.Error("Fellow prompt lacks the rm rule")
-	}
-	if !strings.Contains(buildMsg("Plan approved.", "none"), want) {
-		t.Error("build message lacks the rm rule")
-	}
-	for name, rule := range map[string]string{"shellRule": shellRule, "scratchSafetyRule": scratchSafetyRule, "scratchCleanupRule": scratchCleanupRule, "worktreeStorageRule": worktreeStorageRule, "worktreeRule": worktreeRule} {
-		if strings.Contains(rule, "%") {
-			t.Errorf("%s is formatted into newCardPrompt: no %% allowed", name)
-		}
-	}
-}
-
 func TestSubagentPreambleCarriesZshQuotingRule(t *testing.T) {
 	for _, reviewer := range []bool{false, true} {
 		txt := delegateText(delegateOpts(), reviewer)
@@ -306,5 +254,57 @@ func TestDryRunNeverAnswersPrompts(t *testing.T) {
 	f.denyPrompts(f.agents())
 	if p.countCalls("permit", "deny") != 0 {
 		t.Error("a dry run answered a prompt")
+	}
+}
+
+func TestPromptsCarryRmRule(t *testing.T) {
+	want := "no cd earlier in the same command"
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	for _, kind := range []string{gateRequest, gateDesign, "land"} {
+		if !strings.Contains(ReviewPrompt(c, kind, 7478, "unknown"), want) {
+			t.Errorf("%s review prompt lacks the rm rule", kind)
+		}
+	}
+	if !strings.Contains(newCardPrompt, want) {
+		t.Error("Fellow prompt lacks the rm rule")
+	}
+	if !strings.Contains(proposedSolutionRule+noLiveChangesRule+worktreeRule, want) {
+		t.Error("build message lacks the rm rule")
+	}
+	for name, rule := range map[string]string{"shellRule": shellRule, "scratchSafetyRule": scratchSafetyRule, "scratchCleanupRule": scratchCleanupRule, "worktreeStorageRule": worktreeStorageRule, "worktreeRule": worktreeRule} {
+		if strings.Contains(rule, "%") {
+			t.Errorf("%s is formatted into newCardPrompt: no %% allowed", name)
+		}
+	}
+}
+
+func TestRerunSupersedesOldReviewers(t *testing.T) {
+	for _, status := range []string{"idle", "running"} {
+		c := card("c1", map[string]string{labelStage: gateDesign, labelStuck: stuckReview})
+		c.Status = status
+		old := runningReviewer("r1", "c1", time.Hour, "Bash: rm x")
+		done := reviewer("r0", "c1", gateSignoff)
+		done.Labels[labelPrefix+labelApplied] = "1"
+		f, p := newTestFactory(t, c, old, done)
+		p.busy["r1"] = 1 // Paseo refuses to archive the running reviewer until it is stopped
+		if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
+			t.Fatalf("%s: %v", status, err)
+		}
+		if l := p.labels("r1"); l[labelApplied] != "1" || l[labelVerdict] != "superseded" {
+			t.Errorf("%s: old reviewer labels = %v", status, l)
+		}
+		// marked applied before it is stopped, so no Tick can apply its verdict in between
+		if v := strings.Join(p.verbs("r1"), ","); v != "update,inspect,archive,stop,inspect,archive,inspect" {
+			t.Errorf("%s: old reviewer calls = %s", status, v)
+		}
+		if len(p.labels("r0")) != 0 || p.called("stop", "r0") || p.called("archive", "r0") {
+			t.Errorf("%s: applied reviewer touched: %v", status, p.verbs("r0"))
+		}
+		if status == "idle" && len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) != 1 {
+			t.Errorf("no fresh review: %v", p.calls)
+		}
+		if status == "running" && p.labels("c1")[labelAutoReview] == "" {
+			t.Errorf("review not queued: %v", p.labels("c1"))
+		}
 	}
 }

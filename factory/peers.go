@@ -21,7 +21,7 @@ import (
 // ordering and which tasks to take.
 // GET /api/peers?for=<agent id> is a short brief of the other cards in flight (what each is doing,
 // its stage and the files it changed), what landed in the same repo lately, the next ideas and the
-// running schedule runs. Agents read it before they plan, build and land. It is read-only: it moves
+// running schedule runs. Agents read it before they build and land. It is read-only: it moves
 // no card, and the factory does not hold or order cards by it (that is a separate card).
 
 const (
@@ -35,7 +35,7 @@ const (
 )
 
 // peerStages are the columns of cards in flight (everything but Ideas and Done).
-var peerStages = map[string]bool{"plan": true, "plan-review": true, "building": true, "review": true,
+var peerStages = map[string]bool{stageRoute: true, "building": true, gateRequest: true, gateDesign: true, gateSignoff: true,
 	"zach": true, "landing": true}
 
 type Peer struct {
@@ -363,7 +363,7 @@ func (r CardRequest) brief() (string, []string) {
 }
 
 // isAppCard reports whether a is a top-level Paseo-started session (source "app"), not a factory
-// worker, reviewer, arbiter, scout, routing helper or anchor.
+// worker, reviewer, scout, routing helper or anchor.
 func isAppCard(a Agent) bool {
 	return source(a) == "app" && a.L(labelRole) == "" && a.L(labelRouting) == "" &&
 		!boardAnchor(a) && (a.L(labelStage) == "" || a.L(labelSource) == "app")
@@ -742,18 +742,18 @@ func peersCmd(port int) string {
 // fellowPeersRule is the Fellow prompt's section on other cards; snapshot is the brief at start.
 func fellowPeersRule(port int, snapshot string) string {
 	return `Other agents. Other factory cards run at the same time as you, often in the same repo and files.
-Refresh the brief below before you plan, before you build and before you land:
+Refresh the brief below before you build and before you land:
 ` + peersCmd(port) + `
 - A card in flight already does what you were asked: say which one on a line
-  "DUPLICATE OF: <card id>" and stop (no plan, no edits).
-- Your work overlaps another card's files or area: name that card in your plan, add an
+  "DUPLICATE OF: <card id>" and stop (no edits).
+- Your work overlaps another card's files or area: name that card in your summary, add an
   "Ordering:" line saying which should land first and why, and keep your edits to shared files small.
-- If yours must land after another card, end the plan with a line "Waits on: <its short id>" (one
+- If yours must land after another card, end your reply with a line "Waits on: <its short id>" (one
   card, the last such line counts). The factory holds your land prompt until that card lands and
   sends it then: never poll for it or refuse a land prompt.
-- If your build needs another card's result before you can write or test the code, end the plan with
-  "Waits on: <its short id> before build" instead. The factory holds the build after plan review and
-  starts it once that card lands: never poll for another card during plan or build.
+- If your build needs another card's result before you can write or test the code, end your reply with
+  "Waits on: <its short id> before build" instead. The factory holds the build and
+  starts it once that card lands: never poll for another card.
 - Before landing, fetch origin/main; if a card that touched your files has landed, rebase on it and
   rerun the tests.
 - Never edit another card's worktree, and never message other agents.
@@ -765,12 +765,8 @@ The brief when you started:
 // reviewPeersRule is the reviewer prompt's check against the other cards.
 func reviewPeersRule(port int, kind, id string) string {
 	cmd := fmt.Sprintf(`curl -s "localhost:%d/api/peers?for=%s"`, port, id)
-	if kind == "plan" {
-		return "Other cards in flight (their files, stages and requests): `" + cmd + "`. A duplicate of a card in " +
-			"flight is a close verdict: name it on a line `DUPLICATE OF: <card id>`. An overlap with another card's files or area that the plan does " +
-			"not name, or a named overlap with no \"Ordering:\" line, is a blocking finding (`Waits on: <id>` holds landing; `Waits on: <id> before build` holds the build until that card lands).\n"
-	}
 	return "Other cards in flight and what landed lately: `" + cmd + "`. Check the work against origin/main as " +
 		"it is now (`git fetch` first): if a card that touched the same files landed after this one started, the " +
-		"work must be rebased on it and still pass.\n"
+		"work must be rebased on it and still pass. A duplicate of a card in flight is a close verdict: name it on a line " +
+		"`DUPLICATE OF: <card id>`.\n"
 }
