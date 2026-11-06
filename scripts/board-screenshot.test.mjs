@@ -1,15 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { capture, withPreview } from './board-screenshot.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chromium } from 'playwright';
 
+// .factory-scratch is absent on a clean checkout, so create it before each temp folder.
+const scratchDir = async prefix => {
+  const scratch = resolve('.factory-scratch');
+  await mkdir(scratch, { recursive: true });
+  return mkdtemp(join(scratch, prefix));
+};
+
 // Run against the real embedded page and real API, with the preview's fake inputs.
 test('For you and card links render at exact widths and preserve navigation', async () => {
-  const out = await mkdtemp('.factory-scratch/capture-test-');
+  const out = await scratchDir('capture-test-');
   try {
     await withPreview(async url => {
       const results = await capture(url, { card: 'preview-zach', out });
@@ -179,9 +186,8 @@ test('missing shared browser reports setup without downloading', async () => {
 test('declared live preview uses actual CLI and only simulates sample-card actions', async () => {
   const {execFileSync}=await import('node:child_process');
   const {createInterface}=await import('node:readline');
-  const {resolve}=await import('node:path');
   const spec=JSON.parse(await readFile('.factory.json','utf8')).preview;
-  const home=await mkdtemp(resolve('.factory-scratch/declared-preview-'));
+  const home=await scratchDir('declared-preview-');
   const goEnv=JSON.parse(execFileSync('go',['env','-json','GOPATH','GOMODCACHE','GOCACHE'],{encoding:'utf8'}));
   const proc=spawn('sh',['-c',spec.run],{
     detached:true,stdio:['ignore','pipe','pipe'],
