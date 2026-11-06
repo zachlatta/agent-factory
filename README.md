@@ -777,7 +777,8 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
 `/api/board`), in this order:
 
 - **For you**: the Needs Zach cards whose ask is not board-only (`Ask.BoardOnly`, the same rule that
-  decides what is emailed in its thread): finished work to try, a decision, or an agent's question;
+  decides what is emailed in its thread): finished work to try, a decision (including a landed diff
+  on a public repo whose secret scan did not pass), or an agent's question;
   and work that landed with a required action for Zach (`action`, shown here though not emailed). Each shows its label
   (what kind of input it wants: "Ready: try it, then land", "Allow the build", "Work landed. Do this:"),
   its question (the agent's `DECISION:` line, else the ask's title) and the one thing to do (its
@@ -898,7 +899,8 @@ No new digest goes out; a reply to one sent earlier is still read this way.
 - `digest.json` keeps what each sent digest numbered for 30 days: the card, its title, its
   `factory.since`, the question line, its choices, and the thread the send returned, so a number means
   what that digest showed and never shifts. A send that surely failed removes the list. One that may
-  have gone out has no thread, so a reply to it is not recognised (404).
+  have gone out has no thread, so a reply to it is not recognised (404); the same holds for a reply
+  after those 30 days.
 - `POST /api/answer` checks a reply's thread against these lists before any card. The whole reply must
   read as word then numbers (`yes 1 3, drop 2`, `approve 3 and 5`) or numbers then word
   (`1 yes, 2 drop`). The words are the approve, land and drop lists of the table under Needs Zach
@@ -931,7 +933,7 @@ question with a `DUE:` time also gets one reminder per due time in its thread
 (`factory/due.go`). Each ask on the board is either emailed (in its thread) or board-only
 (`Ask.boardOnly`):
 
-- **Emailed:** allow a build with side effects, try finished work before it lands, the secret
+- **Emailed in its thread:** allow a build with side effects, try finished work before it lands, the secret
   scan's stop, a public-repo push without review, a landed diff on a public repo whose secret scan
   did not pass (something unreviewed may already be public), a repo choice, and a direct result's
   question, though its work has already landed.
@@ -975,7 +977,7 @@ The email is the decision alone:
 - The first email answer that acts on a card with no email thread stores the answered thread as its
   `gmail-thread` (`factory/answer.go`), before the answer runs, so its land message tells it to report
   there and later stages carry it. A reply that only gets a clarifying question or starts a separate
-  card stores nothing. Its later waits stay addressed to `FACTORY_ZACH_EMAIL`.
+  card stores nothing, so that card's later waits stay on the board.
 - `factory.told` holds the wait already emailed; it is cleared when the card leaves Needs Zach.
   `factory.feedback-told` holds the feedback exchange whose goes-ahead answer was emailed, and is not.
   A wait where the builder was just asked for a decision or preview (`factory.writing`) is emailed

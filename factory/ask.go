@@ -228,8 +228,8 @@ func baseAsk(c Card, a Agent) *Ask {
 				"not pass (" + strings.TrimPrefix(strings.TrimPrefix(note, landDiffNotePrefix), ": ") +
 				"). Treat anything it found as exposed."
 		}
-		return &Ask{Label: "Work landed. Check what landed:", landed: true, Title: "Landed something other than what was reviewed", From: "builder",
-			Why: why + " Its last message is below.", Actions: []Action{reply("Reply", "Message to the agent"), act("done", "Checked, mark done")}}
+		return &Ask{Label: "Work landed. Check what landed:", landed: true, Kind: askDecision, Title: "Landed something other than what was reviewed", From: "builder",
+			Why: why + " Its last message is below.", Actions: []Action{primary("done", "Checked, mark done"), reply("Reply", "Message to the agent")}}
 	case a.L(labelStage) == "zach":
 		return &Ask{Label: "Moved here by hand", Title: handTitle, From: "builder",
 			Why:     "This card was put in Needs Zach by hand. The agent's last message is below.",

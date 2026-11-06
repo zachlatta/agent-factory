@@ -184,6 +184,23 @@ func TestDigestListFollowsTheSend(t *testing.T) {
 	}
 }
 
+// A reply to a list older than the keep window is not recognised, even when no later digest
+// pruned it: it falls through to the card path and acts on nothing.
+func TestDigestReplyRefusesAStaleList(t *testing.T) {
+	f, p, m := sentDigest(t, digestWait("c1", "A build", time.Hour))
+	then := f.Now()
+	f.Now = func() time.Time { return then.Add(31 * 24 * time.Hour) }
+	if _, err := digestReply(f, "m1", "yes 1"); err == nil || !strings.Contains(err.Error(), ErrNoCard.Error()) {
+		t.Fatalf("a 31-day-old list must not be recognised: %v", err)
+	}
+	if l := p.labels("c1"); l[labelStage] == "building" || l[labelAnswered] != "" || f.agent("c1").L(labelStage) != "zach" {
+		t.Errorf("the stale reply acted: %v (stage %q)", l, f.agent("c1").L(labelStage))
+	}
+	if r := replyMails(m); len(r) != 0 {
+		t.Errorf("the stale reply was answered in its thread: %+v", r)
+	}
+}
+
 // Lists older than the keep window go when a later digest is recorded.
 func TestDigestListsAgeOut(t *testing.T) {
 	f, _, _ := sentDigest(t, digestWait("c1", "A build", time.Hour))

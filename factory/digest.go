@@ -92,8 +92,9 @@ func (f *Factory) writeDigest(d digestFile) error {
 	return os.Rename(tmp, f.digestPath())
 }
 
-// recordShipped adds the board's finished cards to the ledger in digest.json, and drops lines older
-// than ledgerKeep.
+// recordShipped adds the board's finished cards to the ledger in digest.json, drops lines older
+// than ledgerKeep, and drops digest lists older than digestListKeep (no digest is sent now, so
+// nothing else prunes them).
 func (f *Factory) recordShipped() {
 	if f.passive() {
 		return
@@ -110,7 +111,10 @@ func (f *Factory) recordShipped() {
 	merged, added := recordLines(d.Shipped, Finished(f.boardCards()))
 	kept := filterLedger(merged, keep)
 	d.Shipped = kept
-	if !added && len(kept) == len(merged) {
+	lists := keptLists(d.Lists, now)
+	pruned := len(lists) != len(d.Lists)
+	d.Lists = lists
+	if !added && !pruned && len(kept) == len(merged) {
 		return // nothing new: no write
 	}
 	if err := f.writeDigest(d); err != nil {

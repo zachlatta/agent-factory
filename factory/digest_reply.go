@@ -198,7 +198,8 @@ func (f *Factory) updateDigestList(match func(digestList) bool, change func(*dig
 	return errors.New("no such digest list")
 }
 
-// digestListFor is the newest stored list sent in thread.
+// digestListFor is the newest stored list sent in thread, within digestListKeep: a stale list
+// is not recognised, so a late reply falls through to the card path and acts on nothing.
 func (f *Factory) digestListFor(thread string) (digestList, bool) {
 	f.digestMu.Lock()
 	d, err := f.readDigest()
@@ -209,7 +210,7 @@ func (f *Factory) digestListFor(thread string) (digestList, bool) {
 		return digestList{}, false
 	}
 	for i := len(d.Lists) - 1; i >= 0; i-- {
-		if d.Lists[i].Thread == thread {
+		if d.Lists[i].Thread == thread && !d.Lists[i].At.Before(f.Now().Add(-digestListKeep)) {
 			return d.Lists[i], true
 		}
 	}

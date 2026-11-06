@@ -453,11 +453,11 @@ func TestLandedDiffDiffersOnAPublicRepo(t *testing.T) {
 				if l[labelStage] != "zach" || !strings.HasPrefix(l[labelNote], landDiffNotePrefix) || len(p.sent("c1")) != 0 {
 					t.Fatalf("labels %v sent %v", l, p.sent("c1"))
 				}
-				// a board card: the stop shows on the board (a problem ask, in Stuck as before), and no mail is sent
+				// a board card: the stop shows in For you (a possible leak is already public), and no mail is sent
 				f.SetAgents([]Agent{withLabels(c, l)})
 				f.Tick()
-				if s := BuildSections(f.boardCards(), t0, nil); len(s.Stuck) != 1 || s.Stuck[0].ID != "c1" || len(s.ForYou) != 0 {
-					t.Errorf("sections Stuck = %+v ForYou = %+v, want the stopped card in Stuck only", s.Stuck, s.ForYou)
+				if s := BuildSections(f.boardCards(), t0, nil); len(s.ForYou) != 1 || s.ForYou[0].ID != "c1" || len(s.Stuck) != 0 {
+					t.Errorf("sections Stuck = %+v ForYou = %+v, want the stopped card in For you only", s.Stuck, s.ForYou)
 				}
 				if len(m.sends()) != 0 {
 					t.Errorf("board card emailed Zach: %v", m.sends())

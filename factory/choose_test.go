@@ -30,6 +30,8 @@ func TestAskChoices(t *testing.T) {
 		{"secret scan", map[string]string{labelNote: "secret scan failed: email in x.go:1"}, askDecision, []string{"fix", "scan", "drop"}},
 		{"build side effects", map[string]string{labelAwaiting: "plan", labelNote: sideEffectNote}, askDecision, []string{"yes", "no", "change", "drop"}},
 		{"published unreviewed", map[string]string{labelNote: "public repo: finished without review"}, askDecision, []string{"yes", "no", "change"}},
+		{"landed diff, scan failed", map[string]string{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"}, askDecision, []string{"yes", "no", "change"}},
+		{"landed diff, no scan hit", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, askProblem, []string{"done", "change"}},
 		// board-only: the factory's own to settle, answered in the card's details
 		{"did not settle", map[string]string{labelNote: arbiterStuckNote}, askProblem, []string{"arbiter", "change", "drop"}},
 		{"close", map[string]string{labelNote: "reviewer suggests closing", labelVerdict: "close"}, askProblem, []string{"drop", "change"}},
@@ -50,6 +52,12 @@ func TestAskChoices(t *testing.T) {
 		labelCandidates: "a/one b/two"}))
 	if repo.Kind != askDecision || !slices.Equal(choiceIDs(repo), []string{"pick:a/one", "pick:b/two", "pick", "change", "drop"}) {
 		t.Errorf("repo ask: %q %v", repo.Kind, choiceIDs(repo))
+	}
+	// on the scan-hit landed diff, Yes is its primary Checked, mark done
+	scanHit := askFor(Card{ID: "c1", Stage: "zach"}, card("c1", map[string]string{labelStage: "zach",
+		labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"}))
+	if yes := choiceByID(scanHit, "yes"); yes == nil || yes.action != "done" || !yes.Primary {
+		t.Errorf("scan-hit Yes = %+v, want primary done", yes)
 	}
 }
 
@@ -187,6 +195,8 @@ func TestEveryAskHasOneKind(t *testing.T) {
 		{labelNote: arbiterStuckNote}, {labelVerdict: "close"}, {labelNote: "stuck", labelStuckFrom: "plan"},
 		{labelNote: "landing not verified"},
 		{labelNote: "landed; still to do: x"}, {labelNote: "landed; did not say what remains"}, {},
+		{labelNote: landDiffNotePrefix + ": extra commit" + landDiffScanMark + "found: x"},
+		{labelNote: landDiffNotePrefix + ": extra commit"},
 	} {
 		labels := map[string]string{labelStage: "zach"}
 		for k, v := range l {

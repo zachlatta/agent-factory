@@ -75,7 +75,7 @@ func TestAskFor(t *testing.T) {
 		{"landed without a REMAINING line", card("c", map[string]string{labelStage: "zach", labelNote: "landed; did not say what remains"}),
 			"Landed: did it finish?", "builder", "done,reply"},
 		{"landed other than reviewed", card("c", map[string]string{labelStage: "zach", labelNote: "landed diff differs from the reviewed one: extra commit"}),
-			"Landed something other than what was reviewed", "builder", "reply,done"},
+			"Landed something other than what was reviewed", "builder", "done,reply"},
 	}
 	for _, c := range cases {
 		cards := BuildBoard([]Agent{c.a}, nil, t0)
