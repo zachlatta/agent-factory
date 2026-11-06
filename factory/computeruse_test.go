@@ -19,8 +19,6 @@ func checkComputerUsePrompt(t *testing.T, prompt string) {
 		"`tailscale ip -4`", "dry-run mode the repo's README documents",
 		"Close every tab you opened", "stop every server you started",
 		"does not authorize", "Do not change host settings",
-		"Temporary private-network test servers meeting every build-side-effect condition need no separate approval.",
-		"Dry-run servers that read real data still require approval, even on the tailnet.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("computer-use prompt lacks %q", want)
@@ -44,7 +42,11 @@ func TestFellowsGetComputerUseForEveryAgent(t *testing.T) {
 			}
 			prompt := runs[0][len(runs[0])-1]
 			checkComputerUsePrompt(t, prompt)
-			for _, want := range []string{"direct track", "Click through your own UI changes", "before code review", "do NOT land"} {
+			for _, want := range []string{
+				"Temporary private-network test servers meeting every build-side-effect condition need no separate approval.",
+				"Dry-run servers that read real data still require approval, even on the tailnet.",
+				"direct track", "Click through your own UI changes", "before code review", "do NOT land",
+			} {
 				if !strings.Contains(prompt, want) {
 					t.Errorf("Fellow prompt lacks %q", want)
 				}
@@ -57,6 +59,14 @@ func TestUIReviewsShareComputerUseAndKeepRestrictions(t *testing.T) {
 	for _, kind := range []string{"code", "land"} {
 		prompt, _ := reviewPrompt(t, kind, diffFiles("web/page.html\n"))
 		checkComputerUsePrompt(t, prompt)
+		for _, unwanted := range []string{
+			"every build-side-effect condition",
+			"Dry-run servers that read real data still require approval",
+		} {
+			if strings.Contains(prompt, unwanted) {
+				t.Errorf("%s review received builder approval guidance %q", kind, unwanted)
+			}
+		}
 		for _, want := range []string{
 			"Read-only", "Do not edit, commit, push, land",
 			"phone width", "UI feedback:", "gateway is full",
@@ -89,6 +99,17 @@ func TestScoutsAndPickersDoNotGetComputerUse(t *testing.T) {
 	for _, run := range runArgs(p) {
 		if strings.Contains(run[len(run)-1], computerUseHeading) {
 			t.Error("Scout or picker received browser instructions")
+		}
+	}
+}
+
+func TestUIReviewRulesExcludeBuildApprovalGuidance(t *testing.T) {
+	for name, prompt := range map[string]string{"generic": uiReviewRule, "board": boardLayoutRule} {
+		checkComputerUsePrompt(t, prompt)
+		for _, unwanted := range []string{"every build-side-effect condition", "Dry-run servers that read real data still require approval"} {
+			if strings.Contains(prompt, unwanted) {
+				t.Errorf("%s UI rule received builder approval guidance %q", name, unwanted)
+			}
 		}
 	}
 }

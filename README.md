@@ -135,9 +135,9 @@ The planner (the "Fellow") first picks a track:
   and the plan reviewer checks each one against the plan's approach; if one fails or is not shown,
   it goes on the line. An existing test suite's own loopback servers that meet the conditions need
   at most a short note. Temporary private-network test servers meeting every condition need no
-  separate approval. Anything else is a side effect. Dry-run servers that read real data still
-  require approval, even on the tailnet. Public tunnels, production service changes and servers
-  kept running for a later preview remain outside this exemption.
+  separate approval. Anything else is a side effect. Plans and builds that run dry-run servers
+  reading real data still require build approval, even on the tailnet. Public tunnels, production
+  service changes and servers kept running for a later preview remain outside this exemption.
 
   Only a bare none counts (`none`, `None.`, `**none**`;
   also no, n/a or nothing): its reason goes on the next line. Anything else on the line, even a
@@ -414,8 +414,8 @@ The planner (the "Fellow") first picks a track:
   for interactive flows. Other repos retain computer-use checks at both widths. Reviewers return
   non-blocking feedback under "UI feedback:" for the builder's landing summary.
   For interactive action checks, build the binary in the worktree's `.factory-scratch/` and
-  run `factory -dry-run -listen "$(tailscale ip -4):0"`. It reads real data but only logs writes;
-  this real-data dry run still requires build approval, even on the tailnet.
+  run `factory -dry-run -listen "$(tailscale ip -4):0"`. It reads real data but only logs writes.
+  Code and landing reviewers may run this documented read-only check without a build-approval request.
   Stopping it with SIGINT or SIGTERM deletes its temporary state copy. Bind direct remote checks
   to the tailnet IP, never `0.0.0.0`.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
@@ -1394,9 +1394,9 @@ just to test it.
 Drop confirmation, or other actions. Read the current computer-use skill, click through changed
 flows, read page text, and inspect screenshots. To verify actual action behavior beyond the preview simulation, build the current `cmd/factory` under `.factory-scratch/` and use the documented
 `-dry-run -listen "$(tailscale ip -4):0"` mode. That mode reads real data but only logs writes;
-never test against the live service. Because this dry run reads real data, it still requires build
-approval even when bound to the tailnet IP. Close your tabs and stop your servers. Report failed or
-skipped checks explicitly. Remove `.factory-scratch/` before finishing.
+never test against the live service. Plans and builds must declare this real-data dry run for build
+approval. Code and landing reviewers may run it as a documented read-only check without a new approval.
+Close your tabs and stop your servers. Report failed or skipped checks explicitly. Remove `.factory-scratch/` before finishing.
 
 ## Install
 
