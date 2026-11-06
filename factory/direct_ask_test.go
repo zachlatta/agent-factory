@@ -120,6 +120,9 @@ func relabel(f *Factory, p *fakePaseo, c Agent) {
 
 func TestFinishDirectWaitsWhenTheReplyAsks(t *testing.T) {
 	f, p, m, c := directCard(t, nil, askReply)
+	c.Labels[gmailThreadLabel] = "t1"
+	f.SetAgents([]Agent{c})
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f.Tick()
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || l[labelTrack] != "direct" || l[labelNote] != noteDirectAsk+"Send the booth form with the larger table?" ||
@@ -134,7 +137,7 @@ func TestFinishDirectWaitsWhenTheReplyAsks(t *testing.T) {
 	relabel(f, p, c)
 	f.Tick()
 	sends := m.sends()
-	if len(sends) != 1 || sends[0].Args["subject"] != "Send the booth form with the larger table?" {
+	if len(sends) != 1 || composed(t, f, "c1").Subject != "Send the booth form with the larger table?" {
 		t.Fatalf("sends = %+v", sends)
 	}
 	text := sends[0].Args["text"].(string)
@@ -225,6 +228,9 @@ func TestDirectAskShape(t *testing.T) {
 // The note is a label, cut and with commas changed; what Zach reads is the agent's own wording.
 func TestDirectAskTitleComesFromTheOverview(t *testing.T) {
 	f, p, m, a := directCard(t, nil, askWithCommas)
+	a.Labels[gmailThreadLabel] = "t1"
+	f.SetAgents([]Agent{a})
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f.Tick()
 	relabel(f, p, a)
 	if note := p.labels("c1")[labelNote]; !strings.HasPrefix(note, noteDirectAsk) {
@@ -237,7 +243,7 @@ func TestDirectAskTitleComesFromTheOverview(t *testing.T) {
 		t.Errorf("title = %q", ask.Title)
 	}
 	f.Tick()
-	if s := m.sends(); len(s) != 1 || s[0].Args["subject"] != want {
+	if s := m.sends(); len(s) != 1 || composed(t, f, "c1").Subject != want {
 		t.Errorf("sends = %+v", s)
 	}
 }
@@ -378,6 +384,8 @@ func TestDirectAskCountsOneAsk(t *testing.T) {
 func TestDirectAskFromAnArchivedAgentShowsAndEmailsOnce(t *testing.T) {
 	archived := func(t *testing.T) (*Factory, *fakePaseo, *fakeMail, Agent) {
 		f, p, m, c := directCard(t, map[string]string{labelArchiveWatch: "1"}, askReply)
+		c.Labels[gmailThreadLabel] = "t1"
+		m.threads["t1"] = []threadMsg{{ID: "m1"}}
 		c.ArchivedAt = t0
 		f.SetAgents([]Agent{c})
 		return f, p, m, c
@@ -401,13 +409,27 @@ func TestDirectAskFromAnArchivedAgentShowsAndEmailsOnce(t *testing.T) {
 		relabel(f, p, a)
 		f.Tick()
 		sends := m.sends()
-		if len(sends) != 1 || sends[0].Args["subject"] != "Send the booth form with the larger table?" {
+		if len(sends) != 1 || composed(t, f, "c1").Subject != "Send the booth form with the larger table?" {
 			t.Fatalf("sends = %+v", sends)
+		}
+	})
+	t.Run("a board card shows and parks with no email", func(t *testing.T) {
+		f, p, m, c := directCard(t, map[string]string{labelArchiveWatch: "1"}, askReply)
+		c.ArchivedAt = t0
+		f.SetAgents([]Agent{c})
+		f.Tick()
+		relabel(f, p, c)
+		f.Tick()
+		if s := BuildSections(f.boardCards(), t0, nil); len(s.ForYou) != 1 {
+			t.Fatalf("For you = %+v", s.ForYou)
+		}
+		if s := m.sends(); len(s) != 0 {
+			t.Fatalf("board card emailed Zach: %+v", s)
 		}
 	})
 	t.Run("a failed send is tried again", func(t *testing.T) {
 		f, p, m, a := archived(t)
-		m.errs["send_email"] = errors.New("mail down")
+		m.errs["reply_to_message"] = errors.New("mail down")
 		f.Tick()
 		relabel(f, p, a)
 		f.Tick()
@@ -415,7 +437,7 @@ func TestDirectAskFromAnArchivedAgentShowsAndEmailsOnce(t *testing.T) {
 			t.Fatalf("no send tried")
 		}
 		tried := len(m.sends())
-		delete(m.errs, "send_email")
+		delete(m.errs, "reply_to_message")
 		relabel(f, p, a)
 		f.Tick()
 		if len(m.sends()) != tried {
@@ -442,12 +464,11 @@ func TestDirectAskFromAnArchivedAgentShowsAndEmailsOnce(t *testing.T) {
 	})
 }
 
-// reminderCard waits on Zach since since, with a due time.
+// reminderCard waits on Zach since since, with a due time, in a thread Zach started.
 func reminderCard(t *testing.T, since, due time.Time) (*Factory, *fakePaseo, *fakeMail, Agent) {
 	t.Helper()
-	c := card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelTrack: "direct",
-		labelNote: directAskNote("Send it?"), labelSince: iso(since), labelDue: iso(due), labelTold: directAskNote("Send it?"),
-		labelZachThread: "t1"})
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelSource: "board", labelTrack: "direct",
+		labelNote: directAskNote("Send it?"), labelSince: iso(since), labelDue: iso(due), labelTold: directAskNote("Send it?")}), "t1")
 	c.Title = "Fill in the booth form"
 	f, p, m := mailFactory(t, c)
 	m.threads["t1"] = []threadMsg{{ID: "m1"}}

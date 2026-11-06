@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-// The daily digest: one email at digestHour in Config.Location, to Config.DigestTo,
+// No daily digest is sent (tickDigest is not called); this file keeps the shipped ledger and the
+// numbering of digests sent earlier. The digest as built: one email at digestHour in Config.Location, to Config.DigestTo,
 // with what waits on Zach, what shipped today, what is in progress, what is stuck and which requests
 // got no answer, one line per card with its board link. It is built from the board's Sections
 // (sections.go) by the factory itself: no agent turn. digest.json in the state directory keeps the day
@@ -294,7 +295,8 @@ func (f *Factory) setDigestStatus(s string) {
 	f.mu.Unlock()
 }
 
-// tickDigest sends today's digest once it is digestHour, unless it was sent already.
+// tickDigest is not called: no digest is sent. It stays until the mail machinery is deleted;
+// the shipped ledger in this file (recordShipped) is live and feeds the board.
 func (f *Factory) tickDigest() {
 	to := f.cfg.DigestTo
 	if to == "" {

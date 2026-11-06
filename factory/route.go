@@ -126,7 +126,7 @@ Candidate repos (checkouts under %s):
 Pick the repo where this work would land. Read each likely repo's README and AGENTS.md, its recent
 ` + "`git log`" + `, and grep it for names in the request. Check past agent sessions for earlier work on
 the same thing (PDW: ` + "`pdw readme agent-sessions`" + `). Errands that change no code (a question, research,
-a report or an email to Zach, a PDW mutation) go to <default repo>, where such work is recorded.
+a report or a note for Zach, a PDW mutation) go to <default repo>, where such work is recorded.
 Be quick: a few minutes at most.
 
 End your reply with a short reason, then one last line in exactly one of these forms:

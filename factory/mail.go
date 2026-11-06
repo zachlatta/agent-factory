@@ -17,13 +17,13 @@ import (
 	"unicode"
 )
 
-// Needs Zach email. Every card that waits on Zach gets one email per wait reason (factory.told), sent
-// by the factory itself through the zrl-bot mailbox, carrying what the board's Ask shows: the title,
-// why, the card, the full last message of the builder or reviewer, its questions, the reply words and
-// a board link. Inbox cards answer in their own thread (gmail-thread). Other cards get one new thread
-// to Config.ZachEmail on their first wait (factory.zach-thread); later waits reply in it. His email
-// replies reach the factory through the dispatcher's POST /api/answer (answer.go); the first one that
-// acts makes that thread the card's gmail-thread too, so the card reports there when it lands.
+// Needs Zach email. The factory starts no email of its own: a card that waits on Zach is emailed
+// (once per wait reason, factory.told) only in a thread Zach started (gmail-thread); board work is
+// board-only, and neither a factory-started thread (factory.zach-thread) nor Config.ZachEmail sends
+// anything. A thread email carries what the board's Ask shows: the title, why, the card, the full
+// last message of the builder or reviewer, its questions, the reply words and a board link. His
+// email replies reach the factory through the dispatcher's POST /api/answer (answer.go); the first
+// one that acts makes that thread the card's gmail-thread too, so the card reports there when it lands.
 
 // Mailer calls one zrl_bot_email_control tool with args and returns its JSON result.
 type Mailer interface {
@@ -121,11 +121,8 @@ func (f *Factory) mailZach(a Agent, c Card) error {
 	if f.mailWaits(a.ID) {
 		return nil
 	}
-	if lineageEmailThread(byID, a) == "" && f.cfg.ZachEmail == "" {
-		if f.noteOnce("no-zach-email", "") {
-			f.logf("no FACTORY_ZACH_EMAIL: board cards waiting on Zach are not emailed")
-		}
-		return nil
+	if lineageEmailThread(byID, a) == "" {
+		return nil // no thread Zach started: this wait is board-only
 	}
 	detail, qs, ov := f.askDetail(c, ask)
 	ask.Questions, ask.Overview = qs, ov
@@ -162,7 +159,11 @@ func (f *Factory) mailWaits(id string) bool {
 // mailOnce emails m to Zach in a's thread at most once: it sets label key to val on a first, so a
 // factory that stops mid-send never sends it again. A failed send clears the label and waits
 // mailRetryAfter; one that may have gone through keeps it. sent is true only for a confirmed send.
+// A card with no email thread sends nothing and sets no label: the factory starts no email of its own.
 func (f *Factory) mailOnce(a Agent, key, val string, m email) (sent bool, err error) {
+	if lineageEmailThread(f.byID(), a) == "" {
+		return false, nil
+	}
 	if err := f.setLabels(a.ID, map[string]string{key: val}); err != nil {
 		return false, err
 	}

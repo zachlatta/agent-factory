@@ -67,9 +67,8 @@ func (f *Factory) feedbackMail(a Agent, c Card, ask *Ask, closing string) email 
 func (f *Factory) mailFeedbackGoesAhead(t Agent) {
 	exchange := t.L(labelReadyFeedback)
 	byID := f.byID()
-	if t.L(labelFeedbackTold) == exchange || f.Mail == nil ||
-		(lineageEmailThread(byID, t) == "" && lineageLabel(byID, t, labelZachThread) == "" && f.cfg.ZachEmail == "") {
-		return
+	if t.L(labelFeedbackTold) == exchange || f.Mail == nil || lineageEmailThread(byID, t) == "" {
+		return // no thread Zach started: the answer is board-only
 	}
 	m := f.feedbackMail(t, Card{ID: t.ID, Repo: t.Repo}, readyAsk(""), feedbackGoesAhead)
 	if _, err := f.mailOnce(t, labelFeedbackTold, exchange, m); err != nil {

@@ -11,7 +11,7 @@ import (
 
 // Ready for you: the one stop where Zach sees finished work before it lands. The builder writes
 // three CHANGED: lines and any before/after screenshots; the factory runs the live preview
-// (tryout.go) and sends one email. Whole approval replies land it, Drop drops it, and other
+// (tryout.go) and emails it in the card's thread, if it has one. Whole approval replies land it, Drop drops it, and other
 // replies go back to the builder and code review. A repair keeps finished-work approval only after a fresh review confirms unchanged behavior;
 // new behavior or new always-ask reasons get a new Ready summary.
 

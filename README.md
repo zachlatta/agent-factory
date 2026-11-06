@@ -78,7 +78,7 @@ that waits on a person.
 
 The planner (the "Fellow") first picks a track:
 
-- **Direct track**: errands that change no code (a question, research, a report, an email to Zach,
+- **Direct track**: errands that change no code (a question, research, a report, a note for Zach,
   or a PDW mutation he approves himself, including an email or message to someone else sent only
   through a PDW review such as `gmail.send_email`, where the agent queues the mutation and replies
   to Zach with an Approve button). Done in one pass; the factory checks the work reached
@@ -86,16 +86,15 @@ The planner (the "Fellow") first picks a track:
   A last reply that asks Zach something (a DECISION that is not None, a NEEDS FROM ZACH that is not
   Nothing, a QUESTION block with or without an overview, or a `REMAINING` item left for him) goes to
   Needs Zach instead, once those checks pass, with that question as the ask: Answer, Mark done or
-  Drop. It is emailed like any decision, also when its agent was already archived, which parks the
-  card. This includes a result that waits only on a PDW approval: it stays in For you until he marks
+  Drop. Like any decision it is emailed in its thread if it has one, also when its agent was
+  already archived, which parks the card. This includes a result that waits only on a PDW approval: it stays in For you until he marks
   it done. A NEEDS FROM ZACH line that starts with Nothing, None, N/A or No action says nothing,
   whatever follows it. A reply with no overview and no QUESTION block asks nothing, so an inbox errand
   whose last line follows a command still finishes.
   The ask can carry an optional `DUE:` line after NEEDS FROM ZACH: an ISO time with a zone
   (`2035-01-31T22:00:00-05:00`, seconds optional). A bad value or a time with no zone is logged and
   ignored, and the ask still stops. The due time shows on the board and in the ask email, puts the
-  card first in For you (soonest first) and first in the daily digest, and turns to Overdue when it
-  passes. Zach gets one reminder in the card's thread when under 6 hours remain, parked or not, per
+  card first in For you (soonest first), and turns to Overdue when it passes. Zach gets one reminder in the card's thread when under 6 hours remain, parked or not, per
   due time. An ask that arrives inside those 6 hours is its own reminder, and none is sent once it is
   past due.
   Zach's message to an errand card (before its first plan, after it finished direct, or answering
@@ -180,7 +179,8 @@ The planner (the "Fellow") first picks a track:
   This repo lists its gates there.
 - **Ready for you** is the one stop where a person sees finished work before it lands. The builder
   writes three `CHANGED:` lines in plain words and any `BEFORE:` / `AFTER:` screenshots; it starts no
-  server and uploads nothing. The factory runs the repo's preview (below) and sends one email:
+  server and uploads nothing. The factory runs the repo's preview (below) and emails it in the
+  card's thread, if it has one:
   subject "Ready to try: <title>" when a preview (including starting or queued), usable screenshot
   or sample output exists. Otherwise the subject, first line and board title use the builder’s decision,
   with "Nothing is installed or changed until you say yes or land." A decision that names no change
@@ -193,20 +193,22 @@ The planner (the "Fellow") first picks a track:
   the approval words below, `land` or `land it` lands it; the drop words drop it; letters (`1A`, or
   `A` for one question) answer the builder's questions and go to it; anything else is a change
   request, which sends the card back to building and code review. If the clean reviewed revision
-  matches the revision last presented, the builder's answer is emailed once per feedback exchange
-  without another Ready summary or announcement, and what follows depends on the answer:
+  matches the revision last presented, the builder's answer is emailed in its thread once per
+  feedback exchange, if it has one, without another Ready summary or announcement, and what
+  follows depends on the answer:
   - It asks for something: Land, Change and Drop remain available, as above.
   - `DECISION: None` and `NEEDS FROM ZACH: Nothing`, bare, with no question and no `REMAINING` item:
-    he has seen this version, so "you asked for it" is waived. If no other reason holds, the email says
-    "Nothing more is needed from you. It goes ahead on its own." (once per exchange,
+    he has seen this version, so "you asked for it" is waived. If no other reason holds, its thread
+    answer says "Nothing more is needed from you. It goes ahead on its own." (once per exchange,
     `factory.feedback-told`; a failed send is logged and does not hold it back) and the card goes on to
     the normal landing, with no approval recorded, so a later repair comes back to him.
   - Otherwise, that same answer with any other reason (an arbiter's, no plan review, architecture, the
     reviewer's always-ask line or a missing one, the file check, or a reason from the Ready stop) waits
-    for him, and the email and board say why (`factory.feedback-hold`).
+    for him, and the board says why (`factory.feedback-hold`), as does its thread answer when
+    there is one.
 
   Changed code gets a fresh Ready presentation (`factory.ready` counts presentations). The presented
-  revision and exchange are persisted through restart and agent replacement. The email waits for the preview to load or fail, at most 10 minutes
+  revision and exchange are persisted through restart and agent replacement. A thread email waits for the preview to load or fail, at most 10 minutes
   after the builder was asked.
 - **Previews** (`factory/tryout.go`, `previews.json`). A repo declares one in `.factory.json`, read
   from `origin/main` only, so a card cannot change what runs on the host before it lands:
@@ -284,8 +286,8 @@ The planner (the "Fellow") first picks a track:
 - Automatic recovery (`factory/recover.go`). Errors, usage limits, stalls, failed reviewers,
   dropped dependencies and failed landings never go to Needs Zach or email. The factory retries
   them, or hands them back to the card, up to a hard cap per kind. When a cap runs out, the card
-  stays in its column marked stuck (`factory.stuck=<why>`, read with `stuckReason` for the daily
-  digest): a "stuck: <why>" flag on the board and a board-only ask with Re-run (Resume for agent
+  stays in its column marked stuck (`factory.stuck=<why>`, read with `stuckReason`): a
+  "stuck: <why>" flag on the board and a board-only ask with Re-run (Resume for agent
   errors), Reply and Drop. A stuck card gets no automatic move until it runs again or Zach acts; that clears the mark.
   The state lives in one label, `factory.recovery` (base64 JSON, which replaces
   `factory.limit-recovery` and is read from it once). It survives restarts, and a handoff to a
@@ -360,8 +362,9 @@ The planner (the "Fellow") first picks a track:
   without one (`rm` only with literal absolute paths, `git -C` instead of `cd`, work in the
   worktree) or to say in its summary what it needs (`factory/blocked.go`). It never allows a prompt,
   never answers one of an agent it did not start, and never in a dry or read-only run. An agent
-  still on a prompt 20 minutes after its last activity gets Zach one email in its card's thread, once
-  per move of the card (`factory.permit-told`, `factory/permit.go`); he approves or denies it in
+  still on a prompt 20 minutes after its last activity gets Zach one email in its card's thread,
+  if it has one, once per move of the card (`factory.permit-told`, `factory/permit.go`); he
+  approves or denies it in
   Paseo, stops the agent or messages it.
 - A plan can name one card it lands after, with a line `Waits on: <short id>`, or one its build needs
   first, with `Waits on: <short id> before build`. A plain `Waits on:` holds the land prompt after code
@@ -378,8 +381,8 @@ The planner (the "Fellow") first picks a track:
   Held work stays in Building or Landing and in Working. When its dependency chain reaches Needs Zach,
   its tile, panel and Working line name and link to that decision. The decision shows how many
   held cards wait on it, including indirect dependencies, matching the workflow health count.
-  These explanations clear automatically and create no extra asks or counts in Needs Zach.
-  The daily digest includes the waiting explanation; no additional emails are sent.
+  These explanations clear automatically and create no extra asks or counts in Needs Zach, and
+  no emails are sent for them.
 - A landing card is Done only if its HEAD is on `origin/main`, it made a commit of its own, and its
   last message ends with `REMAINING: none` or lists only optional tries as described below. A card that lists work left (`REMAINING:` then one `-`
   line per item), or says nothing, waits in Needs Zach with the list in its note, shown on the board and
@@ -393,7 +396,8 @@ The planner (the "Fellow") first picks a track:
   must do it, `Zach:` or `agent:`. When the message's `NEEDS FROM ZACH:` says nothing (and names no
   ask), it has no question and no item is Zach's, the work left goes back to the same card instead: the
   agent finishes it in its worktree, new commits get a code review (and, on a card Zach asked for, his
-  finished-work stop again), and it lands again. Only the first landing emails Zach. At most 2 such
+  finished-work stop again), and it lands again. Only the first landing is reported in its
+  thread. At most 2 such
   rounds (`factory.work-left-rounds`, carried across handoffs and not reset by "Send it on"); after
   that the card waits in Needs Zach with the list.
 - A landing whose HEAD is not on `origin/main` (a push failure, a rebase conflict, a `bin/land` scan
@@ -406,8 +410,8 @@ The planner (the "Fellow") first picks a track:
   says not to push again if HEAD is already on main. This review still runs when an earlier landing
   was verified and there are no unpushed commits. On a public repo the factory first scans the
   range that landed (`factory.base..HEAD`). A hit, or a scan that cannot run, waits in Needs Zach as
-  "Landed something other than what was reviewed" and is emailed: something unreviewed is already
-  public.
+  "Landed something other than what was reviewed" and is emailed in its thread, if it has one:
+  something unreviewed is already public.
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check,
   given to the panel's phone UX reviewer (or the single reviewer when git cannot list the files).
   In this repo use the screenshot helper below for desktop and phone layout, and computer use
@@ -773,8 +777,8 @@ The board opens on one column, at every width (`factory/sections.go`, the `secti
 `/api/board`), in this order:
 
 - **For you**: the Needs Zach cards whose ask is not board-only (`Ask.BoardOnly`, the same rule that
-  decides what is emailed): finished work to try, a decision, or an agent's question; and work that
-  landed with a required action for Zach (`action`, shown here though not emailed). Each shows its label
+  decides what is emailed in its thread): finished work to try, a decision, or an agent's question;
+  and work that landed with a required action for Zach (`action`, shown here though not emailed). Each shows its label
   (what kind of input it wants: "Ready: try it, then land", "Allow the build", "Work landed. Do this:"),
   its question (the agent's `DECISION:` line, else the ask's title) and the one thing to do (its
   `NEEDS FROM ZACH:` line); on Ready for you, what changed and
@@ -876,58 +880,19 @@ external image URL is used. Images become unavailable if their worktree or file 
 
 ### Daily digest
 
-At 6 PM in Zach's time zone the factory sends one email, the daily digest (`factory/digest.go`),
-to `FACTORY_DIGEST_TO`. It is the only status email: decisions are emailed as they come (below),
-and everything else waits for it.
+No daily digest is sent, whatever `FACTORY_DIGEST_TO` holds; the setting sends nothing. The
+board is where the day's work shows. `/api/health` reports no digest state.
 
-It is opt-in. With no `FACTORY_DIGEST_TO` no digest is sent; it never falls back to
-`FACTORY_ZACH_EMAIL`. Finished cards are still recorded in `digest.json` (the board's Shipped today
-reads it). The operator sets `FACTORY_DIGEST_TO` once the delivery below is chosen and ready; a
-digest set after 6 PM still goes out that evening, listing that day's finished cards.
-`/api/health` reports its last state as `digest` (off, nothing to report, sent, send failed,
-possibly sent); it never fails the health check.
-
-- It opens with what is due (the Due part below), then a numbered list, newest first, of the waiting
-  asks one word answers (see "Answering
-  the digest by number"): one short line with the title and the decision, `1. Move the backup: Allow this build? (Yes, No or Drop)`.
-  Then it lists, from the same `Sections` the board shows, one line per card with its board link:
-  Waiting on you (the other asks, unnumbered), Shipped (with the time), In progress, Stuck, and No
-  answer yet, then the count of routine runs and the board link. A numbered card is not listed twice,
-  and its link is in the HTML only. The subject counts them, and "for you" counts every waiting card
-  ("Factory today: 2 shipped, 1 stuck"). Titles and states are in plain words: ids, hashes, repo slugs
-  and file names are cut.
-- No answer yet is the board's list as it stands: the dispatcher's requests not dismissed (see
-  "Unanswered requests"), so a dismissed request leaves the board and the digest alike, and one
-  still unanswered is listed again the next evening.
-- Shipped lists every finished card no digest has listed yet, whatever the day:
-  a card that lands at 7 PM, or whose landing is confirmed only after a digest went out, is in the
-  next one. Selection is by card, not by a time cutoff, so a card is listed exactly once and never
-  dropped. Each pass records the board's finished cards in `digest.json`, and a digest marks the
-  ones it lists (unmarked again if the send surely failed). The ledger keeps a line for a week, so
-  it outlives the card's time on the board and a failing digest catches up. The first digest ever
-  lists only that day's, and marks the ledger's earlier cards listed, so no later digest lists them.
-  A digest turned off (no address) and back on catches up on what finished while it was off, at
-  most a week of it.
-- The factory writes it itself from the board; no agent turn.
-- A Due part comes first, above the numbered list, soonest first: For you cards whose question has a
-  `DUE:` time, each with that time or Overdue. Its answer takes words, so such a card has no number,
-  is not listed again under Waiting on you, and the subject counts it first ("1 due").
-- One line lists the finished cards that asked Zach 3 or more times, most asked first:
-  `Asked you 3 or more times: Fix the printer (4), Move the server (3)`. It reads card timing, so it
-  includes dropped cards and cards that left the board. A card is listed once, for the first digest
-  after it reached Done: `digest.json` saves the exact time each digest selected its cards, whenever
-  it was sent, and a send that surely failed restores the previous time. The first digest looks back
-  to the start of that day. Open cards are not listed. The line alone is enough to send a digest,
-  and the subject counts it ("2 asked 3+ times").
-- `digest.json` in the state directory keeps the day last sent, written before the send, so a
-  restart never sends a day twice, and a factory that was down at 6 PM still sends that evening.
-  A day with nothing to report sends nothing. A failed send is tried again after 5 minutes; one
-  that timed out (it may have gone out) stays recorded and is not sent again. Dry and read-only
-  runs never send.
+- Finished cards are still recorded each pass in `digest.json` in the state directory
+  (`factory/digest.go`): the board's Shipped today reads that ledger. The ledger keeps a line
+  for a week, so a finished card stays listed after it leaves the board. The file also keeps
+  what each digest sent earlier numbered, so a reply to one still answers by number, below.
 
 #### Answering the digest by number
 
-- An ask is numbered only if it is emailed, its go answer is Land or Yes and does not close the card,
+No new digest goes out; a reply to one sent earlier is still read this way.
+
+- An ask was numbered only if it was emailed, its go answer is Land or Yes and does not close the card,
   it has no questions (Yes would take the recommended options), and its builder is not still writing.
   Agents' open questions, repo choices, Done it actions and approvals with questions stay unnumbered.
 - `digest.json` keeps what each sent digest numbered for 30 days: the card, its title, its
@@ -956,38 +921,15 @@ possibly sent); it never fails the health check.
   matching card goes to `/api/answer` first, and on 404 continues as usual. A quiet-delivery filter
   on that subject must leave "Re:" messages alone, or it hides what was done and refused.
 
-Delivery, in this order:
-
-1. Pick a recipient that is one of the mailbox's allowed recipients exactly as listed
-   (`get_mailbox_info`); plus forms of an allowed address are refused. Changing that list is not
-   part of this setup.
-2. Normal delivery (Zach accepts a phone alert for it): set `FACTORY_DIGEST_TO` to that address in
-   the host environment file and let the factory reload. After the first digest, check that it
-   reached that address once, with the day's sections and working board links, and that
-   `/api/health` and `digest.json` show one send for that day, which a restart does not repeat.
-
-Quiet delivery (no phone alert), only when Zach asks for it, is set up on the recipient's side,
-never in the bot's mailbox: a filter in the bot's own mailbox does not change how a delivered copy
-alerts in another inbox. Then, instead of step 2:
-
-1. In the recipient mailbox, create one filter that matches only the digest: from the bot's address, with
-   the subject `"Factory today:"`, adding a label, marking it read and skipping the inbox. Where the
-   mailbox is one of PDW's Gmail accounts this is a reviewed `gmail.create_filter` mutation; it
-   touches no other mail and applies to new mail only.
-2. Verify it is active: the filter shows in that mailbox (PDW's `base_gmail.filters` after its
-   sync) with exactly those criteria and actions.
-3. Only then set `FACTORY_DIGEST_TO` in the host environment file and let the factory reload.
-4. Check silence, do not assume it: after the first digest, its message in the recipient mailbox has
-   the label and neither `INBOX` nor `UNREAD`, the phone's notification log shows no mail alert for
-   its subject, and `/api/health` and `digest.json` show exactly one send for that day. If it
-   alerted, report it rather than calling the setup done.
-
 ### Needs Zach email
 
-Zach is emailed only for decisions, by the factory itself through the zrl-bot mailbox
-(`pdw call zrl_bot_email_control__*`, `factory/mail.go`), once per wait reason. A question with a
-`DUE:` time also gets one reminder per due time (`factory/due.go`). Each ask on the board
-is either emailed or board-only (`Ask.boardOnly`):
+The factory starts no email of its own. A card that waits on Zach is emailed only in a thread
+Zach started (`gmail-thread`), by the factory itself through the zrl-bot mailbox
+(`pdw call zrl_bot_email_control__*`, `factory/mail.go`), once per wait reason; every other card
+waits on the board only, and no told-family label is set for a send that never happens. A
+question with a `DUE:` time also gets one reminder per due time in its thread
+(`factory/due.go`). Each ask on the board is either emailed (in its thread) or board-only
+(`Ask.boardOnly`):
 
 - **Emailed:** allow a build with side effects, try finished work before it lands, the secret
   scan's stop, a public-repo push without review, a landed diff on a public repo whose secret scan
@@ -1000,7 +942,7 @@ is either emailed or board-only (`Ask.boardOnly`):
   landed diff).
   Errors, usage limits, failed reviewers, stopped cards, dropped dependencies and failed landings
   never reach Needs Zach at all (automatic recovery). These are problems for the factory and its
-  agents; the board shows them under Working on it, and the daily digest lists them.
+  agents; the board shows them under Working on it.
 
 The email is the decision alone:
 
@@ -1024,9 +966,12 @@ The email is the decision alone:
   the owner of `owner/repo-name` slugs are removed. Factory copy avoids pipeline words (card, track,
   landing, Fellow), and agents are told to write the same way for anything Zach reads by email.
 
-- Inbox cards answer in their own thread. Other cards start one thread to `FACTORY_ZACH_EMAIL` on
-  their first wait (`factory.zach-thread`); later waits reply in it, always addressed to
-  `FACTORY_ZACH_EMAIL`. If sending with inline screenshots fails, it retries once without them.
+- Inbox cards answer in their own thread; that thread is the only place a card is emailed. A card
+  with no email thread is never emailed: neither a factory-started thread
+  (`factory.zach-thread`, kept from earlier mail) nor `FACTORY_ZACH_EMAIL` sends anything for it.
+  `FACTORY_ZACH_EMAIL` still addresses replies in a factory-started thread once an email answer
+  has made that thread the card's own, below. If sending with inline screenshots fails, it retries
+  once without them.
 - The first email answer that acts on a card with no email thread stores the answered thread as its
   `gmail-thread` (`factory/answer.go`), before the answer runs, so its land message tells it to report
   there and later stages carry it. A reply that only gets a clarifying question or starts a separate
@@ -1040,8 +985,7 @@ The email is the decision alone:
 - `factory.due` holds when a direct result's question is due, and `factory.due-told` the due time Zach
   was already reminded of (`factory/due.go`), so asking again with the same time does not resend and
   a new time reminds him once more. The reminder goes in the card's thread like any later wait.
-- Not emailed either: cards with no thread when `FACTORY_ZACH_EMAIL` is unset. A failed send is
-  retried after 5 minutes; a timed-out one is not, since it may have gone out.
+- A failed send is retried after 5 minutes; a timed-out one is not, since it may have gone out.
 - Cards that were waiting in Needs Zach for a reason automatic recovery now handles take the
   recovery path on their next pass.
 - `/api/health` reports the last mailbox check as `mail`; it never fails the health check.
@@ -1121,13 +1065,13 @@ nothing is working on, it writes to a JSON file whose path is host config
 (`FACTORY_UNANSWERED_PATH`): `{"updated": "<RFC 3339>", "requests": [{"key", "source", "thread",
 "asked", "subject", "why"}]}`. The dispatcher is the file's only writer and rewrites it whole.
 
-The factory reads it into the board's **No answer yet** list (`factory/unanswered.go`), which the
-daily digest reads too, and serves it at `GET /api/unanswered`. Dismiss (`POST /api/dismiss-request`
+The factory reads it into the board's **No answer yet** list (`factory/unanswered.go`) and
+serves it at `GET /api/unanswered`. Dismiss (`POST /api/dismiss-request`
 with `{"id": "<key>"}`) records the key in the factory's own `dismissed-requests.json`, never in
 the dispatcher's file, so a dismissal survives a restart and the dispatcher's rewrites, for as long
 as the dispatcher lists the request (a key it no longer lists is dropped a month after its
 dismissal). A missing or unreadable file lists nothing. A card that ended with no reply is not listed
-here, on the board or in the digest (the watchdog flags its request); if it landed, it is still shipped.
+here or on the board (the watchdog flags its request); if it landed, it is still shipped.
 
 ### Card timing
 
@@ -1455,8 +1399,8 @@ or a progress note does not count as a failed landing. If recording the run fail
 | `FACTORY_INBOX_SOURCE` | | the email dispatcher's `source` label value on its agents (none: no dispatcher) |
 | `FACTORY_INBOX_ANCHOR_ROLE` | | the dispatcher's anchor agent `role` label, hidden on the board |
 | `FACTORY_UNANSWERED_PATH` | `-unanswered` | the dispatcher's JSON file of requests with no answer (none: the No answer yet list is empty) |
-| `FACTORY_ZACH_EMAIL` | `-zach-email` | where cards with no email thread email Zach (none: they are not emailed) |
-| `FACTORY_DIGEST_TO` | `-digest-to` | where the 6 PM daily digest goes (none: no digest; it never falls back to `FACTORY_ZACH_EMAIL`). An exactly allowed recipient, set once its delivery is ready (Daily digest) |
+| `FACTORY_ZACH_EMAIL` | `-zach-email` | the address replies in a factory-started thread use once an email answer makes it the card's thread; a board card is not emailed (Needs Zach email) |
+| `FACTORY_DIGEST_TO` | `-digest-to` | sends nothing: no daily digest is sent (Daily digest) |
 | `FACTORY_PREVIEW_PORTS` | `-preview-ports` | `lo-hi` ports Ready for you previews run and are published on (default `7700-7799`) |
 | `FACTORY_PREVIEW_MAX` | `-preview-max` | previews running at once (default 8) |
 | `FACTORY_METRIC_HOSTS` | `-metric-hosts` | comma-separated SSH aliases whose CPU, load, RAM and disk the board's host icon shows besides this host (none: this host only) |

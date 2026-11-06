@@ -26,7 +26,7 @@ type Ask struct {
 	Overview *Overview `json:"overview,omitempty"`
 	// BoardOnly: the wait shows on the board but is never emailed. Problems the factory or an agent
 	// can sort out (errors, stalls, stuck steps, landing checks, duplicates) and finished or hand-moved
-	// cards are board-only; Zach is emailed only for decisions.
+	// cards are board-only; Zach is emailed only for decisions, and only in a thread he started.
 	BoardOnly bool `json:"boardOnly,omitempty"`
 	// Ready is set on the Ready for you stop: what changed and the preview (ready.go).
 	Ready *Ready `json:"ready,omitempty"`
@@ -147,7 +147,7 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Label: "Agent stuck on a prompt", Title: "Waiting on a permission prompt", From: "builder",
 			Why: "Claude Code asked for permission (" + a.Pending + "), which it does even in bypass mode. The factory " +
 				"refuses every prompt and tells the agent how to do the step without one; it carries on, or stops and says what it needs. " +
-				"If it is still on the prompt with no activity for 20 minutes, you get one email. Approve or deny it in Paseo, stop it, or message it.",
+				"Approve or deny it in Paseo, stop it, or message it.",
 			Actions: []Action{act("stop", "Stop it"), reply("Reply", "Message to the agent")}}
 	case a.Status == "running" && stalledFlag(c) == "":
 		// a builder writing its brief or plan summary for Zach (sent along with the move here)

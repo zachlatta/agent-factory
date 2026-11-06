@@ -74,7 +74,8 @@ func TestAskShowsTheAgentsOverview(t *testing.T) {
 }
 
 func TestEmailLeadsWithTheOverview(t *testing.T) {
-	f, p, m := mailFactory(t, planWait("c1", nil))
+	f, p, m := mailFactory(t, inThread(planWait("c1", nil), "t1"))
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	storeLog(t, f, p, "c1", "[User] go\nDECISION: Re-run the build?\nOVERVIEW: The build hung.\nNEEDS FROM ZACH: Tap Re-run.\n\nI tried twice.")
 	f.Tick()
 	sends := m.sends()
@@ -82,8 +83,8 @@ func TestEmailLeadsWithTheOverview(t *testing.T) {
 		t.Fatalf("sends = %+v", sends)
 	}
 	text, html := sends[0].Args["text"].(string), sends[0].Args["html"].(string)
-	if sends[0].Args["subject"] != "Re-run the build?" {
-		t.Errorf("the decision is the subject: %v", sends[0].Args["subject"])
+	if got := composed(t, f, "c1").Subject; got != "Re-run the build?" {
+		t.Errorf("the decision is the subject: %v", got)
 	}
 	if !strings.HasPrefix(text, "I recommend yes.\n") || !strings.Contains(text, "The build hung.") {
 		t.Errorf("text does not lead with the recommendation, then the overview:\n%s", text)

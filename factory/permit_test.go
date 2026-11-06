@@ -14,19 +14,21 @@ func stuckCard(id string, idle time.Duration) Agent {
 	return c
 }
 
-// A factory agent still on a refused prompt with no activity for 20 minutes gets Zach one email, once per
-// move; the factory never approves the prompt (the fake paseo panics on permit allow).
+// A factory agent still on a refused prompt with no activity for 20 minutes gets Zach one email in
+// the card's thread, once per move; the factory never approves the prompt (the fake paseo panics on permit allow).
 func TestStuckPromptEmailsZachOnce(t *testing.T) {
-	f, p, m := mailFactory(t, stuckCard("c1", 19*time.Minute))
+	f, p, m := mailFactory(t, inThread(stuckCard("c1", 19*time.Minute), "t1"))
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f.Tick()
 	if len(m.sends()) != 0 {
 		t.Fatalf("emailed before %v: %v", permitTimeout, m.sends())
 	}
-	f2, p2, m2 := mailFactory(t, stuckCard("c1", 21*time.Minute))
+	f2, p2, m2 := mailFactory(t, inThread(stuckCard("c1", 21*time.Minute), "t1"))
+	m2.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f2.Tick()
 	sends := m2.sends()
-	if len(sends) != 1 || sends[0].Tool != "send_email" {
-		t.Fatalf("sends = %v, want one new thread", sends)
+	if len(sends) != 1 || sends[0].Tool != "reply_to_message" {
+		t.Fatalf("sends = %v, want one reply in the thread", sends)
 	}
 	text := sends[0].Args["text"].(string)
 	for _, want := range []string{"card c1", "Bash: rm -rf build", "never approves", "https://board.example/#c1"} {
@@ -34,20 +36,18 @@ func TestStuckPromptEmailsZachOnce(t *testing.T) {
 			t.Errorf("email lacks %q:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(sends[0].Args["subject"].(string), "permission prompt") {
-		t.Errorf("subject = %v", sends[0].Args["subject"])
+	if subj := f2.stuckPromptEmail(f2.agent("c1"), f2.agent("c1")).Subject; !strings.Contains(subj, "permission prompt") {
+		t.Errorf("subject = %v", subj)
 	}
 	mark := "building@" + ago(time.Hour)
 	if got := p2.labels("c1")[labelPermitTold]; got != mark {
 		t.Errorf("permit-told = %q, want %q", got, mark)
 	}
-	if p2.labels("c1")[labelZachThread] != "nt1" {
-		t.Error("the new thread is not kept for later emails")
-	}
 	// the next pass sees the mark: no second email for this move
-	again := stuckCard("c1", 40*time.Minute)
+	again := inThread(stuckCard("c1", 40*time.Minute), "t1")
 	again.Labels[labelPrefix+labelPermitTold] = mark
 	f3, _, m3 := mailFactory(t, again)
+	m3.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f3.Tick()
 	if len(m3.sends()) != 0 {
 		t.Errorf("emailed twice for one move: %v", m3.sends())
@@ -64,9 +64,10 @@ func TestStuckPromptEmailsZachOnce(t *testing.T) {
 
 // A later move of the card that gets stuck again is emailed again.
 func TestStuckPromptEmailsAgainAfterAMove(t *testing.T) {
-	c := stuckCard("c1", 30*time.Minute)
+	c := inThread(stuckCard("c1", 30*time.Minute), "t1")
 	c.Labels[labelPrefix+labelPermitTold] = "plan@" + ago(3*time.Hour)
 	f, _, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f.mailStuckPrompts(f.agents(), t0)
 	if len(m.sends()) != 1 {
 		t.Fatalf("sends = %v, want one for the new move", m.sends())
@@ -76,7 +77,7 @@ func TestStuckPromptEmailsAgainAfterAMove(t *testing.T) {
 // A reviewer or sub-agent of a card is reported in the card's thread, once for both; an agent the
 // factory did not start is never reported.
 func TestStuckPromptOfHelpersGoesToTheirCard(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "review", labelSince: ago(time.Hour), labelZachThread: "th1"})
+	c := inThread(card("c1", map[string]string{labelStage: "review", labelSince: ago(time.Hour), labelZachThread: "th1"}), "th1")
 	r := reviewer("r1", "c1", "code")
 	r.Status, r.Pending, r.LastActivityAt = "running", "Bash: git push", t0.Add(-25*time.Minute)
 	sub := Agent{ID: "s1", Status: "running", Pending: "Edit: y", CreatedAt: t0.Add(-time.Hour),
@@ -114,8 +115,9 @@ func TestStuckPromptOfHelpersGoesToTheirCard(t *testing.T) {
 
 // A failed send clears the mark, so a later pass tries again.
 func TestStuckPromptFailedSendClearsMark(t *testing.T) {
-	f, p, m := mailFactory(t, stuckCard("c1", 30*time.Minute))
-	m.errs["send_email"] = errors.New("mailbox down")
+	f, p, m := mailFactory(t, inThread(stuckCard("c1", 30*time.Minute), "t1"))
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
+	m.errs["reply_to_message"] = errors.New("mailbox down")
 	f.mailStuckPrompts(f.agents(), t0)
 	if p.labels("c1")[labelPermitTold] != "" {
 		t.Error("a failed send kept the mark")

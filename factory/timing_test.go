@@ -429,8 +429,9 @@ func TestTimingReplyCheckSkips(t *testing.T) {
 }
 
 func TestFactoryEmailsAreRecorded(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"})
-	f, p, _ := mailFactory(t, c)
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelAwaiting: "plan", labelNote: "architecture: approve the plan to build"}), "t1")
+	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	storeLog(t, f, p, "c1", "What now?")
 	f.Tick()
 	ct := timing(t, f, "c1")

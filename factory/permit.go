@@ -8,10 +8,10 @@ import (
 )
 
 // permitTimeout: a factory agent still on a permission prompt this long after its last activity,
-// though denyPrompts refused it, is stuck; Zach gets one email about it.
+// though denyPrompts refused it, is stuck; a card with an email thread gets one email about it.
 const permitTimeout = 20 * time.Minute
 
-// mailStuckPrompts emails Zach once per move of a card (factory.permit-told) when one of the factory's
+// mailStuckPrompts emails Zach in the card's thread, once per move (factory.permit-told), when a
 // agents still waits on a permission prompt permitTimeout after its last activity: the refusal failed
 // or did not end the prompt. It never answers the prompt; Zach approves or denies it in Paseo, or stops
 // the agent. Dry and read-only runs send nothing.
@@ -33,8 +33,8 @@ func (f *Factory) mailStuckPrompts(agents []Agent, now time.Time) {
 		if o.L(labelPermitTold) == mark || f.mailWaits(o.ID) {
 			continue
 		}
-		if lineageEmailThread(byID, o) == "" && lineageLabel(byID, o, labelZachThread) == "" && f.cfg.ZachEmail == "" {
-			continue // mailZach logs the missing address
+		if lineageEmailThread(byID, o) == "" {
+			continue // alerts go only in a thread Zach started
 		}
 		told[o.ID] = true
 		sent, err := f.mailOnce(o, labelPermitTold, mark, f.stuckPromptEmail(o, a))

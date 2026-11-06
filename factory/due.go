@@ -9,8 +9,8 @@ import (
 )
 
 // A direct result that asks Zach something waits on him with this note (finishDirect). Its question
-// can carry a DUE: line: the board and the ask email show it, the daily digest leads with it, and
-// Zach gets one reminder dueReminderLead before it.
+// can carry a DUE: line: the board shows it, and a card with an email thread gets one reminder
+// dueReminderLead before it.
 const (
 	noteDirectAsk     = "asks you: "
 	directAskNoteCap  = 200
@@ -122,7 +122,7 @@ func (f *Factory) mailParkedAsks(agents []Agent) {
 
 // mailDueReminders sends Zach one reminder in the card's thread when a question that has waited since
 // before the window is due within dueReminderLead. An ask that arrives inside the window is its own
-// reminder, and past the time the board and digest show it overdue instead. It loops over every agent:
+// reminder, and past the time the board shows it overdue instead. It loops over every agent:
 // a parked card is reminded too. One per due time: asking again with the same time does not resend.
 func (f *Factory) mailDueReminders(agents []Agent, now time.Time) {
 	if f.passive() || f.Mail == nil {
@@ -142,8 +142,8 @@ func (f *Factory) mailDueReminders(agents []Agent, now time.Time) {
 		if lineageLabel(byID, a, labelDueTold) == mark || f.mailWaits(a.ID) {
 			continue
 		}
-		if lineageEmailThread(byID, a) == "" && lineageLabel(byID, a, labelZachThread) == "" && f.cfg.ZachEmail == "" {
-			continue // mailZach logs the missing address
+		if lineageEmailThread(byID, a) == "" {
+			continue // reminders go only in a thread Zach started
 		}
 		c, ok := f.card(a.ID)
 		if !ok {

@@ -27,8 +27,9 @@ func TestReadyFeedbackUnchanged(t *testing.T) {
 }
 
 func TestReadyFeedbackMail(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: feedbackPrefix + " exchange-2", labelReady: "1"})
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: feedbackPrefix + " exchange-2", labelReady: "1"}), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	storeLog(t, f, p, "c1", "DECISION: None.\nOVERVIEW: The preview needs a reload.\nNEEDS FROM ZACH: Nothing.\n\nReload the preview to see the update.")
 	f.Tick()
 	f.SetAgents([]Agent{labeled(c, p.labels("c1"))})
@@ -189,8 +190,9 @@ func TestFeedbackAnswerGoesAheadOrWaits(t *testing.T) {
 			line:  "the reviewer says: it rewrites a gate", hold: "the reviewer says: it rewrites a gate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := feedbackCard(tc.extra)
+			c := inThread(feedbackCard(tc.extra), "t1")
 			f, p, m := mailFactory(t, c)
+			m.threads["t1"] = []threadMsg{{ID: "m1"}}
 			headIs(f, reviewedSHA, nil)
 			storeLog(t, f, p, "c1", tc.reply)
 			if err := f.passCode(c, map[string]string{}, "code approve", tc.tier, tc.review, tc.asked); err != nil {
@@ -230,8 +232,9 @@ func TestFeedbackAnswerGoesAheadOrWaits(t *testing.T) {
 
 // The normal form of an answer sits only in OVERVIEW: the email must carry it.
 func TestFeedbackGoesAheadCarriesAnAnswerOnlyInTheOverview(t *testing.T) {
-	c := feedbackCard(nil)
+	c := inThread(feedbackCard(nil), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "c1", "DECISION: None.\nOVERVIEW: The totals include refunds.\nNEEDS FROM ZACH: Nothing.")
 	if err := f.passCode(c, map[string]string{}, "code approve", "low", "ALWAYS ASK: none", ""); err != nil {
@@ -249,8 +252,9 @@ func TestFeedbackGoesAheadCarriesAnAnswerOnlyInTheOverview(t *testing.T) {
 
 // An answer stripped to punctuation is not printed.
 func TestFeedbackEmailSkipsAnOverviewStrippedToPunctuation(t *testing.T) {
-	c := feedbackCard(nil)
+	c := inThread(feedbackCard(nil), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "c1", "DECISION: None.\nOVERVIEW: `factory/mail.go`.\nNEEDS FROM ZACH: Nothing.")
 	if err := f.passCode(c, map[string]string{}, "code approve", "low", "ALWAYS ASK: none", ""); err != nil {
@@ -278,8 +282,9 @@ func TestFeedbackEmailQuestions(t *testing.T) {
 			[]string{"1 question is too long for email. Open the board to answer.", `Reply "drop" to drop it, or reply with feedback.`}, []string{"A. ", `"yes"`, `"land"`, "Letters"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := feedbackCard(nil)
+			c := inThread(feedbackCard(nil), "t1")
 			f, p, m := mailFactory(t, c)
+			m.threads["t1"] = []threadMsg{{ID: "m1"}}
 			headIs(f, reviewedSHA, nil)
 			storeLog(t, f, p, "c1", reply+tc.question)
 			if err := f.passCode(c, map[string]string{}, "code approve", "low", "ALWAYS ASK: none", ""); err != nil {
@@ -309,8 +314,9 @@ func TestFeedbackEmailQuestions(t *testing.T) {
 // One answer email per exchange, across a retried verdict and a restart; a new exchange gets its own.
 func TestFeedbackGoesAheadMailsOnce(t *testing.T) {
 	const passes = "ALWAYS ASK: none\nTIER: low\nVERDICT: approve"
-	c := feedbackCard(nil)
+	c := inThread(feedbackCard(nil), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "c1", answerNothing)
 	if err := f.passCode(c, map[string]string{}, "code approve", "low", passes, ""); err != nil {
@@ -320,8 +326,6 @@ func TestFeedbackGoesAheadMailsOnce(t *testing.T) {
 	if l[labelFeedbackTold] != "exchange-2" {
 		t.Fatalf("labels = %v", l)
 	}
-	// the thread exists from here on, so a second send would be delivered and counted
-	m.threads["nt1"] = []threadMsg{{ID: "m1", LabelIDs: []string{"SENT"}}}
 	again := labeled(c, l)
 	f.SetAgents([]Agent{again})
 	if err := f.passCode(again, map[string]string{}, "code approve", "low", passes, ""); err != nil {
@@ -333,7 +337,7 @@ func TestFeedbackGoesAheadMailsOnce(t *testing.T) {
 	restarted, q, after := mailFactory(t, again)
 	headIs(restarted, reviewedSHA, nil)
 	storeLog(t, restarted, q, "c1", answerNothing)
-	after.threads["nt1"] = []threadMsg{{ID: "m1", LabelIDs: []string{"SENT"}}}
+	after.threads["t1"] = []threadMsg{{ID: "m1"}}
 	if err := restarted.passCode(again, map[string]string{}, "code approve", "low", passes, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -353,11 +357,12 @@ func TestFeedbackGoesAheadMailsOnce(t *testing.T) {
 }
 
 func TestFeedbackGoesAheadMailFailureStillLands(t *testing.T) {
-	c := feedbackCard(nil)
+	c := inThread(feedbackCard(nil), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "c1", answerNothing)
-	m.errs["send_email"] = errors.New("mailbox down")
+	m.errs["reply_to_message"] = errors.New("mailbox down")
 	if err := f.passCode(c, map[string]string{}, "code approve", "low", "ALWAYS ASK: none", ""); err != nil {
 		t.Fatal(err)
 	}

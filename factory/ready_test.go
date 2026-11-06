@@ -58,9 +58,10 @@ func TestReadyForYouRoundsGetOneEmailEach(t *testing.T) {
 }
 
 func TestReadyEmail(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
-		labelWriting: ago(5 * 60e9)})
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
+		labelWriting: ago(5 * 60e9)}), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	storeLog(t, f, p, "c1", "DECISION: Land this?\nOVERVIEW: The board is grouped.\nNEEDS FROM ZACH: try it\n\n"+
 		"CHANGED: The board groups cards by repo.\nCHANGED: Each group folds.\nCHANGED: Counts show per group.\n\nrisks")
 	if err := f.previews.put(Preview{Card: "c1", Port: 7701, URL: "https://board.example:7701/", State: previewReady}); err != nil {
@@ -73,8 +74,8 @@ func TestReadyEmail(t *testing.T) {
 	}
 	a := sends[0].Args
 	text, html := a["text"].(string), a["html"].(string)
-	if a["subject"] != "Ready to try: card c1" {
-		t.Errorf("subject = %v", a["subject"])
+	if got := composed(t, f, "c1").Subject; got != "Ready to try: card c1" {
+		t.Errorf("subject = %v", got)
 	}
 	for _, want := range []string{"- The board groups cards by repo.", "- Each group folds.", "- Counts show per group.",
 		"Try it: https://board.example:7701/", `Reply "yes" or "land"`, "https://board.example/#c1"} {
@@ -98,9 +99,10 @@ func TestReadyEmail(t *testing.T) {
 }
 
 func TestReadyEmailWaitsForThePreview(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
-		labelWriting: ago(5 * 60e9)})
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
+		labelWriting: ago(5 * 60e9)}), "t1")
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	f.runner = newFakeRunner()
 	storeLog(t, f, p, "c1", "CHANGED: a\nCHANGED: b\nCHANGED: c")
 	f.previews.put(Preview{Card: "c1", State: previewStarting})
@@ -136,10 +138,11 @@ func mustCard(t *testing.T, f *Factory, id string) Card {
 }
 
 func TestReadyEmailShowsQuestionsAndLettersAnswerThem(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
-		labelWriting: ago(5 * 60e9)})
+	c := inThread(card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1), labelReady: "1",
+		labelWriting: ago(5 * 60e9)}), "t1")
 	c.Title = "Buttons in example/desk get clearer labels"
 	f, p, m := mailFactory(t, c)
+	m.threads["t1"] = []threadMsg{{ID: "m1"}}
 	storeLog(t, f, p, "c1", "CHANGED: Buttons say Land.\n\nQUESTION: Which colour for the button?\n- Blue (recommended)\n- Red\n")
 	f.Tick()
 	sends := m.sends()
@@ -152,8 +155,8 @@ func TestReadyEmailShowsQuestionsAndLettersAnswerThem(t *testing.T) {
 			t.Errorf("email lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(sends[0].Args["subject"].(string), "example/desk") {
-		t.Errorf("subject keeps the repo slug: %v", sends[0].Args["subject"])
+	if got := composed(t, f, "c1").Subject; strings.Contains(got, "example/desk") {
+		t.Errorf("subject keeps the repo slug: %v", got)
 	}
 	ask := readyAsk("")
 	ask.Questions = []Question{{Text: "Which colour for the button?", Options: []string{"Blue (recommended)", "Red"}}}

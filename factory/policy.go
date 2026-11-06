@@ -388,7 +388,7 @@ On either track, your first reply (the plan, or the direct result) includes one 
 TITLE: <the outcome in at most 60 characters, plain words, no file names>
 
 First decide the track. Direct track: the request is an errand that changes no code: a question,
-suggestions, research, a report or an email to Zach, or a PDW mutation he approves himself (including an
+suggestions, research, a report or a note for Zach, or a PDW mutation he approves himself (including an
 email or message to someone other than Zach that is sent only through a PDW mutation he approves, such as
 gmail.send_email: write the message, queue the mutation, reply to Zach with an Approve button, and end
 TRACK: direct). Those come out better from one strong pass than from plan and review agents. On the
@@ -810,7 +810,7 @@ func (f *Factory) passPlan(t Agent, labels map[string]string, verdict, tier, not
 const sideEffectNote = "building has side effects: approve to build"
 
 // sideEffectStop holds card t's passed plan for Zach, because building it has side effects (or they were not
-// ruled out). The factory emails him once the builder has written the decision (mailZach).
+// ruled out). A card with an email thread is emailed once the builder has written the decision (mailZach).
 // Its verdict label keeps the plan pending (planPending), so Zach's reply goes back to plan review.
 func (f *Factory) sideEffectStop(t Agent, labels map[string]string, notes string) error {
 	labels[labelStage], labels[labelVerdict], labels[labelAwaiting] = "zach", "plan side effects", "plan"
@@ -824,7 +824,7 @@ func (f *Factory) sideEffectStop(t Agent, labels map[string]string, notes string
 // passCode moves card t on from code that passed review (or the arbiter): a public repo's scan first, then
 // to Zach when finishedWorkReason says he sees it before it lands (asked is a reason already given),
 // otherwise to landing. An answer to his feedback on the version he was shown returns to him, unless it asks
-// nothing and no reason but "you asked for it" holds (feedbackGate): then it is emailed and goes on to landing.
+// nothing and no reason but "you asked for it" holds (feedbackGate): then it is emailed in its thread, if any, and goes on to landing.
 func (f *Factory) passCode(t Agent, labels map[string]string, verdict, tier, notes, asked string) error {
 	target, now := t.ID, iso(f.Now())
 	set := func(kv ...string) error {
@@ -1193,7 +1193,7 @@ func (f *Factory) Tick() {
 	f.checkReplies(now)
 	f.probeMail()
 	f.recordShipped()
-	f.tickDigest()
+	// no digest: the factory sends Zach no email of its own (digest.go keeps the shipped ledger)
 }
 
 // actedGrace: a card counts as having acted only this long after its last move (see tickAgent).
@@ -1386,7 +1386,8 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if moved, err := f.migrateWait(a, c); moved || err != nil {
 			return err
 		}
-		if f.Mail == nil || lineageTold(f.byID(), a) == waitNote(a) || !mailable(c.Ask) {
+		if f.Mail == nil || lineageTold(f.byID(), a) == waitNote(a) || !mailable(c.Ask) ||
+			lineageEmailThread(f.byID(), a) == "" { // board waits are not emailed
 			return nil
 		}
 		if live, err := f.stillStopped(a); !live {
@@ -1583,7 +1584,7 @@ func (f *Factory) recordBase(a Agent) {
 	}
 }
 
-// waitNote says why a Needs Zach card waits; Zach is emailed it once per note (mail.go).
+// waitNote says why a Needs Zach card waits; a card with an email thread is emailed it once per note (mail.go).
 func waitNote(a Agent) string {
 	if n := a.L(labelNote); n != "" {
 		return n
@@ -1658,7 +1659,7 @@ func (f *Factory) finishDirect(a Agent, c Card) error {
 		labels := map[string]string{labelStage: "zach", labelSince: now, labelNote: directAskNote(title),
 			labelDue: f.replyDue(a, reply), labelStuck: ""}
 		if a.archived() {
-			labels[labelParked] = now // it shows, a reply wakes it, and mailParkedAsks emails it
+			labels[labelParked] = now // it shows, a reply wakes it, and mailParkedAsks emails it in its thread
 		}
 		return f.setLabels(a.ID, labels)
 	}

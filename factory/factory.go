@@ -42,8 +42,8 @@ type Config struct {
 	Guarded      []string // public repos: public-repo review rule, then scanned before landing (guard.go)
 	PrivateRules string   // file of private scan patterns (hostnames and the like), never in a repo
 	Gitleaks     string   // gitleaks binary; "" = gitleaks on PATH
-	ZachEmail    string   // where cards with no email thread email Zach (mail.go); "" = they don't
-	DigestTo     string   // where the daily digest goes (digest.go); "" = no digest, never ZachEmail
+	ZachEmail    string   // addresses replies in a factory-started thread (mail.go); a board card is not emailed
+	DigestTo     string   // sends nothing: no daily digest is sent (digest.go keeps the shipped ledger)
 	MetricHosts  []string // SSH aliases whose load the board shows besides this host (hostfleet.go)
 	PreviewPorts string   // "lo-hi": the ports previews run and are published on (tryout.go)
 	PreviewMax   int      // previews running at once
