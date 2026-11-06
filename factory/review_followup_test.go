@@ -83,6 +83,7 @@ func TestFollowUpDuringReviewRetiresTheOldReviewer(t *testing.T) {
 
 	// The old reviewer's late approval of the same HEAD arrives; the builder has committed its fix.
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: approve")
+	storeLog(t, f, p, "c1", "Fixed the empty case.")
 	late := merged(old, p.labels("r1"))
 	late.Status = "idle"
 	answered := merged(freshCard(false, requested(nil)), c)
@@ -308,6 +309,7 @@ func TestStaleReviewStartAfterFollowUpWaitsForTheBuilder(t *testing.T) {
 	}
 
 	// the builder answers: the queued review starts as usual
+	storeLog(t, f, p, "c1", "Fixed the empty case.")
 	answered := merged(stale, p.labels("c1"))
 	answered.LastActivityAt = t0.Add(5 * time.Minute)
 	f.Now = func() time.Time { return t0.Add(10 * time.Minute) }

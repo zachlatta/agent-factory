@@ -129,6 +129,7 @@ func TestMessageAfterDoneStillReopensTheCard(t *testing.T) {
 	}
 	answered := merged(done, p.labels("c1"))
 	answered.LastActivityAt = t0.Add(5 * time.Minute)
+	storeLog(t, f, p, "c1", "Handled the empty case.")
 	f.SetAgents([]Agent{answered})
 	f.Now = func() time.Time { return t0.Add(10 * time.Minute) }
 	f.Tick()
@@ -222,6 +223,7 @@ func TestExplicitReviewAfterDoneWaitsForTheRunningAgent(t *testing.T) {
 	}
 	stopped := merged(running, p.labels("c1"))
 	stopped.Status, stopped.LastActivityAt = "idle", t0.Add(3*time.Minute)
+	storeLog(t, f, p, "c1", "Finished the work.")
 	f.SetAgents([]Agent{stopped})
 	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
 	f.Tick()

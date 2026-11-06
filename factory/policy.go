@@ -1295,6 +1295,11 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 				return f.markDirect(a, c)
 			}
 		}
+		if a.L(labelStage) == "building" && a.L(labelAutoReview) == "code" {
+			if held, err := f.holdStoppedBuildWait(a); held || err != nil {
+				return err
+			}
+		}
 		_, err := f.StartReview(c, a.L(labelAutoReview))
 		return err
 	case a.L(labelStage) == "plan" && (a.L(labelSource) == "board" || fromInbox(a)) && acted:

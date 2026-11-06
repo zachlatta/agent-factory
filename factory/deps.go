@@ -12,10 +12,11 @@ import (
 // Card dependencies. An approved plan may name one card this card lands after, with a line
 // "Waits on: <short id>" (ParseWaitsOnSpec; stored as factory.waits-on when the plan review passes),
 // or one its build needs first, with "Waits on: <short id> before build" (ParseWaitsOnSpec; stored
-// with factory.waits-before=build). A before-build dependency holds the card in building after plan
-// review (and any side-effect approval) with no running agent until that card lands; a plain waits-on
-// holds the land prompt after code review passes. If the blocker was dropped, or the factory cannot
-// find it, the card is told and goes to building (rebuildWithoutDep) to decide for itself.
+// with factory.waits-before=build when the plan review passes or when a build turn stops with that
+// line). A before-build dependency holds the card in building after plan review (and any side-effect
+// approval) or during building with no running agent until that card (or its replacement) lands; a
+// plain waits-on holds the land prompt after code review passes. If the blocker was dropped, or the
+// factory cannot find it, the card is told and goes to building (rebuildWithoutDep) to decide for itself.
 
 // labelHeldApproved marks a held card Zach approved himself (the time). Only such a card is released
 // while parked: the release's prompt is what wakes it, after the freshness and scan gates.
@@ -152,7 +153,8 @@ func (f *Factory) saveHeldBuild(id, msg string) error {
 	return os.Rename(tmp, path)
 }
 
-// heldBuildMsg returns card a's saved deferred build prompt, or reconstructs it from labels if none was saved.
+// heldBuildMsg returns card a's saved deferred build prompt, or reconstructs it from a's stage handoff
+// prompt or labels if none was saved.
 func (f *Factory) heldBuildMsg(a Agent) string {
 	byID := f.byID()
 	byID[a.ID] = a
@@ -165,6 +167,12 @@ func (f *Factory) heldBuildMsg(a Agent) string {
 			return string(b)
 		}
 	}
+	if evs, err := storedEvents(f.cfg.Home, a); err == nil {
+		first, _, _ := handoffParts(evs)
+		if step := stageStepMsg(first); step != "" {
+			return step
+		}
+	}
 	notes := "(none)"
 	if fix := a.L(labelPlanFix); fix != "" {
 		notes = "Apply these fixes from the last plan review: " + fix
@@ -173,6 +181,100 @@ func (f *Factory) heldBuildMsg(a Agent) string {
 		return buildWithFixesMsg(notes)
 	}
 	return buildMsg(fmt.Sprintf("Plan approved (%s tier).", a.L(labelTier)), notes)
+}
+
+// stageStepMsg extracts the "=== This step ===" section from a stage handoff prompt, cutting any
+// trailing sub-agent delegate section added for older inbox cards.
+func stageStepMsg(first string) string {
+	s := strings.TrimSpace(first)
+	if strings.HasPrefix(s, "Start by reading the start-here skill:") {
+		if _, rest, ok := strings.Cut(s, "\n"); ok {
+			s = strings.TrimSpace(rest)
+		}
+	}
+	if !strings.HasPrefix(s, stageHandoffMarker) {
+		return ""
+	}
+	const header = "\n=== This step ===\n"
+	i := strings.LastIndex(first, header)
+	if i < 0 {
+		return ""
+	}
+	rest := first[i+len(header):]
+	if j := strings.LastIndex(rest, "\n"+delegateMarker); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// holdStoppedBuildWait checks whether a stopped building card's latest reply names a before-build
+// dependency ("Waits on: <id> before build"). If so, it stores the wait and holds the card in building
+// (or releases immediately if the dependency already landed), under the card gate.
+func (f *Factory) holdStoppedBuildWait(a Agent) (bool, error) {
+	g := f.gate(a.ID)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.finished {
+		return false, nil
+	}
+	if !g.delivered.IsZero() && !f.agent(a.ID).LastActivityAt.After(g.delivered) {
+		return false, nil
+	}
+	reply, err := storedReplyOne(f.cfg.Home, a)
+	if err != nil {
+		return true, f.waitForHistory(a, a, err)
+	}
+	id, beforeBuild := ParseWaitsOnSpec(reply, a.ID)
+	byID := f.byID()
+	if !beforeBuild || id == "" || sameCard(byID, id, a.ID) {
+		return false, nil
+	}
+	if a.L(labelWaitsDone) != "" && a.L(labelWaitsBefore) == "build" && (a.L(labelWaitsOn) == id || sameCard(byID, a.L(labelWaitsOn), id)) {
+		return false, nil
+	}
+	if rest, ok := strings.CutPrefix(a.L(labelNote), rebuildingNotePrefix); ok {
+		if rebuiltID, _, ok := strings.Cut(rest, " "); ok && (rebuiltID == id || sameCard(byID, rebuiltID, id)) {
+			return false, nil
+		}
+	}
+	if heldBeforeBuild(a) && a.L(labelWaitsOn) == id && a.L(labelHeld) == id {
+		return false, nil
+	}
+	if prevID, _ := f.pendingDep(a); prevID != "" && prevID != id && !sameCard(byID, prevID, id) {
+		if live, err := f.stillStopped(a); !live {
+			return true, err
+		}
+		return true, f.setLabels(a.ID, map[string]string{
+			labelStage:      "zach",
+			labelAutoReview: "",
+			labelHeld:       "",
+			labelNote:       fmt.Sprintf("waits on %s before build conflicts with stored wait on %s", id, prevID),
+		})
+	}
+	if live, err := f.stillStopped(a); !live {
+		return true, err
+	}
+	labels := map[string]string{}
+	setPlanWaitsOn(a, labels, reply)
+	if a.L(labelWaitsBefore) != "build" {
+		labels[labelWaitsDone] = ""
+	}
+	aWith := labeled(a, labels)
+	if depID, _ := f.pendingDep(aWith); depID != "" {
+		if err := f.saveHeldBuild(a.ID, f.heldBuildMsg(a)); err != nil {
+			return true, err
+		}
+		labels[labelStage] = "building"
+		labels[labelSince] = iso(f.Now())
+		labels[labelAutoReview] = ""
+		labels[labelHeld] = depID
+		labels[labelNote] = holdBuildNote(depID)
+		if a.L(labelDirtyAsks) != "" {
+			labels[labelDirtyAsks] = ""
+		}
+		return true, f.setLabels(a.ID, labels)
+	}
+	return true, f.releaseHeldBuild(aWith, id)
 }
 
 func (f *Factory) dropHeldBuild(a Agent) {
@@ -287,6 +389,15 @@ func (f *Factory) releaseHeldBuild(a Agent, id string) error {
 	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: "code",
 		labelSince: iso(f.Now()), labelHeld: "", labelTold: "", labelWaitsDone: "1",
 		labelNote: "building: " + id + " landed"})
+	if w := a.L(labelWaitsOn); w != "" {
+		labels[labelWaitsOn] = w
+	}
+	if wb := a.L(labelWaitsBefore); wb != "" {
+		labels[labelWaitsBefore] = wb
+	}
+	if a.L(labelDirtyAsks) != "" {
+		labels[labelDirtyAsks] = ""
+	}
 	msg := f.heldBuildMsg(a)
 	if err := f.advance(labeled(a, labels), "build", fmt.Sprintf("Card %s, which this card waited on before building, has landed: "+
 		"fetch and rebase on origin/main first (`git fetch origin main && git rebase origin/main`), then build as planned.\n\n%s", id, msg)); err != nil {

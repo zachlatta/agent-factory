@@ -53,14 +53,22 @@ func lookupAgentByPrefix(byID map[string]Agent, id string) (Agent, bool) {
 func resolveCardID(byID map[string]Agent, id string) string {
 	cur, ok := lookupAgentByPrefix(byID, id)
 	if !ok {
-		return id
+		for _, a := range byID {
+			if rep := a.L(labelReplaces); rep != "" && (rep == id || strings.HasPrefix(rep, id) || strings.HasPrefix(id, rep)) {
+				cur, ok = a, true
+				break
+			}
+		}
+		if !ok {
+			return id
+		}
 	}
 	seen := map[string]bool{cur.ID: true}
 	for range maxReplaceHops {
 		nextID := cur.L(labelReplacedBy)
 		if nextID == "" {
 			for _, a := range byID {
-				if rep := a.L(labelReplaces); rep != "" && (rep == cur.ID || strings.HasPrefix(cur.ID, rep)) {
+				if rep := a.L(labelReplaces); rep != "" && (rep == cur.ID || strings.HasPrefix(cur.ID, rep) || strings.HasPrefix(rep, cur.ID)) {
 					nextID = a.ID
 					break
 				}

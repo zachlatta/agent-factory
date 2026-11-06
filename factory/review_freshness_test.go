@@ -113,6 +113,7 @@ func TestMovedHeadStartsAFreshReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	moved := freshCard(false, reviewLabels(p.labels("c1")))
+	storeLog(t, f, p, "c1", "Built the change.")
 	f.SetAgents([]Agent{moved})
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": movedSHA + "\n"})
 	f.Tick()
