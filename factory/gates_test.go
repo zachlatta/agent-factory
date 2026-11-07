@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -746,5 +747,27 @@ func TestSameChoiceReadsTheLabelThenTheModel(t *testing.T) {
 	a.Model = "no-such-model"
 	if _, ok := sameChoice(a); ok {
 		t.Error("an unlisted model must not match")
+	}
+}
+
+func TestRepoPickerCarriesTheSchedule(t *testing.T) {
+	f, p := newTestFactory(t)
+	writeFile(t, filepath.Join(f.cfg.Home, "dev", "acme", "ops", "README.md"), "ops")
+	res, err := f.Act("new", Body{Request: "Run the job", Repo: autoRepo, Schedule: "nightly", SubmittedBy: submittedBySystem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.(map[string]string)["id"]
+	r, ok := f.routes.get(id)
+	if !ok || r.Schedule != "nightly" {
+		t.Fatalf("route = %+v", r)
+	}
+	a := card(id, map[string]string{labelStage: stageRoute, labelRouting: "1"})
+	f.SetAgents([]Agent{a})
+	if err := f.startRouted(a, "acme/ops"); err != nil {
+		t.Fatal(err)
+	}
+	if runs := p.runsWithLabel(labelArg(labelOrigin, "schedule")); len(runs) != 1 {
+		t.Fatalf("the card lost its schedule through repo picking: %v", p.calls)
 	}
 }

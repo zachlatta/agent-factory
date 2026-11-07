@@ -612,7 +612,7 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		if source != "board" {
 			return nil, errors.New("an email or voice card names its repo")
 		}
-		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Agent: agent.ID, Thinking: agent.Thinking}
+		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Schedule: b.Schedule, Agent: agent.ID, Thinking: agent.Thinking}
 		if tierRank(b.Tier) >= 0 {
 			r.Tier = b.Tier
 		}

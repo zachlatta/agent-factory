@@ -158,3 +158,64 @@ func TestEvidencePrompts(t *testing.T) {
 		}
 	}
 }
+
+// webpVP8X is a minimal animated-style WebP container with the given canvas.
+func webpVP8X(w, h int) []byte {
+	le24 := func(n int) []byte { return []byte{byte(n), byte(n >> 8), byte(n >> 16)} }
+	body := append([]byte("WEBPVP8X\x0a\x00\x00\x00\x12\x00\x00\x00"), le24(w-1)...)
+	body = append(body, le24(h-1)...)
+	return append(append([]byte("RIFF"), byte(len(body)), 0, 0, 0), body...)
+}
+
+func TestEvidenceAcceptsAWebpVideo(t *testing.T) {
+	dir := t.TempDir()
+	ev := filepath.Join(dir, ".factory-evidence")
+	if err := os.Mkdir(ev, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	good := webpVP8X(1280, 800)
+	if err := os.WriteFile(filepath.Join(ev, "proof.webp"), good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, media, err := readEvidence(dir, "proof.webp")
+	if err != nil || media != "image/webp" || len(data) != len(good) {
+		t.Fatalf("media %q, %d bytes, err %v", media, len(data), err)
+	}
+	truncated := append([]byte{}, good...)
+	truncated[4] = 0xff
+	for name, bad := range map[string][]byte{
+		"not webp":     []byte("<svg onload=alert(1)>"),
+		"truncated":    truncated,
+		"short":        []byte("RIFF"),
+		"huge canvas":  webpVP8X(10000, 10000),
+		"unknown kind": append(append([]byte("RIFF\x16\x00\x00\x00WEBPXXXX"), make([]byte, 10)...), 0, 0, 0, 0)[:30],
+	} {
+		if err := os.WriteFile(filepath.Join(ev, "bad.webp"), bad, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := readEvidence(dir, "bad.webp"); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestValidWebpReadsLossyAndLosslessCanvases(t *testing.T) {
+	wrap := func(chunk string, payload []byte) []byte {
+		body := append([]byte("WEBP"+chunk), payload...)
+		return append(append([]byte("RIFF"), byte(len(body)), 0, 0, 0), body...)
+	}
+	lossy := func(w, h uint16) []byte {
+		p := []byte{0, 0, 0, 0, 0, 0, 0, 0x9d, 0x01, 0x2a, byte(w), byte(w >> 8), byte(h), byte(h >> 8)}
+		return wrap("VP8 ", append([]byte{14, 0, 0, 0}, p[4:]...))
+	}
+	lossless := func(w, h uint32) []byte {
+		bits := (w - 1) | (h-1)<<14
+		return wrap("VP8L", []byte{10, 0, 0, 0, 0x2f, byte(bits), byte(bits >> 8), byte(bits >> 16), byte(bits >> 24), 0, 0, 0, 0, 0})
+	}
+	if !validWebp(lossy(800, 600)) || validWebp(lossy(16000, 16000)) {
+		t.Error("lossy canvas not read")
+	}
+	if !validWebp(lossless(800, 600)) || validWebp(lossless(16000, 16000)) {
+		t.Error("lossless canvas not read")
+	}
+}

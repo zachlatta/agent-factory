@@ -168,7 +168,8 @@ messages or spending. Those wait for the landing step, as a runbook. ` + noLiveC
 const proposedSolutionRule = `Build the proposed solution now, all of it, in this pass. Do not write a plan and stop. Keep it to the
 smallest thing that fully does what was asked (settings count, not only code). It is one or both of:
 - Code changes: commits on this card's branch with a clean worktree, plus proof it works that fits the change: a
-  webp video for UI work (kept in the evidence folder below, out of Git), test output or a before-and-after
+  webp video for UI work (kept in the evidence folder below, out of Git, under 5 MB: record frames with the board
+  helper or a browser, join them with img2webp, and name it the way the evidence rule says), test output or a before-and-after
   log when there is nothing to show on screen. Name the proof in your summary.
 - Live system changes: a runbook in your final message under a RUNBOOK: heading. Investigate first, read-only, so
   it lists exactly what will happen (which host, which package from which version to which, which setting from

@@ -728,7 +728,7 @@ A decision or needs line that says nothing ("None.") is dropped on a card that a
 so the ask's title leads instead. The decision line is the question shown; the overview is shown under it in the card; the full report
 is folded. Existing `QUESTION:` blocks provide up to four questions, with the recommendation first.
 
-For visible changes, agents save useful screenshots in the card worktree's `.factory-evidence/`
+For visible changes, agents save useful screenshots or a webp video in the card worktree's `.factory-evidence/`
 folder, excluded from Git before saving. Never commit or force-add evidence. After the overview
 and a blank line, optional whole lines name the files:
 
@@ -738,13 +738,13 @@ AFTER: after.png
 ```
 
 Each key occurs at most once. Filenames contain letters, digits, underscores or hyphens and a
-`.png`, `.jpg` or `.jpeg` extension. Images must decode as PNG or JPEG, at most 5 MB and
-20 megapixels. Copy captures from another machine into the worktree before referencing them.
+`.png`, `.jpg`, `.jpeg` or `.webp` extension. Images must decode as PNG or JPEG, or be a WebP container whose
+canvas can be read, at most 5 MB and 20 megapixels. An animated WebP is how a builder shows a UI working. Copy captures from another machine into the worktree before referencing them.
 For text decisions, show the exact before and after text in the report instead.
 
 Factory serves only the current ask's named images at `/api/evidence/{card}/{before|after}`
 under the board's existing access boundary. It rejects symlinks, paths, special files, unsupported
-formats and oversized images; it disables caching and content sniffing. The card accepts images
+formats and oversized images or videos; it disables caching and content sniffing. The card accepts images
 only from these generated routes, including inside report Markdown. No public image service or
 external image URL is used. Images become unavailable if their worktree or file is removed.
 

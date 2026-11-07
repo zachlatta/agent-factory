@@ -49,7 +49,7 @@ For visible decisions, save useful screenshots in the card worktree's .factory-e
 excluded from Git before saving; never commit, force-add or upload evidence to a public CDN.
 Copy captures from another host into that folder. Immediately after the overview and a blank line,
 optionally write BEFORE: before.png and AFTER: after.png as separate whole lines. Use each key once,
-plain filenames (letters, digits, underscores, hyphens), PNG/JPEG only, at most 5 MB and 20 megapixels.
+plain filenames (letters, digits, underscores, hyphens), PNG, JPEG or an animated WebP, at most 5 MB and 20 megapixels.
 Factory serves these through the board's existing access boundary. For text changes, show the exact
 before and after copy in the report. Use QUESTION blocks, recommendation first; the board adds Other.
 `
