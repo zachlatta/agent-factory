@@ -312,3 +312,35 @@ func TestRunGateButtonStartsTheOneGate(t *testing.T) {
 		}
 	}
 }
+
+func TestGatePassKeepsChecksAndReport(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelSubmittedBy: submittedByZach, labelReviewed: "abc"}), reviewer("r1", "c1", gateCheck))
+	headIs(f, "abc", nil)
+	storeLog(t, f, p, "r1", greenGate)
+	storeLog(t, f, p, "c1", "[Assistant] Built.")
+	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
+		t.Fatal(err)
+	}
+	var cards = []Card{{ID: "c1"}}
+	f.timings.fillTiming(cards, t0)
+	if cards[0].Timing == nil || len(cards[0].Timing.Rounds) != 1 {
+		t.Fatal("missing gate pass")
+	}
+	r := cards[0].Timing.Rounds[0]
+	if !strings.Contains(r.Grades, "works:green") || !strings.Contains(r.Report, "go test ./... passed") {
+		t.Fatalf("missing checks or report: %+v", r)
+	}
+}
+
+func TestGatePassHistorySurvivesRestart(t *testing.T) {
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck}))
+	f.recordRound("c1", gateCheck, 1, t0, "changes", gateReply("WORKS", "yellow"))
+	f.recordRound("c1", gateCheck, 2, t0, "approve", greenGate)
+	s := newTimingStore(f.timings.path, func() time.Time { return t0 }, time.UTC)
+	cards := []Card{{ID: "c1"}}
+	s.fillTiming(cards, t0)
+	rounds := cards[0].Timing.Rounds
+	if len(rounds) != 2 || !strings.Contains(rounds[0].Grades, "works:yellow") || !strings.Contains(rounds[1].Grades, "works:green") || rounds[1].Report != greenGate {
+		t.Fatalf("history lost: %+v", rounds)
+	}
+}

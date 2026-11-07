@@ -104,6 +104,14 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
       const text = await page.locator('body').innerText();
       await writeFile(resolve(out, `${name}.txt`), text);
       results.push({ name, width, height, view: shown, card: card || null, file: `${name}.png` });
+      if (card && await page.locator('#pGateChecks .gatepass').count()) {
+        const checks = page.locator('#pGateChecks');
+        await checks.scrollIntoViewIfNeeded();
+        await page.screenshot({path:resolve(out, name+'-gate-checks.png')});
+        if (await checks.locator('summary').count()) await checks.locator('summary').first().click();
+        await page.screenshot({path:resolve(out, name+'-gate-report.png')});
+        await writeFile(resolve(out, name+'-gate-checks.txt'), await checks.innerText());
+      }
       if (name === 'phone' && view!=='usage') {
         // a For you card whose question options must fit the phone screen
         const forYou = new Set((board.sections?.forYou || []).map(l => l.id));

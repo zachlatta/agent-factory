@@ -113,6 +113,10 @@ his sign-off when the gate asks for it (`factory/gates.go`).
      architectural changes than he asked for, and when the system submitted it, except a scheduled run of a job he
      already approved (green); yellow when unsure. Sign-off never sends work back.
 
+   The card panel shows gate checks by pass: a colored grade and text label for each check, plus an
+   expandable gate report. Completed passes keep their grades and reports across restarts. Older passes
+   without saved checks say so; the latest label is shown when no pass history exists.
+
    The factory reads the grades (`ParseGrades`) and keeps the last ones on the card (`factory.grades`, shown in the
    card panel). Any of meets request, works, design and (in a public repo) public safety that is not green, including
    a missing line, sends the work back to the builder with the gate's findings, and the gate runs again when the builder

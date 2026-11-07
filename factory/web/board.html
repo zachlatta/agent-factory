@@ -218,6 +218,11 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
 #fleetPop .k{display:inline-block;width:8px;height:3px;margin:0 3px 2px 0;vertical-align:middle}
 #fleetPop .ffoot{display:flex;justify-content:space-between;gap:8px;padding:8px 0 4px;font-size:12px}#fleetPop .ffoot a{color:var(--blue)}
 @media (max-width:760px){#fleetPop{top:44px;left:8px;width:calc(100vw - 16px)}}
+.gatepass{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px}
+.gatecheck{display:flex;gap:10px;align-items:center;margin:8px 0}
+.grade{font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;min-width:85px;text-align:center}
+.grade.green{background:#dcfce7;color:#166534}.grade.yellow{background:#fef3c7;color:#854d0e}.grade.red{background:#fee2e2;color:#991b1b}.grade.unknown{background:#eee;color:#444}
+.gatereport{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.5 monospace}
 </style>
 </head>
 <body>
@@ -258,6 +263,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <div class="bd">
     <div id="pAsk"></div>
     <div class="idea" id="pIdea"></div>
+    <div id="pGateChecks"></div>
     <details id="pDetails"><summary>Details</summary>
     <div class="sub" id="pSub"></div><div class="stagebar" id="pBar"></div>
     <div id="pFlags"></div>
@@ -636,9 +642,19 @@ function latestReviews(children){
   return Object.values(last);
 }
 const gateNames = {gate:'gate', request:'request gate', design:'design gate', signoff:'sign-off gate'};
-// gradesText spells out the gate's last grades ("request:green works:yellow ...") for the card panel.
 const gradeNames = {request:'meets request', works:'works', design:'design', public:'public safety', signoff:'sign-off'};
-function gradesText(g){ return g.split(' ').map(p=>{ const [k,v]=p.split(':'); return (gradeNames[k]||k)+' '+(v==='-'?'not graded':v); }).join(' · '); }
+function gatePassesHtml(c){
+  const passes = ((c.timing||{}).rounds||[]).filter(r=>r.kind==='gate');
+  if(!passes.length && c.grades) passes.push({grades:c.grades, verdict:'latest recorded grades'});
+  if(!passes.length) return '<p class="sub">No completed gate passes recorded.</p>';
+  return '<h3>Gate checks by pass</h3>'+passes.map((r,i)=>`<section class="gatepass"><b>Pass ${i+1}${r.n?' · round '+r.n:''} · ${esc(r.verdict)}</b>
+    ${r.grades ? Object.entries(gradeNames).map(([key,name])=>{
+      const value = Object.fromEntries(r.grades.split(' ').map(p=>p.split(':')))[key] || '-';
+      const color = ['green','yellow','red'].includes(value)?value:'unknown';
+      return `<div class="gatecheck"><span class="grade ${color}">${esc(value==='-'?'not graded':value==='n/a'?'not applicable':value)}</span><span>${esc(name)}</span></div>`;
+    }).join('') : '<p class="sub">Checks unavailable for this older pass.</p>'}
+    ${r.report?`<details><summary>Gate report</summary><pre class="gatereport">${esc(r.report)}</pre></details>`:''}</section>`).join('');
+}
 // reviewName is a reviewer's name: its gate, or an older card's review kind.
 function reviewName(k){ return gateNames[k.kind] || (k.kind||'')+' review'; }
 // reviewLabel names a reviewer's round and verdict. The round counter only counts applied
@@ -873,10 +889,14 @@ function fillPanel(c, fresh){
   $('pFlags').innerHTML = decisionWaitHtml(c) + c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('') + (c.verdict?`<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>`:'') + (c.note && !c.decisionBlocker?`<span class="flag note">${esc(c.note)}</span>`:'');
   const kv = [['Column', (B.stages[idx]||[])[1] + (c.labelled?'':' (from Paseo status)')],
     ['Submitted by', c.submittedBy==='system'?'the system':'you'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
-    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Gate rounds', `${c.rounds.gate} (cap 3)`], ...(c.grades ? [['Gate grades', gradesText(c.grades)]] : []),
+    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Gate rounds', `${c.rounds.gate} (cap 3)`],
     ...(c.timing ? [['Timeline', timeline(c.timing)]] : []),
     ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
+  const gateHtml = c.id.startsWith('idea-') ? '' : gatePassesHtml(c);
+  if(fresh || $('pGateChecks').dataset.content !== gateHtml){
+    $('pGateChecks').innerHTML = gateHtml; $('pGateChecks').dataset.content = gateHtml;
+  }
   const busy = c.status==='running';
   const isIdea = c.id.startsWith('idea-');
   // ideas: the message box holds Zach's changes, sent with Start now, so it sits above the buttons

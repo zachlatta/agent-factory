@@ -326,3 +326,19 @@ func TestTimingSessionArchivedIdentityCanArriveLate(t *testing.T) {
 		t.Fatalf("late archived identity = %+v", ct.Sessions)
 	}
 }
+
+func TestTimingExportOmitsGateReport(t *testing.T) {
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck}))
+	f.recordRound("c1", gateCheck, 1, t0, "approve", greenGate)
+	for _, c := range f.timings.export().Cards {
+		for _, r := range c.Rounds {
+			if r.Report != "" {
+				t.Fatal("export contains report text")
+			}
+		}
+	}
+	ct, _ := f.timings.get("c1")
+	if ct.Rounds[0].Report == "" {
+		t.Fatal("export removed stored report")
+	}
+}

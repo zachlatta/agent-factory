@@ -43,6 +43,8 @@ type TimingEvent struct {
 
 // TimingRound is one review round: started with the reviewer, ended when its verdict was applied.
 type TimingRound struct {
+	Grades  string    `json:"grades,omitempty"`
+	Report  string    `json:"report,omitempty"`
 	Kind    string    `json:"kind"`
 	N       int       `json:"n"`
 	Start   time.Time `json:"start"`
@@ -474,6 +476,8 @@ type StageSpan struct {
 }
 
 type RoundView struct {
+	Grades  string `json:"grades,omitempty"`
+	Report  string `json:"report,omitempty"`
 	Kind    string `json:"kind"`
 	N       int    `json:"n"`
 	Secs    int    `json:"secs"`
@@ -498,7 +502,7 @@ func (t CardTiming) view(now time.Time) *TimingView {
 		v.Stages = append(v.Stages, sp)
 	}
 	for _, r := range t.Rounds {
-		v.Rounds = append(v.Rounds, RoundView{Kind: r.Kind, N: r.N, Secs: max(0, secs(r.End.Sub(r.Start))), Verdict: r.Verdict})
+		v.Rounds = append(v.Rounds, RoundView{Kind: r.Kind, N: r.N, Secs: max(0, secs(r.End.Sub(r.Start))), Verdict: r.Verdict, Grades: r.Grades, Report: r.Report})
 	}
 	if !t.RequestedAt.IsZero() {
 		end := t.end()
@@ -525,10 +529,14 @@ func (s *TimingStore) fillTiming(cards []Card, now time.Time) {
 }
 
 // recordRound records a review round of card id.
-func (f *Factory) recordRound(id, kind string, n int, start time.Time, verdict string) {
+func (f *Factory) recordRound(id, kind string, n int, start time.Time, verdict, notes string) {
+	var grades string
+	if notes != "" {
+		grades = gradesLabel(ParseGrades(notes))
+	}
 	end := f.Now()
 	f.timings.update(id, func(t *CardTiming) {
-		t.Rounds = append(t.Rounds, TimingRound{Kind: kind, N: n, Start: start, End: end, Verdict: verdict})
+		t.Rounds = append(t.Rounds, TimingRound{Kind: kind, N: n, Start: start, End: end, Verdict: verdict, Grades: grades, Report: notes})
 	})
 }
 

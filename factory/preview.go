@@ -86,7 +86,7 @@ func PreviewHandler(root string) (http.Handler, error) {
 			// a decision for Zach: the gate sent it to him for sign-off
 			a.Title, request, reply = "Board card list loads faster", previewDecisionRequest, previewDecisionReply
 			a.Labels[labelPrefix+labelVerdict] = "gate approve"
-			a.Labels[labelPrefix+labelRoundsGate] = "1"
+			a.Labels[labelPrefix+labelRoundsGate] = "2"
 			a.Labels[labelPrefix+labelGrades] = "request:green works:green design:green public:n/a signoff:red"
 			a.Labels[labelPrefix+labelNote] = readyNote(1)
 			a.Labels[labelPrefix+labelAskWhy] = "it changes more than you asked for"
@@ -166,6 +166,19 @@ func PreviewHandler(root string) (http.Handler, error) {
 		return hostReading{Metrics: hostMetrics{CPUCount: 4, Errors: map[string]string{}}}
 	}
 	f.fleet = nil
+	f.SetAgents(agents)
+	f.recordRound("preview-zach", gateCheck, 1, now.Add(-5*time.Minute), "changes", `MEETS REQUEST: green - requested behavior is present
+WORKS: yellow - phone check needs another pass
+DESIGN: red - controls overflow on phone
+PUBLIC SAFETY: n/a
+SIGN OFF: green
+VERDICT: changes`)
+	f.recordRound("preview-zach", gateCheck, 2, now.Add(-2*time.Minute), "approve", `MEETS REQUEST: green
+WORKS: green - desktop and phone checked
+DESIGN: green - controls fit
+PUBLIC SAFETY: n/a
+SIGN OFF: red - approval required
+VERDICT: approve`)
 	f.SetAgents(agents)
 	if err := seedPreviewUsage(f, now); err != nil {
 		return nil, err

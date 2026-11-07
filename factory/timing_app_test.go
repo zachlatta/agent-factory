@@ -43,7 +43,7 @@ func TestTimingNormalizesLocalClock(t *testing.T) {
 	a := fresh("c")
 	f, _ := newTestFactory(t, a)
 	f.Now = func() time.Time { return local.Add(time.Minute) }
-	f.recordRound("c", "plan", 1, local, "approve")
+	f.recordRound("c", "plan", 1, local, "approve", "")
 	f.SetAgents([]Agent{moved(a, "zach", "")})
 	f.timings.update("c", func(ct *CardTiming) { ct.ReplyRetry = local; ct.Mails = []FactoryMail{{At: local}} })
 	ct := timing(t, f, "c")

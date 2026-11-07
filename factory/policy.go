@@ -442,7 +442,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 			err = f.markStuck(labeled(t, labels), stuckGate)
 		}
 	}
-	f.recordRound(target, kind, rounds, r.started, verdict)
+	f.recordRound(target, kind, rounds, r.started, verdict, notes)
 	f.logf("%s gate %s for %s (round %d)", kind, verdict, short(target), rounds)
 	return err
 }

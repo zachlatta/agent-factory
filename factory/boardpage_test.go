@@ -152,7 +152,7 @@ func TestBoardPageReviewChipsCollapse(t *testing.T) {
 	// the panel still lists every child and both round counts
 	for _, want := range []string{
 		"kidsHtml(c)",
-		"${c.rounds.gate} (cap 3)", "gradesText(c.grades)",
+		"${c.rounds.gate} (cap 3)", "gatePassesHtml(c)",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("panel lost %q", want)
@@ -168,6 +168,16 @@ func TestBoardPageReviewChipsCollapse(t *testing.T) {
 		t.Skip("node not installed")
 	}
 	script := page[i:j] + `
+const esc = s => String(s||'').replaceAll('<','&lt;');
+const history = gatePassesHtml({timing:{rounds:[
+ {kind:'gate', n:1, verdict:'changes', grades:'works:yellow design:red',report:'<script>report</script>'},
+ {kind:'gate', n:2, verdict:'approve', grades:'works:green'}
+]}});
+for(const text of ['Pass 1', 'Pass 2', 'grade yellow', 'grade red', 'grade green', 'not graded', '&lt;script>'])
+ if(!history.includes(text)) throw Error('missing '+text);
+if(history.includes('<script>')) throw Error('unescaped report');
+if(!gatePassesHtml({}).includes('No completed')) throw Error('missing empty state');
+if(!gatePassesHtml({timing:{rounds:[{kind:'gate',n:1}]}}).includes('unavailable')) throw Error('missing historical state');
 const rv = (kind, status, verdict, archived) => ({role:'reviewer', kind, status, verdict, archived:!!archived});
 const labels = (kids, rounds) => latestReviews(kids).map(k => reviewLabel(k, rounds));
 console.log(JSON.stringify([
