@@ -403,6 +403,7 @@ const $ = id => elements[id];
 $('newDlg').open=true;
 $('newDlg').close=()=>{$('newDlg').open=false;};
 $('newDlg').showModal=()=>{$('newDlg').open=true;};
+let newImages=[], readingImages=false; const renderNewImages=()=>{};
 let B={cards:[]}, calls=0, reply, sent, refreshes=0;
 const releaseKeyboard=()=>{}, fillNewDlg=()=>{}, refreshNewDlg=()=>{}, toast=()=>{};
 const fillThinking=(id,agent,level)=>{$(id).value=level;};
@@ -420,7 +421,7 @@ const fetch=(url, options)=>{calls++; sent=JSON.parse(options.body); return new 
  assert.equal($('newDlg').open,false); assert.equal($('newStarting').hidden,false);
  assert.match($('newStartingText').textContent,/Starting/);
  assert.equal($('newStartingTitle').textContent,'Test request');
- assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol',thinking:'high',submittedBy:'zach'});
+ assert.deepEqual(sent,{request:'Test request',repo:'auto',agent:'codex-sol',thinking:'high',attachments:[],submittedBy:'zach'});
  await $('nGo').onclick(); $('newBtn').onclick();
  assert.equal(calls,1); assert.equal($('newDlg').open,false);
  B={cards:[]}; renderNewSubmission(); assert.equal($('newStarting').hidden,false);

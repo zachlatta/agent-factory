@@ -288,8 +288,11 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <div id="nThinkingRow" hidden><label class="sub" for="nThinking">Thinking level</label><br><select id="nThinking" style="width:100%"></select></div>
   <div class="ausage" id="nAgentUsage"></div>
   <div class="sub" id="nAgentNote" style="margin:2px 0 8px;min-height:1em"></div>
-  <label class="sub">What should it do?</label>
+  <label class="sub" for="nReq">What should it do?</label>
   <textarea id="nReq" style="min-height:120px" placeholder="e.g. Add a dry-run flag to bin/land that prints what it would push"></textarea>
+  <div class="sub">Drop screenshots into the box, or <label for="nFiles" style="text-decoration:underline;cursor:pointer">choose images</label>. Up to 10 images, 25 MB total.</div>
+  <input id="nFiles" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+  <div id="nImages" aria-live="polite" style="display:flex;flex-wrap:wrap;gap:8px"></div>
   <p id="nError" role="alert"></p>
   <div class="acts" style="justify-content:flex-end"><button id="nScout" title="A read-only agent looks through this repo and past sessions and suggests up to 3 ideas">Suggest ideas</button><span style="flex:1"></span><button onclick="newDlg.close()">Cancel</button><button class="primary" id="nGo">Start building</button></div>
 </dialog>
@@ -1051,6 +1054,39 @@ function refreshNewDlg(tries){ loadAgents().then(()=>{ if(!$('newDlg').open) ret
 
 $('nScout').onclick = async()=>{ $('nScout').disabled=true;
   try{ const r=await post('scout',{repo:$('nRepo').value, request:$('nReq').value.trim()}); toast($('nRepo').value==='auto' ? 'Picking a repo, then the Scout starts: ideas show up in Ideas' : 'Scout started: ideas show up in Ideas'); $('newDlg').close(); refresh();} finally{ $('nScout').disabled=false; } };
+let newImages = [], readingImages = false;
+function renderNewImages(){
+  $('nImages').replaceChildren();
+  newImages.forEach((a,i)=>{
+    const wrap=document.createElement('div'), img=document.createElement('img'), remove=document.createElement('button');
+    img.src='data:'+a.type+';base64,'+a.data_base64; img.alt=a.name;
+    img.style='width:80px;height:60px;object-fit:contain';
+    remove.textContent='Remove '+a.name; remove.type='button';
+    remove.onclick=()=>{ newImages.splice(i,1); renderNewImages(); };
+    wrap.append(img,remove); $('nImages').append(wrap);
+  });
+  $('nScout').disabled=readingImages || newImages.length>0;
+}
+async function addNewImages(files){
+  if(readingImages || newSubmission) return;
+  const batch=Array.from(files);
+  if(!batch.length) return;
+  const allowed=['image/png','image/jpeg','image/webp','image/gif'];
+  if(batch.some(f=>!allowed.includes(f.type))){ $('nError').textContent='Choose PNG, JPEG, WebP or GIF screenshots.'; return; }
+  if(newImages.length+batch.length>10 || newImages.reduce((n,a)=>n+a.size,0)+batch.reduce((n,f)=>n+f.size,0)>25*1024*1024){ $('nError').textContent='Use at most 10 screenshots totaling 25 MB.'; return; }
+  readingImages=true; $('nGo').disabled=true; renderNewImages();
+  try{
+    const added=await Promise.all(batch.map(async f=>({name:f.name,type:f.type,size:f.size,data_base64:await new Promise((resolve,reject)=>{
+      const reader=new FileReader(); reader.onload=()=>resolve(reader.result.split(',')[1]); reader.onerror=()=>reject(new Error('read failed')); reader.readAsDataURL(f);
+    })})));
+    newImages.push(...added); $('nError').textContent='';
+  }catch(e){ $('nError').textContent='Could not read screenshots. Try again.'; }
+  finally{ readingImages=false; $('nGo').disabled=false; renderNewImages(); }
+}
+$('nFiles').onchange=async()=>{ await addNewImages($('nFiles').files); $('nFiles').value=''; };
+$('nReq').ondragover=e=>{ if(Array.from(e.dataTransfer.types).includes('Files')){ e.preventDefault(); e.dataTransfer.dropEffect='copy'; $('nReq').style.outline='2px solid var(--accent)'; } };
+$('nReq').ondragleave=()=>{ $('nReq').style.outline=''; };
+$('nReq').ondrop=e=>{ e.preventDefault(); $('nReq').style.outline=''; addNewImages(e.dataTransfer.files); };
 // newSubmission: begin
 // Local feedback outlives board polls. The POST still reports the server's completed launch.
 let newSubmission = null;
@@ -1073,9 +1109,9 @@ $('newBtn').onclick = ()=>{
   fillNewDlg(); $('newDlg').showModal(); refreshNewDlg(4);
 };
 $('nGo').onclick = async()=>{
-  if(newSubmission) return;
+  if(newSubmission || readingImages) return;
   const draft=$('nReq').value;
-  const body={request:draft.trim(), repo:$('nRepo').value, agent:$('nAgent').value, thinking:$('nThinking').value};
+  const body={request:draft.trim(), repo:$('nRepo').value, agent:$('nAgent').value, thinking:$('nThinking').value, attachments:newImages.map(({name,type,data_base64})=>({name,type,data_base64}))};
   if(!body.request) return;
   body.submittedBy='zach'; newSubmission={body}; $('nError').textContent='';
   renderNewSubmission();
@@ -1091,7 +1127,7 @@ $('nGo').onclick = async()=>{
     if(!r.ok){ error='Could not start the card: '+(j.error||'HTTP '+r.status); throw new Error(error); }
     if(typeof j.id!=='string' || !j.id) throw new Error('missing agent id');
     newSubmission.id=j.id;
-    $('nReq').value='';
+    $('nReq').value=''; newImages=[]; renderNewImages();
     toast('Card started: '+j.id.slice(0,7));
   }catch(e){
     newSubmission=null;

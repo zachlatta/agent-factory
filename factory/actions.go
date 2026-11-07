@@ -608,6 +608,13 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(b.Attachments) > 0 {
+		paths, err := f.saveNewScreenshots(b.Attachments)
+		if err != nil {
+			return nil, err
+		}
+		req += "\n\nAttached screenshots (read these files):\n- " + strings.Join(paths, "\n- ")
+	}
 	if repo == autoRepo {
 		if source != "board" {
 			return nil, errors.New("an email or voice card names its repo")
@@ -707,4 +714,44 @@ func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
 func landingReply(a Agent) bool {
 	note := a.L(labelNote)
 	return note == "landed; did not say what remains"
+}
+
+// saveNewScreenshots validates the entire batch before saving it in a unique directory.
+func (f *Factory) saveNewScreenshots(atts []Attachment) ([]string, error) {
+	if len(atts) > 10 {
+		return nil, errors.New("at most 10 screenshots")
+	}
+	var data [][]byte
+	total := 0
+	for _, a := range atts {
+		if a.Type != "image/png" && a.Type != "image/jpeg" && a.Type != "image/webp" && a.Type != "image/gif" {
+			return nil, errors.New("screenshots must be PNG, JPEG, WebP or GIF")
+		}
+		b, err := base64.StdEncoding.DecodeString(a.DataBase64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid screenshot: %w", err)
+		}
+		total += len(b)
+		if len(b) == 0 || total > 25<<20 {
+			return nil, errors.New("screenshots must total 25 MB or less")
+		}
+		data = append(data, b)
+	}
+	root := f.uploadDir("new")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp(root, "screenshots-")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for i, a := range atts {
+		path := filepath.Join(dir, fmt.Sprintf("%d-%s", i+1, safeName(a.Name)))
+		if err := os.WriteFile(path, data[i], 0600); err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
 }

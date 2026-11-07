@@ -299,3 +299,43 @@ test('usage answers decisions, filters dated summaries and opens archived eviden
     } finally {await browser.close()}
   });
 });
+
+test('new task screenshots drop, remove, and survive a failed launch', async () => {
+ await withPreview(async url => {
+  const browser=await chromium.launch({headless:true});
+  try {
+   const page=await browser.newPage();
+   await page.goto(url);
+   await page.locator('#newBtn').click();
+   await page.locator('#nReq').fill('Fix this layout');
+   const drop=await page.evaluateHandle(()=>{
+    const dt=new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='),c=>c.charCodeAt(0))],'screen.png',{type:'image/png'}));
+    return dt;
+   });
+   await page.locator('#nReq').dispatchEvent('drop',{dataTransfer:drop});
+   await page.locator('#nImages img').waitFor();
+   assert.equal(await page.locator('#nScout').isDisabled(),true);
+   await page.screenshot({path:'.factory-evidence/drop-added.png'});
+   await page.locator('#nImages button').click();
+   assert.equal(await page.locator('#nImages img').count(),0);
+   await page.locator('#nReq').dispatchEvent('drop',{dataTransfer:drop});
+   await page.locator('#nImages img').waitFor();
+   let body;
+   await page.route('**/api/new',async route=>{
+    body=route.request().postDataJSON();
+    await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'sample failure'})});
+   });
+   await page.locator('#nGo').click();
+   await page.locator('#nError').filter({hasText:'sample failure'}).waitFor();
+   assert.equal(body.attachments[0].name,'screen.png');
+   assert.ok(body.attachments[0].data_base64.length);
+   assert.equal(await page.locator('#nReq').inputValue(),'Fix this layout');
+   assert.equal(await page.locator('#nImages img').count(),1);
+   await page.setViewportSize({width:390,height:844});
+   await page.locator('#nImages').scrollIntoViewIfNeeded();
+   await page.screenshot({path:'.factory-evidence/drop-phone.png'});
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  } finally { await browser.close(); }
+ });
+});

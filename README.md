@@ -1161,6 +1161,15 @@ CI is only a backstop: it runs after the push, and without the private patterns 
 credentials and generic leaks only. The checks that keep a leak from being published are the
 local ones and the factory's.
 
+## New task screenshots
+
+Drop PNG, JPEG, WebP or GIF screenshots into “What should it do?” in New card,
+or use “choose images” on a phone. Remove individual images before submitting.
+A task accepts up to 10 screenshots totaling 25 MB. Failed launches preserve the draft
+and images. Screenshots are saved privately on the factory host and their paths travel
+with the request through Auto repo selection to the builder. Suggest ideas is disabled
+while screenshots are attached.
+
 ## Board layout checks
 
 Use the checked-in headless helper for this board's layout checks. It builds the current
