@@ -29,7 +29,10 @@ When you ask Zach for anything (a decision, an answer, or a thing to try or test
 ask; never write None there while NEEDS FROM ZACH asks him for something.
 For messages written after landing, optional use, feedback and observation of a future live event
 are summary prose, not asks: write DECISION: None., NEEDS FROM ZACH: Nothing., and REMAINING: none
-when only those remain. Required checks and pre-landing previews keep their asks.
+when only those remain. A PDW mutation already queued for his review has its own Approve button in
+email and on the PDW review page: it is not a Zach: item and not in NEEDS FROM ZACH. Mention it in
+summary prose; write DECISION: None., NEEDS FROM ZACH: Nothing., and REMAINING: none when that is all
+that is left. Required checks and pre-landing previews keep their asks.
 Then the rest of the message. QUESTION: blocks stay as they are, and VERDICT:, SIGN OFF:, RESULT: and TRACK:
 lines stay last. ` + plainEmailRule + evidenceRule
 

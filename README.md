@@ -749,7 +749,10 @@ never split one.
 After landing, optional use, feedback and optional observation awaiting a future live event belong
 in the summary, with no decision or needs ask and `REMAINING: none`. Required acceptance checks,
 unfinished deployment and required settings remain unfinished work. Pre-landing previews keep
-their test asks and approval choices. Error recovery applies the same optional-try completion rule.
+their test asks and approval choices. A PDW mutation already queued for his review has its own
+Approve button in email and on the PDW review page. Mention it in summary prose, not as a `Zach:`
+item or in NEEDS FROM ZACH; write `DECISION: None.`, `NEEDS FROM ZACH: Nothing.`, and `REMAINING: none`
+when that is all that is left. Error recovery applies the same optional-try completion rule.
 
 Agents keep the `DECISION:`, `OVERVIEW:` and `NEEDS FROM ZACH:` block (`factory/overview.go`).
 A decision or needs line that says nothing ("None.") is dropped on a card that asks for something,

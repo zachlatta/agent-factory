@@ -67,6 +67,23 @@ func TestLandingMessagesAskWhatRemains(t *testing.T) {
 	}
 }
 
+func TestLandingQueuedPDWReview(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"completion": remainingRule,
+		"summary":    overviewRule,
+	} {
+		for _, want := range []string{"PDW mutation already queued", "summary prose", "not a Zach: item", "not in NEEDS FROM ZACH", "REMAINING: none"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s rule missing %q", name, want)
+			}
+		}
+	}
+	const reply = "DECISION: None.\nOVERVIEW: The change is live.\nNEEDS FROM ZACH: Nothing.\n\nThe PDW mutation is queued for review with its own Approve button in email and on the PDW review page.\nREMAINING: none"
+	if stage, _, again := landedNext(reply, 0); stage != "landed" || len(again) != 0 || !landedNothingRemains(reply) {
+		t.Fatalf("queued review held completed work: stage=%s again=%v", stage, again)
+	}
+}
+
 func TestLandingReadsWhatRemains(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply, stage, note string

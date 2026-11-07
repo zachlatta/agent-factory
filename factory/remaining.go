@@ -22,7 +22,10 @@ const remainingRule = " End that summary with a line that says what is left of t
 	"this change did not cause (an expired login, a test failing for reasons unrelated to it) or work outside " +
 	"the area of the ask: say those in the summary, and suggest any worth doing as an idea. Run every check " +
 	"of this change you can before you write that line. Start each - line with who must do it: Zach: only " +
-	"for a decision, approval, login or action only he can take, else agent:. Your NEEDS FROM ZACH names " +
+	"for a decision, approval, login or action only he can take, else agent:. A PDW mutation already queued " +
+	"for his review has its own Approve button in email and on the PDW review page: it is not a Zach: item " +
+	"and not in NEEDS FROM ZACH. Mention it in summary prose and write REMAINING: none when that is all " +
+	"that is left. Your NEEDS FROM ZACH names " +
 	"every Zach: item and says nothing only when there is none: when it needs nothing from Zach, its agent: " +
 	"items come back to you in this card (at most 2 rounds): you finish them, the gate runs, and you " +
 	"land again. After landing, optional use and feedback and optional agent observation awaiting a future live event " +
