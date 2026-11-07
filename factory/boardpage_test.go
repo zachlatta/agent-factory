@@ -70,7 +70,7 @@ func TestBoardPageSafeArea(t *testing.T) {
 }
 
 // On the phone the board is one column: the For you list, no stage tabs, no sideways scroll and no
-// activity ticker; a card's ids, branch and logs sit under Details.
+// activity ticker; a card opens its chat and folds ids and branch under Details.
 func TestBoardPageInboxOnPhone(t *testing.T) {
 	page := boardPage(t)
 	if strings.Contains(page, `class="tabs"`) || strings.Contains(page, "renderPhone") {
@@ -95,8 +95,8 @@ func TestBoardPageInboxOnPhone(t *testing.T) {
 		t.Error("the phone does not always show the For you list")
 	}
 	d := strings.Index(page, `<details id="pDetails">`)
-	if d < 0 || strings.Index(page, `id="pLogs"`) < d || strings.Index(page, `id="pKv"`) < d || strings.Index(page, `id="pAsk"`) > d {
-		t.Error("card detail must start with the ask and fold ids and logs under Details")
+	if d < 0 || strings.Index(page, `id="pTranscript"`) > strings.Index(page, `id="pAsk"`) || strings.Index(page, `id="pKv"`) < d || strings.Index(page, `id="pAsk"`) > d {
+		t.Error("card detail must start with chat, keep the ask visible and fold ids under Details")
 	}
 	if strings.Contains(page, "confirm('Drop this card?") {
 		t.Error("Drop still uses a browser dialog")

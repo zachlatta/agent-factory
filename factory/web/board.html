@@ -100,7 +100,6 @@ aside .bd{padding:12px 16px calc(12px + env(safe-area-inset-bottom));overflow:au
 .stagebar span{flex:1;height:5px;border-radius:2px;background:#eaeef2}
 .stagebar span.on{background:var(--blue)}
 .stagebar span.done{background:#8cc4ff}
-pre.logs{white-space:pre-wrap;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:46vh;overflow:auto}
 textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:6px;padding:6px}
 dialog{border:1px solid var(--line);border-radius:10px;padding:16px;width:min(560px,94vw)}
 dialog h3{margin:0 0 8px}
@@ -179,6 +178,7 @@ button.link{border:0;background:none;color:var(--blue);padding:8px 0 0;font-size
 .line.stuck .ls{color:var(--red)}.line:not([data-id]){cursor:default}a.line{color:inherit;text-decoration:none}a.line:hover .lt{text-decoration:underline}
 .line .ls button.link{padding:0;font-size:inherit}
 button.filter{margin-top:16px;border-radius:99px;font-size:12.5px}button.filter.on{background:var(--ink);color:#fff}
+#pTranscript{display:block;width:100%;height:68dvh;min-height:360px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px}
 #panel h4{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em;margin:14px 0 4px}
 #panel h4:first-child{margin-top:0}
 #panel .gist{font-size:13.5px;white-space:pre-wrap;margin-bottom:4px}
@@ -261,6 +261,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
   <button class="x" onclick="closePanel()">×</button>
   <div class="hd"><h2 id="pTitle"></h2><div class="sub" id="pState"></div></div>
   <div class="bd">
+    <iframe id="pTranscript" title="Agent transcript and chat"></iframe>
     <div id="pAsk"></div>
     <div class="idea" id="pIdea"></div>
     <div id="pGateChecks"></div>
@@ -274,8 +275,6 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
       <select id="pMove"></select><button id="pMoveBtn">Move</button></div>
     <a class="primary" id="pOpen" style="display:block;text-align:center;padding:8px;border-radius:8px;background:var(--blue);color:#fff;text-decoration:none;font-weight:600;margin:12px 0 4px">Open full transcript and chat →</a>
     <div id="pKids"></div>
-    <h4 style="margin:14px 0 6px" id="pLogsHd">Latest messages</h4>
-    <pre class="logs" id="pLogs">…</pre>
     </details>
   </div>
 </aside>
@@ -654,7 +653,10 @@ function gatePassesHtml(c){
     ${r.grades ? Object.entries(gradeNames).map(([key,name])=>{
       const value = Object.fromEntries(r.grades.split(' ').map(p=>p.split(':')))[key] || '-';
       const color = ['green','yellow','red'].includes(value)?value:'unknown';
-      return `<div class="gatecheck"><span class="grade ${color}">${esc(value==='-'?'not graded':value==='n/a'?'not applicable':value)}</span><span>${esc(name)}</span></div>`;
+      const label = {request:'MEETS REQUEST',works:'WORKS',design:'DESIGN',public:'PUBLIC SAFETY',signoff:'SIGN OFF'}[key];
+      const lines = [...(r.report||'').matchAll(new RegExp('^[ \t>*_#-]*'+label+'[*_]*\\s*:[ \t*_\x60]*(?:green|yellow|red|n/a|none)\\b[ \t*_\x60]*[-–—:]?[ \t]*(.*)$','gim'))];
+      const reason = lines.length ? lines[lines.length-1][1].trim() : '';
+      return `<div class="gatecheck"><span class="grade ${color}">${esc(value==='-'?'not graded':value==='n/a'?'not applicable':value)}</span><span>${esc(name)}${reason? `<div class="sub">${esc(reason)}</div>` : '<div class="sub">No explanation recorded.</div>'}</span></div>`;
     }).join('') : '<p class="sub">Checks unavailable for this older pass.</p>'}
     ${r.report?`<details><summary>Gate report</summary><pre class="gatereport">${esc(r.report)}</pre></details>`:''}</section>`).join('');
 }
@@ -876,7 +878,7 @@ async function move(id, stage){ const c=B.cards.find(x=>x.id===id); if(!c||c.sta
 function openPanel(id){ const c=findCard(id); sel=c?c.id:id; seen(c); fillPanel(c, true); render(); }
 // seen marks an unread card read (factory.seen). Quiet: a read-only canary answers 403, no toast.
 function seen(c){ if(!c||!c.unread) return; c.unread=false; fetch('api/seen', {method:'POST', headers:{'Content-Type':'application/json','X-Factory':'1'}, body:JSON.stringify({id:c.id})}).catch(()=>{}); }
-function closePanel(){ sel=null; $('panel').classList.remove('open'); render(); }
+function closePanel(){ $('pTranscript').removeAttribute('src'); sel=null; $('panel').classList.remove('open'); render(); }
 
 function fillPanel(c, fresh){
   if(!c){ closePanel(); return; }
@@ -885,6 +887,13 @@ function fillPanel(c, fresh){
   $('pState').textContent = [repoLabel(c.repo), c.ask ? '' : stateOf(c)].filter(Boolean).join(' · ');
   if(fresh || !askOpen.has(c.id)) fillAsk(c);
   if(fresh) $('pDetails').open = c.id.startsWith('idea-');
+  const frame = $('pTranscript'), idea = c.id.startsWith('idea-');
+  frame.style.display = idea ? 'none' : 'block';
+  if(idea) frame.removeAttribute('src');
+  else {
+    const src = 't/' + encodeURIComponent(c.id) + '?embed=1';
+    if(frame.getAttribute('src') !== src) frame.src = src;
+  }
   $('pOpen').href = 't/' + c.id;
   $('pSub').textContent = `${c.short} · ${c.host} · ${c.source} · ${c.status}${c.archivedAt?' (archived)':''}`;
   const idx = B.stages.findIndex(s=>s[0]===c.stage);
@@ -911,7 +920,7 @@ function fillPanel(c, fresh){
   $('pOpen').style.display = isIdea ? 'none' : 'block';
   // a reload keeps a sub-agent message box Zach is typing in
   if(fresh || !(document.activeElement && document.activeElement.matches('#pKids textarea'))) $('pKids').innerHTML = isIdea ? '' : kidsHtml(c);
-  $('pKv').style.display = $('pLogsHd').style.display = $('pLogs').style.display = isIdea ? 'none' : '';
+  $('pKv').style.display = isIdea ? 'none' : '';
   $('pIdea').className = 'idea' + (c.idea && !isIdea ? ' started' : '');
   $('pIdea').innerHTML = c.idea ? ideaHtml(c, isIdea) : '';
   if(c.idea && fresh && !(c.idea.id in briefs)){ briefs[c.idea.id] = null;
@@ -943,16 +952,15 @@ function fillPanel(c, fresh){
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   const mv=$('pMove'); mv.innerHTML = B.stages.map(s=>`<option value="${s[0]}" ${s[0]===c.stage?'selected':''}>${s[1]}</option>`).join('');
-  if(fresh && !isIdea){ $('pMsg').value=''; $('pLogs').textContent='loading…';
-    // opening a card reads its session file once: Zach's request on top, the latest messages under Details
+  if(fresh && !isIdea){ $('pMsg').value='';
+    // Read the request once; the embedded chat polls the live transcript.
     fetch('api/logs/'+c.id).then(r=>r.json()).then(j=>{ reqs[c.id] = j.request||{};
       if(sel!==c.id) return;
-      $('pLogs').textContent = (j.text||j.error||'').trim().split('\n').slice(-120).join('\n') || '(no text yet)'; $('pLogs').scrollTop=1e9;
       if(!askOpen.has(c.id)) fillAsk(findCard(c.id)); }).catch(()=>{ reqs[c.id] = reqs[c.id]||{}; }); }
 }
 // panelTop: begin
 // The card opens with Zach's own ask, what it needs from him (or what is happening), the preview and
-// its choices; ids, branch, logs and the operator buttons are folded under Details.
+// its choices; ids, branch and the operator buttons are folded under Details.
 const reqs = {}, taskOpen = new Set();
 function stateOf(c){
   const S = B.sections||{};

@@ -331,7 +331,10 @@ Read the request and follow-ups below, the builder's final message, and the diff
 If you changed anything, grade the code as it is after your change and commit it; the factory checks your
 final commit again.
 
-End with these lines, then the VERDICT line, each grade one word followed by " - " and one short reason:
+End with these lines, then the VERDICT line, each grade one word followed by " - " and a concrete explanation.
+For every check, say what you inspected or changed, cite the evidence you observed, and explain how
+that evidence supports the grade. Name remaining gaps for yellow or red. A bare assertion such as
+"meets criteria" is not evidence. Keep each explanation on its grade line so the board shows it inline:
 MEETS REQUEST: <green|yellow|red> - <why>
 WORKS: <green|yellow|red> - <what you ran>
 DESIGN: <green|yellow|red> - <why>

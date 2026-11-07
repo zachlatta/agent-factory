@@ -84,7 +84,7 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
       await page.addInitScript(now => { Date.now = () => now; }, Date.parse(board.updated));
       const query = new URLSearchParams({ view });
       if (card) query.set('card', card);
-      await page.goto(view==='usage'?`${url}/usage`:`${url}/?${query}`, { waitUntil: 'networkidle', timeout: 20000 });
+      await page.goto(view==='usage'?`${url}/usage`:`${url}/?${query}`, { waitUntil: 'domcontentloaded', timeout: 20000 });
       if(view==='usage')await page.waitForFunction(()=>document.querySelector('#totals').textContent.includes('matching rows'));
       else await page.waitForFunction(() => B.updated && !loadErr);
       const shown = view==='usage'?'usage':name === 'phone' ? 'inbox' : view;
@@ -93,7 +93,9 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
       if (card) {
         await page.locator('#panel.open').waitFor();
         await page.waitForFunction(id => sel === id && document.querySelector('#pTitle').textContent === B.cards.find(c => c.id === id).title, card);
-        await page.waitForFunction(() => document.querySelector('#pLogs').textContent !== 'loading…');
+        if (!card.startsWith('idea-')) {
+          await page.frameLocator('#pTranscript').locator('#tx > :not(.empty)').first().waitFor();
+        }
       }
       await page.evaluate(() => document.fonts.ready);
       if (errors.length) throw Error(`${name}: ${errors.join('; ')}`);
@@ -101,7 +103,8 @@ export async function capture(url, { view = 'inbox', card, out = join(root, '.fa
       if (name === 'phone' && sideways) throw Error('The phone page scrolls sideways');
       const path = resolve(out, `${name}.png`);
       await page.screenshot({ path, fullPage: false });
-      const text = await page.locator('body').innerText();
+      const text = await page.locator('body').innerText() + (card && !card.startsWith('idea-')
+        ? '\nInline chat:\n' + await page.frameLocator('#pTranscript').locator('body').innerText() : '');
       await writeFile(resolve(out, `${name}.txt`), text);
       results.push({ name, width, height, view: shown, card: card || null, file: `${name}.png` });
       if (card && await page.locator('#pGateChecks .gatepass').count()) {

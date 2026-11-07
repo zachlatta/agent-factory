@@ -56,6 +56,11 @@ and name changes, messages and archives, and the `paseo` CLI for the rest (label
   the helper, each command has `cli` and `helper` counts, and `helper` shows its state
   (`running`, `down`, ...), CLI and daemon versions, start time, restarts and last error.
 
+Opening a card shows the live transcript and chat inline in the sidebar, starting at the latest
+activity. It uses the same chat as the full transcript page: polling, tool calls, thinking,
+older history, search and replies. Scrolling up keeps your place; Latest returns to new activity.
+Closing the panel stops its transcript polling. Gate checks and card details remain below the chat.
+
 **Unread** on a card: its agent finished a turn you have not opened. Opening the card or loading its
 transcript page marks it seen (`factory.seen`) until the agent is sent another message and finishes
 again; a running card is never unread.
@@ -116,8 +121,10 @@ his sign-off when the gate asks for it (`factory/gates.go`).
      choice between approaches, spending, or a dispute with the builder about what was asked), the gate ends
      `VERDICT: escalate` with `NEEDS FROM ZACH:` and a `QUESTION:` block of options.
 
-   The card panel shows gate checks by pass: a colored grade and text label for each check, plus an
-   expandable gate report. Completed passes keep their grades and reports across restarts. Older passes
+   The card panel shows gate checks by pass: a colored grade, text label and evidence from its grade
+   line for each check, plus an expandable gate report. Each grade explains what was inspected or
+   changed and how the observed evidence supports it. Completed passes keep their grades and reports
+   across restarts. Older passes
    without saved checks say so; the latest label is shown when no pass history exists.
 
    The factory reads the grades (`ParseGrades`) and keeps the last ones on the card (`factory.grades`, shown in the

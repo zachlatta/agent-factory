@@ -344,3 +344,12 @@ func TestGatePassHistorySurvivesRestart(t *testing.T) {
 		t.Fatalf("history lost: %+v", rounds)
 	}
 }
+
+func TestGateRequiresEvidenceForEachGrade(t *testing.T) {
+	got := ReviewPrompt(Card{ID: "c1", Repo: publicRepo}, gateCheck, 7478, "public")
+	for _, want := range []string{"what you inspected or changed", "evidence supports the grade", "on its grade line"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing evidence instruction %q", want)
+		}
+	}
+}

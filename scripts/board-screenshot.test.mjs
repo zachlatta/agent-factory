@@ -14,6 +14,27 @@ const scratchDir = async prefix => {
   return mkdtemp(join(scratch, prefix));
 };
 
+test('card panel embeds chat, preserves it on refresh, and releases it on close', async () => {
+  await withPreview(async url => {
+    const browser = await chromium.launch({headless:true});
+    try {
+      const page = await browser.newPage();
+      await page.goto(url + '/?card=preview-building');
+      const chat = page.frameLocator('#pTranscript');
+      await chat.locator('#tx > *').first().waitFor();
+      assert.match(await page.locator('#pTranscript').getAttribute('src'), /preview-building\?embed=1/);
+      await chat.locator('#msg').fill('Keep this draft');
+      await page.evaluate(() => load());
+      assert.equal(await chat.locator('#msg').inputValue(), 'Keep this draft');
+      await page.locator('#panel > .x').click();
+      assert.equal(await page.locator('#pTranscript').getAttribute('src'), null);
+      await page.evaluate(() => openPanel('preview-zach'));
+      await page.locator('#pGateChecks .gatecheck').first().waitFor();
+      assert.match(await page.locator('#pGateChecks').innerText(), /desktop and phone checked/);
+    } finally { await browser.close(); }
+  });
+});
+
 // Run against the real embedded page and real API, with the preview's fake inputs.
 test('For you and card links render at exact widths and preserve navigation', async () => {
   const out = await scratchDir('capture-test-');
