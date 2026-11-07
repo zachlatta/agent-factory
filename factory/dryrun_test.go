@@ -164,7 +164,7 @@ func TestDryRunActionsChangeNothing(t *testing.T) {
 	}
 	img := base64.StdEncoding.EncodeToString([]byte("png"))
 	dryPost(t, f, agents, "stage", `{"id":"c1","stage":"building"}`)
-	dryPost(t, f, agents, "send", `{"id":"c2","message":"hi","attachments":[{"name":"a.png","type":"image/png","dataBase64":"`+img+`"}]}`)
+	dryPost(t, f, agents, "send", `{"id":"c2","message":"hi","attachments":[{"name":"a.png","type":"image/png","data_base64":"`+img+`"}]}`)
 	dryPost(t, f, agents, "new", `{"request":"do a thing","repo":"example/desk"}`)
 	dryPost(t, f, agents, "close", `{"id":"c2"}`)
 	dryPost(t, f, agents, "approve", `{"id":"`+idea.ID+`"}`)

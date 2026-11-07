@@ -27,6 +27,7 @@ const routedNote = "started in " // + repo: a picker whose card started
 
 // Route is a picker's saved New card request, kept until the real card starts.
 type Route struct {
+	Images    []string  `json:"images,omitempty"`
 	Request   string    `json:"request"`
 	Title     string    `json:"title"`
 	Titled    bool      `json:"titled,omitempty"` // the caller gave Title; otherwise it came from Request
@@ -259,7 +260,7 @@ func (f *Factory) startRouted(a Agent, repo string) error {
 		if r.Titled {
 			title = r.Title
 		}
-		res, err = f.newCard(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, SubmittedBy: r.By, schedule: r.Schedule, Agent: r.Agent, Thinking: r.Thinking})
+		res, err = f.newCardWithImages(Body{Request: r.Request, Repo: repo, Title: title, Thread: r.Thread, Origin: r.Origin, SubmittedBy: r.By, schedule: r.Schedule, Agent: r.Agent, Thinking: r.Thinking}, r.Images)
 	}
 	if err != nil {
 		return failed(err)

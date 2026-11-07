@@ -315,6 +315,10 @@ test('new task screenshots drop, remove, and survive a failed launch', async () 
    });
    await page.locator('#nReq').dispatchEvent('drop',{dataTransfer:drop});
    await page.locator('#nImages img').waitFor();
+   assert.equal(await page.locator('#newDlg').evaluate(el=>{
+    const dt=new DataTransfer(); dt.items.add(new File(['image'],'other.png',{type:'image/png'}));
+    return el.dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true}));
+   }),false);
    assert.equal(await page.locator('#nScout').isDisabled(),true);
    await page.screenshot({path:'.factory-evidence/drop-added.png'});
    await page.locator('#nImages button').click();

@@ -1167,7 +1167,9 @@ Drop PNG, JPEG, WebP or GIF screenshots into “What should it do?” in New car
 or use “choose images” on a phone. Remove individual images before submitting.
 A task accepts up to 10 screenshots totaling 25 MB. Failed launches preserve the draft
 and images. Screenshots are saved privately on the factory host and their paths travel
-with the request through Auto repo selection to the builder. Suggest ideas is disabled
+with the request through Auto repo selection to the builder. Images under 5 MB also
+reach the builder inline, just as reply attachments do. Reply attachments use the same
+private storage and batch limits. Suggest ideas is disabled
 while screenshots are attached.
 
 ## Board layout checks

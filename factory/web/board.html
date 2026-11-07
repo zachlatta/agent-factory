@@ -1083,6 +1083,8 @@ async function addNewImages(files){
   }catch(e){ $('nError').textContent='Could not read screenshots. Try again.'; }
   finally{ readingImages=false; $('nGo').disabled=false; renderNewImages(); }
 }
+$('newDlg').ondragover=e=>{ if(Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault(); };
+$('newDlg').ondrop=e=>{ e.preventDefault(); };
 $('nFiles').onchange=async()=>{ await addNewImages($('nFiles').files); $('nFiles').value=''; };
 $('nReq').ondragover=e=>{ if(Array.from(e.dataTransfer.types).includes('Files')){ e.preventDefault(); e.dataTransfer.dropEffect='copy'; $('nReq').style.outline='2px solid var(--accent)'; } };
 $('nReq').ondragleave=()=>{ $('nReq').style.outline=''; };

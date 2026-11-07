@@ -580,6 +580,10 @@ func fromEmail(b Body) bool {
 // newCard starts a builder in a fresh worktree of the chosen repo, or, for repo "auto", a
 // picker that chooses the repo first (route.go).
 func (f *Factory) newCard(b Body) (map[string]string, error) {
+	return f.newCardWithImages(b, nil)
+}
+
+func (f *Factory) newCardWithImages(b Body, images []string) (map[string]string, error) {
 	req := strings.TrimSpace(b.Request)
 	if req == "" {
 		return nil, errors.New("request is empty")
@@ -608,18 +612,22 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(b.Attachments) > 0 {
-		paths, err := f.saveNewScreenshots(b.Attachments)
-		if err != nil {
-			return nil, err
+	for _, a := range b.Attachments {
+		if a.Type != "image/png" && a.Type != "image/jpeg" && a.Type != "image/webp" && a.Type != "image/gif" {
+			return nil, errors.New("screenshots must be PNG, JPEG, WebP or GIF")
 		}
-		req += "\n\nAttached screenshots (read these files):\n- " + strings.Join(paths, "\n- ")
 	}
+	files, uploadedImages, err := f.saveAttachments("new", b.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	images = append(images, uploadedImages...)
+	req = f.attachmentMessage(req, files)
 	if repo == autoRepo {
 		if source != "board" {
 			return nil, errors.New("an email or voice card names its repo")
 		}
-		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Schedule: b.schedule, Agent: agent.ID, Thinking: agent.Thinking}
+		r := Route{Images: images, Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Schedule: b.schedule, Agent: agent.ID, Thinking: agent.Thinking}
 		return f.startPicker(r)
 	}
 	by := submissionTag(b)
@@ -627,6 +635,9 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
 		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "building"), "--label", labelArg(labelAutoReview, gateCheck), "--label", labelArg(labelSubmittedBy, by), "--label", labelArg(labelArchiveWatch, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))
+	for _, image := range images {
+		args = append(args, "--image", image)
+	}
 	args = append(args, extra...)
 	if branch := f.freeBranch(repoDir, branchSlug(title)); branch != "" {
 		args = append(args, "--new-branch", branch)
@@ -679,35 +690,20 @@ func safeName(name string) string {
 	return n
 }
 
-// chat sends Zach's message. Every attachment is saved under ~/.paseo/factory-uploads/<id8>/ and
-// named in the message; images under 5 MB also go inline (paseo send --image).
+// chat saves attachments and sends eligible images inline.
 func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
-	var files, images []string
-	for _, a := range atts {
-		data, err := base64.StdEncoding.DecodeString(a.DataBase64)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %v", a.Name, err)
-		}
-		if len(data) > 25<<20 {
-			return nil, fmt.Errorf("%s is over 25 MB", a.Name)
-		}
-		dir := f.uploadDir(id)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
-		}
-		path := filepath.Join(dir, f.Now().Format("20060102-150405")+"-"+safeName(a.Name))
-		if err := os.WriteFile(path, data, 0o644); err != nil {
-			return nil, err
-		}
-		files = append(files, path)
-		if strings.HasPrefix(a.Type, "image/") && len(data) < 5<<20 {
-			images = append(images, path)
-		}
+	files, images, err := f.saveAttachments(id, atts)
+	if err != nil {
+		return nil, err
 	}
+	return files, f.send(id, f.attachmentMessage(msg, files), images...)
+}
+
+func (f *Factory) attachmentMessage(msg string, files []string) string {
 	if len(files) > 0 {
 		msg += "\n\nAttached files (saved on " + f.cfg.Host + "):\n- " + strings.Join(files, "\n- ")
 	}
-	return files, f.send(id, msg, images...)
+	return msg
 }
 
 // landingReply resumes verification or completion reporting without queuing the gate.
@@ -716,42 +712,45 @@ func landingReply(a Agent) bool {
 	return note == "landed; did not say what remains"
 }
 
-// saveNewScreenshots validates the entire batch before saving it in a unique directory.
-func (f *Factory) saveNewScreenshots(atts []Attachment) ([]string, error) {
+// saveAttachments validates the entire batch before saving it privately in a unique directory.
+func (f *Factory) saveAttachments(id string, atts []Attachment) (files, images []string, err error) {
+	if len(atts) == 0 {
+		return nil, nil, nil
+	}
 	if len(atts) > 10 {
-		return nil, errors.New("at most 10 screenshots")
+		return nil, nil, errors.New("at most 10 attachments")
 	}
 	var data [][]byte
 	total := 0
 	for _, a := range atts {
-		if a.Type != "image/png" && a.Type != "image/jpeg" && a.Type != "image/webp" && a.Type != "image/gif" {
-			return nil, errors.New("screenshots must be PNG, JPEG, WebP or GIF")
-		}
 		b, err := base64.StdEncoding.DecodeString(a.DataBase64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid screenshot: %w", err)
+			return nil, nil, fmt.Errorf("invalid attachment: %w", err)
 		}
 		total += len(b)
 		if len(b) == 0 || total > 25<<20 {
-			return nil, errors.New("screenshots must total 25 MB or less")
+			return nil, nil, errors.New("attachments must total 25 MB or less")
 		}
 		data = append(data, b)
 	}
-	root := f.uploadDir("new")
+	root := f.uploadDir(id)
 	if err := os.MkdirAll(root, 0700); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	dir, err := os.MkdirTemp(root, "screenshots-")
+	dir, err := os.MkdirTemp(root, "attachments-")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var paths []string
+
 	for i, a := range atts {
 		path := filepath.Join(dir, fmt.Sprintf("%d-%s", i+1, safeName(a.Name)))
 		if err := os.WriteFile(path, data[i], 0600); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		paths = append(paths, path)
+		files = append(files, path)
+		if strings.HasPrefix(a.Type, "image/") && len(data[i]) < 5<<20 {
+			images = append(images, path)
+		}
 	}
-	return paths, nil
+	return files, images, nil
 }
