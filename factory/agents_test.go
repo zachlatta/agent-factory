@@ -41,7 +41,7 @@ func TestReviewersAndScoutsAlwaysUseOpus(t *testing.T) {
 		c.Provider = a.providerID()
 		f, p := newTestFactory(t, c)
 		got, _ := f.card("c1")
-		if _, err := f.StartReview(got, gateRequest); err != nil {
+		if _, err := f.StartReview(got, gateCheck); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.Act("scout", Body{Repo: "example/desk"}); err != nil {

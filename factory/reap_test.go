@@ -56,12 +56,12 @@ func TestReapLeavesUnlabelledAgents(t *testing.T) {
 }
 
 func TestReapArchivesAppliedReviewers(t *testing.T) {
-	r1 := reviewer("rev1", "card1", gateSignoff)
+	r1 := reviewer("rev1", "card1", gateCheck)
 	r1.Labels[labelPrefix+labelApplied] = "1"
-	r2 := reviewer("rev2", "card1", gateSignoff)
+	r2 := reviewer("rev2", "card1", gateCheck)
 	r2.Labels[labelPrefix+labelApplied] = "1"
 	r3 := reviewer("rev3", "gone1", "land") // verdict not applied yet: ApplyVerdict's job, whatever its target
-	c := card("card1", map[string]string{labelStage: gateDesign})
+	c := card("card1", map[string]string{labelStage: gateCheck})
 	f, p := newTestFactory(t, c, r1, r2, r3)
 	f.reap(t0)
 	if !p.archived["rev1"] || !p.archived["rev2"] {
@@ -73,8 +73,8 @@ func TestReapArchivesAppliedReviewers(t *testing.T) {
 }
 
 func TestDropStopsRunningReviewers(t *testing.T) {
-	c := card("card1", map[string]string{labelStage: gateDesign})
-	r := reviewer("rev1", "card1", gateSignoff)
+	c := card("card1", map[string]string{labelStage: gateCheck})
+	r := reviewer("rev1", "card1", gateCheck)
 	r.Status = "running"
 	f, p := newTestFactory(t, c, r)
 	p.busy["rev1"] = 1 // like Paseo: archive refuses a running agent until it is stopped
@@ -111,7 +111,7 @@ func TestReapParksNeedsZachPastTTL(t *testing.T) {
 
 func TestReapKeepsNeedsZachWithPendingReviewer(t *testing.T) {
 	c := idleFor(card("zach1", map[string]string{labelStage: "zach"}), 5*time.Hour)
-	r := reviewer("rev1", "zach1", gateSignoff)
+	r := reviewer("rev1", "zach1", gateCheck)
 	r.Status = "running"
 	r.LastActivityAt = t0
 	f, p := newTestFactory(t, c, r)
@@ -225,11 +225,11 @@ func TestParkedTargetGetsVerdict(t *testing.T) {
 	c := card("card1", map[string]string{labelStage: "zach", labelParked: ago(time.Hour), labelRoundsRequest: "1",
 		labelReviewed: reviewedSHA})
 	c.ArchivedAt = t0.Add(-time.Hour)
-	r := reviewer("rev1", "card1", gateSignoff)
+	r := reviewer("rev1", "card1", gateCheck)
 	f, p := newTestFactory(t, c, r)
 	headIs(f, reviewedSHA, nil)
 	p.archived["card1"] = true
-	storeLog(t, f, p, "rev1", "Looks good.\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "rev1", "Looks good.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("rev1")); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestLoadAgentsKeepsParkedPastWindow(t *testing.T) {
 
 func TestHealthCountsAgents(t *testing.T) {
 	c1 := idleFor(card("card1", map[string]string{labelStage: "zach"}), 2*time.Hour)
-	r1 := reviewer("rev1", "card1", gateSignoff)
+	r1 := reviewer("rev1", "card1", gateCheck)
 	c2 := card("card2", map[string]string{labelStage: "building"})
 	c2.Status = "running"
 	c3 := card("card3", map[string]string{labelStage: "zach", labelParked: ago(time.Hour)})

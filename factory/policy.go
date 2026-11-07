@@ -96,12 +96,14 @@ Check the work against the request and follow-ups (section below):
   hostnames or tailnet URLs (*.ts.net), local paths (/home/<user>/...), and content from <errands> or PDW.
 - Repo fit and whole change (rule below).`
 
-// reviewerRules are the rules every reviewer follows, read-only or not (the design gate has its own edit rule).
+// reviewerRules are the rules every reviewer follows, read-only or not (the gate has its own edit rule).
 const reviewerReadOnly = `- Read-only. Do not edit, commit, push, land, send email, create PDW mutations, or message the builder.
   Use a scratch copy in .factory-scratch/ (listed in .git/info/exclude) if you need to try something.`
 
-const designEdits = `- Edit only for a small refactor, on this card's branch, with a clean worktree and the tests passing when you stop.
-  Do not push, land, change anything outside the worktree, send email, create PDW mutations, or message the builder.`
+const gateEdits = `- Edit only for a small refactor or to remove a public-safety leak, on this card's branch, with a clean worktree
+  and the tests passing when you stop. Dev servers for testing run in the worktree, bound to loopback or this host's
+  tailnet IP, and you stop them before you end. Read production; never change it. Do not push, land, change anything
+  outside the worktree, send email, create PDW mutations, or message the builder.`
 
 // ReviewPrompt is the prompt for a fresh reviewer agent of the given kind (a gate, or land); port is the
 // factory's, for the peers brief; vis is the repo's visibility ("public", "private" or "unknown").
@@ -127,8 +129,8 @@ func ReviewPrompt(c Card, kind string, port int, vis string) string {
 		r += "\n" + decidedRule
 	}
 	edits := reviewerReadOnly
-	if kind == gateDesign {
-		edits = designEdits
+	if kind == gateCheck {
+		edits = gateEdits
 	}
 	verdicts := "approve (it passes), nits (it passes; list nits, no new work), changes (blocking findings; it goes back to the builder), close (duplicate, already done, or not needed)"
 	r += ideaRule(port, "reviewer of "+c.Short, "Posting an idea is the only outside write you may make. ")
@@ -288,7 +290,7 @@ func (f *Factory) unreadableReview(rev Agent, cause error) error {
 func (f *Factory) ApplyVerdict(rev Agent) error {
 	target, kind := rev.L(labelReviewOf), rev.L(labelReviewKind)
 	if kind == "" {
-		kind = gateRequest
+		kind = oldGateRequest // a reviewer from before review kinds were recorded: nothing to apply
 	}
 	var g *cardGate
 	if kind != "land" {
@@ -365,7 +367,7 @@ func (f *Factory) ApplyVerdict(rev Agent) error {
 		return nil
 	}
 	if !isGate(kind) {
-		// a reviewer from before the three gates: the card was moved to them (migrateFlow)
+		// a reviewer from an earlier flow: the card was moved to the gate (migrateFlow)
 		f.logf("reviewer %s: old review kind %q, verdict not applied", short(rev.ID), kind)
 		return consume()
 	}
@@ -378,9 +380,9 @@ type reviewOutcome struct {
 	started              time.Time // when the gate's reviewer started
 }
 
-// decide moves card t once per gate round: a pass goes to the next gate, the sign-off gate's pass to Zach
-// or landing, and a failure back to the builder, that gate running again when it stops. consume records the
-// reviewer's verdict. The caller holds t's gate: a round started before t's last follow-up moves nothing.
+// decide moves card t once per gate round: when every check but sign-off is green, sign-off decides between
+// Zach and landing; otherwise the work goes back to the builder and the gate runs again when it stops. consume
+// records the reviewer's verdict. The caller holds t's gate: a round started before t's last follow-up moves nothing.
 func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	target, kind, verdict, notes := t.ID, r.kind, r.verdict, r.notes
 	g := f.gate(target)
@@ -418,31 +420,24 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 		}
 		return f.setLabels(target, labels)
 	}
+	grades := ParseGrades(notes)
+	labels[labelGrades] = gradesLabel(grades)
+	failed := gateFailures(grades, f.guarded(t.Repo))
 	var err error
 	switch {
 	case verdict == "close":
 		err = set(labelStage, "zach", labelNote, "reviewer suggests closing")
-	case kind == gateSignoff && verdict == "escalate":
+	case verdict == "escalate" && len(failed) == 0:
 		// no one to escalate to but Zach: it never lands on its own
-		err = f.passSignoff(t, labels, kind+" "+verdict, notes+"\nSIGN OFF: the sign-off gate could not decide this itself")
-	case kind == gateSignoff && verdict != "changes":
+		err = f.passSignoff(t, labels, kind+" "+verdict, notes+"\nSIGN OFF: red - the gate could not decide this itself")
+	case (verdict == "approve" || verdict == "nits") && len(failed) == 0:
 		err = f.passSignoff(t, labels, kind+" "+verdict, notes)
-	case verdict == "approve" || verdict == "nits":
-		if err = f.setLabels(target, labels); err == nil {
-			next := nextGate(kind)
-			c, ok := f.card(target)
-			if !ok {
-				return nil
-			}
-			c.Stage = next
-			_, err = f.startReview(g, c, next)
-		}
 	case rounds < f.cfg.ReworkCap:
 		if err = set(labelStage, "building", labelSince, iso(f.Now()), labelAutoReview, kind); err == nil {
-			err = f.advance(labeled(t, labels), kind+" gate fixes", reworkGateMsg(kind, rounds, f.cfg.ReworkCap, notes))
+			err = f.advance(labeled(t, labels), "gate fixes", reworkGateMsg(failed, rounds, f.cfg.ReworkCap, notes))
 		}
 	default:
-		// the round cap: the card stays in this gate, marked stuck, on the board only
+		// the round cap: the card stays in the gate, marked stuck, on the board only
 		if err = f.setLabels(target, labels); err == nil {
 			err = f.markStuck(labeled(t, labels), stuckGate)
 		}
@@ -452,7 +447,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	return err
 }
 
-// passSignoff moves card t on from the sign-off gate: a public repo's scan first, then to Zach when the gate
+// passSignoff moves card t on from the gate's sign-off: a public repo's scan first, then to Zach when the gate
 // (finishedWorkReason) says he signs off, otherwise to landing. An answer to his feedback on the version he was shown returns to him, unless it asks
 // nothing and no reason but "you asked for it" holds (feedbackGate): then it is emailed in its thread, if any, and goes on to landing.
 func (f *Factory) passSignoff(t Agent, labels map[string]string, verdict, notes string) error {
@@ -547,7 +542,7 @@ func (f *Factory) passSignoff(t Agent, labels map[string]string, verdict, notes 
 			return err
 		}
 		if err = set(labelStage, "landing", labelVerdict, verdict, labelSince, now, labelNote, note); err == nil {
-			msg := "All three gates passed. " + f.landMsgFor(t)
+			msg := "The gate passed. " + f.landMsgFor(t)
 			if fb != "" {
 				msg += uiFeedbackLandMsg(fb)
 			}
@@ -647,7 +642,7 @@ func (f *Factory) askToCommit(c Card, dirty, kind string) error {
 
 // staleReviewNote and the unverified notes have no comma: label values cannot hold one (labelArg).
 // Every note of a card held because its reviewed commit could not be checked starts with
-// unverifiedReviewNote; its Re-run starts the gates again.
+// unverifiedReviewNote; its Re-run starts the gate again.
 const (
 	staleReviewNote      = "changed since review: fresh gates"
 	unverifiedReviewNote = "reviewed commit not verified: "
@@ -656,7 +651,7 @@ const (
 
 // reviewHold reports why card a may not be approved for landing or sent a land prompt yet: nil when
 // its HEAD is still the commit its gates saw (factory.reviewed) and its worktree is clean, else
-// the labels that move it. A moved HEAD or uncommitted work goes back to the design gate (since
+// the labels that move it. A moved HEAD or uncommitted work goes back to the gate (since
 // cleared, so it starts once the agent is stopped); a HEAD or status that cannot be read stops the
 // card for Zach, and so does a card with no reviewed commit in any repo, as cardLandBlock refuses to
 // publish it. Zach's approval is no review: it is checked the same way.
@@ -678,7 +673,7 @@ func (f *Factory) reviewHold(a Agent, cwd string) map[string]string {
 	if err != nil {
 		return zach(unverifiedReviewNote + "could not read HEAD: " + trunc(err.Error(), 150))
 	}
-	stale := map[string]string{labelStage: "building", labelAutoReview: gateDesign, labelSince: "", labelHeld: "",
+	stale := map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: "", labelHeld: "",
 		labelNote: staleReviewNote}
 	if head = strings.TrimSpace(head); head != reviewed {
 		f.logf("%s HEAD %s is not the reviewed %s: fresh gates", short(a.ID), short(head), short(reviewed))
@@ -704,13 +699,13 @@ func (f *Factory) runReviewer(c Card, kind, vis, title, why, head string) (strin
 		c.Request = &r
 	}
 	prompt := strings.ReplaceAll(ReviewPrompt(c, kind, f.cfg.Port, vis), "<errands>", f.errandsName())
-	if kind == gateSignoff {
+	if kind == gateCheck {
 		prompt += f.approvedBehaviorPrompt(f.agent(c.ID))
 	}
 	if f.guarded(c.Repo) {
 		prompt += publicReviewRule
 	}
-	if (kind == gateRequest || kind == "land") && f.uiChange(c) {
+	if (kind == gateCheck || kind == "land") && f.uiChange(c) {
 		if c.Repo == "zachlatta/agent-factory" {
 			prompt += boardLayoutRule
 		} else {
@@ -885,8 +880,8 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		if live, err := f.stillStopped(a); !live {
 			return err
 		}
-		if a.L(labelAutoReview) == "" {
-			a = labeled(a, map[string]string{labelAutoReview: gateRequest}) // a stopped builder always goes to the request gate
+		if a.L(labelAutoReview) == "" || isOldGate(a.L(labelAutoReview)) {
+			a = labeled(a, map[string]string{labelAutoReview: gateCheck}) // a stopped builder always goes to the gate
 		}
 		// A landed-diff recovery must review the published HEAD even when there are no
 		// unpushed commits. A verification carried from an earlier landing cannot cover it.
@@ -914,14 +909,14 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 				return f.waitForHistory(a, a, err)
 			}
 			f.nameCard(a, text)
-			if atoi(a.L(roundsLabel(gateRequest))) == 0 {
+			if !gatedBefore(a) {
 				guarded := f.guarded(c.Repo)
 				// a public repo has no direct track: only a first pass that says it took one finishes as one,
-				// and finishDirect scans what it pushed and stops for Zach. A reply there goes through the gates.
+				// and finishDirect scans what it pushed and stops for Zach. A reply there goes through the gate.
 				direct := ParseTrack(text) == "direct" && (!guarded || a.L(labelFollowedUp) == "")
 				if !direct && !guarded && fromInbox(a) && f.noOwnCommits(c.Cwd) {
 					// an inbox card with no RESULT line and nothing unpublished did an errand; its last reply may
-					// be a line after its final command, so read recent session text. Commits always get the gates.
+					// be a line after its final command, so read recent session text. Commits always get the gate.
 					recent, err := storedText(f.cfg.Home, a, 60)
 					if err != nil {
 						return f.waitForHistory(a, a, err)
@@ -979,7 +974,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 		}
 		if why := ParseReturnToBuild(reply); why != "" {
 			f.logf("%s lander found big runbook drift: %s", short(a.ID), why)
-			return f.returnToBuildFrom(a, gateRequest, "runbook no longer matches", "The lander checked your runbook against the live system "+
+			return f.returnToBuildFrom(a, gateCheck, "runbook no longer matches", "The lander checked your runbook against the live system "+
 				"and found changes too big to correct: "+trunc(why, landFailMax)+"\n\nRework the proposed solution for the new state, read-only, and stop with the whole new runbook and the RESULT: line. "+overviewReminder, false)
 		}
 		if a.L(labelResult) == "runbook" && f.noOwnCommits(c.Cwd) {
@@ -1004,7 +999,7 @@ func (f *Factory) tickAgent(a Agent, now time.Time) error {
 				// One that never reports goes through the stopped-step recovery.
 				return f.checkStuck(a, now)
 			}
-			// a push failure or rebase conflict: the card fixes its branch, then the gates again
+			// a push failure or rebase conflict: the card fixes its branch, then the gate again
 			f.logf("%s landing not verified: %s", short(a.ID), why)
 			return f.returnToBuild(a, "landing not verified", landFailMsg(why), false)
 		case landDiffers:
@@ -1060,12 +1055,10 @@ func (f *Factory) waitForHistory(card, source Agent, cause error) error {
 
 // stuckWhy names the working columns, where automatic recovery runs, and what a stopped card there is missing.
 var stuckWhy = map[string]string{
-	stageRoute:  "Repo picker stopped, nothing queued",
-	"building":  "Builder stopped, nothing queued",
-	gateRequest: "Reviewer gone, no verdict",
-	gateDesign:  "Reviewer gone, no verdict",
-	gateSignoff: "Reviewer gone, no verdict",
-	"landing":   "Landing agent stopped without landing",
+	stageRoute: "Repo picker stopped, nothing queued",
+	"building": "Builder stopped, nothing queued",
+	gateCheck:  "Reviewer gone, no verdict",
+	"landing":  "Landing agent stopped without landing",
 }
 
 // landReviewPending reports whether card a's landing review is still deciding: its record is running
@@ -1102,7 +1095,7 @@ func (f *Factory) checkStuck(a Agent, now time.Time) error {
 		if a.L(labelAutoReview) != "" {
 			return nil // starts once the agent acts
 		}
-	case gateRequest, gateDesign, gateSignoff:
+	case gateCheck:
 		agents := f.agents()
 		if reviewPending(agents, a.ID, now) || unappliedStoppedReviewer(agents, a.ID) {
 			return nil
@@ -1360,6 +1353,24 @@ func (f *Factory) freeBranch(dir, slug string) string {
 		}
 	}
 	return ""
+}
+
+// freshBase fetches main in the checkout at dir and returns origin/main, the base a new card's branch starts
+// from: the checkout's own main may be behind or carry commits that never reached origin. It is "" when the
+// checkout has no origin/main; a failed fetch still branches from the last fetched origin/main.
+func (f *Factory) freshBase(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := f.Git(ctx, dir, "fetch", "-q", "origin", "main"); err != nil {
+		f.logf("fetch in %s failed, branching from the last fetched origin/main: %v", dir, err)
+	}
+	if _, err := f.GitOut(ctx, dir, "rev-parse", "--verify", "-q", "origin/main"); err != nil {
+		return ""
+	}
+	return "origin/main"
 }
 
 // branchSlug turns a card title into a git branch slug of lowercase ASCII letters and digits

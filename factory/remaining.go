@@ -10,7 +10,7 @@ import (
 // A card lands only part of its work when its landing agent says something is left: the landing
 // message asks for a REMAINING line. A card with no line, or with something left that needs Zach, waits
 // in Needs Zach; one whose NEEDS FROM ZACH says nothing goes back to the same card to finish what is left
-// (build, the gates, land again), at most workLeftCap rounds, then waits in Needs Zach.
+// (build, the gate, land again), at most workLeftCap rounds, then waits in Needs Zach.
 
 // remainingRule ends every landing message. Completion is read from the assistant reply,
 // so examples in the user prompt cannot count as the agent's answer.
@@ -24,7 +24,7 @@ const remainingRule = " End that summary with a line that says what is left of t
 	"of this change you can before you write that line. Start each - line with who must do it: Zach: only " +
 	"for a decision, approval, login or action only he can take, else agent:. Your NEEDS FROM ZACH names " +
 	"every Zach: item and says nothing only when there is none: when it needs nothing from Zach, its agent: " +
-	"items come back to you in this card (at most 2 rounds): you finish them, the gates run, and you " +
+	"items come back to you in this card (at most 2 rounds): you finish them, the gate runs, and you " +
 	"land again. After landing, optional use and feedback and optional agent observation awaiting a future live event " +
 	"belong in summary prose, not REMAINING or NEEDS FROM ZACH. Say honestly what is unobserved. " +
 	"Required acceptance checks still count as unfinished work even when awaiting an event."
@@ -223,7 +223,7 @@ func rerunLandMsg(guarded bool) string {
 func workLeftMsg(items []string, round int) string {
 	return fmt.Sprintf("Your landing is verified, but this card is not done: your REMAINING list has work for "+
 		"an agent, and it belongs to this card (round %d of %d). Do it now in this worktree: %s. Commit any "+
-		"change on your branch and stop with a short summary; do not land: the gates run on new commits, "+
+		"change on your branch and stop with a short summary; do not land: the gate runs on new commits, "+
 		"then the factory tells you to land again. If an item turns out to need Zach, mark it Zach: and ask "+
 		"in NEEDS FROM ZACH.", round, workLeftCap, strings.Join(items, "; ")) + remainingRule
 }
@@ -258,7 +258,7 @@ func (f *Factory) landedError(a Agent, c Card, reply, errNote string) error {
 	switch {
 	case len(again) > 0:
 		f.logf("%s landed with agent work left, sent back: %s", short(a.ID), strings.Join(again, "; "))
-		labels[labelAutoReview], labels[labelSince] = gateRequest, iso(f.Now())
+		labels[labelAutoReview], labels[labelSince] = gateCheck, iso(f.Now())
 		labels[labelWorkLeftRounds] = fmt.Sprint(rounds + 1)
 		if err := f.setLabels(a.ID, labels); err != nil {
 			return err

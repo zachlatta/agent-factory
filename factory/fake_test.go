@@ -352,7 +352,7 @@ func card(id string, labels map[string]string) Agent {
 func ago(d time.Duration) string { return t0.Add(-d).Format(time.RFC3339) }
 
 func reviewer(id, of, kind string) Agent {
-	return Agent{ID: id, Host: "host1", Title: gateDesign, Status: "idle", CreatedAt: t0.Add(-5 * time.Minute),
+	return Agent{ID: id, Host: "host1", Title: gateCheck, Status: "idle", CreatedAt: t0.Add(-5 * time.Minute),
 		Provider: "claude", SessionID: testSession(id),
 		LastActivityAt: t0.Add(-time.Minute), LastUserMessageAt: t0.Add(-5*time.Minute + 600*time.Millisecond), // its prompt
 		Labels: map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: of, labelPrefix + labelReviewKind: kind}}

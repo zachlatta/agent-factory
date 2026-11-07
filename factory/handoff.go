@@ -421,7 +421,7 @@ func handoffStep(stage string) string {
 	switch stage {
 	case "building":
 		return "building the proposed solution. Finish it, commit on the branch, leave the worktree clean, do NOT land, " +
-			"and stop with a short summary ending in the RESULT: line. The gates check it next."
+			"and stop with a short summary ending in the RESULT: line. The gate checks it next."
 	case "landing":
 		return "landing. The factory had told the previous agent to land. Check whether it already landed " +
 			"(git fetch, then git log origin/main); if not, land it as the instructions say, then report as they say."
@@ -429,7 +429,7 @@ func handoffStep(stage string) string {
 	return "continue the interrupted step, then stop with a short summary."
 }
 
-// handoffParts reads a session's first user message and, for a card from before the gates, its approved
+// handoffParts reads a session's first user message and, for a card from before the gate, its approved
 // plan (the reply just before the last "Build it now, as planned" message) and that message's reviewer notes.
 func handoffParts(evs []Event) (first, plan, notes string) {
 	var run []string

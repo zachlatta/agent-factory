@@ -84,7 +84,7 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 		ID: "sub-old-1", Host: "host1", Title: "helper sub-agent", Status: "running", Provider: "claude", Model: "claude-opus-5-5",
 		CreatedAt: t0.Add(-15 * time.Minute), LastActivityAt: t0.Add(-time.Minute), Labels: map[string]string{"paseo.parent-agent-id": oldID},
 	}
-	rev := reviewer("rev-old-1", oldID, gateDesign)
+	rev := reviewer("rev-old-1", oldID, gateCheck)
 	waiter := card("33333333-3333-3333-3333-333333333333", map[string]string{labelStage: "landing", labelWaitsOn: short(oldID), labelHeld: short(oldID)})
 	f, p := newTestFactory(t)
 	// This test exercises replacement routing, with a readable harmless diff.
@@ -161,8 +161,8 @@ func TestReplacementResolutionConsumers(t *testing.T) {
 	if !reviewPending(f.agents(), newID, t0) {
 		t.Error("reviewPending(newID) = false for reviewer targeting oldID")
 	}
-	storeLog(t, f, p, rev.ID, "Looks good.\nALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
-	if err := f.ApplyVerdict(rev); err != nil || !isGate(p.labels(newID)[labelStage]) || len(p.sent(oldID)) > 0 {
+	storeLog(t, f, p, rev.ID, "Looks good.\nALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
+	if err := f.ApplyVerdict(rev); err != nil || p.labels(newID)[labelStage] != "landing" || len(p.sent(oldID)) > 0 {
 		t.Fatalf("ApplyVerdict err=%v labels=%v sentOld=%d", err, p.labels(newID), len(p.sent(oldID)))
 	}
 	tm, ok := f.timings.get(newID)
@@ -260,7 +260,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 	old := card("11111111-1111-1111-1111-111111111111", map[string]string{
 		labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelTold: "architecture: approve the plan to build",
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
-		labelTrack: "build", labelBase: "base-commit-1", labelRoundsRequest: "2", labelRoundsDesign: "1",
+		labelTrack: "build", labelBase: "base-commit-1", labelRoundsGate: "2", labelRoundsRequest: "2", labelRoundsDesign: "1",
 		labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "reply-1", labelFeedbackHold: "it is an architecture change", labelFeedbackTold: "reply-1", labelAskWhy: "requested",
 		labelDecided: "1", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
 		labelLandedVerified: "1", labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
@@ -333,7 +333,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 	if !ok || f.mailZach(f.agent(repl.ID), c) != nil || len(mailer.calls) != 0 {
 		t.Fatalf("card=%v calls=%d, want 0 (already told on predecessor)", ok, len(mailer.calls))
 	}
-	if c.Rounds.Request != 2 || c.Rounds.Design != 1 {
+	if c.Rounds.Gate != 2 {
 		t.Errorf("Card carried gates = %+v", c)
 	}
 	ra := f.agent(repl.ID)

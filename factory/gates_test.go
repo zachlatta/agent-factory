@@ -36,54 +36,24 @@ func TestSubmittedByTagsEveryCard(t *testing.T) {
 
 func TestBuilderStopStartsTheRequestGate(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "building", labelSource: "board",
-		labelAutoReview: gateRequest, labelSince: ago(2 * time.Minute)}))
+		labelAutoReview: gateCheck, labelSince: ago(2 * time.Minute)}))
 	storeLog(t, f, p, "c1", "[Assistant] Built it.\nRESULT: code\nTITLE: Built it")
 	if err := f.tickAgent(f.agent("c1"), t0); err != nil {
 		t.Fatal(err)
 	}
-	if got := p.labels("c1")[labelStage]; got != gateRequest {
-		t.Fatalf("stage = %q, want %q", got, gateRequest)
+	if got := p.labels("c1")[labelStage]; got != gateCheck {
+		t.Fatalf("stage = %q, want %q", got, gateCheck)
 	}
-	if !strings.Contains(p.promptOfKind(gateRequest), "unsaid context") {
-		t.Errorf("request gate prompt = %q", trunc(p.promptOfKind(gateRequest), 300))
-	}
-}
-
-func TestGatesRunInOrder(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board"}),
-		reviewer("r1", "c1", gateRequest))
-	storeLog(t, f, p, "r1", "[Assistant] It does what he asked.\nVERDICT: approve")
-	storeLog(t, f, p, "c1", "[Assistant] Built.\nRESULT: code")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.labels("c1")[labelStage]; got != gateDesign {
-		t.Fatalf("after the request gate, stage = %q", got)
-	}
-	design := p.promptOfKind(gateDesign)
-	if !strings.Contains(design, "commit") || strings.Contains(design, "Read-only.") {
-		t.Errorf("the design reviewer does small refactors itself: %q", trunc(design, 300))
-	}
-}
-
-func TestDesignGatePassMovesToSignOff(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board"}),
-		reviewer("r1", "c1", gateDesign))
-	storeLog(t, f, p, "r1", "[Assistant] Cohesive.\nVERDICT: nits")
-	storeLog(t, f, p, "c1", "[Assistant] Built.")
-	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.labels("c1")[labelStage]; got != gateSignoff {
-		t.Fatalf("stage = %q, want %q", got, gateSignoff)
+	if !strings.Contains(p.promptOfKind(gateCheck), "unsaid context") {
+		t.Errorf("request gate prompt = %q", trunc(p.promptOfKind(gateCheck), 300))
 	}
 }
 
 func TestSignOffNoneGoesToLanding(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateSignoff, labelSource: "board", labelReviewed: "abc", labelAgent: "codex-sol"}),
-		reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewed: "abc", labelAgent: "codex-sol"}),
+		reviewer("r1", "c1", gateCheck))
 	headIs(f, "abc", nil)
-	storeLog(t, f, p, "r1", "[Assistant] It is what he asked for.\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] It is what he asked for.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[Assistant] Built.")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -94,10 +64,10 @@ func TestSignOffNoneGoesToLanding(t *testing.T) {
 }
 
 func TestSignOffReasonComesToZach(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateSignoff, labelSource: "idea", labelReviewed: "abc"}),
-		reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "idea", labelReviewed: "abc"}),
+		reviewer("r1", "c1", gateCheck))
 	headIs(f, "abc", nil)
-	storeLog(t, f, p, "r1", "[Assistant] System submitted.\nSIGN OFF: the system submitted it\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] System submitted.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nSIGN OFF: red - the system submitted it\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[Assistant] Built.")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -109,10 +79,10 @@ func TestSignOffReasonComesToZach(t *testing.T) {
 }
 
 func TestMissingSignOffLineAsksZach(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateSignoff, labelSource: "board", labelReviewed: "abc"}),
-		reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewed: "abc"}),
+		reviewer("r1", "c1", gateCheck))
 	headIs(f, "abc", nil)
-	storeLog(t, f, p, "r1", "[Assistant] Fine.\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] Fine.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[Assistant] Built.")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -124,7 +94,7 @@ func TestMissingSignOffLineAsksZach(t *testing.T) {
 
 func TestSignOffPromptNamesWhoSubmitted(t *testing.T) {
 	c := Card{ID: "c1", Title: "t", Repo: "o/r", SubmittedBy: submittedBySystem}
-	got := ReviewPrompt(c, gateSignoff, 7478, "private")
+	got := ReviewPrompt(c, gateCheck, 7478, "private")
 	for _, want := range []string{"Submitted by: system", "scheduled run", "SIGN OFF:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("sign-off prompt misses %q", want)
@@ -136,7 +106,7 @@ func TestSignOffPromptNamesWhoSubmitted(t *testing.T) {
 }
 
 func TestGateFailureGoesBackToBuildAndThatGateRunsAgain(t *testing.T) {
-	for _, gate := range []string{gateRequest, gateDesign} {
+	for _, gate := range []string{gateCheck, gateCheck} {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gate, labelSource: "board"}),
 			reviewer("r1", "c1", gate))
 		storeLog(t, f, p, "r1", "[Assistant] Does not hold.\nVERDICT: changes")
@@ -152,8 +122,8 @@ func TestGateFailureGoesBackToBuildAndThatGateRunsAgain(t *testing.T) {
 }
 
 func TestReworkCapMarksTheCardStuck(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", roundsLabel(gateDesign): "2"}),
-		reviewer("r1", "c1", gateDesign))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", roundsLabel(gateCheck): "2"}),
+		reviewer("r1", "c1", gateCheck))
 	storeLog(t, f, p, "r1", "[Assistant] Still wrong.\nVERDICT: changes")
 	storeLog(t, f, p, "c1", "[Assistant] Built.")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
@@ -190,7 +160,7 @@ func TestLanderSendsBigRunbookDriftBackToBuild(t *testing.T) {
 	if err := f.tickAgent(f.agent("c1"), t0); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateCheck {
 		t.Fatalf("labels %v", l)
 	}
 }
@@ -251,13 +221,13 @@ func TestOldFlowCardsMoveToTheNewFlow(t *testing.T) {
 		reviewer("r1", "c1", "code"))
 	storeLog(t, f, p, "c2", "[Assistant] Plan.\nTIER: low")
 	storeLog(t, f, p, "c1", "[Assistant] Built.")
-	storeLog(t, f, p, "r1", "[Assistant] Old verdict.\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] Old verdict.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 	for _, id := range []string{"c1", "c2"} {
 		if err := f.tickAgent(f.agent(id), t0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := p.labels("c1")[labelAutoReview]; got != gateRequest {
+	if got := p.labels("c1")[labelAutoReview]; got != gateCheck {
 		t.Errorf("a card under old review gets the new gates: auto-review %q", got)
 	}
 	if got := p.labels("c2")[labelStage]; got != "building" {
@@ -270,15 +240,18 @@ func (f *Factory) passSignoffForTest(t Agent, labels map[string]string, verdict,
 	return f.passSignoff(t, labels, verdict, notes)
 }
 
-func signoffNone(s string) string { return s + "\nSIGN OFF: none" }
+func signoffNone(s string) string { return s + "\n" + allGreen }
+
+// allGreen is the grade lines of a gate that passes every check and needs no sign-off.
+const allGreen = "MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none"
 
 func TestLandingSwapStartsOpusAndKeepsTheBuilderOnRecord(t *testing.T) {
-	a := card("c1", map[string]string{labelStage: gateSignoff, labelSource: "board", labelReviewed: "abc", labelAgent: "codex-sol"})
+	a := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewed: "abc", labelAgent: "codex-sol"})
 	a.WorkspaceID = "ws-1"
-	f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, a, reviewer("r1", "c1", gateCheck))
 	headIs(f, "abc", nil)
 	storeLog(t, f, p, "c1", "[User] Zach's request:\nDo it\n[Assistant] Built.\nRESULT: code")
-	storeLog(t, f, p, "r1", "[Assistant] Fine.\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] Fine.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -295,15 +268,15 @@ func TestLandingSwapStartsOpusAndKeepsTheBuilderOnRecord(t *testing.T) {
 }
 
 func TestMissingGateVerdictReplacesTheReviewerThenMarksStuck(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board"}), reviewer("r1", "c1", gateDesign))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board"}), reviewer("r1", "c1", gateCheck))
 	storeLog(t, f, p, "r1", "[Assistant] no verdict line")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.runsWithLabel(labelArg(labelReviewKind, gateDesign))) != 1 || p.labels("c1")[labelReviewerRetries] != "1" {
+	if len(p.runsWithLabel(labelArg(labelReviewKind, gateCheck))) != 1 || p.labels("c1")[labelReviewerRetries] != "1" {
 		t.Fatalf("not replaced: %v", p.labels("c1"))
 	}
-	f2, p2 := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelReviewerRetries: "2"}), reviewer("r1", "c1", gateDesign))
+	f2, p2 := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewerRetries: "2"}), reviewer("r1", "c1", gateCheck))
 	storeLog(t, f2, p2, "r1", "[Assistant] no verdict line")
 	if err := f2.ApplyVerdict(f2.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -314,7 +287,7 @@ func TestMissingGateVerdictReplacesTheReviewerThenMarksStuck(t *testing.T) {
 }
 
 func TestDirectReplyFinishesWithoutGates(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateRequest, labelSince: ago(2 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateCheck, labelSince: ago(2 * time.Minute)})
 	f, p := newTestFactory(t, c)
 	storeLog(t, f, p, "c1", "[Assistant] The answer is 4.\nTRACK: direct")
 	if err := f.tickAgent(f.agent("c1"), t0); err != nil {
@@ -326,11 +299,11 @@ func TestDirectReplyFinishesWithoutGates(t *testing.T) {
 }
 
 func TestPublicRepoScanStillStopsASignedOffCard(t *testing.T) {
-	c := publicCard("c1", map[string]string{labelStage: gateSignoff, labelSource: "board", labelReviewed: reviewedSHA})
-	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
+	c := publicCard("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewed: reviewedSHA})
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateCheck))
 	fakeScan(f, []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, nil)
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "[Assistant] Fine.\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] Fine.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -339,15 +312,15 @@ func TestPublicRepoScanStillStopsASignedOffCard(t *testing.T) {
 	}
 }
 
-func TestDesignGateCommitMovesTheReviewedHead(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelReviewed: "old"}), reviewer("r1", "c1", gateDesign))
+func TestGateCommitGetsAFreshGate(t *testing.T) {
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelSubmittedBy: submittedByZach, labelReviewed: "old"}), reviewer("r1", "c1", gateCheck))
 	headIs(f, "refactored", nil)
-	storeLog(t, f, p, "r1", "[Assistant] Small refactor committed.\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "[Assistant] Small refactor committed.\n"+allGreen+"\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelReviewed] != "refactored" || l[labelStage] != gateSignoff {
-		t.Fatalf("sign-off must read the refactored head: %v", l)
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateCheck || l[labelNote] != staleReviewNote {
+		t.Fatalf("the gate's own commit must be gated again before it lands: %v", l)
 	}
 }
 
@@ -359,8 +332,8 @@ func TestReplyMovesTheCardToTheRightStep(t *testing.T) {
 		queued string
 	}{
 		{"landing stays", map[string]string{labelStage: "landing"}, "landing", ""},
-		{"a built card goes back through the gates", map[string]string{labelStage: gateDesign, labelVerdict: "request approve", labelResult: "code"}, "building", gateRequest},
-		{"an errand stays on its pass", map[string]string{labelStage: "building", labelTrack: "direct"}, "building", gateRequest},
+		{"a built card goes back through the gates", map[string]string{labelStage: gateCheck, labelVerdict: "request approve", labelResult: "code"}, "building", gateCheck},
+		{"an errand stays on its pass", map[string]string{labelStage: "building", labelTrack: "direct"}, "building", gateCheck},
 		{"a picker picks again", map[string]string{labelStage: stageRoute, labelRouting: "1"}, stageRoute, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,7 +349,7 @@ func TestReplyMovesTheCardToTheRightStep(t *testing.T) {
 }
 
 func TestRerunRestartsEachGate(t *testing.T) {
-	for _, from := range []string{gateRequest, gateDesign, gateSignoff} {
+	for _, from := range []string{gateCheck, gateCheck, gateCheck} {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: from, labelStuck: stuckReview}))
 		if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
 			t.Fatal(err)
@@ -388,19 +361,19 @@ func TestRerunRestartsEachGate(t *testing.T) {
 }
 
 func TestInboxCardWithCommitsAndNoResultLineGetsTheGates(t *testing.T) {
-	c := inboxCard("c1", map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)})
+	c := inboxCard("c1", map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: gateCheck, labelSince: ago(10 * time.Minute)})
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
 	f.GitOut = gitStub(map[string]string{"rev-list origin/main..HEAD": "abc\n", "status --porcelain": "", "rev-parse HEAD": "abc\n"})
 	storeLog(t, f, p, "c1", "Fixed it and committed.")
 	f.Tick()
-	if p.labels("c1")[labelTrack] == "direct" || len(p.runsWithLabel(labelArg(labelReviewKind, gateRequest))) != 1 {
+	if p.labels("c1")[labelTrack] == "direct" || len(p.runsWithLabel(labelArg(labelReviewKind, gateCheck))) != 1 {
 		t.Fatalf("commits must not skip the gates: %v", p.labels("c1"))
 	}
 }
 
 func TestPublicDirectFirstPassIsScannedAndStops(t *testing.T) {
-	c := publicCard("c1", map[string]string{labelStage: "building", labelSource: "board", labelBase: "abc", labelAutoReview: gateRequest,
+	c := publicCard("c1", map[string]string{labelStage: "building", labelSource: "board", labelBase: "abc", labelAutoReview: gateCheck,
 		labelSince: ago(10 * time.Minute)})
 	c.Cwd = t.TempDir()
 	f, p := newTestFactory(t, c)
@@ -422,7 +395,7 @@ func TestPublishedWorkInAPublicRepoIsScannedAtSignOff(t *testing.T) {
 		hits []scan.Hit
 		zach bool
 	}{{"clean", nil, false}, {"a hit waits for Zach", []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, true}} {
-		a := publicCard("c1", reviewLabels(map[string]string{labelBase: "abc", labelStage: gateSignoff}))
+		a := publicCard("c1", reviewLabels(map[string]string{labelBase: "abc", labelStage: gateCheck}))
 		f, p := newTestFactory(t, a)
 		fakeScan(f, tc.hits, nil)
 		if got := f.publishedScanNote(a) != ""; got != tc.zach {
@@ -445,13 +418,13 @@ func TestFollowUpStartsANewGateGeneration(t *testing.T) {
 func TestLegacyStuckReviewMovesToARealGate(t *testing.T) {
 	f, p, _ := mailFactory(t, card("c1", map[string]string{labelStage: "zach", labelNote: "stuck", labelStuckFrom: "review"}))
 	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != gateRequest || l[labelStuck] != stuckReview {
+	if l := p.labels("c1"); l[labelStage] != gateCheck || l[labelStuck] != stuckReview {
 		t.Fatalf("labels = %v", l)
 	}
 }
 
 func TestBuilderQuestionWaitsForZach(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateCheck, labelSince: ago(10 * time.Minute)})
 	f, p := newTestFactory(t, c)
 	storeLog(t, f, p, "c1", "[Assistant] I need one answer first.\nQUESTION: Which login?\n- The new one (recommended)\n- The old one\n")
 	f.Tick()
@@ -464,26 +437,26 @@ func TestBuilderQuestionWaitsForZach(t *testing.T) {
 	if _, err := f.Act("send", Body{ID: "c1", Message: "The new one."}); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateCheck {
 		t.Fatalf("his answer goes back to the builder: %v", l)
 	}
 }
 
 func TestResultWithAQuestionStillGoesThroughTheGates(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateCheck, labelSince: ago(10 * time.Minute)})
 	f, p := newTestFactory(t, c)
 	storeLog(t, f, p, "c1", "[Assistant] Built.\nQUESTION: Also rename it?\n- No (recommended)\n- Yes\n\nRESULT: code")
 	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != gateCheck {
 		t.Fatalf("a finished solution goes to the gates: %v", l)
 	}
 }
 
 // A recovery working from a list older than Zach's follow-up starts no reviewer.
 func TestStaleRecoveryAfterFollowUpStartsNoReviewer(t *testing.T) {
-	gone := reviewer("r1", "c1", gateDesign)
+	gone := reviewer("r1", "c1", gateCheck)
 	gone.Status, gone.LastActivityAt = "running", t0.Add(-time.Hour) // stalled without a verdict
-	c := card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelReviewed: reviewedSHA, labelSince: ago(time.Hour)})
+	c := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewed: reviewedSHA, labelSince: ago(time.Hour)})
 	c.LastActivityAt = t0.Add(-10 * time.Minute)
 	f, p := newTestFactory(t, c, gone)
 	headIs(f, reviewedSHA, nil)
@@ -505,7 +478,7 @@ func TestStaleRecoveryAfterFollowUpStartsNoReviewer(t *testing.T) {
 
 // A card whose fresh agent cannot start resumes its old session with the same stage message.
 func TestStageHandoffFallsBackToResume(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelAgent: "opus"}), reviewer("r1", "c1", gateDesign))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelAgent: "opus"}), reviewer("r1", "c1", gateCheck))
 	f.cfg.NoStageHandoff = true
 	storeLog(t, f, p, "c1", "[Assistant] Built.\nRESULT: code")
 	storeLog(t, f, p, "r1", "[Assistant] - fix it\nVERDICT: changes")
@@ -549,16 +522,16 @@ func TestBoardTagsItsCardsAsZachs(t *testing.T) {
 }
 
 func TestSignOffPromptGivesTheSource(t *testing.T) {
-	got := ReviewPrompt(Card{ID: "c1", Title: "t", Repo: "o/r", SubmittedBy: submittedBySystem, Source: "schedule"}, gateSignoff, 7478, "private")
+	got := ReviewPrompt(Card{ID: "c1", Title: "t", Repo: "o/r", SubmittedBy: submittedBySystem, Source: "schedule"}, gateCheck, 7478, "private")
 	if !strings.Contains(got, "Source: schedule") {
 		t.Errorf("the gate cannot tell a scheduled run: %q", trunc(got, 400))
 	}
 }
 
 func TestEscalationAtSignOffNeverLands(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateSignoff, labelSource: "board", labelReviewed: "abc"}), reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewed: "abc"}), reviewer("r1", "c1", gateCheck))
 	headIs(f, "abc", nil)
-	storeLog(t, f, p, "r1", "[Assistant] Not sure.\nSIGN OFF: none\nVERDICT: escalate")
+	storeLog(t, f, p, "r1", "[Assistant] Not sure.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: escalate")
 	storeLog(t, f, p, "c1", "[Assistant] Built.")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
@@ -585,7 +558,7 @@ func TestPagesNameOnlyTheGates(t *testing.T) {
 
 // An answer to Zach's feedback on the version he saw lands only when nothing still needs him.
 func TestFeedbackAnswerGoesAheadOrWaits(t *testing.T) {
-	const none = "SIGN OFF: none\nVERDICT: approve"
+	const none = "MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve"
 	for _, tc := range []struct {
 		name, reply, review string
 		extra               map[string]string
@@ -594,8 +567,8 @@ func TestFeedbackAnswerGoesAheadOrWaits(t *testing.T) {
 	}{
 		{name: "asks nothing", reply: answerNothing, review: none, landing: true},
 		{name: "asks something", reply: "DECISION: Land the totals?\nOVERVIEW: x.\nNEEDS FROM ZACH: Reply yes.", review: none},
-		{name: "the gate says sign off", reply: answerNothing, review: "SIGN OFF: it rewrites a gate\nVERDICT: approve", hold: "it rewrites a gate"},
-		{name: "the gate is silent", reply: answerNothing, review: "VERDICT: approve", hold: "the sign-off gate did not say whether it needs you"},
+		{name: "the gate says sign off", reply: answerNothing, review: "SIGN OFF: it rewrites a gate\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve", hold: "it rewrites a gate"},
+		{name: "the gate is silent", reply: answerNothing, review: "MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve", hold: "the gate did not say whether it needs you"},
 		{name: "a reason from the Ready stop holds", reply: answerNothing, review: none,
 			extra: map[string]string{labelAskWhy: "it rewrites a gate"}, hold: "it rewrites a gate"},
 	} {
@@ -637,7 +610,7 @@ func TestFeedbackGateKeepsAnEarlierReason(t *testing.T) {
 }
 
 func TestGateColumnsKeepTheirStyling(t *testing.T) {
-	if !strings.Contains(boardPage(t), "['request','design','signoff'].includes(s[0])?'gate'") {
+	if !strings.Contains(boardPage(t), "s[0]==='gate'?'gate'") {
 		t.Error("the gate columns lost their styling")
 	}
 }
@@ -662,7 +635,7 @@ func TestRunbookLabelDoesNotSkipTheCheckOnCommits(t *testing.T) {
 }
 
 func TestBuilderTitleNamesTheCard(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateRequest, labelSince: ago(2 * time.Minute)}))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "building", labelSource: "board", labelAutoReview: gateCheck, labelSince: ago(2 * time.Minute)}))
 	storeLog(t, f, p, "c1", "[Assistant] Built it.\nTITLE: **Cards get short titles**\nRESULT: code")
 	if err := f.tickAgent(f.agent("c1"), t0); err != nil {
 		t.Fatal(err)
@@ -688,11 +661,11 @@ func TestScanHitOnPublishedWorkAtSignOffWaitsForZach(t *testing.T) {
 	}{{"a hit waits for Zach", []scan.Hit{{Rule: "email", File: "x.go", Line: 1}}, true}, {"clean goes on", nil, false}} {
 		a := freshCard(false, reviewLabels(map[string]string{labelLandedVerified: "1", labelBase: "base1"}))
 		a.Repo = publicRepo
-		f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff))
+		f, p := newTestFactory(t, a, reviewer("r1", "c1", gateCheck))
 		fakeScan(f, tc.hits, nil)
 		f.GitOut = gitStub(map[string]string{"rev-parse HEAD": reviewedSHA, "status --porcelain": "", "merge-base origin/main " + reviewedSHA: reviewedSHA,
 			"rev-list --reverse --no-merges " + reviewedSHA + ".." + reviewedSHA: ""})
-		storeLog(t, f, p, "r1", "[Assistant] Fine.\nSIGN OFF: none\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "[Assistant] Fine.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 			t.Fatal(err)
 		}
@@ -774,7 +747,7 @@ func TestRepoPickerCarriesTheSchedule(t *testing.T) {
 }
 
 func TestApproveRefusedWhileTheGatesRun(t *testing.T) {
-	for _, stage := range []string{"building", gateRequest, gateDesign, gateSignoff} {
+	for _, stage := range []string{"building", gateCheck, gateCheck, gateCheck} {
 		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: stage, labelSource: "board", labelReviewed: reviewedSHA}))
 		headIs(f, reviewedSHA, nil)
 		dirtyIs(f, "", nil)

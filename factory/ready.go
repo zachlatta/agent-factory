@@ -12,7 +12,7 @@ import (
 // Ready for you: the one stop where Zach sees finished work before it lands. The builder writes
 // three CHANGED: lines and any before/after screenshots; the factory runs the live preview
 // (tryout.go) and emails it in the card's thread, if it has one. Whole approval replies land it, Drop drops it, and other
-// replies go back to the builder and the gates. A repair keeps finished-work approval only after a fresh review confirms unchanged behavior;
+// replies go back to the builder and the gate. A repair keeps finished-work approval only after a fresh review confirms unchanged behavior;
 // new behavior or new sign-off reasons get a new Ready summary.
 
 // readyPrefix starts the Needs Zach note of a card at the Ready for you stop.
@@ -49,10 +49,10 @@ func isFinishedNote(note string) bool {
 // readyStop reports whether a waits on Zach at the Ready for you stop.
 func readyStop(a Agent) bool { return a.L(labelStage) == "zach" && isFinishedNote(a.L(labelNote)) }
 
-// readyMsg asks the builder of a card that passed the gates, and comes to Zach for reason, for what he
+// readyMsg asks the builder of a card that passed the gate, and comes to Zach for reason, for what he
 // reads at Ready for you.
 func readyMsg(reason string) string {
-	return "The gates passed and the sign-off gate says Zach signs off. This change now goes to him once, finished, as \"Ready for you\", before it lands (" +
+	return "The gate passed and says Zach signs off. This change now goes to him once, finished, as \"Ready for you\", before it lands (" +
 		reason + "). Write it for reading on a phone, in plain words. Start with three lines:\n" +
 		"DECISION: <the change by name, in one line, for example: Land the clearer board buttons?; never a bare \"Land this change?\">\n" +
 		"OVERVIEW: <what changed and why, at most 3 short sentences; it is built and reviewed, nothing is live yet>\n" +
@@ -70,7 +70,7 @@ const readyTitle = "Ready to try"
 
 // readyAsk is the Ready for you ask; why (labelAskWhy) says why it comes to Zach, when known.
 func readyAsk(why string) *Ask {
-	w := "Built, tested and passed by the gates; nothing is live yet."
+	w := "Built, tested and passed by the gate; nothing is live yet."
 	if why != "" {
 		w += " It comes to you because " + why + "."
 	}

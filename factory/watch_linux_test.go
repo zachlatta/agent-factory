@@ -112,7 +112,7 @@ func TestWatcherSeesRenamedFiles(t *testing.T) {
 	f.reload()
 	stop := f.startWatch()
 	defer stop()
-	moved := card("c1", map[string]string{labelStage: gateRequest})
+	moved := card("c1", map[string]string{labelStage: gateCheck})
 	writeAgents(t, f, moved)
 	path := agentFile(f.cfg.Home, "c1")
 	b, _ := os.ReadFile(path)

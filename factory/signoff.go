@@ -3,7 +3,7 @@ package factory
 import "strings"
 
 // finishedWorkReason says why card t comes to Zach before it lands, or "" when it lands on its own.
-// review is the sign-off gate's final message.
+// review is the gate's final message.
 func (f *Factory) finishedWorkReason(t Agent, review string) string {
 	return strings.Join(f.finishedWorkReasons(t, review), "; ")
 }
@@ -19,7 +19,7 @@ func (f *Factory) finishedWorkReasons(t Agent, review string) []string {
 	case "none":
 		return nil
 	case "":
-		return []string{"the sign-off gate did not say whether it needs you"}
+		return []string{"the gate did not say whether it needs you"}
 	}
 	return []string{r}
 }

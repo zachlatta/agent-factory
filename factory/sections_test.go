@@ -139,7 +139,7 @@ func TestSectionsBeforeBuildWaitState(t *testing.T) {
 	blocker.ArchivedAt = t0.Add(-time.Minute)
 	released := card("c1", map[string]string{labelStage: "building", labelSource: "board",
 		labelRoundsRequest: "1", labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelWaitsDone: "1",
-		labelAutoReview: gateRequest, labelNote: "building: d0e0001 landed", labelSince: ago(10 * time.Minute)})
+		labelAutoReview: gateCheck, labelNote: "building: d0e0001 landed", labelSince: ago(10 * time.Minute)})
 	released.Status = "running"
 	f, _ := newTestFactory(t, released, blocker)
 	f.SetAgents([]Agent{released, blocker})
@@ -165,7 +165,7 @@ func TestBuildSections(t *testing.T) {
 		{ID: "z1", Title: "Phone board", Stage: "zach", Source: "board", Ask: ready},
 		{ID: "z2", Title: "Broken landing", Stage: "zach", Source: "board", Ask: problem},
 		{ID: "w1", Title: "Retries", Stage: "building", Source: "board"},
-		{ID: "w2", Title: "Hung", Stage: gateDesign, Source: "board", Flags: []string{"stalled 40 min"}},
+		{ID: "w2", Title: "Hung", Stage: gateCheck, Source: "board", Flags: []string{"stalled 40 min"}},
 		{ID: "w3", Title: "Follower", Stage: "landing", Source: "board", WaitsOn: "w1abcde", Flags: []string{"waits on w1abcde"}},
 		{ID: "w1abcdef", Title: "Retries 2", Stage: "building", Source: "board"},
 		done("d1", "Shipped this morning", at(9, 15)),

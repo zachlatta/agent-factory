@@ -101,7 +101,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 	case "review":
 		kind := b.Kind
 		if !isGate(kind) {
-			kind = gateRequest
+			kind = gateCheck
 		}
 		f.reopen(c.ID)
 		if c.Status == "running" {
@@ -182,7 +182,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			msg += "\n\nAnswer this feedback directly and describe any changes. Do not repeat the Ready summary. " +
 				"Write DECISION: None. and NEEDS FROM ZACH: Nothing. only if his reply leaves nothing for him to decide, because this version then lands with no further ask. " +
 				"If he only asked a question, told you to wait or hold, or you are not sure, keep the ask in both lines. " +
-				"Commit any code changes, then stop for the gates."
+				"Commit any code changes, then stop for the gate."
 		}
 		if landingReply(f.agent(c.ID)) {
 			msg += remainingRule
@@ -227,7 +227,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 			return ok, f.pickRepo(a, b.Repo)
 		}
 		if !landable(f.agent(c.ID)) {
-			return nil, errors.New("this card is still going through the gates: it can be landed once they pass")
+			return nil, errors.New("this card is still at the gate: it can be landed once it passes")
 		}
 		answers := ""
 		if m := strings.TrimSpace(b.Message); m != "" {
@@ -242,7 +242,7 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 				return nil, err
 			}
 		}
-		// Zach approves what was reviewed: a card that moved since goes back to the gates, and one whose
+		// Zach approves what was reviewed: a card that moved since goes back to the gate, and one whose
 		// reviewed commit cannot be checked does not land
 		disposition, hold := f.assessReview(f.agent(c.ID), c.Cwd)
 		if disposition == reviewAlreadyLanded {
@@ -461,7 +461,7 @@ func (f *Factory) retireReviews(id string) error {
 // errandPass reports whether card a is doing a one-pass errand: marked direct with no gate since, or on
 // its first pass with no gate run yet. Its TRACK: direct ending still finishes it (tickAgent).
 func errandPass(a Agent) bool {
-	if a.L(labelResult) != "" || atoi(a.L(labelRoundsRequest)) > 0 {
+	if a.L(labelResult) != "" || gatedBefore(a) {
 		return false
 	}
 	return a.L(labelTrack) == "direct" || (a.L(labelStage) == "building" && a.L(labelVerdict) == "")
@@ -470,13 +470,13 @@ func errandPass(a Agent) bool {
 // newCodeGeneration is the labels that start card a's new gate generation after Zach's follow-up: every
 // gate's rounds and reviewer replacements start afresh; finished-work authorization is invalidated.
 func newCodeGeneration(Agent) map[string]string {
-	return map[string]string{labelRoundsRequest: "", labelRoundsDesign: "", labelRoundsSignoff: "", labelReviewerRetries: "",
+	return map[string]string{labelRoundsGate: "", labelRoundsRequest: "", labelRoundsDesign: "", labelRoundsSignoff: "", labelReviewerRetries: "",
 		labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}
 }
 
 // replyLabels places a factory card after Zach replies to it, so its next move is queued once the
 // agent answers: a landing card stays in Landing (the landing check runs when it stops), anything else
-// builds and goes through the gates again, an errand's TRACK: direct ending finishing it there. Nothing is
+// builds and goes through the gate again, an errand's TRACK: direct ending finishing it there. Nothing is
 // left in Building with no move queued.
 // answerLabels is where Zach's message (No, Change or an answer) moves card c. The board preview
 // simulates the same move.
@@ -498,9 +498,9 @@ func replyLabels(a Agent, now string, guarded bool) map[string]string {
 	case heldBeforeBuild(a):
 		return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: ""}
 	case !guarded && errandPass(a):
-		return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: gateRequest, labelNote: "answering Zach", labelFollowedUp: "1"}
+		return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: gateCheck, labelNote: "answering Zach", labelFollowedUp: "1"}
 	}
-	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: gateRequest, labelFollowedUp: "1"}
+	return map[string]string{labelStage: "building", labelSince: now, labelAutoReview: gateCheck, labelFollowedUp: "1"}
 }
 
 // rerun restarts the step a stuck card left: its column when it is marked stuck there (factory.stuck),
@@ -522,8 +522,8 @@ func (f *Factory) rerun(c Card) error {
 		return errors.New("this card is not stuck")
 	}
 	switch from {
-	case "plan", "plan-review", "review":
-		from = gateRequest // a card stuck before the gates existed
+	case "plan", "plan-review", "review", oldGateRequest, oldGateDesign, oldGateSignoff:
+		from = gateCheck // a card stuck in an earlier flow
 	}
 	if err := f.updateRecovery(a, func(r *recovery) { r.Nudges, r.NudgeStage = 0, "" },
 		map[string]string{labelStuck: "", labelReviewerRetries: ""}); err != nil {
@@ -558,11 +558,8 @@ func (f *Factory) rerunStep(c Card, from string) error {
 			return err
 		}
 		return f.setLabels(c.ID, next)
-	case "building", gateRequest, gateDesign, gateSignoff:
-		kind := from
-		if !isGate(kind) {
-			kind = gateRequest
-		}
+	case "building", gateCheck:
+		kind := gateCheck
 		if err := f.supersedeReviewers(c.ID); err != nil {
 			return err
 		}
@@ -621,16 +618,19 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	by := submissionTag(b)
 	repoDir := f.repoDir(repo)
 	args := append(agent.runArgs(), "--new-workspace", "worktree", "--cwd", repoDir, "--title", title,
-		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "building"), "--label", labelArg(labelAutoReview, gateRequest), "--label", labelArg(labelSubmittedBy, by), "--label", labelArg(labelArchiveWatch, "1"), "--label", labelArg(labelSince, iso(f.Now())),
+		"--label", labelArg(labelSource, source), "--label", labelArg(labelStage, "building"), "--label", labelArg(labelAutoReview, gateCheck), "--label", labelArg(labelSubmittedBy, by), "--label", labelArg(labelArchiveWatch, "1"), "--label", labelArg(labelSince, iso(f.Now())),
 		"--label", labelArg(labelAgent, agent.ID))
 	args = append(args, extra...)
 	if branch := f.freeBranch(repoDir, branchSlug(title)); branch != "" {
 		args = append(args, "--new-branch", branch)
+		if base := f.freshBase(repoDir); base != "" {
+			args = append(args, "--base", base)
+		}
 	}
 	if b.Origin == "idea" {
 		args = append(args, "--label", labelArg(labelOrigin, "idea"))
 	} else if b.schedule != "" {
-		// a scheduled run of an approved job, traced to its agent: the sign-off gate reads this source
+		// a scheduled run of an approved job, traced to its agent: the gate reads this source for sign-off
 		args = append(args, "--label", labelArg(labelOrigin, "schedule"))
 	}
 	if b.Title != "" {
@@ -703,7 +703,7 @@ func (f *Factory) chat(id, msg string, atts []Attachment) ([]string, error) {
 	return files, f.send(id, msg, images...)
 }
 
-// landingReply resumes verification or completion reporting without queuing the gates.
+// landingReply resumes verification or completion reporting without queuing the gate.
 func landingReply(a Agent) bool {
 	note := a.L(labelNote)
 	return note == "landed; did not say what remains"

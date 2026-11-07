@@ -328,7 +328,7 @@ func TestHealthReportsMailWithoutFailing(t *testing.T) {
 
 func TestCloseVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r := reviewer("r1", "c1", gateRequest)
+	r := reviewer("r1", "c1", gateCheck)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Provider, r.SessionID, r.Cwd = "claude", "s-oom", "/w/c1"
 	f, _, m := mailFactory(t, c, r)
@@ -358,7 +358,7 @@ func TestCloseVerdictIsBoardOnlyAndExplainsWhy(t *testing.T) {
 
 	// Missing transcript file says why it could not be read.
 	c2 := card("c2", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r2 := reviewer("r2", "c2", gateDesign)
+	r2 := reviewer("r2", "c2", gateCheck)
 	r2.Labels[labelPrefix+labelApplied] = "1"
 	r2.Provider, r2.SessionID, r2.Cwd = "claude", "missing-id", "/w/c2"
 	f2, _, _ := mailFactory(t, c2, r2)
@@ -599,7 +599,7 @@ func TestWhichWaitsAreEmailed(t *testing.T) {
 		a.RequiresAttention, a.AttentionReason = true, reason
 		return a
 	}
-	stuckReviewer := reviewer("r1", "c1", gateSignoff)
+	stuckReviewer := reviewer("r1", "c1", gateCheck)
 	stuckReviewer.Status, stuckReviewer.Pending = "running", "Bash"
 	for _, tc := range []struct {
 		name  string
@@ -617,7 +617,7 @@ func TestWhichWaitsAreEmailed(t *testing.T) {
 			return a
 		}(), nil, true},
 		{"stuck in its column", card("c1", map[string]string{labelStage: "building", labelStuck: stuckStopped}), nil, false},
-		{"stuck reviewer", card("c1", map[string]string{labelStage: gateDesign, labelStuck: stuckReview}), []Agent{stuckReviewer}, false},
+		{"stuck reviewer", card("c1", map[string]string{labelStage: gateCheck, labelStuck: stuckReview}), []Agent{stuckReviewer}, false},
 		{"agent error", card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}), nil, false},
 		{"reviewed commit unverified", card("c1", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}), nil, false},
 		{"parked changed since review", card("c1", map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: "review"}), nil, false},

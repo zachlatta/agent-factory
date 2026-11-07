@@ -59,11 +59,11 @@ func merged(a Agent, labels map[string]string) Agent {
 // Act and Tick are not serialized: a Tick whose list was read before the follow-up still sees the old
 // reviewer unapplied. Its approval of the same, clean HEAD must not pass the new request.
 func TestLateVerdictFromStaleListAfterFollowUpIsRetired(t *testing.T) {
-	old := reviewer("r1", "c1", gateSignoff)
+	old := reviewer("r1", "c1", gateCheck)
 	f, p := newTestFactory(t, freshCard(false, requested(nil)), old)
 	headIs(f, reviewedSHA, nil)
 	dirtyIs(f, "", nil)
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if _, err := f.Act("send", Body{ID: "c1", Message: "Also handle the empty case."}); err != nil {
 		t.Fatal(err)
 	}
@@ -93,11 +93,11 @@ func TestDirtyWorktreeAtApprovalGoesBackToReview(t *testing.T) {
 		{"public", reviewLabels(nil), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f, p := newTestFactory(t, freshCard(tc.public, tc.labels), reviewer("r1", "c1", gateSignoff))
+			f, p := newTestFactory(t, freshCard(tc.public, tc.labels), reviewer("r1", "c1", gateCheck))
 			ranges := fakeScan(f, nil, nil)
 			headIs(f, reviewedSHA, nil)
 			dirtyIs(f, " M factory/policy.go", nil)
-			storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+			storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 				t.Fatal(err)
 			}
@@ -124,10 +124,10 @@ func TestDirtyWorktreeAtZachApprovalDoesNotLand(t *testing.T) {
 }
 
 func TestUnreadableWorktreeAtApprovalFailsClosed(t *testing.T) {
-	f, p := newTestFactory(t, freshCard(false, requested(nil)), reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, freshCard(false, requested(nil)), reviewer("r1", "c1", gateCheck))
 	headIs(f, reviewedSHA, nil)
 	dirtyIs(f, "", errors.New("index locked"))
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestUnreadableWorktreeAtApprovalFailsClosed(t *testing.T) {
 // After a restart the factory has no memory of the follow-up: the retired reviewer's labels, read
 // back from its file, keep its verdict from being applied.
 func TestRetiredReviewerStaysRetiredAfterRestart(t *testing.T) {
-	old := reviewer("r1", "c1", gateSignoff)
+	old := reviewer("r1", "c1", gateCheck)
 	f, p := newTestFactory(t, freshCard(false, requested(nil)), old)
 	if _, err := f.Act("send", Body{ID: "c1", Message: "Also handle the empty case."}); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestRetiredReviewerStaysRetiredAfterRestart(t *testing.T) {
 	restarted, p2 := newTestFactory(t, merged(freshCard(false, requested(nil)), p.labels("c1")), merged(old, p.labels("r1")))
 	headIs(restarted, reviewedSHA, nil)
 	dirtyIs(restarted, "", nil)
-	storeLog(t, restarted, p2, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, restarted, p2, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	restarted.Tick()
 	if l := p2.labels("r1"); l[labelVerdict] != "" {
 		t.Errorf("retired verdict applied after restart: %v", l)
@@ -175,7 +175,7 @@ func (p failUpdate) Run(ctx context.Context, args ...string) (string, error) {
 // A follow-up whose reviewer could not be marked retired is not sent, and the old verdict still
 // does not pass the card: the retirement is not lost with the label write.
 func TestFollowUpFailsClosedWhenTheReviewerCannotBeRetired(t *testing.T) {
-	old := reviewer("r1", "c1", gateSignoff)
+	old := reviewer("r1", "c1", gateCheck)
 	f, p := newTestFactory(t, freshCard(false, requested(nil)), old)
 	f.p = failUpdate{p, "r1"}
 	if _, err := f.Act("send", Body{ID: "c1", Message: "Also handle the empty case."}); err == nil {
@@ -187,7 +187,7 @@ func TestFollowUpFailsClosedWhenTheReviewerCannotBeRetired(t *testing.T) {
 	f.p = p
 	headIs(f, reviewedSHA, nil)
 	dirtyIs(f, "", nil)
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(old); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestFollowUpFailsClosedWhenTheReviewerCannotBeRetired(t *testing.T) {
 
 // queuedForCode is a card that stopped with a code review queued, as Tick lists it before a follow-up.
 func queuedForCode() Agent {
-	return card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+	return card("c1", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 		labelRoundsRequest: "1", labelSince: ago(10 * time.Minute)})
 }
 
@@ -213,7 +213,7 @@ func TestFollowUpAndReviewStartRace(t *testing.T) {
 		c, _ := f.card("c1")
 		done := make(chan error, 2)
 		go func() { _, err := f.Act("send", Body{ID: "c1", Message: "Also handle the empty case."}); done <- err }()
-		go func() { _, err := f.StartReview(c, gateRequest); done <- err }()
+		go func() { _, err := f.StartReview(c, gateCheck); done <- err }()
 		for range 2 {
 			if err := <-done; err != nil {
 				t.Fatal(err)
@@ -234,7 +234,7 @@ func TestFollowUpAndReviewStartRace(t *testing.T) {
 // The no-verdict retry runs inside ApplyVerdict, which holds the card's gate: it still starts its one
 // automatic re-run.
 func TestNoVerdictRetryStillRuns(t *testing.T) {
-	f, p := newTestFactory(t, freshCard(false, requested(nil)), reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, freshCard(false, requested(nil)), reviewer("r1", "c1", gateCheck))
 	f.GitOut = gitStub(cleanDiff, map[string]string{"rev-parse HEAD": reviewedSHA + "\n"})
 	storeLog(t, f, p, "r1", "no verdict line here")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
@@ -253,9 +253,9 @@ func TestNoVerdictRetryStillRuns(t *testing.T) {
 // the next review.
 
 func TestFollowUpDuringReviewRetiresTheOldReviewer(t *testing.T) {
-	old := reviewer("r1", "c1", gateSignoff)
+	old := reviewer("r1", "c1", gateCheck)
 	old.Status = "running"
-	other := reviewer("r2", "c2", gateSignoff)
+	other := reviewer("r2", "c2", gateCheck)
 	other.Status = "running"
 	land := reviewer("r3", "c1", "land")
 	land.Status = "running"
@@ -273,12 +273,12 @@ func TestFollowUpDuringReviewRetiresTheOldReviewer(t *testing.T) {
 		t.Error("a landing review was retired by a message")
 	}
 	c := p.labels("c1")
-	if c[labelStage] != "building" || c[labelAutoReview] != gateRequest {
+	if c[labelStage] != "building" || c[labelAutoReview] != gateCheck {
 		t.Errorf("follow-up not queued for a fresh review: %v", c)
 	}
 
 	// The old reviewer's late approval of the same HEAD arrives; the builder has committed its fix.
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "Fixed the empty case.")
 	late := merged(old, p.labels("r1"))
 	late.Status = "idle"
@@ -293,7 +293,7 @@ func TestFollowUpDuringReviewRetiresTheOldReviewer(t *testing.T) {
 	if len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) != 1 {
 		t.Fatalf("no fresh code reviewer: %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelStage] != gateRequest || l[labelReviewed] != movedSHA {
+	if l := p.labels("c1"); l[labelStage] != gateCheck || l[labelReviewed] != movedSHA {
 		t.Errorf("fresh review not on the new commit: %v", l)
 	}
 }
@@ -309,13 +309,13 @@ func TestStaleReviewStartAfterFollowUpWaitsForTheBuilder(t *testing.T) {
 	}
 	queued := p.labels("c1")
 	c, _ := f.card("c1")
-	if _, err := f.StartReview(c, gateRequest); err != nil {
+	if _, err := f.StartReview(c, gateCheck); err != nil {
 		t.Fatal(err)
 	}
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 0 {
 		t.Fatalf("reviewed before the builder answered the follow-up: %v", runs)
 	}
-	if l := p.labels("c1"); l[labelStage] != queued[labelStage] || l[labelAutoReview] != gateRequest || l[labelSince] != queued[labelSince] {
+	if l := p.labels("c1"); l[labelStage] != queued[labelStage] || l[labelAutoReview] != gateCheck || l[labelSince] != queued[labelSince] {
 		t.Errorf("follow-up's queue changed: %v, was %v", l, queued)
 	}
 
@@ -329,7 +329,7 @@ func TestStaleReviewStartAfterFollowUpWaitsForTheBuilder(t *testing.T) {
 	if len(p.runsWithLabel(labelArg(labelReviewOf, "c1"))) != 1 {
 		t.Fatalf("no review after the builder answered: %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelStage] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != gateCheck {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -351,7 +351,7 @@ func TestStaleReviewStartAfterFollowUpWaitsForTheBuilder(t *testing.T) {
 
 // Recovery of a review that started after the follow-up still replaces its blocked reviewer.
 func TestRecoveryAfterFollowUpStillReplacesABlockedReviewer(t *testing.T) {
-	gone := reviewer("r1", "c1", gateSignoff)
+	gone := reviewer("r1", "c1", gateCheck)
 	gone.CreatedAt = t0.Add(2 * time.Minute)
 	gone.Status = "error" // blocked without a verdict
 	f, p := newTestFactory(t, freshCard(false, requested(nil)))

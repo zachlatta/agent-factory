@@ -55,7 +55,7 @@ func TestParseQuestions(t *testing.T) {
 func TestAskQuestionsFromLongReply(t *testing.T) {
 	// finished work: the builder's preview is the detail
 	c := card("c1", map[string]string{labelStage: "zach", labelNote: readyNote(1)})
-	r := reviewer("r1", "c1", gateSignoff)
+	r := reviewer("r1", "c1", gateCheck)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
 	// the question sits past the 6000-character cut of Detail
@@ -78,8 +78,8 @@ func TestPromptsTeachQuestionFormat(t *testing.T) {
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	for name, p := range map[string]string{
 		"new card":    fmt.Sprintf(newCardPrompt, "req", "example/desk", "", wholeChangeRule, questionRule),
-		"plan review": ReviewPrompt(c, gateRequest, 7478, "unknown"),
-		"code review": ReviewPrompt(c, gateRequest, 7478, "unknown"),
+		"plan review": ReviewPrompt(c, gateCheck, 7478, "unknown"),
+		"code review": ReviewPrompt(c, gateCheck, 7478, "unknown"),
 		"preview":     readyMsg("you asked for it"),
 	} {
 		if !strings.Contains(p, "QUESTION:") {

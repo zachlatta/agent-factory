@@ -48,9 +48,9 @@ func TestParseWaitsOn(t *testing.T) {
 }
 
 func TestRevisedPlanWithoutWaitsOnClearsIt(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board",
-		labelWaitsOn: "d0e0001", labelWaitsDone: "1", labelWaitsBefore: "build"}), reviewer("r1", "c1", gateRequest))
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board",
+		labelWaitsOn: "d0e0001", labelWaitsDone: "1", labelWaitsBefore: "build"}), reviewer("r1", "c1", gateCheck))
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	storeLog(t, f, p, "c1", "[User] revise\nThe revised plan, no dependency.\nTIER: low")
 	f.ApplyVerdict(f.agent("r1"))
 	if l := p.labels("c1"); l[labelWaitsOn] != "" || l[labelWaitsDone] != "" || l[labelWaitsBefore] != "" {
@@ -77,10 +77,10 @@ func heldCard(extra map[string]string) Agent {
 }
 
 func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
-		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff), dep("building", false))
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1",
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateCheck), dep("building", false))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +95,9 @@ func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
 
 func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 	for name, d := range map[string]Agent{"landed": dep("landed", true), "marked": {}} {
-		labels := map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
+		labels := map[string]string{labelStage: gateCheck, labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
 			labelReviewed: reviewedSHA}
-		agents := []Agent{reviewer("r1", "c1", gateSignoff)}
+		agents := []Agent{reviewer("r1", "c1", gateCheck)}
 		if name == "marked" {
 			labels[labelWaitsDone] = "1" // landed long ago: no longer in the list
 		} else {
@@ -105,7 +105,7 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 		}
 		f, p := newTestFactory(t, append(agents, idea("c1", labels))...)
 		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		if l := p.labels("c1"); l[labelStage] != "landing" || l[labelHeld] != "" {
 			t.Errorf("%s: labels = %v", name, l)
@@ -117,10 +117,10 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 }
 
 func TestHeldCardWithUIFeedbackIsToldToWait(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
-		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff), dep(gateDesign, false))
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1",
+		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateCheck), dep(gateCheck, false))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || strings.Contains(msgs[0], "Land it now") || !strings.Contains(msgs[0], "the button is small") ||
@@ -133,7 +133,7 @@ func TestHeldCardWaitsWhileDependencyInFlight(t *testing.T) {
 	// it got the feedback message, replied and stopped: still nothing to do, not a landing to verify
 	c := heldCard(nil)
 	c.LastActivityAt = t0.Add(-5 * time.Minute)
-	f, p := newTestFactory(t, c, dep(gateDesign, false))
+	f, p := newTestFactory(t, c, dep(gateCheck, false))
 	gitCalls := 0
 	f.Git = func(_ context.Context, _ string, _ ...string) error { gitCalls++; return nil }
 	f.Tick()
@@ -190,13 +190,13 @@ func TestHeldCardRebuildsWhenDependencyDroppedOrMissing(t *testing.T) {
 		f, p, m := mailFactory(t, append(tc.agents, heldCard(nil))...)
 		f.Tick()
 		l := p.labels("c1")
-		if l[labelStage] != "building" || l[labelAutoReview] != gateRequest || l[labelHeld] != "" || l[labelWaitsOn] != "" ||
+		if l[labelStage] != "building" || l[labelAutoReview] != gateCheck || l[labelHeld] != "" || l[labelWaitsOn] != "" ||
 			l[labelNote] != "rebuilding: d0e0001 "+tc.state {
 			t.Errorf("%s: labels = %v", name, l)
 		}
 		msgs := p.sent("c1")
 		if len(msgs) != 1 || !strings.Contains(msgs[0], tc.says) || !strings.Contains(msgs[0], "rebuild without it") ||
-			!strings.Contains(msgs[0], "The gates run again") {
+			!strings.Contains(msgs[0], "The gate runs again") {
 			t.Errorf("%s: sent = %v", name, msgs)
 		}
 		if len(m.sends()) != 0 {
@@ -490,7 +490,7 @@ func (p errSend) Run(ctx context.Context, args ...string) (string, error) {
 func TestBuildingStopWithWaitsBeforeBuildHoldsAndSkipsAskToCommit(t *testing.T) {
 	t.Run("holds while blocker is in flight even with no commits and dirty worktree", func(t *testing.T) {
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 			labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
 		})
 		f, p := newTestFactory(t, c, dep("building", false))
@@ -523,14 +523,14 @@ func TestBuildingStopWithWaitsBeforeBuildHoldsAndSkipsAskToCommit(t *testing.T) 
 
 	t.Run("releases immediately when blocker already landed", func(t *testing.T) {
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 			labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
 		})
 		f, p := newTestFactory(t, c, dep("landed", true))
 		storeLog(t, f, p, "c1", "[User] Build it now.\nPaused before editing.\nWaits on: d0e0001 before build")
 		f.Tick()
 		l := p.labels("c1")
-		if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != gateRequest ||
+		if l[labelStage] != "building" || l[labelHeld] != "" || l[labelAutoReview] != gateCheck ||
 			l[labelWaitsOn] != "d0e0001" || l[labelWaitsBefore] != "build" || l[labelWaitsDone] != "1" ||
 			l[labelDirtyAsks] != "" || l[labelNote] != "building: d0e0001 landed" {
 			t.Fatalf("labels = %v", l)
@@ -563,7 +563,7 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			c := card("c1", map[string]string{
-				labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+				labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 				labelRoundsRequest: "1", labelSince: ago(5 * time.Minute),
 			})
 			oldDep := card("d0e0001aaaa", map[string]string{
@@ -601,7 +601,7 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 			f.SetAgents(nextAgents)
 			f.Tick()
 			rl := p.labels("c1")
-			if rl[labelStage] != "building" || rl[labelHeld] != "" || rl[labelAutoReview] != gateRequest ||
+			if rl[labelStage] != "building" || rl[labelHeld] != "" || rl[labelAutoReview] != gateCheck ||
 				rl[labelWaitsDone] != "1" || rl[labelNote] != "building: d0e0001 landed" {
 				t.Fatalf("did not release when replacement landed: labels=%v", rl)
 			}
@@ -615,14 +615,14 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 
 func TestBuildingStopUnreadableSessionWaitsForHistory(t *testing.T) {
 	c := card("c1", map[string]string{
-		labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+		labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 		labelRoundsRequest: "1",
 	})
 	f, p := newTestFactory(t, c, dep("building", false))
 	// No session file stored yet: first tick waits for history and neither holds nor starts review.
 	f.Tick()
 	l := p.labels("c1")
-	if l[labelStage] == gateRequest || l[labelStage] == "zach" || l[labelHeld] != "" {
+	if l[labelStage] == gateCheck || l[labelStage] == "zach" || l[labelHeld] != "" {
 		t.Fatalf("first tick with unreadable session: labels = %v", l)
 	}
 	if revs := p.runsWithLabel(labelArg(labelRole, "reviewer")); len(revs) != 0 {
@@ -658,7 +658,7 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 	t.Run("conflicts with unlanded stored wait", func(t *testing.T) {
 		otherDep := card("e0f0002aaaa", map[string]string{labelStage: "building"})
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 			labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
 		})
 		f, p := newTestFactory(t, c, dep("building", false), otherDep)
@@ -680,7 +680,7 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 		landedOther := card("e0f0002aaaa", map[string]string{labelStage: "landed", labelLandedVerified: "1"})
 		landedOther.ArchivedAt = t0.Add(-time.Minute)
 		c := card("c1", map[string]string{
-			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+			labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 			labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
 		})
 		f, p := newTestFactory(t, c, dep("building", false), landedOther)
@@ -720,7 +720,7 @@ func TestFailedSendOnBeforeBuildReleaseAndDropRetriesAndMissingWorktreeStops(t *
 			}
 			f.p = errSend{p}
 			f.Tick()
-			if l := p.labels("c1"); (l[labelHeld] != "" && l[labelHeld] != "d0e0001") || l[labelAutoReview] == gateRequest {
+			if l := p.labels("c1"); (l[labelHeld] != "" && l[labelHeld] != "d0e0001") || l[labelAutoReview] == gateCheck {
 				t.Fatalf("failed send cleared hold or armed review: %v", l)
 			}
 			if _, err := os.Stat(f.heldBuildPath("c1")); err != nil {
@@ -733,7 +733,7 @@ func TestFailedSendOnBeforeBuildReleaseAndDropRetriesAndMissingWorktreeStops(t *
 			if len(msgs) != 1 || !strings.Contains(msgs[0], "MARKER-NOTES") {
 				t.Fatalf("retry sent = %v", msgs)
 			}
-			if l := p.labels("c1"); l[labelHeld] != "" || l[labelAutoReview] != gateRequest {
+			if l := p.labels("c1"); l[labelHeld] != "" || l[labelAutoReview] != gateCheck {
 				t.Fatalf("retry labels = %v", l)
 			}
 			if _, err := os.Stat(f.heldBuildPath("c1")); !os.IsNotExist(err) {

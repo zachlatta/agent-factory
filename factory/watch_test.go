@@ -25,8 +25,8 @@ func threeReviews(t *testing.T) (*Factory, *fakePaseo) {
 	t.Helper()
 	var agents []Agent
 	for _, n := range []string{"1", "2", "3"} {
-		agents = append(agents, card("c"+n, map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
-			labelRoundsDesign: "1"}), reviewer("r"+n, "c"+n, gateDesign))
+		agents = append(agents, card("c"+n, map[string]string{labelStage: gateCheck, labelRoundsRequest: "1",
+			labelRoundsDesign: "1"}), reviewer("r"+n, "c"+n, gateCheck))
 	}
 	f, p := newTestFactory(t, agents...)
 	// the files hold the agents as they are now; this fake does not write labels back, so only the
@@ -157,7 +157,7 @@ func TestNoteAgentFilesComparesWhatRulesRead(t *testing.T) {
 		t.Errorf("stopped agent: hot = %v", ids)
 	}
 	moved := run
-	moved.Labels = map[string]string{labelPrefix + labelStage: gateDesign}
+	moved.Labels = map[string]string{labelPrefix + labelStage: gateCheck}
 	if ids := note(moved); !slices.Equal(ids, []string{"c1"}) {
 		t.Errorf("label change: hot = %v", ids)
 	}
@@ -173,9 +173,9 @@ func TestNoteAgentFilesComparesWhatRulesRead(t *testing.T) {
 }
 
 func TestGraceDue(t *testing.T) {
-	young := reviewer("r1", "c1", gateSignoff)
+	young := reviewer("r1", "c1", gateCheck)
 	young.CreatedAt = t0.Add(-40 * time.Second)
-	moved := card("c1", map[string]string{labelStage: gateDesign, labelSince: ago(10 * time.Second)})
+	moved := card("c1", map[string]string{labelStage: gateCheck, labelSince: ago(10 * time.Second)})
 	moved.LastActivityAt = t0.Add(-5 * time.Second)
 	due, ids := graceDue([]Agent{young, moved}, t0)
 	if want := t0.Add(21 * time.Second); !due.Equal(want) || !slices.Equal(ids, []string{"r1"}) {

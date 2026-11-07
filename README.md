@@ -1,7 +1,7 @@
 # agent-factory
 
 A Kanban board and review pipeline for coding agents run by Paseo. A prompt comes in, an agent builds
-the proposed solution, three gates check it, and it lands. You are asked only when the sign-off gate says so.
+the proposed solution, one gate grades it, and it lands. You are asked only when the gate says you sign off.
 
 One Go binary. It reads Paseo's agent files every 15 seconds and whenever one changes, applies the
 rules below, and makes every move through Paseo: the Paseo helper below for agent checks, label
@@ -70,8 +70,8 @@ the phone.
 
 ## How a card moves
 
-Pick repo → Build → Meets request → Design → Sign-off → Landing → Done, with **Needs Zach** for anything
-that waits on a person (`factory/gates.go`).
+Pick repo → Build → Gate → Landing → Done, with **Needs Zach** for anything that waits on a person, including
+his sign-off when the gate asks for it (`factory/gates.go`).
 
 1. **Submit.** The prompt is tagged `factory.submitted-by`: `zach`, or `system` for ideas, Scouts, scheduled
    runs and anything else automatic. `POST /api/new` from the board sends `"submittedBy":"zach"` and email and voice
@@ -91,38 +91,63 @@ that waits on a person (`factory/gates.go`).
    The builder ends with `RESULT: code`, `RESULT: runbook` or `RESULT: both`. It is read-only against production:
    it can do anything in the worktree, including dev servers bound to loopback or this host's tailnet IP, and makes no
    external change. That is a rule the agent follows; nothing enforces it yet.
-4. **Gate: does it meet the request?** Opus 5.5 at medium checks it against the original prompt and any unsaid context
-   it needed: what else the old behaviour did, and who depends on it. It opens the proof. A pass moves on; a fail goes
-   back to step 3.
-5. **Gate: is it well designed?** Opus 5.5 at medium checks code quality, that it reflects the latest `main`, and that the
-   codebase or system stays cohesive. Needed refactors get done instead of local patches: small ones the reviewer
-   does itself on the branch, with the tests passing, then approves; big ones go back to step 3. It never comes to Zach.
-6. **Gate: does Zach sign off?** A separate Opus 5.5 at medium decides, and writes `SIGN OFF: none` or why:
-   - submitted by Zach and it is what he asked for: no sign-off, including deletes, spending and messages he asked for;
-   - submitted by Zach with larger architectural changes than he asked for: sign-off;
-   - submitted by the system: sign-off, except a scheduled run of a job he already approved.
+4. **Gate.** One fresh Opus 5.5 at medium, the gatekeeper, decides whether the work moves forward or goes back to the
+   builder. It does not read the start-here skill: its prompt has every rule it needs. It audits the worktree against
+   the original request and grades each check green (nothing left to do), yellow (minor issues) or red (wrong or
+   missing), one line each before its `VERDICT:` line:
+   - `MEETS REQUEST:` does it do everything that was asked, with the unsaid context it needed: what else the old
+     behaviour did, and who depends on it.
+   - `WORKS:` part of meets request. The gate tests it itself and does not take the builder's proof on trust: it runs
+     the tests and build, then uses the change (a dev server and computer use for UI, the changed commands or requests
+     otherwise, the key queries for data work) and pastes each command and its last lines. A runbook is checked step
+     by step read-only against the live system, never run. What cannot be tested without changing production is yellow.
+   - `DESIGN:` code quality, built on the latest `main` (it fetches and rebases), and the codebase or system stays
+     cohesive. Needed refactors get done instead of local patches: small ones the gate does itself on the branch,
+     with the tests passing; big ones (a redesign or more than about 150 changed lines) are graded yellow or red.
+   - `PUBLIC SAFETY:` in a public repo, every commit that would be published: the repo's secret scan, no private data
+     (secrets, internal hostnames, paths, private repo names, ids, emails other than GitHub noreply, quotes or incident
+     history), noreply commit emails, and nothing that weakens the scanner, which is always red. A small leak the gate
+     removes itself by rewriting the unpublished commits. `n/a` in a private repo.
+   - `SIGN OFF:` does Zach need to sign off before it goes live? Green when he submitted it and it is what he asked
+     for (including deletes, spending and messages he asked for); red when he submitted it but it includes larger
+     architectural changes than he asked for, and when the system submitted it, except a scheduled run of a job he
+     already approved (green); yellow when unsure. Sign-off never sends work back.
 
-   A missing line, or a verdict of `escalate`, counts as a sign-off. Approve & land is offered, and accepted, only on a
-   card waiting on Zach or landing: a card still building or in a gate has nothing to approve. A sign-off stops at Ready for you (below).
+   The factory reads the grades (`ParseGrades`) and keeps the last ones on the card (`factory.grades`, shown in the
+   card panel). Any of meets request, works, design and (in a public repo) public safety that is not green, including
+   a missing line, sends the work back to the builder with the gate's findings, and the gate runs again when the builder
+   stops (`factory.auto-review`), until they are green. So does `VERDICT: changes`. When they are green, sign-off
+   decides: green goes to landing; yellow, red, a missing line or `VERDICT: escalate` comes to Zach at Ready for you
+   (below). Approve & land is offered, and accepted, only on a card waiting on Zach or landing: a card still building
+   or at the gate has nothing to approve. If the gate committed a fix, its approval covers a commit that is no longer
+   HEAD, so the gate runs again on the final commit before anything lands. Its approval of the exact HEAD is the code
+   review that `bin/land` and the pre-push hook reuse.
 7. **Land.** Opus 5.5 at medium lands it on `main` in a fresh agent, whatever built it. For a runbook it first checks that
    it still matches the live system: it corrects minor changes itself, and for huge ones ends with
-   `RETURN TO BUILD: <what changed>`, which sends the card to step 3 and then its gates. A runbook-only card
+   `RETURN TO BUILD: <what changed>`, which sends the card to step 3 and then the gate. A runbook-only card
    has no commits to verify, so the lander's report ends it. In a public repo the factory's own scan runs before landing.
 
-A gate that fails comes back to the builder; when it stops, that gate runs again (`factory.auto-review`). Each gate has
-at most 3 rounds (`factory.request-rounds`, `-design-`, `-signoff-`; Zach's follow-up resets them). At the cap the card stays
-in that gate marked stuck, on the board only. A failed landing returns to the builder and re-enters at the design gate.
+The gate has at most 3 rounds (`factory.gate-rounds`; Zach's follow-up resets them). At the cap the card stays at the gate
+marked stuck, on the board only. A failed landing returns to the builder and goes through the gate again.
+
+A new card's branch starts from `origin/main`, fetched just before the card starts (`--base origin/main`), never from
+the checkout's own `main`, which may be behind or carry commits that never reached `origin`.
+
+Cards left in the three gates of the earlier flow (Meets request, Design, Sign-off) move to the gate once their builder
+has stopped (`migrateOldGate`): their old reviewers are retired and the gate runs from the start, since an old verdict
+covers none of the new checks. One marked stuck there stays stuck, in the gate column. Timing and usage history keep
+the old gate names.
 
 A builder that stops on a question with no `RESULT:` line waits in Needs Zach with that question, and his answer goes back to it.
 
 **Errands.** A request that changes nothing (a question, research, a report, a PDW mutation he approves himself)
-takes the direct track: the builder does it in one pass, lands its work item and ends `TRACK: direct`; no gates run. An email or voice card with no `RESULT:` line counts as an errand only when it has no unpublished commits: commits always go through the gates. A
+takes the direct track: the builder does it in one pass, lands its work item and ends `TRACK: direct`; the gate does not run. An email or voice card with no `RESULT:` line counts as an errand only when it has no unpublished commits: commits always go through the gates. A
 last reply that asks Zach something goes to Needs Zach with that question: Answer, Mark done or Drop. It can carry a
 `DUE:` line after NEEDS FROM ZACH: an ISO time with a zone, shown on the board, listed first in For you, and turning to Overdue
-when it passes. A bad value is logged and ignored. Public repos have no direct track: a first pass that says it took one has what it pushed scanned and stops for Zach, and replies go through the gates. Work already published when it reaches sign-off is scanned too; a hit waits for him.
+when it passes. A bad value is logged and ignored. Public repos have no direct track: a first pass that says it took one has what it pushed scanned and stops for Zach, and replies go through the gate. Work already published when it reaches sign-off is scanned too; a hit waits for him.
 
 Cards left in the old flow's columns (plan, plan review, code review) move on their next stopped pass
-(`migrateFlow`): built work goes to the gates, and the rest is told to build.
+(`migrateFlow`): built work goes to the gate, and the rest is told to build.
 
 A card's title comes from the builder's
 first `TITLE:` line; titles given by an idea or the email dispatcher are kept. A card's worktree starts on a branch
@@ -132,8 +157,8 @@ slugged from its initial title and renames with it.
   writes three `CHANGED:` lines in plain words and any `BEFORE:` / `AFTER:` screenshots; it starts no
   server and uploads nothing. The factory runs the repo's preview (below). The board item shows it with Land, Change and
   Drop. Email replies in a thread he started: `yes`, `land` or `land it` lands it; drop words drop it; letters answer the
-  builder's questions; anything else is a change request, which sends the card back to building and the gates. An answer
-  to his feedback on the version he was shown that asks nothing goes on to landing, unless the sign-off gate still gives a reason.
+  builder's questions; anything else is a change request, which sends the card back to building and the gate. An answer
+  to his feedback on the version he was shown that asks nothing goes on to landing, unless the gate's sign-off still gives a reason.
 - **Previews** (`factory/tryout.go`, `previews.json`). A repo declares one in `.factory.json`, read
   from `origin/main` only, so a card cannot change what runs on the host before it lands:
   `"preview": {"run": "<command>", "path": "/", "env": {"KEY": "literal"}}`, or
@@ -166,9 +191,9 @@ slugged from its initial title and renames with it.
   README the old behaviour touched is updated, and no old path is left (or each instance left alone is
   listed with why). The gates check it, and a partial change is a blocking finding. Scope
   is the area of the ask: refactoring inside it is part of the job and is no change in scope; a
-  refactor outside it is architecture Zach did not ask for, which the sign-off gate names.
+  refactor outside it is architecture Zach did not ask for, which the gate's sign-off names.
 - Builders name their deploy steps (if any) and make no live changes (install scripts, enabling or restarting
-  services, resizing VMs, external settings): the gates check the steps, and the landing step runs and verifies them.
+  services, resizing VMs, external settings): the gate checks the steps, and the landing step runs and verifies them.
 - Automatic recovery (`factory/recover.go`). Errors, usage limits, stalls, failed reviewers,
   dropped dependencies and failed landings never go to Needs Zach or email. The factory retries
   them, or hands them back to the card, up to a hard cap per kind. When a cap runs out, the card
@@ -192,7 +217,7 @@ slugged from its initial title and renames with it.
     (`paseo run --workspace`) before it is marked stuck: Opus 5.5 unless Claude is the failing
     provider, else the best-ranked Frontier model (`rankAgentChoices`), skipping the failing
     provider, unavailable ones and exhausted plans. The new agent gets the card's first message
-    verbatim (so its gates and the public-repo scan rule carry over), the proposed solution with its
+    verbatim (so its gate and the public-repo scan rule carry over), the proposed solution with its
     reviewer notes and the old agent's last reply, plus the carried labels (`factory.recovery`
     included, so the caps are not reset) and `factory.replaces`. The steps are stored in
     `factory.handoff` on the old agent (starting, started, confirmed, failed), so a restart finishes
@@ -216,7 +241,7 @@ slugged from its initial title and renames with it.
     then `stuck=landing failed`.
 - Fresh agent per stage (`factory/stagehandoff.go`): every move of a card to new work starts a new
   agent instead of resuming its session, whose context by then is re-read on every call. That is a
-  gate's fixes, the land prompt (after the gates, Zach's approval, a re-run or a released hold),
+  gate's fixes, the land prompt (after the gate, Zach's approval, a re-run or a released hold),
   and a failed landing, a dropped dependency or work left after a landing going back to building.
   The new agent runs the same model, except a lander, which runs Opus 5.5 at medium (`factory.agent`, else the agent's provider and model) in the
   same worktree, through the same
@@ -256,7 +281,7 @@ slugged from its initial title and renames with it.
   counts as dropped once archived), the card is told and goes to building with its `Waits on` cleared:
   before build, it builds without that card if it still can or stops and says why if
   the scope must change; after build, it decides whether to rebuild without the other card's work or
-  keep the change as is, and either way the gates run again before the land prompt.
+  keep the change as is, and either way the gate runs again before the land prompt.
   Held work stays in Building or Landing and in Working. When its dependency chain reaches Needs Zach,
   its tile, panel and Working line name and link to that decision. The decision shows how many
   held cards wait on it, including indirect dependencies, matching the workflow health count.
@@ -274,24 +299,24 @@ slugged from its initial title and renames with it.
   ask go in the summary or become ideas, so they never hold a finished card. Each item starts with who
   must do it, `Zach:` or `agent:`. When the message's `NEEDS FROM ZACH:` says nothing (and names no
   ask), it has no question and no item is Zach's, the work left goes back to the same card instead: the
-  agent finishes it in its worktree, new commits go through the gates, and it lands again. Only the first landing is reported in its
+  agent finishes it in its worktree, new commits go through the gate, and it lands again. Only the first landing is reported in its
   thread. At most 2 such
   rounds (`factory.work-left-rounds`, carried across handoffs and not reset by "Send it on"); after
   that the card waits in Needs Zach with the list.
 - A landing whose HEAD is not on `origin/main` (a push failure, a rebase conflict, a `bin/land` scan
   hit) goes back to building, with the failure in the message. The agent rebases on `origin/main`,
   resolves conflicts, reruns the tests and commits; on a scan hit it rewrites its own unpushed
-  commits instead. Then the design and sign-off gates run again and the land prompt follows. A direct-track card
+  commits instead. Then the gate runs again and the land prompt follows. A direct-track card
   not on main is told once to land its work item again, then marked stuck.
 - A landing whose commits differ from the reviewed ones goes back to building the same way: the
-  agent checks what landed and fixes forward, the gates cover what landed, and the land prompt
+  agent checks what landed and fixes forward, the gate covers what landed, and the land prompt
   says not to push again if HEAD is already on main. This review still runs when an earlier landing
   was verified and there are no unpushed commits. On a public repo the factory first scans the
   range that landed (`factory.base..HEAD`). A hit, or a scan that cannot run, waits in Needs Zach as
   "Landed something other than what was reviewed" and is emailed in its thread, if it has one:
   something unreviewed is already public.
 - Code and landing reviews of a change to frontend files (`factory/uireview.go`) include a UI check,
-  given to the request gate.
+  given to the gate.
   In this repo use the screenshot helper below for desktop and phone layout, and computer use
   for interactive flows. Other repos retain computer-use checks at both widths. Reviewers return
   non-blocking feedback under "UI feedback:" for the builder's landing summary.
@@ -303,8 +328,8 @@ slugged from its initial title and renames with it.
 - Drop, Close and dragging to Done are final: the card is stopped and archived, and late verdicts
   for it are not forwarded. Its running reviewers are stopped and archived with it.
 - Every code approval, landing approval, landing retry and dependency release checks that HEAD
-  is still the commit the gates captured and the worktree is clean. Changed or uncommitted
-  work queues the design gate again; a
+  is still the commit the gate captured and the worktree is clean. Changed or uncommitted
+  work queues the gate again; a
   failed read, or a card with no captured reviewed commit, stops without landing. That
   technical stop is board-only and offers Re-run the review, never an approval that skips it.
 - A follow-up retires the earlier gates. A verdict for work from before the
@@ -331,7 +356,7 @@ slugged from its initial title and renames with it.
 - A duplicate passes its request on. A reviewer (or the builder) that finds a duplicate names the
   card it duplicates on a `DUPLICATE OF: <card id>` line. When Zach closes the card at that close
   verdict, the factory keeps its request and the reviewer's notes (`steers.json`) and sends them to
-  the kept card once it is building; an idle one then goes through the gates again. While the kept card is in review or Needs Zach the steer waits; if it is landing, landed or
+  the kept card once it is building; an idle one then goes through the gate again. While the kept card is in review or Needs Zach the steer waits; if it is landing, landed or
   dropped, the request becomes an idea titled "From closed duplicate <id>: ..." (`factory/steer.go`).
 
 ### Quiet factory agents
@@ -374,7 +399,7 @@ external card archived before its first enrollment is outside this detection.
 
 A finished-work Land approval records the revision and summary shown at Ready for you, including
 when landing waits on another card. If a failed landing returns to building, that authorization
-survives restarts and fresh agents. The follow-up sign-off gate
+survives restarts and fresh agents. The follow-up gate's sign-off
 compares against that baseline and reports `APPROVED BEHAVIOR: unchanged|changed|unsure` with evidence.
 Only an explicit unchanged finding can reuse approval. Changed, uncertain or missing findings
 retain the normal Ready rules. New user instructions invalidate the saved authorization; factory Resume and Re-run messages do not.
@@ -1016,7 +1041,7 @@ count, arithmetic mean (`average`), `median` and `p90`, in seconds, for:
   landed), `toDone` (asked to Done), and `zachWait` (time in Needs Zach up to Done).
 - **Per-step durations** (`steps`, `stepsByRepo`): `cards`, `visits`, `repeatedVisits`,
   `visitSecs` (per visit) and `cardSecs` (summed across visits per card) for each step: `building`,
-  `request`, `design`, `signoff`, `landing` and `zach`, plus `plan`, `plan-review` and `review` from older cards.
+  `gate`, `landing` and `zach`, plus `request`, `design`, `signoff`, `plan`, `plan-review` and `review` from older cards.
 - **Per-turn agent durations** (`agentTurns`, `agentTurnsByRole`, `agentTurnsByModel`,
   `agentTurnsByStep`, `agentTurnsByRepo`): `cards`, `sessions`, `turns`, `turnSecs` (per turn)
   and `sessionTurnSecs` (summed turns per session), measured directly from local transcript files
@@ -1083,14 +1108,14 @@ Naming alone can wait for a later readable reply.
 Repos listed in `FACTORY_GUARDED_REPOS` (default: this one) are public, so everything that lands
 in them is published. For their cards:
 
-- After the sign-off gate passes, the factory runs the secret scan on `origin/main..HEAD` in the card's
+- After the gate passes, the factory runs the secret scan on `origin/main..HEAD` in the card's
   worktree. It uses its own installed binary and the gitleaks config from `origin/main`, never the
   card's copy, so a card cannot weaken the scan that checks it. A hit, or a scan that cannot run,
   stops the card in Needs Zach; nothing is published.
-- After a clean scan the sign-off gate's decision applies, as in any repo: what Zach asked for lands on its
+- After a clean scan the gate's sign-off decision applies, as in any repo: what Zach asked for lands on its
   own, and what the system started comes to him first, except a scheduled run of a job he already approved. A
   landing runs `bin/land`, which scans again before its push, as does the pre-push hook. With no sign-off no person
-  approves the landing: what keeps private data out is the gates, told the repo is public, and the scans. Landing a card at Ready for you
+  approves the landing: what keeps private data out is the gate, which grades public safety, and the scans. Landing a card at Ready for you
   scans again before the land message.
 - The direct track is off (a first pass that says it took one is scanned and stops for Zach), and reviewers get a public-repo rule
   (any hostname, email, id, quote or secret is blocking).
@@ -1164,9 +1189,9 @@ An unknown view or card, an incomplete load, a page error, a failed request, or 
 scrolls sideways fails the capture.
 The helper owns and stops its preview server and browser, including on failure.
 
-Fixtures use IDs `preview-<stage>` for agent stages: `route`, `building`, `request`, `design`,
-`signoff`, `zach`, `landing`, and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture
-(`preview-zach`, Land / Change / Drop) is a change the sign-off gate sent to you, with its reason;
+Fixtures use IDs `preview-<stage>` for agent stages: `route`, `building`, `gate`, `zach`, `landing`,
+and `landed`. The Ideas fixture is `idea-preview`. The Needs Zach fixture
+(`preview-zach`, Land / Change / Drop) is a change the gate sent to you for sign-off, with its reason;
 `preview-ready` is finished work with Land / Change / Drop, its own synthetic request and changes, and an
 optional question; `preview-action` is work that landed with a required approval (Done it / Something's wrong / Skip it). Every fixture session starts with a synthetic request, so a card opens on its ask.
 `preview-unverified` shows a publication verification stop with Re-run, Reply and Drop.
@@ -1292,7 +1317,7 @@ factory finds the checkout under `~/dev/*/*` whose `origin` git remote matches `
 ### Computer use for agents
 
 Builders get computer-use instructions on both tracks, including web research, and must click through
-their own UI changes before the gates. The request gate and landing reviewers get the same setup instructions
+their own UI changes before the gate. The gate and landing reviewers get the same setup instructions
 when a change touches a UI. Repo pickers, Scouts and the other gates do not get browser instructions.
 
 Agents use the logged-in `pdw` CLI and read the current `openai-computer-use` skill for connection
@@ -1305,7 +1330,7 @@ Computer-use access keeps the role's existing action approvals and read-only res
 
 - `cmd/factory`: the binary (board server, `factory scan`, `land-review`).
 - `cmd/factory-deploy`, `deployer/`: the self-deployer; `deploy/`: the systemd units.
-- `factory/policy.go`: prompts, verdicts, the automatic moves (`Tick`). `factory/gates.go`: the three gates and the flow.
+- `factory/policy.go`: prompts, verdicts, the automatic moves (`Tick`). `factory/gates.go`: the gate, its grades and the flow.
 - `factory/guard.go`: guarded (public) repos. `factory/scan/`: the secret scanner.
 - `factory/signoff.go`: who sees finished work before it lands. `.factory.json`: this repo's preview.
 - `factory/route.go`: Repo Auto. `factory/agents.go`: the agent choices. `factory/reap.go`: the idle reap.

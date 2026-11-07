@@ -89,10 +89,10 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 	c := Card{ID: "c1", Title: "t", Repo: "example/desk"}
 	prompts := map[string]string{
 		"new card":      fmt.Sprintf(newCardPrompt, "req", "example/desk", "", wholeChangeRule, questionRule),
-		"request gate":  ReviewPrompt(c, gateRequest, 7478, "unknown"),
-		"design gate":   ReviewPrompt(c, gateDesign, 7478, "unknown"),
-		"sign-off gate": ReviewPrompt(c, gateSignoff, 7478, "unknown"),
-		"rework":        reworkGateMsg(gateRequest, 1, 3, "notes"),
+		"request gate":  ReviewPrompt(c, gateCheck, 7478, "unknown"),
+		"design gate":   ReviewPrompt(c, gateCheck, 7478, "unknown"),
+		"sign-off gate": ReviewPrompt(c, gateCheck, 7478, "unknown"),
+		"rework":        reworkGateMsg([]string{"design yellow"}, 1, 3, "notes"),
 		"preview":       readyMsg("you asked for it"),
 		"land":          landMsg,
 		"guarded land":  guardedLandMsg,
@@ -118,7 +118,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 	}
 	ac := card("dirty", nil)
 	f.SetAgents([]Agent{ac})
-	if err := f.askToCommit(Card{ID: "dirty"}, " M a.go", gateRequest); err != nil {
+	if err := f.askToCommit(Card{ID: "dirty"}, " M a.go", gateCheck); err != nil {
 		t.Fatal(err)
 	}
 	prompts["commit before review"] = p.sent("dirty")[0]
@@ -132,7 +132,7 @@ func TestPromptsAskForTheOverview(t *testing.T) {
 			t.Errorf("%s does not teach the whole block", name)
 		}
 	}
-	for _, kind := range []string{gateRequest, gateDesign, gateSignoff} {
+	for _, kind := range []string{gateCheck, gateCheck, gateCheck} {
 		if !strings.HasSuffix(ReviewPrompt(c, kind, 7478, "unknown"), "VERDICT: <approve|nits|changes|close>\n") {
 			t.Errorf("%s review no longer ends with VERDICT", kind)
 		}

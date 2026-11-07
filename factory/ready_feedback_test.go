@@ -9,11 +9,11 @@ import (
 )
 
 func TestReadyFeedbackUnchanged(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
+	c := card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1",
 		labelRoundsDesign: "1", labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "exchange-2", labelReviewed: reviewedSHA})
-	f, p := newTestFactory(t, c, reviewer("r2", "c1", gateSignoff))
+	f, p := newTestFactory(t, c, reviewer("r2", "c1", gateCheck))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r2", "TIER: architecture\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r2", "TIER: architecture\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r2"))
 	l := p.labels("c1")
 	if l[labelStage] != "zach" || f.agent("c1").L(labelReady) != "1" || !isFeedbackNote(l[labelNote]) || l[labelWriting] != "" {
@@ -68,7 +68,7 @@ func TestFeedbackRevisionGate(t *testing.T) {
 		{"changed", movedSHA, "", true}, {"unknown", "", "", true}, {"dirty", reviewedSHA, " M code.go", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelReady: "1", labelReadyHead: tc.head, labelReadyFeedback: "reply-1", labelReviewed: reviewedSHA})
+			c := card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1", labelReady: "1", labelReadyHead: tc.head, labelReadyFeedback: "reply-1", labelReviewed: reviewedSHA})
 			f, p := newTestFactory(t, c)
 			headIs(f, reviewedSHA, nil)
 			dirtyIs(f, tc.dirty, nil)
@@ -131,7 +131,7 @@ func TestFeedbackAsksNothing(t *testing.T) {
 
 // feedbackCard waits for its review verdict after a feedback answer on the version Zach was shown.
 func feedbackCard(extra map[string]string) Agent {
-	l := map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelRoundsDesign: "1", labelReady: "1",
+	l := map[string]string{labelStage: gateCheck, labelRoundsRequest: "1", labelRoundsDesign: "1", labelReady: "1",
 		labelReadyHead: reviewedSHA, labelReadyFeedback: "exchange-2", labelReviewed: reviewedSHA, labelAskWhy: "you asked for it"}
 	for k, v := range extra {
 		l[k] = v

@@ -273,8 +273,8 @@ func TestTimingSessionLinksFollowStepsAndSessions(t *testing.T) {
 
 func TestTimingSessionLinksNestedReviewersAndArchivedChildren(t *testing.T) {
 	a := sessionAgent(fresh("c1"), "builder")
-	a = moved(a, gateRequest, iso(t0))
-	r := sessionAgent(reviewer("r1", a.ID, gateRequest), "reviewer")
+	a = moved(a, gateCheck, iso(t0))
+	r := sessionAgent(reviewer("r1", a.ID, gateCheck), "reviewer")
 	b := sessionAgent(card("child", nil), "child")
 	b.Labels["paseo.parent-agent-id"] = r.ID
 	c := sessionAgent(card("nested", nil), "nested")
@@ -286,12 +286,12 @@ func TestTimingSessionLinksNestedReviewersAndArchivedChildren(t *testing.T) {
 		t.Fatalf("links = %+v", ct.Sessions)
 	}
 	for _, l := range ct.Sessions {
-		if l.Stage != gateRequest {
+		if l.Stage != gateCheck {
 			t.Errorf("wrong step: %+v", l)
 		}
 		switch l.AgentID {
 		case r.ID:
-			if l.ParentID != a.ID || l.Role != "reviewer" || l.ReviewKind != gateRequest {
+			if l.ParentID != a.ID || l.Role != "reviewer" || l.ReviewKind != gateCheck {
 				t.Errorf("review link = %+v", l)
 			}
 		case b.ID:

@@ -229,7 +229,7 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 			storeLog(t, f, p, "c1", reply)
 			f.Tick()
 			l := p.labels("c1")
-			if l[labelStage] != "building" || l[labelAutoReview] != gateRequest || l[labelWorkLeftRounds] != "1" ||
+			if l[labelStage] != "building" || l[labelAutoReview] != gateCheck || l[labelWorkLeftRounds] != "1" ||
 				l[labelNote] != "finishing work left (round 1 of 2)" || l[labelLandedVerified] != "1" {
 				t.Fatalf("labels = %v", l)
 			}
@@ -271,12 +271,12 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 				t.Fatalf("new commits: reviews started = %d, want the request gate", p.runs)
 			}
 			// code review passes: a card Zach asked for waits for him before it lands again
-			rev := reviewer("r1", c.ID, gateSignoff)
+			rev := reviewer("r1", c.ID, gateCheck)
 			for k, v := range p.labels("c1") {
 				c.Labels[labelPrefix+k] = v
 			}
 			f.SetAgents([]Agent{c, rev})
-			storeLog(t, f, p, "r1", "SIGN OFF: he should see this\nVERDICT: approve")
+			storeLog(t, f, p, "r1", "SIGN OFF: he should see this\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 			if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 				t.Fatal(err)
 			}

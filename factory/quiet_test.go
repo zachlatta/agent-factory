@@ -147,7 +147,7 @@ func TestQuietBoardHealthAndReap(t *testing.T) {
 	root := card("root", map[string]string{labelStage: "building"})
 	root.Labels[parentAgentLabel] = anchor.ID
 	root.Status = "running"
-	rev := reviewer(gateDesign, "root", gateSignoff)
+	rev := reviewer(gateCheck, "root", gateCheck)
 	rev.Labels[parentAgentLabel] = anchor.ID
 	sub := Agent{ID: "sub", Status: "idle", Labels: map[string]string{parentAgentLabel: rev.ID}}
 	f.SetAgents([]Agent{anchor, root, rev, sub})
@@ -314,7 +314,7 @@ func TestQuietLaunchPreservesExplicitParentAndIgnoresPromptFlags(t *testing.T) {
 }
 
 func TestQuietRealLaunchPaths(t *testing.T) {
-	for _, kind := range []string{"card", "picker", "scout", gateRequest, gateDesign, "land"} {
+	for _, kind := range []string{"card", "picker", "scout", gateCheck, gateCheck, "land"} {
 		t.Run(kind, func(t *testing.T) {
 			f, p := newTestFactory(t)
 			withRepos(t, f, "example/desk")

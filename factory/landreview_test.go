@@ -99,7 +99,7 @@ func TestLandVerdictIsStoredNotSent(t *testing.T) {
 	ag.Labels["paseo.schedule-id"] = "s1"
 	rev := reviewer("new-agent-1", "ag1", "land")
 	f.SetAgents([]Agent{ag, rev})
-	storeLog(t, f, p, "new-agent-1", "[Assistant] Tests pass (go test ./... ok).\nTIER: low\nSIGN OFF: none\nVERDICT: nits")
+	storeLog(t, f, p, "new-agent-1", "[Assistant] Tests pass (go test ./... ok).\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: nits")
 	f.Tick()
 	r, _ := f.landReviews.Get("ag1")
 	if r.Status != "done" || r.Verdict != "nits" || !strings.Contains(r.Findings, "Tests pass") {
@@ -242,7 +242,7 @@ func TestLandClient(t *testing.T) {
 }
 
 func TestStartReviewNeedsCleanTree(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: ago(10 * time.Minute)})
 	f, p := newTestFactory(t, c)
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "?? scratch.txt\n M x.go\n", "rev-parse HEAD": "h1\n"})
 	storeLog(t, f, p, "c1", "Built the requested change.\nTIER: low")
@@ -276,7 +276,7 @@ func TestStartReviewNeedsCleanTree(t *testing.T) {
 	if p.runs != 1 {
 		t.Fatalf("no review: %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelReviewed] != "h1" || l[labelStage] != gateRequest || l[labelDirtyAsks] != "" {
+	if l := p.labels("c1"); l[labelReviewed] != "h1" || l[labelStage] != gateCheck || l[labelDirtyAsks] != "" {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -371,7 +371,7 @@ func TestLandReviewerRunsOnTheReviewerModel(t *testing.T) {
 
 func TestReviewPromptsCarryVisibilityAndTests(t *testing.T) {
 	c := Card{ID: "c1", Title: "t", Cwd: "/w"}
-	for _, kind := range []string{gateRequest, "land"} {
+	for _, kind := range []string{gateCheck, "land"} {
 		pub := ReviewPrompt(c, kind, 7478, "public")
 		if !strings.Contains(pub, "Repo visibility: PUBLIC") || !strings.Contains(pub, "*.ts.net") ||
 			!strings.Contains(pub, "paste the command") {

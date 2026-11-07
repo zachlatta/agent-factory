@@ -79,7 +79,7 @@ func TestLandReviewNeedsACompletedApprovalOfThisHead(t *testing.T) {
 	// an old landing approval does not stand in for a new code review that is pending
 	f, p, dir := landSetup(t)
 	head := gitRun(t, dir, "rev-parse", "HEAD")
-	onBoard(t, f, landingCard(head, "", nil), reviewer("r9", "ag1", gateSignoff))
+	onBoard(t, f, landingCard(head, "", nil), reviewer("r9", "ag1", gateCheck))
 	f.landReviews.put(LandReview{By: "ag1", Head: head, Cwd: dir, Card: true, Status: "done", Verdict: "approve", DoneAt: t0}, t0)
 	if _, err := f.Act("land-review", Body{By: "ag1"}); err == nil || !strings.Contains(err.Error(), "pending") || p.runs != 0 {
 		t.Errorf("pending review: err = %v runs=%d", err, p.runs)
@@ -124,7 +124,7 @@ func TestLandReviewOfARebasedCardIsFreshAndRecordsTheNewHead(t *testing.T) {
 		t.Fatalf("review = %+v runs=%d", r, p.runs)
 	}
 	onBoard(t, f, landingCard(old, old, nil), reviewer(r.Review, "ag1", "land"))
-	storeLog(t, f, p, r.Review, "[Assistant] Read the rebased diff; tests pass.\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, r.Review, "[Assistant] Read the rebased diff; tests pass.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	f.Tick()
 	got, _ := f.landReviews.Get("ag1")
 	if got.Status != "done" || got.Verdict != "approve" || got.Head != head {
@@ -152,13 +152,13 @@ func TestLandReviewOfACardCancelledWhileItRunsIsNotUsable(t *testing.T) {
 		}},
 		{name: "held", board: func(old string) Agent { return landingCard(old, old, map[string]string{labelHeld: "dep1"}) }},
 		{name: "new code review", board: func(old string) Agent {
-			return landingCard(old, "", map[string]string{labelStage: gateDesign})
+			return landingCard(old, "", map[string]string{labelStage: gateCheck})
 		}},
 		{name: "gone from the board", board: func(string) Agent { return Agent{} }},
 		// the snapshot still shows Landing; current state does not
 		{name: "moved since the snapshot", board: func(old string) Agent { return landingCard(old, old, nil) },
 			file: func(old string) Agent {
-				return card("ag1", map[string]string{labelStage: "building", labelAutoReview: gateRequest})
+				return card("ag1", map[string]string{labelStage: "building", labelAutoReview: gateCheck})
 			}},
 		{name: "archived since the snapshot", board: func(old string) Agent { return landingCard(old, old, nil) }, archived: true},
 	} {
@@ -181,7 +181,7 @@ func TestLandReviewOfACardCancelledWhileItRunsIsNotUsable(t *testing.T) {
 				writeAgents(t, f, tc.file(old))
 			}
 			p.archived["ag1"] = tc.archived
-			storeLog(t, f, p, rid, "[Assistant] Looks fine.\nSIGN OFF: none\nVERDICT: approve")
+			storeLog(t, f, p, rid, "[Assistant] Looks fine.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 			f.Tick()
 			got, _ := f.landReviews.Get("ag1")
 			if got.Status != "done" || got.Verdict == "approve" || got.Verdict == "nits" ||
@@ -202,7 +202,7 @@ func TestLandReviewReusesAnIdenticalExternalApprovalOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.SetAgents([]Agent{card("ag1", nil), reviewer("new-agent-1", "ag1", "land")})
-	storeLog(t, f, p, "new-agent-1", "[Assistant] Fine.\nSIGN OFF: none\nVERDICT: nits")
+	storeLog(t, f, p, "new-agent-1", "[Assistant] Fine.\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: nits")
 	f.Tick()
 	res, err := f.Act("land-review", Body{By: "ag1"})
 	if err != nil {
@@ -241,13 +241,13 @@ func TestCodeApprovalMarkerClearsWhenTheReviewDoesNotStart(t *testing.T) {
 		{"launch fails", "", errors.New("paseo run: daemon unavailable")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute),
+			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: ago(10 * time.Minute),
 				labelCodeOK: reviewedSHA, labelReviewed: reviewedSHA})
 			f, p := newTestFactory(t, c)
 			p.runErr = tc.err
 			f.GitOut = gitStub(map[string]string{"status --porcelain": tc.dirty, "rev-parse HEAD": reviewedSHA + "\n"})
 			cd, _ := f.card("c1")
-			f.StartReview(cd, gateRequest)
+			f.StartReview(cd, gateCheck)
 			if v, ok := p.labels("c1")[labelCodeOK]; !ok || v != "" {
 				t.Errorf("code-approved not cleared: %v", p.labels("c1"))
 			}
@@ -292,7 +292,7 @@ func TestLandReviewRefusesCardsNotAuthorizedToLand(t *testing.T) {
 		want   string
 	}{
 		{"building", []Agent{card("ag1", map[string]string{labelStage: "building", labelReviewed: head, labelCodeOK: head})}, "building"},
-		{"in code review", []Agent{card("ag1", map[string]string{labelStage: gateDesign, labelReviewed: head})}, gateDesign},
+		{"in code review", []Agent{card("ag1", map[string]string{labelStage: gateCheck, labelReviewed: head})}, gateCheck},
 		{"waiting on Zach", []Agent{card("ag1", map[string]string{labelStage: "zach", labelReviewed: head, labelCodeOK: head})}, "zach"},
 		{"done", []Agent{card("ag1", map[string]string{labelStage: "done", labelReviewed: head})}, "done"},
 		{"held", []Agent{landingCard(head, head, map[string]string{labelHeld: "dep1"})}, "held"},
@@ -302,11 +302,11 @@ func TestLandReviewRefusesCardsNotAuthorizedToLand(t *testing.T) {
 		{"close verdict", []Agent{landingCard(head, "", map[string]string{labelVerdict: "close"})}, "close"},
 		{"no verdict", []Agent{landingCard(head, "", map[string]string{labelVerdict: "code none"})}, "code none"},
 		// a stale approval restored Landing while a new review is queued or running at the same HEAD
-		{"review queued", []Agent{landingCard(head, head, map[string]string{labelAutoReview: gateRequest})}, "queued"},
-		{"review pending", []Agent{landingCard(head, head, nil), reviewer("r9", "ag1", gateSignoff)}, "pending"},
-		{"arbiter pending", []Agent{landingCard(head, head, nil), withLabels(reviewer("r9", "ag1", gateSignoff),
+		{"review queued", []Agent{landingCard(head, head, map[string]string{labelAutoReview: gateCheck})}, "queued"},
+		{"review pending", []Agent{landingCard(head, head, nil), reviewer("r9", "ag1", gateCheck)}, "pending"},
+		{"arbiter pending", []Agent{landingCard(head, head, nil), withLabels(reviewer("r9", "ag1", gateCheck),
 			map[string]string{})}, "pending"},
-		{"reviewer", []Agent{reviewer("ag1", "c9", gateSignoff)}, "reviewer"},
+		{"reviewer", []Agent{reviewer("ag1", "c9", gateCheck)}, "reviewer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			onBoard(t, f, tc.agents...)

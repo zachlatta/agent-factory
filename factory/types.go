@@ -80,6 +80,7 @@ type Card struct {
 	Flags           []string  `json:"flags"`
 	Unread          bool      `json:"unread"`
 	Rounds          Rounds    `json:"rounds"`
+	Grades          string    `json:"grades,omitempty"` // the gate's last grades (labelGrades)
 	Verdict         string    `json:"verdict"`
 	Note            string    `json:"note"`
 	SubmittedBy     string    `json:"submittedBy"` // zach or system (gates.go)
@@ -111,9 +112,7 @@ type Card struct {
 }
 
 type Rounds struct {
-	Request int `json:"request"`
-	Design  int `json:"design"`
-	Signoff int `json:"signoff"`
+	Gate int `json:"gate"`
 }
 
 type Child struct {

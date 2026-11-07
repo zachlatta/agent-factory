@@ -42,7 +42,7 @@ func freshCard(public bool, labels map[string]string) Agent {
 // reviewLabels is a card the factory started (an idea), so an approving review lands it on its own
 // when its HEAD is fresh; a requested card would stop finished for Zach first.
 func reviewLabels(extra map[string]string) map[string]string {
-	l := map[string]string{labelStage: gateDesign, labelSource: "board", labelOrigin: "idea",
+	l := map[string]string{labelStage: gateCheck, labelSource: "board", labelOrigin: "idea",
 		labelRoundsRequest: "1", labelReviewed: reviewedSHA}
 	for k, v := range extra {
 		l[k] = v
@@ -70,10 +70,10 @@ func backToReview(t *testing.T, name string, l map[string]string) {
 
 func TestVerdictLandsWhenHeadIsTheReviewedCommit(t *testing.T) {
 	for _, public := range []bool{false, true} {
-		f, p := newTestFactory(t, freshCard(public, reviewLabels(nil)), reviewer("r1", "c1", gateSignoff))
+		f, p := newTestFactory(t, freshCard(public, reviewLabels(nil)), reviewer("r1", "c1", gateCheck))
 		fakeScan(f, nil, nil)
 		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 			t.Fatal(err)
 		}
@@ -88,10 +88,10 @@ func TestVerdictLandsWhenHeadIsTheReviewedCommit(t *testing.T) {
 
 func TestVerdictWithMovedHeadGoesBackToCodeReview(t *testing.T) {
 	for _, public := range []bool{false, true} {
-		f, p := newTestFactory(t, freshCard(public, reviewLabels(nil)), reviewer("r1", "c1", gateSignoff))
+		f, p := newTestFactory(t, freshCard(public, reviewLabels(nil)), reviewer("r1", "c1", gateCheck))
 		ranges := fakeScan(f, nil, nil)
 		headIs(f, movedSHA, nil)
-		storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 			t.Fatal(err)
 		}
@@ -106,9 +106,9 @@ func TestVerdictWithMovedHeadGoesBackToCodeReview(t *testing.T) {
 
 // The moved card really gets a fresh reviewer on the next Tick, which records the new HEAD.
 func TestMovedHeadStartsAFreshReview(t *testing.T) {
-	f, p := newTestFactory(t, freshCard(false, reviewLabels(nil)), reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, freshCard(false, reviewLabels(nil)), reviewer("r1", "c1", gateCheck))
 	headIs(f, movedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -117,10 +117,10 @@ func TestMovedHeadStartsAFreshReview(t *testing.T) {
 	f.SetAgents([]Agent{moved})
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": movedSHA + "\n"})
 	f.Tick()
-	if len(p.runsWithLabel(labelArg(labelReviewKind, gateDesign))) != 1 {
+	if len(p.runsWithLabel(labelArg(labelReviewKind, gateCheck))) != 1 {
 		t.Fatalf("no fresh code reviewer: %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelStage] != gateDesign || l[labelReviewed] != movedSHA {
+	if l := p.labels("c1"); l[labelStage] != gateCheck || l[labelReviewed] != movedSHA {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -128,10 +128,10 @@ func TestMovedHeadStartsAFreshReview(t *testing.T) {
 func TestVerdictWithoutReviewedCommitFailsClosed(t *testing.T) {
 	for _, public := range []bool{false, true} {
 		name := map[bool]string{false: "private", true: "public"}[public]
-		f, p := newTestFactory(t, freshCard(public, reviewLabels(map[string]string{labelReviewed: ""})), reviewer("r1", "c1", gateSignoff))
+		f, p := newTestFactory(t, freshCard(public, reviewLabels(map[string]string{labelReviewed: ""})), reviewer("r1", "c1", gateCheck))
 		fakeScan(f, nil, nil)
 		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "no reviewed commit") || l[labelStuckFrom] != "review" {
@@ -165,10 +165,10 @@ func TestReviewGateAgreesWithLandBlock(t *testing.T) {
 
 func TestVerdictGitFailureFailsClosed(t *testing.T) {
 	for _, public := range []bool{false, true} {
-		f, p := newTestFactory(t, freshCard(public, reviewLabels(nil)), reviewer("r1", "c1", gateSignoff))
+		f, p := newTestFactory(t, freshCard(public, reviewLabels(nil)), reviewer("r1", "c1", gateCheck))
 		fakeScan(f, nil, nil)
 		headIs(f, "", errors.New("not a git repository"))
-		storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+		storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "zach" || !strings.Contains(l[labelNote], "could not read HEAD") || l[labelStuckFrom] != "review" {
@@ -314,16 +314,16 @@ func TestRerunLandingChecksReviewFreshness(t *testing.T) {
 // A card held because its reviewed commit could not be checked recovers through Re-run, which starts
 // a fresh code review that records the commit it reads.
 func TestUnverifiedReviewRerunStartsAFreshReview(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "zach", labelStuckFrom: gateDesign,
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "zach", labelStuckFrom: gateCheck,
 		labelNote: noReviewedNote, labelRoundsRequest: "1"}))
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": movedSHA + "\n"})
 	if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.runsWithLabel(labelArg(labelReviewKind, gateDesign))) != 1 {
+	if len(p.runsWithLabel(labelArg(labelReviewKind, gateCheck))) != 1 {
 		t.Fatalf("no fresh code reviewer: %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelStage] != gateDesign || l[labelReviewed] != movedSHA {
+	if l := p.labels("c1"); l[labelStage] != gateCheck || l[labelReviewed] != movedSHA {
 		t.Errorf("labels = %v", l)
 	}
 	noLandPrompt(t, "rerun", p)

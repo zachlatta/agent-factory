@@ -24,7 +24,7 @@ import (
 //
 // A factory card asks too, and only while it is authorized to land (cardLandBlock, on the board's
 // snapshot and on the card's current agent file and Paseo state). When its HEAD is the commit a
-// completed sign-off gate passed (factory.code-approved, which every new review clears), that approval
+// completed gate passed (factory.code-approved, which every new review clears), that approval
 // is the answer and no reviewer runs. Any other HEAD (a rebase, a conflict fix, a card approved before
 // the marker existed) gets a fresh landing review of the actual candidate; its approval, if the card
 // is still authorized when it finishes, becomes the card's reviewed and approved commit. A card's

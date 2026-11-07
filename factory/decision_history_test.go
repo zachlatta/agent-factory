@@ -27,8 +27,8 @@ func TestDecisionHistoryDryRunBlocksLogs(t *testing.T) {
 func TestDecisionHistoryReviewerLateFileAndHumanGate(t *testing.T) {
 	for _, expired := range []bool{false, true} {
 		t.Run(map[bool]string{false: "retry", true: "asked"}[expired], func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1"})
-			r := reviewer("r1", c.ID, gateDesign)
+			c := card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1"})
+			r := reviewer("r1", c.ID, gateCheck)
 			f, p := newTestFactory(t, c, r)
 			if expired {
 				f.Now = func() time.Time { return t0.Add(time.Minute) }
@@ -50,7 +50,7 @@ func TestDecisionHistoryReviewerLateFileAndHumanGate(t *testing.T) {
 				if p.labels(r.ID)[labelApplied] != "" || len(p.sent(c.ID)) != 0 {
 					t.Fatal("late history answered the human gate")
 				}
-			} else if p.labels(r.ID)[labelApplied] != "1" || p.labels(c.ID)[labelRoundsDesign] != "1" {
+			} else if p.labels(r.ID)[labelApplied] != "1" || p.labels(c.ID)[labelRoundsGate] != "1" {
 				t.Fatalf("late verdict not applied: %v", p.labels(c.ID))
 			}
 			noLogsCalls(t, p)
@@ -105,7 +105,7 @@ func TestDecisionHistoryLandingWaitDoesNotWriteTiming(t *testing.T) {
 }
 
 func TestDecisionHistoryAskExplainsPause(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused", labelStuckFrom: gateDesign})
+	c := card("c1", map[string]string{labelStage: "zach", labelNote: "history unavailable: decision paused", labelStuckFrom: gateCheck})
 	ask := askFor(Card{Stage: "zach"}, c)
 	if ask == nil || !strings.Contains(ask.Title, "History unavailable") || !strings.Contains(ask.Why, "two minutes") || ask.Actions[0].ID != "rerun" {
 		t.Fatalf("history wait misrepresented: %+v", ask)
@@ -172,8 +172,8 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 		{"archived history stays missing", false, true}, {"archived history appears", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelRoundsRequest: "1", labelVerdict: "plan approve"})
-			r := reviewer("r1", c.ID, gateDesign)
+			c := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelRoundsRequest: "1", labelVerdict: "plan approve"})
+			r := reviewer("r1", c.ID, gateCheck)
 			if tc.archived {
 				r = archived(r)
 			}
@@ -197,7 +197,7 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 			c.Status, p.status[c.ID] = "running", "running"
 			f.SetAgents([]Agent{c, r})
 			if tc.lateFile {
-				storeLog(t, f, p, r.ID, "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+				storeLog(t, f, p, r.ID, "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 			}
 			if err := f.tickAgent(r, f.Now()); err != nil {
 				t.Fatal(err)
@@ -219,7 +219,7 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 			if err := f.tickAgent(c, f.Now()); err != nil {
 				t.Fatal(err)
 			}
-			if p.labels(r.ID)[labelVerdict] != "superseded" || p.labels(c.ID)[labelRoundsDesign] != "" || p.labels(c.ID)[labelStage] != gateRequest || p.runs != 1 {
+			if p.labels(r.ID)[labelVerdict] != "superseded" || p.labels(c.ID)[labelRoundsDesign] != "" || p.labels(c.ID)[labelStage] != gateCheck || p.runs != 1 {
 				t.Fatalf("reply did not get a fresh review: %v, old reviewer: %v", p.labels(c.ID), p.labels(r.ID))
 			}
 			noLogsCalls(t, p)
@@ -228,19 +228,19 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 }
 
 func TestDecisionHistoryWaitsThenAsks(t *testing.T) {
-	for _, stage := range []string{"landing", "building", gateDesign} {
+	for _, stage := range []string{"landing", "building", gateCheck} {
 		t.Run(stage, func(t *testing.T) {
 			c := card("c1", map[string]string{labelStage: stage, labelSource: "board", labelSince: ago(10 * time.Minute)})
 			c.LastActivityAt = t0.Add(-time.Minute)
 			if stage == "building" {
-				c.Labels[labelPrefix+labelAutoReview] = gateRequest
+				c.Labels[labelPrefix+labelAutoReview] = gateCheck
 			}
-			r := reviewer("r1", "c1", gateSignoff)
+			r := reviewer("r1", "c1", gateCheck)
 			f, p := newTestFactory(t, c, r)
 			run := func() {
 				t.Helper()
 				a := c
-				if stage == gateDesign {
+				if stage == gateCheck {
 					a = r
 				}
 				if err := f.tickAgent(a, f.Now()); err != nil {

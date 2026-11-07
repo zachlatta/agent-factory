@@ -12,7 +12,7 @@ import (
 )
 
 func TestParseVerdictAndTier(t *testing.T) {
-	text := "[Assistant] looks fine\nTIER: **risky**\nSIGN OFF: none\nVERDICT: approve\n"
+	text := "[Assistant] looks fine\nTIER: **risky**\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve\n"
 	if got := ParseVerdict(text); got != "approve" {
 		t.Errorf("verdict = %q", got)
 	}
@@ -34,10 +34,10 @@ func TestParseVerdictAndTier(t *testing.T) {
 func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	// work the factory started lands after the gates when nothing is on the always-ask list
 	for _, tier := range []string{"low", "risky"} {
-		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
-			reviewer("r1", "c1", gateSignoff))
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
+			reviewer("r1", "c1", gateCheck))
 		headIs(f, reviewedSHA, nil)
-		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nSIGN OFF: none\nVERDICT: nits")
+		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: nits")
 		f.ApplyVerdict(f.agent("r1"))
 		l := p.labels("c1")
 		if l[labelStage] != "landing" {
@@ -50,9 +50,9 @@ func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 }
 
 func TestCardBeforeArchivedClosedReviewerStartsOnlyOneReviewer(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.LastActivityAt = t0.Add(-time.Hour)
-	r := reviewer("r1", "c1", gateRequest)
+	r := reviewer("r1", "c1", gateCheck)
 	r.Status = "closed"
 	r.ArchivedAt = t0.Add(-time.Minute)
 	f, p := newTestFactory(t, c, r)
@@ -63,15 +63,15 @@ func TestCardBeforeArchivedClosedReviewerStartsOnlyOneReviewer(t *testing.T) {
 		t.Fatalf("started %d reviewers in one Tick, want 1: %v", len(runs), p.calls)
 	}
 	l := p.labels("c1")
-	if l[labelStage] != gateRequest || l[labelReviewerRetries] != "1" {
+	if l[labelStage] != gateCheck || l[labelReviewerRetries] != "1" {
 		t.Errorf("labels = %v", l)
 	}
 }
 
 func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)})
+	c := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelSince: ago(10 * time.Minute)})
 	c.LastActivityAt = t0.Add(-time.Hour)
-	r := reviewer("r1", "c1", gateRequest)
+	r := reviewer("r1", "c1", gateCheck)
 	f, p := newTestFactory(t, c, r)
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	storeLog(t, f, p, "r1", "Review interrupted before a verdict.")
@@ -88,7 +88,7 @@ func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
 	f.SetAgents([]Agent{withLabels(c, l), rApplied})
 	f.Tick()
 	l = p.labels("c1")
-	if l[labelStage] != gateRequest || l[labelReviewerRetries] != "2" || l[labelStuck] != "" {
+	if l[labelStage] != gateCheck || l[labelReviewerRetries] != "2" || l[labelStuck] != "" {
 		t.Errorf("after failed auto-rerun, next Tick should start the second replacement: labels = %v", l)
 	}
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 2 {
@@ -97,8 +97,8 @@ func TestFailedAutoRerunRetriesOnNextTick(t *testing.T) {
 }
 
 func TestVerdictAndDirtyCommitClearReviewerRetries(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelReviewerRetries: "1"})
-	r := reviewer("r1", "c1", gateRequest)
+	c := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelReviewerRetries: "1"})
+	r := reviewer("r1", "c1", gateCheck)
 	f, p := newTestFactory(t, c, r)
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
 	storeLog(t, f, p, "r1", "TIER: low\nVERDICT: changes\n- fix x")
@@ -113,9 +113,9 @@ func TestVerdictAndDirtyCommitClearReviewerRetries(t *testing.T) {
 	// Same-pass dirty worktree: ApplyVerdict counts a replacement, then StartReview sees a dirty tree and calls
 	// askToCommit in the same pass. askToCommit must clear the count so the next code review round gets its
 	// own replacements.
-	cDirty := card("c2", map[string]string{labelStage: gateDesign, labelSource: "board"})
+	cDirty := card("c2", map[string]string{labelStage: gateCheck, labelSource: "board"})
 	cDirty.Cwd = "/w/c2"
-	rDirty := reviewer("r2", "c2", gateSignoff)
+	rDirty := reviewer("r2", "c2", gateCheck)
 	f2, p2 := newTestFactory(t, cDirty, rDirty)
 	storeLog(t, f2, p2, "r2", "Review interrupted before a verdict.")
 	f2.GitOut = gitStub(map[string]string{
@@ -141,13 +141,13 @@ func TestApproveLandsOtherwise(t *testing.T) {
 }
 
 func TestTickAppliesFinishedReviewersOnce(t *testing.T) {
-	r := reviewer("r1", "c1", gateSignoff)
-	done := reviewer("r2", "c1", gateSignoff)
+	r := reviewer("r1", "c1", gateCheck)
+	done := reviewer("r2", "c1", gateCheck)
 	done.Labels[labelPrefix+labelApplied] = "1"
-	young := reviewer("r3", "c1", gateSignoff)
+	young := reviewer("r3", "c1", gateCheck)
 	young.CreatedAt = t0.Add(-10 * time.Second)
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign}), r, done, young)
-	storeLog(t, f, p, "r1", "VERDICT: approve")
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck}), r, done, young)
+	storeLog(t, f, p, "r1", "MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 	f.Tick()
 	// r2's verdict is not read again (the idle reap archives it); r3 is too young to apply
 	if !p.called("archive", "r1") || p.called("logs", "r2") || p.called("archive", "r3") {
@@ -188,7 +188,7 @@ func TestTickFinishesDirectCardWithoutReview(t *testing.T) {
 
 func TestTickWaitsForAgentToActAfterMove(t *testing.T) {
 	// moved 10 s ago, no activity since: the agent has not picked up the message yet
-	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: t0.Add(-10 * time.Second).Format(time.RFC3339)})
+	c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: t0.Add(-10 * time.Second).Format(time.RFC3339)})
 	c.LastActivityAt = t0.Add(-time.Hour)
 	f, p := newTestFactory(t, c)
 	f.Tick()
@@ -274,7 +274,7 @@ func TestTickSkipsCardArchivedSinceSnapshot(t *testing.T) {
 		labels map[string]string
 	}{
 		{"plan", map[string]string{labelStage: "building", labelSource: "board", labelSince: since}},
-		{"auto-review", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: since}},
+		{"auto-review", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: since}},
 		{"landing", map[string]string{labelStage: "landing", labelSince: since}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,11 +304,11 @@ func TestTickSkipsMoveWhenInspectFails(t *testing.T) {
 
 func TestVerdictForArchivedTargetIsNotSent(t *testing.T) {
 	for _, snapshot := range []bool{true, false} {
-		c := card("c1", map[string]string{labelStage: gateRequest, labelSource: "board"})
+		c := card("c1", map[string]string{labelStage: gateCheck, labelSource: "board"})
 		if snapshot {
 			c.ArchivedAt = t0.Add(-time.Minute)
 		}
-		f, p := newTestFactory(t, c, reviewer("r1", "c1", gateRequest))
+		f, p := newTestFactory(t, c, reviewer("r1", "c1", gateCheck))
 		p.archived["c1"] = true
 		storeLog(t, f, p, "r1", "[Assistant] fix it\nTIER: risky\nVERDICT: changes")
 		f.Tick()
@@ -328,9 +328,9 @@ func TestVerdictForArchivedTargetIsNotSent(t *testing.T) {
 }
 
 func TestVerdictWaitsWhenInspectFails(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board"}),
-		reviewer("r1", "c1", gateRequest))
-	storeLog(t, f, p, "r1", "VERDICT: approve")
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board"}),
+		reviewer("r1", "c1", gateCheck))
+	storeLog(t, f, p, "r1", "MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 	p.inspectErr = errors.New("daemon down")
 	if err := f.ApplyVerdict(f.agent("r1")); err == nil {
 		t.Error("want an error so the next tick retries")
@@ -352,7 +352,7 @@ func TestTickReadsTrackOnlyFromTheAgentsReply(t *testing.T) {
 	if runs := p.runsWithLabel(labelArg(labelReviewOf, "c1")); len(runs) != 1 {
 		t.Fatalf("want a plan review, calls = %v", p.calls)
 	}
-	if l := p.labels("c1"); l[labelStage] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != gateCheck {
 		t.Errorf("labels = %v", l)
 	}
 }
@@ -397,14 +397,14 @@ func TestStoppedCardsRecoverInTheirColumn(t *testing.T) {
 		want   string // "nudge", "stuck" or "" (nothing)
 	}{
 		{"building, nothing queued", map[string]string{labelStage: "building", labelSince: since}, nil, "nudge"},
-		{"building, review queued", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: ago(10 * time.Second)}, nil, ""},
+		{"building, review queued", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: ago(10 * time.Second)}, nil, ""},
 		{"plan, not a board card", map[string]string{labelStage: "building", labelSince: since}, nil, "nudge"},
-		{"plan review, reviewer running", map[string]string{labelStage: gateRequest, labelSince: since},
-			[]Agent{func() Agent { r := reviewer("r1", "c1", gateRequest); r.Status = "running"; return r }()}, ""},
-		{"code review, no reviewer after the replacements and arbiters", map[string]string{labelStage: gateDesign, labelSince: since, labelReviewerRetries: "4"}, nil, "stuck"},
-		{"code review, reviewer applied after the replacements and arbiters", map[string]string{labelStage: gateDesign, labelSince: since, labelReviewerRetries: "4"},
+		{"plan review, reviewer running", map[string]string{labelStage: gateCheck, labelSince: since},
+			[]Agent{func() Agent { r := reviewer("r1", "c1", gateCheck); r.Status = "running"; return r }()}, ""},
+		{"code review, no reviewer after the replacements and arbiters", map[string]string{labelStage: gateCheck, labelSince: since, labelReviewerRetries: "4"}, nil, "stuck"},
+		{"code review, reviewer applied after the replacements and arbiters", map[string]string{labelStage: gateCheck, labelSince: since, labelReviewerRetries: "4"},
 			[]Agent{func() Agent {
-				r := reviewer("r1", "c1", gateSignoff)
+				r := reviewer("r1", "c1", gateCheck)
 				r.Labels[labelPrefix+labelApplied] = "1"
 				return r
 			}()}, "stuck"},
@@ -500,14 +500,14 @@ func TestNudgesStartAfreshAfterTheCardMoves(t *testing.T) {
 }
 
 func TestReviewPending(t *testing.T) {
-	running := reviewer("r1", "c1", gateSignoff)
+	running := reviewer("r1", "c1", gateCheck)
 	running.Status = "running"
-	unapplied := reviewer("r2", "c1", gateSignoff)
-	applied := reviewer("r3", "c1", gateSignoff)
+	unapplied := reviewer("r2", "c1", gateCheck)
+	applied := reviewer("r3", "c1", gateCheck)
 	applied.Labels[labelPrefix+labelApplied] = "1"
-	gone := reviewer("r4", "c1", gateSignoff)
+	gone := reviewer("r4", "c1", gateCheck)
 	gone.ArchivedAt = t0.Add(-time.Minute) // archived without a verdict
-	other := reviewer("r5", "c2", gateSignoff)
+	other := reviewer("r5", "c2", gateCheck)
 	other.Status = "running"
 	for _, tc := range []struct {
 		name   string
@@ -569,11 +569,11 @@ func longReview(t *testing.T, f *Factory, id, of, kind, verdict string, p *fakeP
 
 func TestReviewPromptTreatsZachsRulingsAsSettled(t *testing.T) {
 	c := Card{ID: "c1", Title: "x"}
-	if strings.Contains(ReviewPrompt(c, gateDesign, 7478, "unknown"), "already ruled") {
+	if strings.Contains(ReviewPrompt(c, gateCheck, 7478, "unknown"), "already ruled") {
 		t.Error("rule without a ruling")
 	}
 	c.Decided = true
-	if !strings.Contains(ReviewPrompt(c, gateDesign, 7478, "unknown"), "already ruled") {
+	if !strings.Contains(ReviewPrompt(c, gateCheck, 7478, "unknown"), "already ruled") {
 		t.Error("ruling not passed to the reviewer")
 	}
 }
@@ -604,7 +604,7 @@ var throwawayConditions = []string{
 
 func TestReviewPromptCarriesRules(t *testing.T) {
 	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r"}
-	for _, kind := range []string{gateRequest, gateDesign} {
+	for _, kind := range []string{gateCheck, gateCheck} {
 		pr := ReviewPrompt(c, kind, 7478, "unknown")
 		for _, want := range []string{"DIFFERENT agent", "VERDICT:", wholeChangeRule, "is a blocking finding"} {
 			if !strings.Contains(pr, want) {
@@ -621,20 +621,20 @@ func TestReviewPromptCarriesRules(t *testing.T) {
 // ask is part of the change; outside it, it is architecture Zach did not ask for.
 
 func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)}),
-		reviewer("r1", "c1", gateRequest))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelSource: "board", labelSince: ago(10 * time.Minute)}),
+		reviewer("r1", "c1", gateCheck))
 	storeLog(t, f, p, "c1", "Plan: make the requested change.\nTIER: low")
-	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "BUILD SIDE EFFECTS: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != gateDesign {
-		t.Errorf("labels = %v", l)
+	if l := p.labels("c1"); l[labelStuck] != "" || p.labels("r1")[labelApplied] != "1" {
+		t.Errorf("labels = %v, reviewer %v", l, p.labels("r1"))
 	}
 }
 
 func TestReviewerNotesReachBuilderWhole(t *testing.T) {
 	f, p := newTestFactory(t)
-	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelRoundsDesign: "1"})
-	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", gateDesign, "changes", p)})
+	c := card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1", labelRoundsDesign: "1"})
+	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", gateCheck, "changes", p)})
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
 	if len(msgs) != 1 || !strings.Contains(msgs[0], "FIRST finding") || !strings.Contains(msgs[0], "LAST finding") ||
@@ -660,7 +660,7 @@ func TestMessageMidErrandStillFinishesDirect(t *testing.T) {
 			if _, err := f.Act("send", Body{ID: "c1", Message: "include the memos from this morning", Via: tc.via}); err != nil {
 				t.Fatal(err)
 			}
-			if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
+			if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateCheck {
 				t.Fatalf("after the message: labels = %v", l)
 			}
 			stopsAfterReply(t, f, p, c, tc.reply)
@@ -690,7 +690,7 @@ func TestEmailFollowUpAfterDirectFinishStaysDirect(t *testing.T) {
 	if _, err := f.Act("send", Body{ID: "c1", Message: "The file is corrupted", Via: "email"}); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateCheck {
 		t.Fatalf("after the follow-up: labels = %v", l)
 	}
 	stopsAfterReply(t, f, p, c, "Sent Zach a fixed copy.\nTRACK: direct")
@@ -714,7 +714,7 @@ func TestTickFinishesDirectCardQueuedForTheGates(t *testing.T) {
 		{"it already passed the request gate", "Sent Zach the files.\nTRACK: direct", map[string]string{labelRoundsRequest: "1"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			l := map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: gateRequest, labelSince: ago(10 * time.Minute)}
+			l := map[string]string{labelStage: "building", labelSource: "email", labelAutoReview: gateCheck, labelSince: ago(10 * time.Minute)}
 			for k, v := range tc.labels {
 				l[k] = v
 			}
@@ -778,13 +778,13 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 
 	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
 	dirtyCard, _ := f.card("c-dirty")
-	if err := f.askToCommit(dirtyCard, " M a.go", gateRequest); err != nil {
+	if err := f.askToCommit(dirtyCard, " M a.go", gateCheck); err != nil {
 		t.Fatal(err)
 	}
 
 	worktreePrompts := map[string]string{
 		"newCardPrompt": planPrompt,
-		"reworkMsg":     reworkGateMsg(gateDesign, 1, 3, "fix it"),
+		"reworkMsg":     reworkGateMsg([]string{"design yellow"}, 1, 3, "fix it"),
 		"askToCommit":   p.sent("c-dirty")[0],
 	}
 	for name, s := range worktreePrompts {
@@ -802,7 +802,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		"delegate builder":  delegateText(nil, false),
 		"delegate reviewer": delegateText(nil, true),
 		"review plan":       ReviewPrompt(c, "plan", 7478, "unknown"),
-		"review code":       ReviewPrompt(c, gateDesign, 7478, "unknown"),
+		"review code":       ReviewPrompt(c, gateCheck, 7478, "unknown"),
 		"review land":       ReviewPrompt(c, "land", 7478, "unknown"),
 	}
 	for name, s := range sharedScratchPrompts {
@@ -837,7 +837,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 		}
 	}
 
-	codeRubric := ReviewPrompt(c, gateDesign, 7478, "unknown")
+	codeRubric := ReviewPrompt(c, gateCheck, 7478, "unknown")
 	for _, want := range []string{"must not use /tmp for work that belongs in the worktree", "t.TempDir()"} {
 		if !strings.Contains(codeRubric, want) {
 			t.Errorf("code rubric lacks %q:\n%s", want, codeRubric)
@@ -858,15 +858,15 @@ func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
 
 	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
 	dirtyCard, _ := f.card("c-dirty")
-	if err := f.askToCommit(dirtyCard, " M a.go", gateRequest); err != nil {
+	if err := f.askToCommit(dirtyCard, " M a.go", gateCheck); err != nil {
 		t.Fatal(err)
 	}
 
 	noLivePrompts := map[string]string{
 		"newCardPrompt": planPrompt,
-		"reworkMsg":     reworkGateMsg(gateDesign, 1, 3, "fix it"),
+		"reworkMsg":     reworkGateMsg([]string{"design yellow"}, 1, 3, "fix it"),
 		"askToCommit":   p.sent("c-dirty")[0],
-		"code rubric":   ReviewPrompt(c, gateDesign, 7478, "unknown"),
+		"code rubric":   ReviewPrompt(c, gateCheck, 7478, "unknown"),
 	}
 	for name, s := range noLivePrompts {
 		if !strings.Contains(s, "live changes") {

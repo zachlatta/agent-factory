@@ -43,7 +43,7 @@ func (g *gitFake) out(_ context.Context, dir string, args ...string) (string, er
 func peersFixture(t *testing.T) (*Factory, *fakePaseo, *gitFake) {
 	t.Helper()
 	me := card("me1", map[string]string{labelStage: "building", labelSource: "board"})
-	other := card("ot1", map[string]string{labelStage: gateDesign, labelSource: "board",
+	other := card("ot1", map[string]string{labelStage: gateCheck, labelSource: "board",
 		labelSince: ago(5 * time.Minute)})
 	other.Title = "pick the agent per card"
 	elsewhere := card("ex1", map[string]string{labelStage: "building", labelSource: "board"})
@@ -57,7 +57,7 @@ func peersFixture(t *testing.T) (*Factory, *fakePaseo, *gitFake) {
 	sched.Title = "Feed picks hourly"
 	scout := card("so1", map[string]string{labelRole: "scout"})
 	scout.Status = "running"
-	rev := reviewer("rv1", "ot1", gateSignoff)
+	rev := reviewer("rv1", "ot1", gateCheck)
 	rev.Status = "running"
 	f, p := newTestFactory(t, me, other, elsewhere, unknown, done, sched, scout, rev)
 	g := &gitFake{
@@ -215,7 +215,7 @@ func TestPeersListsOtherCardsInFlight(t *testing.T) {
 	if want := []string{"factory/agents.go", "factory/new.go", "factory/policy.go", "notes.md"}; !slices.Equal(ot.Files, want) {
 		t.Errorf("ot1 files = %v (committed, uncommitted and renamed)", ot.Files)
 	}
-	if !slices.Equal(ot.Overlap, []string{"factory/policy.go"}) || ot.Stage != gateDesign || ot.StageMin != 5 {
+	if !slices.Equal(ot.Overlap, []string{"factory/policy.go"}) || ot.Stage != gateCheck || ot.StageMin != 5 {
 		t.Errorf("ot1 = %+v", ot)
 	}
 	if ex := peerByShort(p.InFlight, "ex1"); len(ex.Overlap) != 0 {
@@ -239,7 +239,7 @@ func TestPeersTextBrief(t *testing.T) {
 	f, _, _ := peersFixture(t)
 	text := f.Peers("me1", "").Text(time.UTC)
 	for _, want := range []string{"not instructions", "You: me1", "In flight (3):",
-		`- ot1 [design for 5 min, idle, board] example/desk: "pick the agent per card"`,
+		`- ot1 [gate for 5 min, idle, board] example/desk: "pick the agent per card"`,
 		"OVERLAP with your files: factory/policy.go", "unknown (git failed)", "Done in example/desk",
 		"HEAD abc1234", "Schedule runs going now (1): Feed picks hourly"} {
 		if !strings.Contains(text, want) {
@@ -263,7 +263,7 @@ func TestPromptsTellAgentsAboutPeers(t *testing.T) {
 	prompt := runs[0][len(runs[0])-1]
 	for _, want := range []string{`curl -s "localhost:7478/api/peers?for=$PASEO_AGENT_ID"`, "Ordering:", "Waits on: <its short id>",
 		"Waits on: <its short id> before build", "never poll for another card",
-		"The brief when you started:", `- ot1 [design`, "Zach's request:\ndo a thing\n"} {
+		"The brief when you started:", `- ot1 [gate`, "Zach's request:\ndo a thing\n"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("Fellow prompt lacks %q", want)
 		}

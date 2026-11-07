@@ -434,10 +434,10 @@ func (f *Factory) replaceReviewer(a Agent, kind, why string) error {
 }
 
 // returnToBuild sends a card whose landing failed back to building, with note on the card and msg to
-// the agent: it fixes the branch, the design gate runs again (it reflects the latest main), then sign-off,
-// the land prompt and its scan. After landReturnCap returns the card stays in landing marked stuck.
+// the agent: it fixes the branch, the gate runs again (it checks the branch reflects the latest main),
+// then the land prompt and its scan. After landReturnCap returns the card stays in landing marked stuck.
 func (f *Factory) returnToBuild(a Agent, note, msg string, landedDiff bool) error {
-	return f.returnToBuildFrom(a, gateDesign, note, msg, landedDiff)
+	return f.returnToBuildFrom(a, gateCheck, note, msg, landedDiff)
 }
 
 // returnToBuildFrom is returnToBuild with the gate that runs when the builder stops.
@@ -460,15 +460,15 @@ func landFailMsg(why string) string {
 		"origin/main, resolve any conflicts, rerun go vet and the repo's tests (or its own checks), and commit on your " +
 		"branch. If the land failed on a secret scan hit, rebasing does not fix it: remove the value and rewrite your " +
 		"own unpushed commits (git rebase -i, git commit --amend); a later commit that deletes it is not enough, since " +
-		"the push would publish the earlier commit too. Then stop with a short summary. The design and sign-off gates run again, then " +
+		"the push would publish the earlier commit too. Then stop with a short summary. The gate runs again, then " +
 		"the factory sends the land prompt. " + overviewReminder
 }
 
 func landDiffMsg(why string) string {
-	return "What reached origin/main is not exactly the commits the gates approved (" + trunc(why, landFailMax) +
+	return "What reached origin/main is not exactly the commits the gate approved (" + trunc(why, landFailMax) +
 		"). It is already on origin/main: do not push it again. Check what landed against what was reviewed. If " +
 		"something is wrong, fix it forward on your branch rebased on origin/main, rerun the tests and commit (do " +
-		"NOT land). Then stop with a short summary. The gates cover what landed, and the land prompt that follows " +
+		"NOT land). Then stop with a short summary. The gate covers what landed, and the land prompt that follows " +
 		"only verifies it. " + overviewReminder
 }
 
@@ -524,21 +524,21 @@ func (f *Factory) returnDirect(a Agent, why string) error {
 
 // rebuildWithoutDep tells a held card that the card its plan waits on was dropped or cannot be
 // found. It decides itself whether to rebuild without it or land as is; either way it goes back
-// through the gates.
+// through the gate.
 func (f *Factory) rebuildWithoutDep(a Agent, id, state string) error {
 	what := "was dropped or closed without landing"
 	if state == depMissing {
 		what = "is not on the board (a wrong id, or it left the board before it landed)"
 	}
 	beforeBuild := heldBeforeBuild(a)
-	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: gateRequest,
+	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: gateCheck,
 		labelSince: iso(f.Now()), labelHeld: "", labelWaitsOn: "", labelWaitsDone: "", labelWaitsBefore: "",
 		labelNote: rebuildingNotePrefix + id + " " + state})
 	step := "rebuilding without the card it waited on"
 	prompt := "Card " + id + ", which this card lands after, " + what + ". Do not land now. Decide " +
 		"yourself: if this change needs that card's work, rebuild without it (bring in what you need, or cut the part " +
 		"that depends on it); if it does not, say so and change nothing. Rebase on origin/main, rerun the tests and " +
-		"commit on your branch. Then stop with a short summary that says which you chose. The gates run again, " +
+		"commit on your branch. Then stop with a short summary that says which you chose. The gate runs again, " +
 		"then the factory sends the land prompt. " + overviewReminder
 	if beforeBuild {
 		step = "build"
@@ -588,14 +588,14 @@ func (f *Factory) migrateWait(a Agent, c Card) (bool, error) {
 			return f.updateRecovery(a, func(r *recovery) { r.Phase = "exhausted" },
 				map[string]string{labelStage: r.Stage, labelStuck: stuckAgentError, labelNote: ""})
 		}
-	case (note == "stuck" || note == legacyNoVerdictNote) && (stuckWhy[from] != "" || from == "review" || from == "plan-review" || from == "plan"):
+	case (note == "stuck" || note == legacyNoVerdictNote) && (stuckWhy[from] != "" || isOldGate(from) || from == "review" || from == "plan-review" || from == "plan"):
 		why := stuckStopped
-		if isGate(from) || from == "review" || from == "plan-review" {
+		if isGateSpan(from) || from == "review" || from == "plan-review" {
 			why = stuckReview
 		}
 		stage := from
-		if stage == "review" || stage == "plan-review" || stage == "plan" {
-			stage = gateRequest // a column of the old flow
+		if stage == "review" || stage == "plan-review" || stage == "plan" || isOldGate(stage) {
+			stage = gateCheck // a column of an earlier flow
 		}
 		move = func() error {
 			return f.setLabels(a.ID, map[string]string{labelStage: stage, labelStuck: why, labelNote: "", labelStuckFrom: ""})

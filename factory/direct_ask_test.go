@@ -739,7 +739,7 @@ func TestReplyToDirectAskStaysDirect(t *testing.T) {
 				t.Fatal(err)
 			}
 			l := p.labels("c1")
-			if l[labelStage] != "building" || l[labelNote] != "answering Zach" || l[labelAutoReview] != gateRequest {
+			if l[labelStage] != "building" || l[labelNote] != "answering Zach" || l[labelAutoReview] != gateCheck {
 				t.Fatalf("after the reply: %v", l)
 			}
 			sent := p.sent("c1")

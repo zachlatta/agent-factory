@@ -11,7 +11,7 @@ import (
 // queuedAfterFollowUp is a card whose builder answered a follow-up and stopped, with a code review
 // queued: a Tick would start it.
 func queuedAfterFollowUp() Agent {
-	return card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
+	return card("c1", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSource: "board",
 		labelRoundsRequest: "1", labelSince: ago(10 * time.Minute)})
 }
 
@@ -44,7 +44,7 @@ func staysDone(t *testing.T, name string, p *fakePaseo) {
 func TestLateVerdictAfterDoneDoesNotReviveTheCard(t *testing.T) {
 	for _, how := range []string{"done", "stage"} {
 		t.Run(how, func(t *testing.T) {
-			rev := reviewer("r1", "c1", gateSignoff)
+			rev := reviewer("r1", "c1", gateCheck)
 			rev.Status = "running"
 			land := reviewer("r2", "c1", "land")
 			land.Status = "running"
@@ -77,10 +77,10 @@ func TestLateVerdictAfterDoneDoesNotReviveTheCard(t *testing.T) {
 
 // A reviewer that somehow started after the card was finished does not move it either.
 func TestVerdictForAFinishedCardIsConsumed(t *testing.T) {
-	rev := reviewer("r1", "c1", gateSignoff)
+	rev := reviewer("r1", "c1", gateCheck)
 	rev.CreatedAt = t0.Add(time.Minute)
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: "landed", labelNote: "marked done by Zach"}), rev)
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(rev); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestMessageAfterDoneStillReopensTheCard(t *testing.T) {
 	if _, err := f.Act("send", Body{ID: "c1", Message: "One more thing: handle the empty case."}); err != nil {
 		t.Fatal(err)
 	}
-	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != "building" || l[labelAutoReview] != gateCheck {
 		t.Fatalf("message did not reopen the card: %v", l)
 	}
 	answered := merged(done, p.labels("c1"))
@@ -113,7 +113,7 @@ func TestMessageAfterDoneStillReopensTheCard(t *testing.T) {
 	f.SetAgents([]Agent{answered})
 	f.Now = func() time.Time { return t0.Add(10 * time.Minute) }
 	f.Tick()
-	if len(p.runsWithLabel(labelArg(labelReviewKind, gateRequest))) != 1 || p.labels("c1")[labelStage] != gateRequest {
+	if len(p.runsWithLabel(labelArg(labelReviewKind, gateCheck))) != 1 || p.labels("c1")[labelStage] != gateCheck {
 		t.Errorf("reopened card not reviewed: %v", p.labels("c1"))
 	}
 }
@@ -132,7 +132,7 @@ func TestStaleReviewStartAfterDoneAndAFinalReport(t *testing.T) {
 			reported.LastActivityAt = t0.Add(time.Minute)
 			f.SetAgents([]Agent{reported})
 			f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
-			if _, err := f.StartReview(stale, gateRequest); err != nil {
+			if _, err := f.StartReview(stale, gateCheck); err != nil {
 				t.Fatal(err)
 			}
 			staysDone(t, how, p)
@@ -152,17 +152,17 @@ func TestExplicitReviewAfterDoneWaitsForTheRunningAgent(t *testing.T) {
 	running.Status = "running"
 	f.SetAgents([]Agent{running})
 	f.Now = func() time.Time { return t0.Add(time.Minute) }
-	res, err := f.Act("review", Body{ID: "c1", Kind: gateRequest})
+	res, err := f.Act("review", Body{ID: "c1", Kind: gateCheck})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if q, _ := res.(map[string]bool); !q["queued"] {
 		t.Fatalf("review of a running agent not queued: %v", res)
 	}
-	if l := p.labels("c1"); l[labelStage] == "landed" || l[labelAutoReview] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] == "landed" || l[labelAutoReview] != gateCheck {
 		t.Fatalf("queued review left in Done: %v", l)
 	}
-	if runs := p.runsWithLabel(labelArg(labelReviewKind, gateRequest)); len(runs) != 0 {
+	if runs := p.runsWithLabel(labelArg(labelReviewKind, gateCheck)); len(runs) != 0 {
 		t.Fatalf("reviewed a running agent: %v", runs)
 	}
 	stopped := merged(running, p.labels("c1"))
@@ -171,7 +171,7 @@ func TestExplicitReviewAfterDoneWaitsForTheRunningAgent(t *testing.T) {
 	f.SetAgents([]Agent{stopped})
 	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
 	f.Tick()
-	if len(p.runsWithLabel(labelArg(labelReviewKind, gateRequest))) != 1 || p.labels("c1")[labelStage] != gateRequest {
+	if len(p.runsWithLabel(labelArg(labelReviewKind, gateCheck))) != 1 || p.labels("c1")[labelStage] != gateCheck {
 		t.Errorf("queued review did not start once the agent stopped: %v", p.labels("c1"))
 	}
 }
@@ -212,11 +212,11 @@ func TestExplicitReviewAfterDoneStarts(t *testing.T) {
 			var err error
 			switch how {
 			case "review":
-				_, err = f.Act("review", Body{ID: "c1", Kind: gateRequest})
+				_, err = f.Act("review", Body{ID: "c1", Kind: gateCheck})
 			case "rerun":
 				_, err = f.Act("rerun", Body{ID: "c1"})
 			case "stage":
-				if _, err = f.Act("stage", Body{ID: "c1", Stage: gateRequest}); err == nil {
+				if _, err = f.Act("stage", Body{ID: "c1", Stage: gateCheck}); err == nil {
 					moved := merged(done, p.labels("c1"))
 					f.SetAgents([]Agent{moved})
 					err = f.checkStuck(moved, t0.Add(10*time.Minute)) // the empty review column recovers

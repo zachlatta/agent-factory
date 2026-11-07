@@ -16,7 +16,7 @@ func actionIDs(a *Ask) string {
 
 func TestAskDetailFromBuilderAndReviewer(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r := reviewer("r1", "c1", gateSignoff)
+	r := reviewer("r1", "c1", gateCheck)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	f, p := newTestFactory(t)
 	storeLog(t, f, p, "r1", "[User] review\n- test missing at a.go:3\nVERDICT: changes")
@@ -103,7 +103,7 @@ func TestLandedAsks(t *testing.T) {
 
 func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 	c := card("c1", map[string]string{labelStage: "zach", labelVerdict: "close", labelNote: "reviewer suggests closing"})
-	r := reviewer("r1", "c1", gateRequest)
+	r := reviewer("r1", "c1", gateCheck)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Provider, r.SessionID, r.Cwd = "claude", "s-mid", "/w/c1"
 	f, _ := newTestFactory(t)
@@ -162,7 +162,7 @@ func TestAskReplyMidRunTranscriptWithoutToolOutput(t *testing.T) {
 // The unverified-review ask reports uncertainty, offers a fresh review first, and never offers
 // Mark done or a landing approval: both would skip the review the card still needs.
 func TestUnverifiedReviewAskReRunsTheReview(t *testing.T) {
-	a := card("c", map[string]string{labelStage: "zach", labelStuckFrom: gateDesign,
+	a := card("c", map[string]string{labelStage: "zach", labelStuckFrom: gateCheck,
 		labelNote: unverifiedReviewNote + "could not read HEAD: git broke"})
 	ask := BuildBoard([]Agent{a}, nil, t0)[0].Ask
 	if ask == nil || !ask.Actions[0].Primary || ask.Actions[0].Label != "Re-run the review" ||
@@ -212,7 +212,7 @@ func TestAskFor(t *testing.T) {
 			"Ready to try", "builder", "approve,reply,close"},
 		{"older finished work", card("c", map[string]string{labelStage: "zach", labelNote: "built and reviewed: try the preview and approve to land"}),
 			"Ready to try", "builder", "approve,reply,close"},
-		{"review stuck in its column", card("c", map[string]string{labelStage: gateDesign, labelStuck: stuckReview}),
+		{"review stuck in its column", card("c", map[string]string{labelStage: gateCheck, labelStuck: stuckReview}),
 			"Stuck: review could not finish", "builder", "rerun,reply,close"},
 		{"no reviewed commit", card("c", map[string]string{labelStage: "zach", labelNote: noReviewedNote, labelStuckFrom: "review"}),
 			"Review needed: could not verify reviewed work", "builder", "rerun,reply,close"},
@@ -280,7 +280,7 @@ func TestUnverifiedReviewAskDoesNotClaimNothingPublished(t *testing.T) {
 			t.Fatalf("unsupported publication claim: %+v", ask)
 		}
 		if note == parkedStaleNote {
-			if !strings.Contains(ask.Why, "The work changed after review and needs a fresh pass through the gates.") {
+			if !strings.Contains(ask.Why, "The work changed after review and needs a fresh pass through the gate.") {
 				t.Fatalf("changed work: %+v", ask)
 			}
 		} else if !strings.Contains(ask.Why, "The factory could not verify whether the reviewed work was published.") {

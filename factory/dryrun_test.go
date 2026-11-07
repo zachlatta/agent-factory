@@ -218,7 +218,7 @@ func TestDryRunApproveLandingFetchesNothing(t *testing.T) {
 }
 
 func TestDryRunRunMakesOnlyReads(t *testing.T) {
-	f, p, _ := newDryRunFactory(t, card("c1", map[string]string{labelStage: gateRequest}))
+	f, p, _ := newDryRunFactory(t, card("c1", map[string]string{labelStage: gateCheck}))
 	f.cfg.Poll = time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()

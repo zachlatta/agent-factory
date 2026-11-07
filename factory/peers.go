@@ -35,7 +35,7 @@ const (
 )
 
 // peerStages are the columns of cards in flight (everything but Ideas and Done).
-var peerStages = map[string]bool{stageRoute: true, "building": true, gateRequest: true, gateDesign: true, gateSignoff: true,
+var peerStages = map[string]bool{stageRoute: true, "building": true, gateCheck: true,
 	"zach": true, "landing": true}
 
 type Peer struct {

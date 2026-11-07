@@ -35,10 +35,10 @@ func TestInboxCardWithoutPlanFinishesDirect(t *testing.T) {
 }
 
 func TestBoardCardLandMessageHasNoEmail(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
-		labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1",
+		labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateCheck))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	if msgs := p.sent("c1"); len(msgs) != 1 || strings.Contains(msgs[0], "reply_to_message") {
 		t.Errorf("sent = %v", msgs)
@@ -208,7 +208,7 @@ func TestInboxIntakeCarriesIntoFreshStages(t *testing.T) {
 	plan, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]string{
 		{"type": "text", "text": "PLAN: rename it and keep a redirect\nBUILD SIDE EFFECTS: none\nTIER: low"}}}})
 	writeFile(t, f.cfg.Home+"/.claude/projects/-test/"+testSession("c1")+".jsonl", string(user)+"\n"+string(plan)+"\n")
-	r := reviewer("r1", "c1", gateRequest)
+	r := reviewer("r1", "c1", gateCheck)
 	f.SetAgents([]Agent{a, r})
 	storeLog(t, f, p, "r1", "- fix it\nVERDICT: changes")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {

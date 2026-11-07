@@ -61,14 +61,14 @@ func TestTimingRecordsStagesFromAcceptedReads(t *testing.T) {
 	}
 	// a move with a since label is dated by it; the same read again adds nothing
 	f.Now = func() time.Time { return t0.Add(10 * time.Minute) }
-	b := moved(a, gateRequest, t0.Add(9*time.Minute).Format(time.RFC3339))
+	b := moved(a, gateCheck, t0.Add(9*time.Minute).Format(time.RFC3339))
 	f.SetAgents([]Agent{b})
 	f.SetAgents([]Agent{b})
 	// Needs Zach sets no since: it is dated when the factory saw it
 	f.Now = func() time.Time { return t0.Add(20 * time.Minute) }
 	f.SetAgents([]Agent{moved(b, "zach", "")})
 	ct = timing(t, f, "c1")
-	if got := strings.Join(stages(ct), " "); got != "building request zach" {
+	if got := strings.Join(stages(ct), " "); got != "building gate zach" {
 		t.Fatalf("stages = %s", got)
 	}
 	if !ct.Events[1].At.Equal(t0.Add(9*time.Minute)) || !ct.Events[2].At.Equal(t0.Add(20*time.Minute)) {
@@ -93,7 +93,7 @@ func TestTimingNeedsNoPaseoCall(t *testing.T) {
 	before := len(p.calls)
 	f.SetAgents([]Agent{moved(a, "building", ago(-time.Minute))})
 	f.Now = func() time.Time { return t0.Add(time.Hour) }
-	f.SetAgents([]Agent{moved(a, gateDesign, "")})
+	f.SetAgents([]Agent{moved(a, gateCheck, "")})
 	f.SetAgents([]Agent{moved(a, "landed", "")})
 	if len(p.calls) != before {
 		t.Errorf("paseo calls: %v", p.calls[before:])
@@ -104,7 +104,7 @@ func TestTimingIgnoresOlderReads(t *testing.T) {
 	a := fresh("c1")
 	f, _ := newTestFactory(t, a)
 	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
-	newer := moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))
+	newer := moved(a, gateCheck, t0.Add(4*time.Minute).Format(time.RFC3339))
 	seqOld, seqNew := f.nextRead(), f.nextRead()
 	if !f.setAgents([]Agent{newer}, seqNew, false) {
 		t.Fatal("newer read refused")
@@ -113,7 +113,7 @@ func TestTimingIgnoresOlderReads(t *testing.T) {
 	if f.setAgents([]Agent{moved(a, "zach", "")}, seqOld, false) {
 		t.Fatal("older read accepted")
 	}
-	if got := strings.Join(stages(timing(t, f, "c1")), " "); got != "building request" {
+	if got := strings.Join(stages(timing(t, f, "c1")), " "); got != "building gate" {
 		t.Errorf("stages = %s", got)
 	}
 	// the store's own guard, for reads that reach it out of order
@@ -478,13 +478,13 @@ func TestMetricsStepsTurnsFiltersAndCoverage(t *testing.T) {
 		`{"timestamp":"` + ts(5*time.Minute) + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\nignore"}]}}`,
 		`{"timestamp":"` + ts(5*time.Minute+10*time.Second) + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review plan"}]}}`,
 		`{"timestamp":"` + ts(6*time.Minute) + `","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"checking"}]}}`,
-		`{"timestamp":"` + ts(7*time.Minute+10*time.Second) + `","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"VERDICT: approve"}]}}`,
+		`{"timestamp":"` + ts(7*time.Minute+10*time.Second) + `","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve"}]}}`,
 	}, "\n")+"\n")
 
 	// Antigravity code reviewer session (180s turn).
 	write(".gemini/antigravity-cli/brain/agy-rev/.system_generated/logs/transcript_full.jsonl", strings.Join([]string{
 		`{"step_index":1,"type":"USER_INPUT","created_at":"` + ts(30*time.Minute) + `","content":"<USER_REQUEST>Review code</USER_REQUEST>"}`,
-		`{"step_index":2,"type":"PLANNER_RESPONSE","created_at":"` + ts(33*time.Minute) + `","content":"VERDICT: approve"}`,
+		`{"step_index":2,"type":"PLANNER_RESPONSE","created_at":"` + ts(33*time.Minute) + `","content":"MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve"}`,
 	}, "\n")+"\n")
 
 	// Muse sub-agent session: one completed 90s turn and one unfinished turn (missing assistant boundary).
@@ -641,11 +641,11 @@ func TestTimingSurvivesRestart(t *testing.T) {
 	a := fresh("c1")
 	f, p := newTestFactory(t, a)
 	f.Now = func() time.Time { return t0.Add(5 * time.Minute) }
-	f.SetAgents([]Agent{moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))})
+	f.SetAgents([]Agent{moved(a, gateCheck, t0.Add(4*time.Minute).Format(time.RFC3339))})
 	for range 5 {
 		f.nextRead() // the old run read many times; the new one starts again at 0
 	}
-	f.SetAgents([]Agent{moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))})
+	f.SetAgents([]Agent{moved(a, gateCheck, t0.Add(4*time.Minute).Format(time.RFC3339))})
 	if b, err := os.ReadFile(filepath.Join(f.cfg.StateDir, "timings.json")); err != nil || strings.Contains(strings.ToLower(string(b)), "seq") {
 		t.Fatalf("file = %s %v (no read number saved)", b, err)
 	}
@@ -654,16 +654,16 @@ func TestTimingSurvivesRestart(t *testing.T) {
 	g.Now = func() time.Time { return t0.Add(30 * time.Minute) }
 	g.GitOut = f.GitOut
 	// unchanged column: no duplicate
-	g.SetAgents([]Agent{moved(a, gateRequest, t0.Add(4*time.Minute).Format(time.RFC3339))})
-	if got := strings.Join(stages(timing(t, g, "c1")), " "); got != "building request" {
+	g.SetAgents([]Agent{moved(a, gateCheck, t0.Add(4*time.Minute).Format(time.RFC3339))})
+	if got := strings.Join(stages(timing(t, g, "c1")), " "); got != "building gate" {
 		t.Fatalf("after restart stages = %s", got)
 	}
 	// a move made while the factory was down is dated by its since; the next one is still recorded
 	g.SetAgents([]Agent{moved(a, "building", t0.Add(20*time.Minute).Format(time.RFC3339))})
 	g.Now = func() time.Time { return t0.Add(40 * time.Minute) }
-	g.SetAgents([]Agent{moved(a, gateDesign, t0.Add(39*time.Minute).Format(time.RFC3339))})
+	g.SetAgents([]Agent{moved(a, gateCheck, t0.Add(39*time.Minute).Format(time.RFC3339))})
 	ct := timing(t, g, "c1")
-	if got := strings.Join(stages(ct), " "); got != "building request building design" {
+	if got := strings.Join(stages(ct), " "); got != "building gate building gate" {
 		t.Fatalf("stages = %s", got)
 	}
 	if !ct.Events[2].At.Equal(t0.Add(20 * time.Minute)) {
@@ -672,17 +672,17 @@ func TestTimingSurvivesRestart(t *testing.T) {
 }
 
 func TestTimingRecordsReviewRounds(t *testing.T) {
-	c := moved(fresh("c1"), gateDesign, ago(5*time.Minute))
+	c := moved(fresh("c1"), gateCheck, ago(5*time.Minute))
 	c.Labels[labelPrefix+labelRoundsRequest] = "1"
-	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
-	storeLog(t, f, p, "r1", "VERDICT: approve")
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateCheck))
+	storeLog(t, f, p, "r1", "MEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r1"))
 	ct := timing(t, f, "c1")
 	if len(ct.Rounds) != 1 {
 		t.Fatalf("rounds = %+v", ct.Rounds)
 	}
 	r := ct.Rounds[0]
-	if r.Kind != gateSignoff || r.N != 1 || r.Verdict != "approve" || !r.Start.Equal(t0.Add(-5*time.Minute)) || !r.End.Equal(t0) {
+	if r.Kind != gateCheck || r.N != 1 || r.Verdict != "approve" || !r.Start.Equal(t0.Add(-5*time.Minute)) || !r.End.Equal(t0) {
 		t.Errorf("round = %+v", r)
 	}
 }

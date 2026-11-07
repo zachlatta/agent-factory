@@ -83,11 +83,19 @@ func PreviewHandler(root string) (http.Handler, error) {
 			Labels: map[string]string{labelPrefix + labelStage: stage[0], labelPrefix + labelSource: "board", labelPrefix + labelSeen: strconv.FormatInt(now.Unix(), 10)}}
 		request, reply := previewRequest, previewReply
 		if stage[0] == "zach" {
-			// a decision for Zach: the sign-off gate sent it to him
+			// a decision for Zach: the gate sent it to him for sign-off
 			a.Title, request, reply = "Board card list loads faster", previewDecisionRequest, previewDecisionReply
-			a.Labels[labelPrefix+labelVerdict] = "signoff approve"
+			a.Labels[labelPrefix+labelVerdict] = "gate approve"
+			a.Labels[labelPrefix+labelRoundsGate] = "1"
+			a.Labels[labelPrefix+labelGrades] = "request:green works:green design:green public:n/a signoff:red"
 			a.Labels[labelPrefix+labelNote] = readyNote(1)
 			a.Labels[labelPrefix+labelAskWhy] = "it changes more than you asked for"
+		}
+		if stage[0] == gateCheck {
+			// a second round: the first sent it back for a yellow check
+			a.Labels[labelPrefix+labelVerdict] = "gate changes"
+			a.Labels[labelPrefix+labelRoundsGate] = "1"
+			a.Labels[labelPrefix+labelGrades] = "request:green works:yellow design:green public:n/a signoff:green"
 		}
 		if stage[0] == "landing" {
 			a.Labels[labelPrefix+labelHeld] = "preview-zach"
@@ -120,15 +128,15 @@ func PreviewHandler(root string) (http.Handler, error) {
 	delete(ready.Labels, labelPrefix+labelAwaiting)
 	delete(ready.Labels, labelPrefix+labelVerdict)
 	ready.Labels[labelPrefix+labelNote] = readyNote(1)
-	// built and through the gates, as real finished work is
-	ready.Labels[labelPrefix+labelRoundsRequest], ready.Labels[labelPrefix+labelRoundsDesign] = "1", "1"
+	// built and through the gate, as real finished work is
+	ready.Labels[labelPrefix+labelRoundsGate] = "1"
 	agents = append(agents, ready)
 	// Publication uncertainty is a technical stop, never a claim that nothing was published.
 	uncertain := ready
 	uncertain.ID, uncertain.SessionID, uncertain.Title = "preview-unverified", "preview-unverified", "Verify published work"
 	uncertain.Labels = maps.Clone(ready.Labels)
 	uncertain.Labels[labelPrefix+labelNote] = unverifiedReviewNote + "could not read HEAD. The factory could not verify whether the reviewed work was published."
-	uncertain.Labels[labelPrefix+labelStuckFrom] = gateDesign
+	uncertain.Labels[labelPrefix+labelStuckFrom] = gateCheck
 	if err := writePreviewSession(home, uncertain.Cwd, uncertain.ID, previewRequest, ""); err != nil {
 		return nil, err
 	}
@@ -149,8 +157,7 @@ func PreviewHandler(root string) (http.Handler, error) {
 		return nil, err
 	}
 	asked.Labels = maps.Clone(ready.Labels)
-	delete(asked.Labels, labelPrefix+labelRoundsRequest)
-	delete(asked.Labels, labelPrefix+labelRoundsDesign)
+	delete(asked.Labels, labelPrefix+labelRoundsGate)
 	asked.Labels[labelPrefix+labelTrack] = "direct"
 	asked.Labels[labelPrefix+labelNote] = directAskNote("Send the booth form with the larger table?")
 	asked.Labels[labelPrefix+labelDue] = iso(now.Add(10 * time.Hour))
@@ -279,7 +286,7 @@ func previewAction(f *Factory, w http.ResponseWriter, r *http.Request) {
 	case "resume", "rerun":
 		a.ArchivedAt = time.Time{}
 		a.Labels[labelPrefix+labelStuck] = ""
-		a.Labels[labelPrefix+labelAutoReview] = gateRequest
+		a.Labels[labelPrefix+labelAutoReview] = gateCheck
 	case "send":
 		a.ArchivedAt = time.Time{}
 		a.Labels[labelPrefix+labelStuck] = ""

@@ -450,7 +450,7 @@ func tokenStage(e tokenEvent, t CardTiming, now time.Time) (string, int, int) {
 		}
 		round := 0
 		for _, r := range t.Rounds {
-			if !e.From.Before(r.Start) && !r.End.IsZero() && e.At.Before(r.End) && ((span.Stage == "plan-review" && r.Kind == "plan") || (span.Stage == "review" && r.Kind == "code") || (isGate(span.Stage) && r.Kind == span.Stage)) {
+			if !e.From.Before(r.Start) && !r.End.IsZero() && e.At.Before(r.End) && ((span.Stage == "plan-review" && r.Kind == "plan") || (span.Stage == "review" && r.Kind == "code") || (isGateSpan(span.Stage) && r.Kind == span.Stage)) {
 				round = r.N
 			}
 		}

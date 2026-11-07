@@ -190,10 +190,10 @@ func baseAsk(c Card, a Agent) *Ask {
 			why = "The reviewed work is not on origin/main."
 		}
 		if note == parkedStaleNote {
-			why = "The work changed after review and needs a fresh pass through the gates."
+			why = "The work changed after review and needs a fresh pass through the gate."
 		}
 		return &Ask{Label: "Review needed", Title: "Review needed: could not verify reviewed work", From: "builder",
-			Why:     why + " " + strings.TrimRight(strings.ReplaceAll(strings.TrimPrefix(note, unverifiedReviewNote), why, ""), ". ") + ". Re-running starts the gates on what the card has now.",
+			Why:     why + " " + strings.TrimRight(strings.ReplaceAll(strings.TrimPrefix(note, unverifiedReviewNote), why, ""), ". ") + ". Re-running starts the gate on what the card has now.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	case a.L(labelVerdict) == "close":
 		return &Ask{Label: "Close this card?", Title: closeTitle, From: "reviewer",

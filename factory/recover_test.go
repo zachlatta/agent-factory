@@ -254,9 +254,9 @@ func TestOldLimitLabelIsReadThenCleared(t *testing.T) {
 
 func TestBlockedReviewerIsReplaced(t *testing.T) {
 	for _, why := range []string{"permission", "stalled"} {
-		c := card("parent", map[string]string{labelStage: gateRequest, labelSince: ago(time.Hour)})
+		c := card("parent", map[string]string{labelStage: gateCheck, labelSince: ago(time.Hour)})
 		c.LastActivityAt = t0.Add(-time.Hour)
-		r := reviewer("blocked-review", "parent", gateRequest)
+		r := reviewer("blocked-review", "parent", gateCheck)
 		r.Status, r.LastActivityAt = "running", t0.Add(-(stallMinutes+1)*time.Minute)
 		if why == "permission" {
 			r.Pending, r.LastActivityAt = "Bash: rm -rf x", t0.Add(-stuckAfter)
@@ -376,7 +376,7 @@ func TestLandedDiffDiffersOnAPublicRepo(t *testing.T) {
 
 func TestLandedDiffRecoveryReviewsPublishedHead(t *testing.T) {
 	c := card("c1", map[string]string{
-		labelStage: "building", labelAutoReview: gateRequest, labelRoundsRequest: "1",
+		labelStage: "building", labelAutoReview: gateCheck, labelRoundsRequest: "1",
 		labelSince: ago(10 * time.Minute), labelLandedVerified: "1", labelReviewed: "h1",
 	})
 	b, _ := json.Marshal(recovery{Lands: 1, LandedDiff: true})
@@ -388,21 +388,21 @@ func TestLandedDiffRecoveryReviewsPublishedHead(t *testing.T) {
 	})
 	storeLog(t, f, p, c.ID, "The published change needs no further edits.\nREMAINING: none")
 	f.Tick()
-	if l := p.labels(c.ID); l[labelStage] != gateRequest || l[labelReviewed] != "h2" || p.runs != 1 {
+	if l := p.labels(c.ID); l[labelStage] != gateCheck || l[labelReviewed] != "h2" || p.runs != 1 {
 		t.Fatalf("published recovery skipped review: labels %v runs %d", l, p.runs)
 	}
 }
 
 func TestReLandAfterRecoveryStillScans(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelRoundsDesign: "1",
+	c := card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1", labelRoundsDesign: "1",
 		labelReviewed: reviewedSHA})
 	c.Repo = publicRepo
 	b, _ := json.Marshal(recovery{Lands: 1})
 	c.Labels[labelPrefix+labelRecovery] = base64.RawURLEncoding.EncodeToString(b)
-	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateCheck))
 	ranges := fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "TIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -586,9 +586,9 @@ func TestLegacyErrorWaitMovesToDoneWhenLanded(t *testing.T) {
 // minutes, then the card is marked stuck in its column: never Needs Zach, never an email.
 
 func TestErrorReviewerIsReplaced(t *testing.T) {
-	c := card("parent", map[string]string{labelStage: gateDesign, labelSince: ago(time.Hour)})
+	c := card("parent", map[string]string{labelStage: gateCheck, labelSince: ago(time.Hour)})
 	c.LastActivityAt = t0.Add(-time.Hour)
-	r := reviewer("failed-review", "parent", gateSignoff)
+	r := reviewer("failed-review", "parent", gateCheck)
 	r.Status = "error"
 	f, p, m := mailFactory(t, c, r)
 	f.Tick()
@@ -615,8 +615,8 @@ func TestOldWaitsMoveToAutomaticRecovery(t *testing.T) {
 	}{
 		{"agent error", map[string]string{labelNote: legacyLimitNote, legacyLimitLabel: base64.RawURLEncoding.EncodeToString(exhausted)}, "", "landing", stuckAgentError, 0},
 		{"stuck builder", map[string]string{labelNote: "stuck", labelStuckFrom: "building"}, "", "building", stuckStopped, 0},
-		{"stuck reviewer", map[string]string{labelNote: "stuck", labelStuckFrom: "review"}, "", gateRequest, stuckReview, 0},
-		{"no verdict", map[string]string{labelNote: legacyNoVerdictNote, labelStuckFrom: "plan-review"}, "", gateRequest, stuckReview, 0},
+		{"stuck reviewer", map[string]string{labelNote: "stuck", labelStuckFrom: "review"}, "", gateCheck, stuckReview, 0},
+		{"no verdict", map[string]string{labelNote: legacyNoVerdictNote, labelStuckFrom: "plan-review"}, "", gateCheck, stuckReview, 0},
 		{"landing not verified", map[string]string{labelNote: legacyNotVerified}, "", "building", "", 1},
 		{"direct not on main", map[string]string{labelNote: legacyNotVerified, labelTrack: "direct"}, "", "building", stuckLanding, 0},
 		{"landed diff, private", map[string]string{labelNote: landDiffNotePrefix + ": extra commit"}, "", "building", "", 1},

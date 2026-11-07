@@ -51,14 +51,14 @@ const (
 	labelReplacedBy   = "replaced-by"  // replacement card agent id that took over this card (replace.go)
 	labelHandoff      = "handoff"      // on the old agent: the step of its one model hand-off (handoff.go)
 	labelTrack        = "track"        // "direct": the card did its errand in one pass; Zach's replies keep it on that track
-	labelAskWhy       = "ask-why"      // why the sign-off gate sends a card to Zach before it lands (signoff.go)
+	labelAskWhy       = "ask-why"      // why the gate sends a card to Zach before it lands (signoff.go)
 	labelReady        = "ready"        // Ready presentations so far; unchanged feedback answers do not increment it
 	labelPermitTold   = "permit-told"  // the stage whose stuck permission prompt was already emailed to Zach (permit.go)
 	labelDue          = "due"          // when a direct card's question to Zach is due (due.go)
 	labelDueTold      = "due-told"     // the due time Zach was already reminded of (due.go)
 )
 
-// labelCodeOK is the HEAD the sign-off gate passed, set where the card moves on
+// labelCodeOK is the HEAD the gate passed, set where the card moves on
 // (passCode) and cleared when any review starts. bin/land's landing review reuses only that approval.
 const labelCodeOK = "code-approved"
 
@@ -85,12 +85,26 @@ const labelWorkLeftRounds = "work-left-rounds"
 // so a comma in a value would split it and fail the whole update: commas become semicolons.
 func labelArg(k, v string) string { return labelPrefix + k + "=" + strings.ReplaceAll(v, ",", ";") }
 
-// A gate's round count, one label each (roundsLabel).
+// The gate's round count (roundsLabel), and the three earlier gates' counts, cleared with it.
 const (
-	labelRoundsRequest = gateRequest + "-rounds"
-	labelRoundsDesign  = gateDesign + "-rounds"
-	labelRoundsSignoff = gateSignoff + "-rounds"
+	labelRoundsGate    = gateCheck + "-rounds"
+	labelRoundsRequest = oldGateRequest + "-rounds"
+	labelRoundsDesign  = oldGateDesign + "-rounds"
+	labelRoundsSignoff = oldGateSignoff + "-rounds"
 )
+
+// labelGrades is the gate's last grades (gradesLabel): "request:green works:yellow design:green public:n/a signoff:green".
+const labelGrades = "grades"
+
+// gatedBefore reports whether card a has had a gate round, in this flow or an earlier one.
+func gatedBefore(a Agent) bool {
+	for _, k := range []string{labelRoundsGate, labelRoundsRequest, labelRoundsDesign, labelRoundsSignoff} {
+		if atoi(a.L(k)) > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // roundsLabel is the label counting gate kind's rounds.
 func roundsLabel(kind string) string { return kind + "-rounds" }

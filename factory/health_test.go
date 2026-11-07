@@ -100,7 +100,7 @@ func TestTickStopsBetweenAgents(t *testing.T) {
 }
 
 func TestReadOnlyRunCallsNoPaseo(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest}))
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateCheck}))
 	f.cfg.ReadOnly = true
 	f.cfg.Poll = time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)

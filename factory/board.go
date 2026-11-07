@@ -14,9 +14,7 @@ var Stages = [][3]string{
 	{"idea", "Ideas", "Suggested by agents, and Scouts looking for them. Ideas start on their own by priority, a few at a time per repo."},
 	{stageRoute, "Pick repo", "Opus picks the repo this request belongs in."},
 	{"building", "Build", "An agent builds the proposed solution, read-only against production."},
-	{gateRequest, "Meets request", "A different agent checks it meets the request and any unsaid context."},
-	{gateDesign, "Design", "A different agent checks it is well designed, and does small refactors itself."},
-	{gateSignoff, "Sign-off", "A separate agent decides whether you need to sign off before it goes live."},
+	{gateCheck, "Gate", "A different agent grades it green, yellow or red: meets the request and works, design, public safety, and whether you sign off."},
 	{"zach", "Needs Zach", "Waiting on you: a question, a preview to try, or an approval."},
 	{"landing", "Landing", "Approved. Opus is landing it."},
 	{"landed", "Done", "Landed, answered by email, or finished and seen."},
@@ -49,10 +47,8 @@ func Derive(a Agent) string {
 	switch st { // columns of the old flow, on a card not yet moved (migrateFlow), or archived there
 	case "plan":
 		st = "building"
-	case "plan-review":
-		st = gateRequest
-	case "review":
-		st = gateDesign
+	case "plan-review", "review", oldGateRequest, oldGateDesign, oldGateSignoff:
+		st = gateCheck
 	}
 	if validStage(st) {
 		return st
@@ -156,8 +152,8 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			Branch: a.Branch, Cwd: a.Cwd, Model: a.Model, Status: a.Status, Source: source(a), Stage: Derive(a),
 			Labelled: a.L(labelStage) != "", Flags: []string{}, Verdict: a.L(labelVerdict), Note: a.L(labelNote),
 			Awaiting: a.L(labelAwaiting), Origin: a.L(labelOrigin), Agent: a.L(labelAgent),
-			Replaces:    lineagePredecessorIDs(agentByID, a.ID),
-			Rounds:      Rounds{Request: atoi(a.L(roundsLabel(gateRequest))), Design: atoi(a.L(roundsLabel(gateDesign))), Signoff: atoi(a.L(roundsLabel(gateSignoff)))},
+			Replaces: lineagePredecessorIDs(agentByID, a.ID),
+			Rounds:   Rounds{Gate: atoi(a.L(labelRoundsGate))}, Grades: a.L(labelGrades),
 			SubmittedBy: submittedBy(a), CanLand: landable(a),
 			CreatedAt: iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
 			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != ""}

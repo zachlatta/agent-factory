@@ -14,7 +14,7 @@ const planLog = "[User] Fellow instructions: plan, then build. Keep the public-r
 
 // planCard is a card in plan review with a readable session, a model and an email thread.
 func planCard(t *testing.T, extra ...Agent) (Agent, *Factory, *fakePaseo) {
-	a := card("c1", map[string]string{labelStage: gateDesign, labelSource: "email", labelAgent: "opus",
+	a := card("c1", map[string]string{labelStage: gateCheck, labelSource: "email", labelAgent: "opus",
 		labelBase: "base1", labelTitled: "given", labelZachThread: "zt-1"})
 	a.Labels[gmailThreadLabel] = "thread-1"
 	a.WorkspaceID = "ws-1"
@@ -113,10 +113,10 @@ func mustChoice(t *testing.T, id string) AgentChoice {
 
 // landCard is a card in code review whose reviewed commit is recorded, with a readable session.
 func landCard(t *testing.T) (Agent, *Factory, *fakePaseo) {
-	a := idea("c1", map[string]string{labelStage: gateDesign, labelAgent: "opus", labelRoundsRequest: "1",
+	a := idea("c1", map[string]string{labelStage: gateCheck, labelAgent: "opus", labelRoundsRequest: "1",
 		labelRoundsDesign: "2", labelRoundsSignoff: "1", labelReviewed: "rev1", labelZachThread: "zt-1"})
 	a.Labels[gmailThreadLabel] = "thread-1"
-	f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff))
+	f, p := newTestFactory(t, a, reviewer("r1", "c1", gateCheck))
 	storeLog(t, f, p, a.ID, planLog+"\n[User] Build it now, as planned.\nBuilt it. Deploy steps: none.")
 	f.GitOut = gitStub(map[string]string{"rev-parse HEAD": "rev1\n", "status --porcelain": "", "diff --no-renames --name-only origin/main...HEAD": "widget.go\n", "log --oneline origin/main..HEAD": "rev1 Add the widget",
 		"diff --stat origin/main...HEAD": " widget.go | 3 +++"})
@@ -125,7 +125,7 @@ func landCard(t *testing.T) (Agent, *Factory, *fakePaseo) {
 
 func TestLandingRunsInAFreshAgentThatPassesTheLandingGate(t *testing.T) {
 	a, f, p := landCard(t)
-	storeLog(t, f, p, "r1", "Fine.\nALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, "r1", "Fine.\nALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestFailedLandingReturnsInAFreshAgentWithItsCount(t *testing.T) {
 	}
 	r := card("new-agent-1", nil)
 	r.Labels = quietRunLabels(runs[0])
-	if r.L(labelStage) != "building" || r.L(labelAutoReview) != gateDesign || readRecovery(r).Lands != 1 {
+	if r.L(labelStage) != "building" || r.L(labelAutoReview) != gateCheck || readRecovery(r).Lands != 1 {
 		t.Fatalf("labels = %v (lands %d)", r.Labels, readRecovery(r).Lands)
 	}
 	if !strings.Contains(runs[0][len(runs[0])-1], "push rejected") {
@@ -205,7 +205,7 @@ func TestWorkLeftAfterLandingRunsInAFreshAgent(t *testing.T) {
 	}
 	r := card("new-agent-1", nil)
 	r.Labels = quietRunLabels(runs[0])
-	if r.L(labelStage) != "building" || r.L(labelAutoReview) != gateRequest || r.L(labelLandedVerified) != "1" || r.L(labelWorkLeftRounds) != "1" {
+	if r.L(labelStage) != "building" || r.L(labelAutoReview) != gateCheck || r.L(labelLandedVerified) != "1" || r.L(labelWorkLeftRounds) != "1" {
 		t.Fatalf("labels = %v", r.Labels)
 	}
 	if !strings.Contains(runs[0][len(runs[0])-1], "measure the tokens") {
@@ -214,13 +214,13 @@ func TestWorkLeftAfterLandingRunsInAFreshAgent(t *testing.T) {
 }
 
 func TestStageHandoffConfirmsThenArchivesOld(t *testing.T) {
-	a, f, p := planCard(t, reviewer("r1", "c1", gateRequest))
+	a, f, p := planCard(t, reviewer("r1", "c1", gateCheck))
 	storeLog(t, f, p, "r1", "- fix it\nVERDICT: changes")
 	if err := f.ApplyVerdict(f.agent("r1")); err != nil {
 		t.Fatal(err)
 	}
 	old := withLabels(a, p.labels(a.ID))
-	r := card("new-agent-1", map[string]string{labelReplaces: a.ID, labelStage: "building", labelAgent: "opus", labelAutoReview: gateDesign})
+	r := card("new-agent-1", map[string]string{labelReplaces: a.ID, labelStage: "building", labelAgent: "opus", labelAutoReview: gateCheck})
 	r.Status = "running"
 	f.SetAgents([]Agent{old, r})
 	f.reap(t0)
@@ -246,7 +246,7 @@ func TestStageHandoffConfirmsThenArchivesOld(t *testing.T) {
 
 func TestStageHandoffRestart(t *testing.T) {
 	start := func(t *testing.T) (Agent, *Factory, *fakePaseo) {
-		a, f, p := planCard(t, reviewer("r1", "c1", gateRequest))
+		a, f, p := planCard(t, reviewer("r1", "c1", gateCheck))
 		storeLog(t, f, p, "r1", "- fix it\nVERDICT: changes")
 		p.runErr = fmt.Errorf("paseo run timed out")
 		if err := f.ApplyVerdict(f.agent("r1")); err != nil {

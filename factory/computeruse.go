@@ -29,7 +29,7 @@ const fellowComputerUseRule = computerUseRule + `
 - Temporary test servers bound to loopback or this host's tailnet IP need no approval, and may read production
   read-only. Nothing here may write to production.
 This applies on the direct track too, including research and checking a site.
-Click through your own UI changes with computer use before the gates: test every changed flow,
+Click through your own UI changes with computer use before the gate: test every changed flow,
 read the page text and inspect screenshots at desktop and phone widths. Use the safe test setup above.
 If access fails or the gateway is full, report what you tried and what remains unverified; never call it a pass.
 `

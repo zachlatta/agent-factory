@@ -152,7 +152,7 @@ func TestBoardPageReviewChipsCollapse(t *testing.T) {
 	// the panel still lists every child and both round counts
 	for _, want := range []string{
 		"kidsHtml(c)",
-		"request ${c.rounds.request} · design ${c.rounds.design} · sign-off ${c.rounds.signoff}",
+		"${c.rounds.gate} (cap 3)", "gradesText(c.grades)",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("panel lost %q", want)
@@ -175,12 +175,13 @@ console.log(JSON.stringify([
           {role:'subagent', status:'running'}, rv('design','closed','nits',1)], {request:2, design:1}),
   labels([rv('request','closed','nits',1), rv('request','running','')], {request:1}),
   labels([rv('signoff','running','')], {}),
+  labels([rv('gate','closed','changes',1), rv('gate','running','')], {gate:1}),
 ]));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
-	want := `[["request gate round 2: nits","design gate round 1: nits"],["request gate round 2 (running)"],["sign-off gate round 1 (running)"]]`
+	want := `[["request gate round 2: nits","design gate round 1: nits"],["request gate round 2 (running)"],["sign-off gate round 1 (running)"],["gate round 2 (running)"]]`
 	if got := strings.TrimSpace(string(out)); got != want {
 		t.Errorf("labels = %s, want %s", got, want)
 	}

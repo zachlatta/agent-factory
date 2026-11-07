@@ -153,12 +153,12 @@ func TestArchivePromptExplainsInterruption(t *testing.T) {
 }
 
 func TestLateVerdictCannotAdvanceInterruptedWork(t *testing.T) {
-	a := card("interrupted-review", map[string]string{labelStage: gateDesign, labelArchiveWatch: "1"})
+	a := card("interrupted-review", map[string]string{labelStage: gateCheck, labelArchiveWatch: "1"})
 	a.ArchivedAt = t0
-	r := reviewer("late-review", a.ID, gateDesign)
+	r := reviewer("late-review", a.ID, gateCheck)
 	f, p := newTestFactory(t, a, r)
 	p.archived[a.ID] = true
-	storeLog(t, f, p, r.ID, "[Assistant] Approved.\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+	storeLog(t, f, p, r.ID, "[Assistant] Approved.\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 	if err := f.ApplyVerdict(r); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestArchivedDirectCardFinishesInsteadOfStuck(t *testing.T) {
 		})
 		a.Cwd = filepath.Join(t.TempDir(), "removed-worktree")
 		a.ArchivedAt = t0
-		r := reviewer("rev1", a.ID, gateRequest)
+		r := reviewer("rev1", a.ID, gateCheck)
 		f, p := newTestFactory(t, a, r)
 		storeLog(t, f, p, a.ID, "[User] Move the call to 4 PM\n[Assistant] Queued for approval.\nTRACK: direct")
 		if err := f.tickAgent(a, t0); err != nil {
@@ -337,10 +337,10 @@ func (p missingCwdSend) Run(ctx context.Context, args ...string) (string, error)
 }
 
 func TestOutsideArchiveKeepsUnfinishedStage(t *testing.T) {
-	for _, stage := range []string{"building", gateRequest, gateDesign, gateSignoff} {
+	for _, stage := range []string{"building", gateCheck, gateCheck, gateCheck} {
 		t.Run(stage, func(t *testing.T) {
 			a := Agent{ID: "interrupted", Status: "closed", ArchivedAt: t0, Labels: map[string]string{
-				"factory.stage": stage, "factory.archive-watch": "1", "factory.auto-review": gateRequest,
+				"factory.stage": stage, "factory.archive-watch": "1", "factory.auto-review": gateCheck,
 			}}
 			if got := Derive(a); got != stage {
 				t.Fatalf("stage = %s; want %s", got, stage)
@@ -381,7 +381,7 @@ func TestInterruptedRecoveryAndDrop(t *testing.T) {
 			}
 			a = withLabels(f.agent(a.ID), p.labels(a.ID))
 			if action == "resume" || action == "send" || action == "rerun" {
-				if a.archived() || stuckReason(a) != "" || a.L(labelAutoReview) != gateRequest {
+				if a.archived() || stuckReason(a) != "" || a.L(labelAutoReview) != gateCheck {
 					t.Fatalf("not recovered: %+v", a)
 				}
 			} else {
@@ -450,7 +450,7 @@ func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
 		{"act rerun", func() error { _, err := f.Act("rerun", Body{ID: a.ID}); return err }},
 		{"act send", func() error { _, err := f.Act("send", Body{ID: a.ID, Message: "try again"}); return err }},
 		{"act approve", func() error { _, err := f.Act("approve", Body{ID: a.ID}); return err }},
-		{"act review", func() error { _, err := f.Act("review", Body{ID: a.ID, Kind: gateRequest}); return err }},
+		{"act review", func() error { _, err := f.Act("review", Body{ID: a.ID, Kind: gateCheck}); return err }},
 		{"act stage building", func() error { _, err := f.Act("stage", Body{ID: a.ID, Stage: "building"}); return err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -487,7 +487,7 @@ func TestArchivedCardWithRemovedWorktreeRefusesWakeActions(t *testing.T) {
 func TestInterruptedReplyUsesNormalSend(t *testing.T) {
 	for _, via := range []string{"board", "email"} {
 		t.Run(via, func(t *testing.T) {
-			a := card("reply", map[string]string{labelStage: gateDesign, labelArchiveWatch: "1", labelStuck: stuckArchived,
+			a := card("reply", map[string]string{labelStage: gateCheck, labelArchiveWatch: "1", labelStuck: stuckArchived,
 				labelRoundsDesign: "4", labelReviewerRetries: "2"})
 			a.Cwd = t.TempDir()
 			a.ArchivedAt = t0

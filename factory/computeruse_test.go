@@ -72,7 +72,7 @@ func TestFellowsGetComputerUseForEveryAgent(t *testing.T) {
 			for _, want := range []string{
 				"Nothing here may write to production.",
 				"may read production",
-				"direct track", "Click through your own UI changes", "before the gates", "Do NOT land",
+				"direct track", "Click through your own UI changes", "before the gate", "Do NOT land",
 			} {
 				if !strings.Contains(prompt, want) {
 					t.Errorf("Fellow prompt lacks %q", want)
@@ -83,7 +83,7 @@ func TestFellowsGetComputerUseForEveryAgent(t *testing.T) {
 }
 
 func TestUIReviewsShareComputerUseAndKeepRestrictions(t *testing.T) {
-	for _, kind := range []string{gateRequest, "land"} {
+	for _, kind := range []string{gateCheck, "land"} {
 		prompt, _ := reviewPrompt(t, kind, diffFiles("web/page.html\n"))
 		checkComputerUsePrompt(t, prompt)
 		for _, unwanted := range []string{
@@ -94,11 +94,14 @@ func TestUIReviewsShareComputerUseAndKeepRestrictions(t *testing.T) {
 				t.Errorf("%s review received builder approval guidance %q", kind, unwanted)
 			}
 		}
-		for _, want := range []string{
-			"Read-only", "Do not edit, commit, push, land",
+		restrict := []string{"Read-only", "Do not edit, commit, push, land"}
+		if kind == gateCheck {
+			restrict = []string{"Read production; never change it", "Do not push, land"} // it may commit small fixes
+		}
+		for _, want := range append(restrict,
 			"phone width", "UI feedback:", "gateway is full",
 			"skip the check", "a skip alone is not", "except inside such a dry run",
-		} {
+		) {
 			if !strings.Contains(prompt, want) {
 				t.Errorf("%s review lacks %q", kind, want)
 			}

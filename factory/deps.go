@@ -14,7 +14,7 @@ import (
 // or one its build needs first, with "Waits on: <short id> before build" (stored with
 // factory.waits-before=build when a build turn stops with that line). A before-build dependency holds
 // the card in building with no running agent until that card lands, and a
-// plain waits-on holds the land prompt after the gates passes. If the blocker was dropped, or the
+// plain waits-on holds the land prompt after the gate passes. If the blocker was dropped, or the
 // factory cannot find it, the card is told and goes to building (rebuildWithoutDep) to decide for itself.
 
 // labelHeldApproved marks a held card Zach approved himself (the time). Only such a card is released
@@ -305,7 +305,7 @@ func waitFlag(agents []Agent, a Agent) string {
 
 // depHoldMsg tells a held builder about the reviewer's UI feedback, and to wait.
 func depHoldMsg(id, fb string) string {
-	return "The gates passed. Do not land yet: this card lands after card " + id +
+	return "The gate passed. Do not land yet: this card lands after card " + id +
 		", and the factory sends you the land prompt once it lands. Do not poll for it, change anything or reply " +
 		"at length now. The reviewer tested the UI and left this non-blocking feedback; when you land, end your " +
 		"summary with it under 'UI feedback:'.\n\n" + fb
@@ -346,7 +346,7 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 		if a.archived() && hold[labelStage] != "zach" {
 			// a parked card cannot wait archived in a working column for its fresh review: it stops for
 			// Zach, whose Re-run starts that review (stuck-from review)
-			hold = map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: gateDesign,
+			hold = map[string]string{labelStage: "zach", labelNote: parkedStaleNote, labelStuckFrom: gateCheck,
 				labelHeld: "", labelAutoReview: ""}
 		}
 		return f.setLabels(a.ID, clearHeldApproval(a, hold))
@@ -373,12 +373,12 @@ func (f *Factory) tickHeld(a Agent, c Card) error {
 	}
 	f.logf("%s released: %s landed", short(a.ID), id)
 	return f.sendLanding(labeled(a, labels), fmt.Sprintf("Card %s, which this card waits on, has landed: rebase on origin/main first. "+
-		"All three gates passed. %s", id, f.landMsgFor(a)))
+		"The gate passed. %s", id, f.landMsgFor(a)))
 }
 
 // releaseHeldBuild starts the build of a card held in building once the card it waited on has landed.
 func (f *Factory) releaseHeldBuild(a Agent, id string) error {
-	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: gateRequest,
+	labels := clearHeldApproval(a, map[string]string{labelStage: "building", labelAutoReview: gateCheck,
 		labelSince: iso(f.Now()), labelHeld: "", labelTold: "", labelWaitsDone: "1",
 		labelNote: "building: " + id + " landed"})
 	if w := a.L(labelWaitsOn); w != "" {

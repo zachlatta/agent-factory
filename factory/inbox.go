@@ -11,7 +11,7 @@ import (
 // Cards from Zach's inbox: emails to the agents' address and voice-memo tasks start cards here. The
 // zrl-bot dispatcher starts each one through POST /api/new like a board card (origin email or voice,
 // Zach's words as the request, its thread, and an Inbox section on answering there), so all three
-// get the same Fellow prompt and gates. Errands finish in one pass; code work goes through the gates.
+// get the same Fellow prompt and gate. Errands finish in one pass; code work goes through the gate.
 // The card tells Zach in its email thread when it lands; whenever it waits on him, the factory emails
 // him there itself (mail.go). A board card answered by email reports in that thread when it lands; one
 // answered only on the board stays quiet.

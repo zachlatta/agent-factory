@@ -227,7 +227,7 @@ func TestTickReadsTrackFromACodexReply(t *testing.T) {
 	f.SetAgents([]Agent{c})
 	f.Git = func(context.Context, string, ...string) error { return nil }
 	f.Tick()
-	if l := p.labels("c1"); l[labelStage] != gateRequest {
+	if l := p.labels("c1"); l[labelStage] != gateCheck {
 		t.Errorf("labels = %v, calls = %v", l, p.calls)
 	}
 }

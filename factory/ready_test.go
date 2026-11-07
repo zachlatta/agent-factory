@@ -637,11 +637,11 @@ func TestReadyMsgAsksForANamedDecision(t *testing.T) {
 
 func TestReadyForYouRoundsGetOneEmailEach(t *testing.T) {
 	// a change request after the first Ready for you: the next code review pass is a new stop and a new email
-	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
+	c := card("c1", map[string]string{labelStage: gateCheck, labelRoundsRequest: "1",
 		labelRoundsDesign: "1", labelReady: "1", labelTold: readyNote(1), labelReviewed: reviewedSHA})
-	f, p := newTestFactory(t, c, reviewer("r2", "c1", gateSignoff))
+	f, p := newTestFactory(t, c, reviewer("r2", "c1", gateCheck))
 	headIs(f, reviewedSHA, nil)
-	storeLog(t, f, p, "r2", "SIGN OFF: he should see this\nVERDICT: approve")
+	storeLog(t, f, p, "r2", "SIGN OFF: he should see this\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nVERDICT: approve")
 	f.ApplyVerdict(f.agent("r2"))
 	l := p.labels("c1")
 	if l[labelNote] != readyNote(2) || l[labelReady] != "2" || l[labelStage] != "zach" {

@@ -25,7 +25,7 @@ Host settings (board URL, default repo, private scan patterns, PATH) live in
   Never use `--no-verify`.
 - Land with `bin/land` (fetch, rebase, scan, vet, test, push `HEAD:main`). On the factory board,
   wait for the factory to tell you to land: it scans your commits itself and lands the card
-  once the gates, told the repo is public, pass and that scan passes.
+  once the gate, which grades public safety, passes and that scan passes.
 - A scan hit means the change is not published. Remove the value and rewrite your own unpushed
   commits (`git rebase -i`, `git commit --amend`); a later commit that deletes it is not enough,
   since the push would publish the earlier commit too.

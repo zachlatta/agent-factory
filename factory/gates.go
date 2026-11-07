@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -10,31 +11,31 @@ import (
 )
 
 // The flow: a prompt is submitted (tagged by Zach or by the system), Opus picks the repo, a builder on any
-// Frontier model produces the proposed solution, three gates check it in order (does it meet the request,
-// is it well designed, does Zach need to sign off), and Opus lands it. A gate's id is also its card's
-// stage and its reviewer's kind.
+// Frontier model produces the proposed solution, one gate grades it, Zach signs off only when the gate says
+// so, and Opus lands it. The gate's id is also its card's stage and its reviewer's kind.
 const (
-	gateRequest = "request" // does it meet the request and the unsaid context it needed
-	gateDesign  = "design"  // is it well designed, on the latest main; small refactors are done here
-	gateSignoff = "signoff" // does Zach need to sign off before it goes live
+	gateCheck = "gate" // the one gate: meets request and works, design, public safety, sign-off
+
+	// the three gates of the earlier flow: cards left there move to the gate (migrateFlow), and
+	// timing and usage history still name them
+	oldGateRequest = "request"
+	oldGateDesign  = "design"
+	oldGateSignoff = "signoff"
 
 	submittedByZach   = "zach"
 	submittedBySystem = "system"
 )
 
-// isGate reports whether s is one of the three gates.
-func isGate(s string) bool { return s == gateRequest || s == gateDesign || s == gateSignoff }
+// isGate reports whether s is the gate.
+func isGate(s string) bool { return s == gateCheck }
 
-// nextGate is the gate after g, or "" after the last.
-func nextGate(g string) string {
-	switch g {
-	case gateRequest:
-		return gateDesign
-	case gateDesign:
-		return gateSignoff
-	}
-	return ""
+// isOldGate reports whether s is one of the earlier flow's three gates.
+func isOldGate(s string) bool {
+	return s == oldGateRequest || s == oldGateDesign || s == oldGateSignoff
 }
+
+// isGateSpan reports whether a recorded stage or round kind s is a gate, now or in the earlier flow.
+func isGateSpan(s string) bool { return isGate(s) || isOldGate(s) }
 
 // submittedBy is who submitted card a: its tag, else what its source shows. Only an email, a voice memo or
 // a card he started in Paseo is surely Zach's. An untagged board card may be an agent's, so it is the
@@ -112,17 +113,94 @@ func ParseReturnToBuild(text string) string {
 	return lastLineValue(returnToBuildRe, text)
 }
 
-// ParseSignOff is the sign-off gate's decision: "none", why Zach must sign off, or "" with no line.
+// ParseSignOff is the gate's sign-off decision: "none", why Zach must sign off, or "" with no line. The
+// line is a grade: green means none; yellow or red mean he signs off, for the reason after the grade.
 func ParseSignOff(text string) string {
 	s := lastLineValue(signOffRe, text)
 	if s == "" {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimRight(strings.Fields(s)[0], ".;:,")) {
-	case "none", "no", "n/a", "nothing":
+	first := strings.ToLower(strings.Trim(strings.Fields(s)[0], ".;:,*_`()"))
+	switch first {
+	case "none", "no", "n/a", "nothing", "green":
 		return "none"
+	case "yellow", "red":
+		if why := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(s[len(strings.Fields(s)[0]):]), "-–—:;,.()*_` ")); why != "" {
+			return strings.TrimRight(why, ")")
+		}
 	}
 	return s
+}
+
+// The gate's checks, as its grade lines name them. Each is graded green, yellow or red; public safety is
+// n/a outside public repos. Every check but sign-off sends the work back to the builder until it is green.
+const (
+	checkRequest = "request" // meets request: does what was asked, with the unsaid context
+	checkWorks   = "works"   // part of meets request: the gate tested that it works
+	checkDesign  = "design"
+	checkPublic  = "public" // public repo safety
+	checkSignoff = "signoff"
+)
+
+// gradeLines are the checks in report order, with the line that grades each and its name for people.
+var gradeLines = []struct{ check, line, name string }{
+	{checkRequest, "MEETS REQUEST", "meets request"},
+	{checkWorks, "WORKS", "meets request: works"},
+	{checkDesign, "DESIGN", "design"},
+	{checkPublic, "PUBLIC SAFETY", "public safety"},
+	{checkSignoff, "SIGN OFF", "sign-off"},
+}
+
+var gradeRes = func() map[string]*regexp.Regexp {
+	m := map[string]*regexp.Regexp{}
+	for _, g := range gradeLines {
+		name := strings.ReplaceAll(g.line, " ", `[ \t-]*`)
+		m[g.check] = regexp.MustCompile(`(?im)^[ \t>*_#-]*` + name + `[*_]*\s*:[ \t*_` + "`" + `]*(green|yellow|red|n/a|none)\b`)
+	}
+	return m
+}()
+
+// ParseGrades reads the gate's grade lines: check to green, yellow, red or n/a. A check with no line is
+// absent. On the sign-off line, none means green.
+func ParseGrades(text string) map[string]string {
+	out := map[string]string{}
+	for _, g := range gradeLines {
+		v := strings.ToLower(lastMatch(gradeRes[g.check], text))
+		if v == "none" {
+			v = "green"
+			if g.check != checkSignoff {
+				continue
+			}
+		}
+		if v != "" {
+			out[g.check] = v
+		}
+	}
+	return out
+}
+
+// gateFailures names the checks that send the work back: any that is not green. Public safety counts only in a
+// public repo; sign-off never does, since it only decides whether the work goes to Zach.
+func gateFailures(grades map[string]string, public bool) []string {
+	var out []string
+	for _, g := range gradeLines {
+		if g.check == checkSignoff || (g.check == checkPublic && !public) {
+			continue
+		}
+		if grades[g.check] != "green" {
+			out = append(out, g.name+" "+cmp.Or(grades[g.check], "not graded"))
+		}
+	}
+	return out
+}
+
+// gradesLabel is the grades as one label value: "request:green works:yellow ...", "-" for a check with no grade.
+func gradesLabel(grades map[string]string) string {
+	parts := make([]string, 0, len(gradeLines))
+	for _, g := range gradeLines {
+		parts = append(parts, g.check+":"+cmp.Or(grades[g.check], "-"))
+	}
+	return strings.Join(parts, " ")
 }
 
 // lastLineValue is re's last match without markdown; empty values and <placeholders> are skipped.
@@ -186,66 +264,86 @@ smallest thing that fully does what was asked (settings count, not only code). I
 ` + readOnlyProdRule + `
 Name any deploy steps in your summary: the landing step runs them.
 End your final message with one line, RESULT: code, RESULT: runbook or RESULT: both, then stop. Do NOT land.
-Three gates check it next: does it meet the request, is it well designed, and does Zach need to sign off.`
+One gate checks it next: does it meet the request and work, is it well designed, is it safe to publish in a public
+repo, and does Zach need to sign off.`
 
-// gateRubric is each gate's job.
+// gateRubric is the gate's job. It may edit (small refactors and public-safety fixes), so it is not read-only.
 var gateRubric = map[string]string{
-	gateRequest: `You are the Request Gate: a DIFFERENT agent from the one that built this. Check whether the proposed solution
-meets the original request and any unsaid context it needed. Agreeing is not your job.
-- Read the request and follow-ups below, then the builder's final message and the diff:
-  ` + "`git -C <cwd> log --oneline origin/main..HEAD`, `git -C <cwd> diff origin/main...HEAD`" + `
-- Does it do everything that was asked, not a nearby or smaller thing? Anything cut, deferred or narrowed fails
-  unless the request allows it.
-- Unsaid context: what else did the old behaviour do, and who depends on it, in this repo and outside it? What
-  would the requester assume without saying?
-- Proof: open it. A UI change needs a webp video that shows it working. Otherwise test output or a before-and-after
-  log. Run the narrowest check that proves it and paste the command and its last lines.
-- A runbook must be fully investigated: exact targets, values, commands, expected results, rollback and a final
-  check. Spot-check its facts read-only. Any step that says "check what needs doing" fails.
-- Nothing was changed outside the worktree while building: production stays read-only until landing.
-- <visibility> If the repo is public or unknown, any private data in the diff is a blocking finding:
-  names or emails of people (other than Zach's public identity), Zach's personal details, internal
-  hostnames or tailnet URLs (*.ts.net), local paths (/home/<user>/...), and content from <errands> or PDW.`,
-	gateDesign: `You are the Design Gate: a DIFFERENT agent from the one that built this. The request gate already passed; do not
-redo it. Your job is that as the codebase and the system evolve, everything stays well designed and cohesive.
-- Read the diff: ` + "`git -C <cwd> diff origin/main...HEAD`" + `. It must reflect the latest origin/main: fetch, and rebase the
-  branch if it is behind.
-- Code quality, correct abstractions, one way of doing each thing, nothing that fights the surrounding design.
-- Needed refactors get done instead of small local patches. Small ones: do them yourself in this worktree,
-  run go vet and the tests (or the repo's own checks), and commit on the branch. Then approve. Big ones: send them
-  back with VERDICT: changes, saying exactly what to do. Big means a redesign or more than about 150 changed lines.
-- Committed scripts, tests and work items must not use /tmp for work that belongs in the worktree (tests using t.TempDir() are fine).
-- Runbooks: is this the right way to change the live system, cohesive with how it already works?
-- Deploy and live changes: none belong before landing. Check that deploy steps and runbook steps match the diff
-  and are safe to run, including what happens if a step fails part-way or is run twice.
-- Never send anything to Zach. You decide here; the next gate alone decides whether he signs off.`,
-	gateSignoff: `You are the Sign-off Gate: a separate agent. Decide only whether Zach must sign off before this goes live.
-Do not re-review quality or correctness: two gates already did.
-Submitted by: <submitted-by>
-Source: <source> (schedule means a scheduled run; an idea or scout is new work the system proposed)
-Read the request and follow-ups below, the builder's final message, and the final diff (it may include refactors from the design gate):
-` + "`git -C <cwd> diff origin/main...HEAD`" + `
-- Submitted by Zach, and the changes are the things he asked for: no sign-off, including deletes, spending and
-  messages he asked for.
-- Submitted by Zach, but it includes or proposes larger architectural changes beyond what he asked for: sign-off.
-- Submitted by the system: sign-off, always, except a scheduled run of a job he already approved: no sign-off.
-Write, right before VERDICT:
-SIGN OFF: <none, or in plain words why Zach must sign off>
-A missing line counts as a sign-off. Use VERDICT: approve either way, or VERDICT: close for a duplicate or something no longer needed.`,
+	gateCheck: `You are the gatekeeper: a DIFFERENT agent from the one that built this. You decide whether the work in this
+worktree moves forward or goes back to the builder for more work. Agreeing is not your job.
+Do not read the start-here skill: this prompt has every rule you need. Audit the changes against the original request (below) and
+grade each check green, yellow or red. Green means nothing is left to do; yellow means minor issues; red means it
+is wrong or missing. Anything but green on checks 1 to 3 sends the work back to the builder, and you run again
+when it stops, until they are green.
+Read the request and follow-ups below, the builder's final message, and the diff:
+` + "`git -C <cwd> log --oneline origin/main..HEAD`, `git -C <cwd> diff origin/main...HEAD`" + `
+
+1. Meets request: does it do what was asked? Two grades.
+   - MEETS REQUEST: it does everything that was asked, not a nearby or smaller thing, plus the unsaid context
+     it needed: what else the old behaviour did, who depends on it in this repo and outside it, and what the
+     requester would assume without saying. Anything cut, deferred or narrowed is not green unless the request
+     allows it.
+   - WORKS: test it yourself; do not take the builder's word or proof for it. Run the tests and the build, then
+     try the change the way it will be used: for UI, start a dev server in the worktree (loopback or this host's
+     tailnet IP) and use it with computer use, and check the builder's webp video against what you see; for
+     a backend or CLI change, run the commands or requests it changes; for data or audit work, re-run the key
+     queries and confirm the numbers. For each, paste the command and its last lines. A runbook is not run: check every
+     step read-only against the live system (targets exist, values and commands are right, expected results,
+     rollback and the final check hold); a step that says "check what needs doing" is red. If something cannot
+     be tested without changing production, grade WORKS yellow and say what was not tested.
+2. DESIGN: is it well designed? Code quality, correct abstractions, one way of doing each thing, and the codebase
+   or system stays cohesive as it evolves. It must reflect the latest origin/main: fetch, and rebase the branch
+   if it is behind. Needed refactors are done instead of small local patches. Small refactors: do them yourself
+   in this worktree, run go vet and the tests (or the repo's own checks), and commit on the branch. Big ones
+   (a redesign or more than about 150 changed lines): grade DESIGN yellow or red and say exactly what to do.
+   Committed scripts, tests and work items must not use /tmp for work that belongs in the worktree (tests using
+   t.TempDir() are fine). The deploy steps and runbook steps must match the diff and be safe to run, including what
+   happens if a step fails part-way or is run twice. No live changes belong before landing, and nothing was changed
+   outside the worktree while building.
+3. PUBLIC SAFETY: <visibility> In a public repo, check every commit that would be published, not only the final
+   diff: run the repo's secret scan (bin/scan) if it has one and paste its result; no secrets, internal hostnames
+   or tailnet URLs (*.ts.net), IP addresses, local paths (/home/<user>/...), private repo names, content from
+   <errands> or PDW, names or emails of people other than Zach's public identity and GitHub noreply,
+   thread, message or session ids, quotes from Zach, incident history or personal facts in the diff, the commit
+   messages or the commit authors; every commit uses a GitHub noreply email; nothing weakens the secret scan
+   (factory/scan/, .gitleaks.toml, .githooks/, bin/), which is always red. A small leak you can remove yourself:
+   rewrite the unpublished commits to drop it (a later commit that deletes it is not enough, the push would
+   publish the earlier one), re-run the scan, then grade. In a private repo write PUBLIC SAFETY: n/a.
+4. SIGN OFF: does Zach need to sign off before it goes live? This never sends the work back.
+   Submitted by: <submitted-by>
+   Source: <source> (schedule means a scheduled run; an idea or scout is new work the system proposed)
+   - Submitted by Zach, and the changes are the things he asked for: green, including deletes, spending and
+     messages he asked for.
+   - Submitted by Zach, but it includes or proposes larger architectural changes beyond what he asked for: red.
+   - Submitted by the system: red, always, except a scheduled run of a job he already approved: green.
+   Unsure: yellow. After yellow or red, say in plain words why he must sign off.
+If you changed anything, grade the code as it is after your change and commit it; the factory checks your
+final commit again.
+
+End with these lines, then the VERDICT line, each grade one word followed by " - " and one short reason:
+MEETS REQUEST: <green|yellow|red> - <why>
+WORKS: <green|yellow|red> - <what you ran>
+DESIGN: <green|yellow|red> - <why>
+PUBLIC SAFETY: <green|yellow|red|n/a> - <why>
+SIGN OFF: <green|yellow|red> - <why>
+Use VERDICT: approve when checks 1 to 3 are green, VERDICT: changes otherwise, or VERDICT: close for a
+duplicate or something no longer needed.`,
 }
 
 // gateTitle names a gate's reviewer agent.
-func gateTitle(kind, card string) string {
-	names := map[string]string{gateRequest: "Request gate", gateDesign: "Design gate", gateSignoff: "Sign-off gate"}
-	return names[kind] + ": " + trunc(card, 60)
+func gateTitle(_, card string) string {
+	return "Gate: " + trunc(card, 60)
 }
 
-// reworkGateMsg sends a builder a gate's failure; that gate runs again when it stops.
-func reworkGateMsg(kind string, round, limit int, notes string) string {
-	name := map[string]string{gateRequest: "request gate", gateDesign: "design gate", gateSignoff: "sign-off gate"}[kind]
-	return fmt.Sprintf("The %s (a different agent) sent this back (round %d of %d). Address each finding, or explain why "+
+// reworkGateMsg sends a builder the gate's findings; the gate runs again when it stops.
+func reworkGateMsg(failed []string, round, limit int, notes string) string {
+	what := "these checks are not green: " + strings.Join(failed, "; ")
+	if len(failed) == 0 {
+		what = "it asked for changes"
+	}
+	return fmt.Sprintf("The gate (a different agent) sent this back (round %d of %d): %s. Address each finding, or explain why "+
 		"it is wrong. Commit on your branch, leave the worktree clean, and stop with a short summary (including the deploy steps as built, if any) ending in the RESULT: line; "+
-		"restate any runbook whole. That gate runs again. %s Do not land. %s\n\n%s\n\n%s", name, round, limit, overviewReminder, noLiveChangesRule, worktreeRule, notes)
+		"restate any runbook whole. The gate runs again. %s Do not land. %s\n\n%s\n\n%s", round, limit, what, overviewReminder, noLiveChangesRule, worktreeRule, notes)
 }
 
 // landRunbookRule tells the lander how to run a runbook. Big drift goes back to the builder.
@@ -255,7 +353,7 @@ const landRunbookRule = "If this card has a runbook, it was written read-only ea
 	"RETURN TO BUILD: <what changed>. The builder reworks it for the new state. "
 
 // migrateFlow moves a card left in a column of the old flow to the new one, once it has stopped: a card
-// under plan review builds, and a card under code review goes through the gates. Its old reviewers are
+// under plan review builds, and a card under code review goes to the gate. Its old reviewers are
 // retired. A parked card is not woken: it stays waiting on Zach. It reports whether it moved the card.
 func (f *Factory) migrateFlow(a Agent) (bool, error) {
 	st := a.L(labelStage)
@@ -268,6 +366,14 @@ func (f *Factory) migrateFlow(a Agent) (bool, error) {
 			return true, f.setLabels(a.ID, map[string]string{labelAwaiting: "", labelNote: "the factory no longer asks before building: reply to build it"})
 		}
 		st = "plan"
+	}
+	if isOldGate(a.L(labelStuckFrom)) {
+		if err := f.setLabels(a.ID, map[string]string{labelStuckFrom: gateCheck}); err != nil {
+			return true, err
+		}
+	}
+	if isOldGate(st) {
+		return f.migrateOldGate(a)
 	}
 	if st != "plan" && st != "plan-review" && st != "review" && !(st == "building" && (a.L(labelAutoReview) == "code" || a.L(labelAutoReview) == "plan")) {
 		return false, nil
@@ -283,14 +389,35 @@ func (f *Factory) migrateFlow(a Agent) (bool, error) {
 	}
 	reply, _ := f.storedReply(a)
 	built := st == "review" || st == "building" || ParseResult(reply) != ""
-	f.logf("%s: moving from old stage %s to the three gates", short(a.ID), st)
+	f.logf("%s: moving from old stage %s to the gate", short(a.ID), st)
 	if built {
-		return true, f.setLabels(a.ID, map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: "", labelNote: "moved to the new gates"})
+		return true, f.setLabels(a.ID, map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: "", labelNote: "moved to the new gates"})
 	}
-	labels := map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelSince: iso(f.Now()), labelNote: "moved to the new flow: building"}
+	labels := map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: iso(f.Now()), labelNote: "moved to the new flow: building"}
 	labels[labelAwaiting] = ""
 	if err := f.setLabels(a.ID, labels); err != nil {
 		return true, err
 	}
 	return true, f.advance(labeled(a, labels), "build", "The factory no longer reviews plans. Build this now.\n\n"+proposedSolutionRule)
+}
+
+// migrateOldGate moves a card left in one of the three earlier gates to the one gate. A card marked stuck
+// there stays stuck, now in the gate column. Otherwise, once its builder has stopped, its old reviewers are
+// retired and the gate runs from the start: a verdict of the old gates covers none of the new checks.
+func (f *Factory) migrateOldGate(a Agent) (bool, error) {
+	if a.L(labelStuck) != "" {
+		return true, f.setLabels(a.ID, map[string]string{labelStage: gateCheck})
+	}
+	if !a.stopped() || a.archived() {
+		return false, nil
+	}
+	g := f.gate(a.ID)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := f.supersedeReviewers(a.ID); err != nil {
+		return true, err
+	}
+	f.logf("%s: moving from old gate %s to the gate", short(a.ID), a.L(labelStage))
+	return true, f.setLabels(a.ID, map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelSince: "",
+		labelNote: "moved to the one gate"})
 }

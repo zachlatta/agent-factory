@@ -23,7 +23,7 @@ func worktreeGone(cwd string) bool {
 
 func archiveStage(a Agent) bool {
 	switch a.L(labelStage) {
-	case "building", gateRequest, gateDesign, gateSignoff, "plan", "plan-review", "review":
+	case "building", gateCheck, oldGateRequest, oldGateDesign, oldGateSignoff, "plan", "plan-review", "review":
 		return a.L(labelRole) == "" && a.L(labelRouting) == "" && !boardAnchor(a)
 	}
 	return false
@@ -65,7 +65,7 @@ func (f *Factory) tickArchive(a Agent) (bool, error) {
 }
 
 func (f *Factory) completeArchivedDirect(a Agent) (bool, error) {
-	if atoi(a.L(roundsLabel(gateRequest))) > 0 {
+	if gatedBefore(a) {
 		return false, nil
 	}
 	key := "checked:" + iso(a.LastActivityAt)

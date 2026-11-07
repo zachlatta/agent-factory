@@ -13,7 +13,7 @@ func TestPostLandingReplyRouting(t *testing.T) {
 	for _, via := range []string{"board", "email"} {
 		for _, note := range []string{"landed; did not say what remains", "landed; still to do: finish"} {
 			t.Run(via+note, func(t *testing.T) {
-				c := card("c1", map[string]string{labelStage: "zach", labelNote: note, labelRoundsRequest: "1", labelAutoReview: gateRequest})
+				c := card("c1", map[string]string{labelStage: "zach", labelNote: note, labelRoundsRequest: "1", labelAutoReview: gateCheck})
 				f, p := newTestFactory(t, c)
 				if _, err := f.Act("send", Body{ID: c.ID, Message: "continue", Via: via}); err != nil {
 					t.Fatal(err)
@@ -27,7 +27,7 @@ func TestPostLandingReplyRouting(t *testing.T) {
 					if !strings.Contains(strings.Join(p.sent(c.ID), ""), remainingRule) {
 						t.Fatal("missing rule")
 					}
-				} else if l[labelStage] != "building" || l[labelAutoReview] != gateRequest {
+				} else if l[labelStage] != "building" || l[labelAutoReview] != gateCheck {
 					t.Fatalf("labels: %v", l)
 				}
 			})
@@ -99,7 +99,7 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 		t.Run(route, func(t *testing.T) {
 			c := idea("c1", map[string]string{labelStage: "zach", labelRoundsRequest: "1", labelStuckFrom: "landing", labelRemainingAsk: "1",
 				labelReviewed: reviewedSHA})
-			agents := []Agent{c, reviewer("r1", c.ID, gateSignoff)}
+			agents := []Agent{c, reviewer("r1", c.ID, gateCheck)}
 			if route == "dependency" {
 				c = heldCard(map[string]string{labelRemainingAsk: "1", labelReviewed: reviewedSHA})
 				agents = []Agent{c, dep("landed", false)}
@@ -111,7 +111,7 @@ func TestNewLandingPromptsResetClarification(t *testing.T) {
 			case "approve", "rerun":
 				_, err = f.Act(route, Body{ID: c.ID})
 			case "code review":
-				storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
+				storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nMEETS REQUEST: green\nWORKS: green\nDESIGN: green\nPUBLIC SAFETY: green\nSIGN OFF: none\nVERDICT: approve")
 				err = f.ApplyVerdict(f.agent("r1"))
 			case "dependency":
 				err = f.tickHeld(c, Card{ID: c.ID, Repo: c.Repo, Cwd: c.Cwd})
@@ -140,12 +140,12 @@ func TestPostLandingEmptyReview(t *testing.T) {
 		{"empty done", "", "REMAINING: none", true, false, "landed"},
 		{"empty missing", "", "Finished", true, false, "landing"},
 		{"empty items", "", "REMAINING: Zach: approve", true, false, "zach"},
-		{"new commits", "new\n", "REMAINING: none", true, false, gateRequest},
-		{"git failure", "", "REMAINING: none", true, true, gateRequest},
-		{"unverified", "", "REMAINING: none", false, false, gateRequest},
+		{"new commits", "new\n", "REMAINING: none", true, false, gateCheck},
+		{"git failure", "", "REMAINING: none", true, true, gateCheck},
+		{"unverified", "", "REMAINING: none", false, false, gateCheck},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateRequest, labelRoundsRequest: "1",
+			c := card("c1", map[string]string{labelStage: "building", labelAutoReview: gateCheck, labelRoundsRequest: "1",
 				labelNote: "landed; still to do: finish"})
 			if tc.verified {
 				c.Labels[labelPrefix+labelLandedVerified] = "1"

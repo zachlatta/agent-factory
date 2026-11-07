@@ -137,7 +137,7 @@ func sessionStep(a Agent, stage string, byID map[string]Agent) (string, string) 
 				return "plan-review", kind
 			case "code":
 				return "review", kind
-			case gateRequest, gateDesign, gateSignoff:
+			case gateCheck, oldGateRequest, oldGateDesign, oldGateSignoff:
 				return kind, kind
 			}
 			return stage, kind

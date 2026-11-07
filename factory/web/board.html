@@ -276,7 +276,7 @@ button.fleet:hover,button.fleet[aria-expanded=true]{background:#eef1f4;border-co
 
 <dialog id="newDlg">
   <h3>New card</h3>
-  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, Opus first picks the repo it belongs in. The agent you pick (auto-suggested to balance plan usage across Frontier models) builds the proposed solution, read-only against production. Three gates then check it meets the request, is well designed, and whether you need to sign off. Opus lands it.</div>
+  <div class="help">Anything goes: a bug, a feature, a question, an errand. With Repo on Auto, Opus first picks the repo it belongs in. The agent you pick (auto-suggested to balance plan usage across Frontier models) builds the proposed solution, read-only against production. One gate then grades it green, yellow or red: meets the request and works, design, public safety, and whether you need to sign off. Anything but green on the first three goes back to the builder. Opus lands it.</div>
   <label class="sub">Repo</label><br><select id="nRepo" style="width:100%;margin-bottom:8px"></select>
   <label class="sub">Agent (builds it)</label><br><select id="nAgent" style="width:100%"></select>
   <div id="nThinkingRow" hidden><label class="sub" for="nThinking">Thinking level</label><br><select id="nThinking" style="width:100%"></select></div>
@@ -339,7 +339,7 @@ function dur(sec){ const m=Math.round(sec/60); return m<60 ? m+'m' : Math.floor(
 function clock(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
 function timeline(t){
   const names = Object.fromEntries(B.stages.map(s=>[s[0], s[1]]));
-  const rounds = Object.fromEntries(['request','design','signoff'].map(g=>[g, (t.rounds||[]).filter(r=>r.kind===g)]));
+  const rounds = Object.fromEntries(['gate','request','design','signoff'].map(g=>[g, (t.rounds||[]).filter(r=>r.kind===g)]));
   const parts = t.requestedAt ? ['asked '+clock(t.requestedAt)] : [];
   let done = '';
   for(const s of t.stages){
@@ -599,7 +599,7 @@ function render(){
   });
   const g=$('grid'); g.style.setProperty('--cols', stages.length);
   g.style.gridTemplateColumns = '150px ' + stages.map(s=>s[0]==='zach'?'minmax(340px,2.2fr)':'minmax(180px,1fr)').join(' ');
-  let h = '<div class="colhead"></div>' + stages.map(s=>`<div class="colhead ${['request','design','signoff'].includes(s[0])?'gate':''} ${s[0]==='zach'?'zach':''}" title="${esc(s[2])}">${esc(s[1])}<small>${esc(s[2])}</small></div>`).join('');
+  let h = '<div class="colhead"></div>' + stages.map(s=>`<div class="colhead ${s[0]==='gate'?'gate':''} ${s[0]==='zach'?'zach':''}" title="${esc(s[2])}">${esc(s[1])}<small>${esc(s[2])}</small></div>`).join('');
   for(const k of order){
     const lc = lanes[k];
     h += `<div class="lane">${esc(LANE_NAMES[k]||k)}<small>${esc(LANDS[k]||($('group').value==='repo'?k:''))}</small><small>${lc.filter(c=>c.stage!=='landed').length} open · ${lc.filter(c=>c.stage==='landed').length} landed</small></div>`;
@@ -611,7 +611,7 @@ function render(){
       let more = '';
       const ck=k+'|'+s[0], cap = s[0]==='landed' ? ($('showLanded').checked?1e9:4) : (open_.has(ck)?1e9:6);
       if(cs.length>cap){ more=`<div class="more" onclick="${s[0]==='landed'?"$('showLanded').click()":`open_.add('${esc(ck).replace(/'/g,"")}');render()`}">+${cs.length-cap} more</div>`; cs=cs.slice(0,cap); }
-      h += `<div class="cell ${['request','design','signoff'].includes(s[0])?'gate':''} ${s[0]==='zach'?'zachc':''}" data-stage="${s[0]}">${cs.map(cardHtml).join('')}${more}</div>`;
+      h += `<div class="cell ${s[0]==='gate'?'gate':''} ${s[0]==='zach'?'zachc':''}" data-stage="${s[0]}">${cs.map(cardHtml).join('')}${more}</div>`;
     }
   }
   if(g.dataset.html === h) return; // unchanged: a refresh moves nothing under a tap
@@ -635,7 +635,10 @@ function latestReviews(children){
   children.forEach(k=>{ if(k.role==='reviewer') last[k.kind||''] = k; });
   return Object.values(last);
 }
-const gateNames = {request:'request gate', design:'design gate', signoff:'sign-off gate'};
+const gateNames = {gate:'gate', request:'request gate', design:'design gate', signoff:'sign-off gate'};
+// gradesText spells out the gate's last grades ("request:green works:yellow ...") for the card panel.
+const gradeNames = {request:'meets request', works:'works', design:'design', public:'public safety', signoff:'sign-off'};
+function gradesText(g){ return g.split(' ').map(p=>{ const [k,v]=p.split(':'); return (gradeNames[k]||k)+' '+(v==='-'?'not graded':v); }).join(' · '); }
 // reviewName is a reviewer's name: its gate, or an older card's review kind.
 function reviewName(k){ return gateNames[k.kind] || (k.kind||'')+' review'; }
 // reviewLabel names a reviewer's round and verdict. The round counter only counts applied
@@ -870,7 +873,7 @@ function fillPanel(c, fresh){
   $('pFlags').innerHTML = decisionWaitHtml(c) + c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('') + (c.verdict?`<span class="flag ${/approve|nits/.test(c.verdict)?'v':'vc'}">${esc(c.verdict)}</span>`:'') + (c.note && !c.decisionBlocker?`<span class="flag note">${esc(c.note)}</span>`:'');
   const kv = [['Column', (B.stages[idx]||[])[1] + (c.labelled?'':' (from Paseo status)')],
     ['Submitted by', c.submittedBy==='system'?'the system':'you'], ['Lands in', c.repo], ['Branch', c.branch||''], ['Model', c.model||''],
-    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Gate rounds', `request ${c.rounds.request} · design ${c.rounds.design} · sign-off ${c.rounds.signoff} (cap 3 each)`],
+    ['Started', ago(c.createdAt)], ['Last activity', ago(c.lastActivityAt)], ['Gate rounds', `${c.rounds.gate} (cap 3)`], ...(c.grades ? [['Gate grades', gradesText(c.grades)]] : []),
     ...(c.timing ? [['Timeline', timeline(c.timing)]] : []),
     ['Cwd', `<code>${esc(c.cwd)}</code>`], ['Agent id', `<code>${esc(c.id)}</code>`]];
   $('pKv').innerHTML = kv.map(([k,v])=>`<div>${k}</div><div>${k==='Cwd'||k==='Agent id'?v:esc(v)}</div>`).join('');
@@ -912,7 +915,7 @@ function fillPanel(c, fresh){
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   else $('pActs').innerHTML = `
-    <button onclick="act('review',{kind:'request'})" title="Run the gates from the start: request, design, then sign-off">${busy?'Run gates when idle':'Run gates'}</button>
+    <button onclick="act('review',{kind:'gate'})" title="Run the gate again on what the card has now">${busy?'Run gate when idle':'Run gate'}</button>
     ${canLand(c)?`<button class="primary" onclick="act('approve')" title="Opus lands it">Approve &amp; land</button>`:''}
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
@@ -993,7 +996,7 @@ function ideaHtml(c, isIdea){
       <b>Start now</b> retries it right away, or <b>Dismiss</b> removes it.</div>`
     : `<div class="next"><b>What happens next:</b> ${i.queue===1?'next in line for this repo':esc('number '+i.queue+' in line for this repo')}.
       ${ideaStartText(c)}
-      Each one is then built and goes through the three gates like any card, and comes to you to sign off. <b>Start now</b> skips the line.</div>`) : '';
+      Each one is then built and goes through the gate like any card, and comes to you to sign off. <b>Start now</b> skips the line.</div>`) : '';
   return `${isIdea?'':'<h4>Started from this idea</h4>'}
     ${isIdea&&i.error?`<div class="err">Could not start: ${esc(i.error)}</div>`:''}
     <h4>What it proposes</h4>

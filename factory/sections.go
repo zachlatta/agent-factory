@@ -74,8 +74,8 @@ func (f *Factory) sections() Sections {
 	return s
 }
 
-var workingState = map[string]string{stageRoute: "picking a repo", "building": "building", gateRequest: "checking it meets the request",
-	gateDesign: "checking the design", gateSignoff: "deciding sign-off", "landing": "shipping"}
+var workingState = map[string]string{stageRoute: "picking a repo", "building": "building", gateCheck: "at the gate",
+	"landing": "shipping"}
 
 // BuildSections sorts cards into Sections. Ideas and Scouts are left out; routine runs are listed
 // only when they started today.

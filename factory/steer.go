@@ -171,7 +171,7 @@ func (f *Factory) tickSteer(id string, st Steer) error {
 		return nil // the message waits for its next turn; its stage moves on as usual
 	}
 	// idle: the agent answers the message, then the review of its own stage runs again
-	kind := gateRequest
+	kind := gateCheck
 	if heldBeforeBuild(k) {
 		kind = ""
 	}

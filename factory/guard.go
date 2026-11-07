@@ -14,7 +14,7 @@ import (
 // Guarded repos are public: anything that lands there is published. For their cards the factory
 // runs the secret scan itself before any landing (from this binary, with origin/main's gitleaks
 // config, so a card cannot weaken the scan that checks it). Reviewers are told the repo is public,
-// and private data in the diff is blocking. A card lands once its gates pass and that scan passes;
+// and private data in the diff is blocking. A card lands once its gate passes and that scan passes;
 // a scan hit or error stops it for Zach. Their
 // ideas start on their own like any repo's (ideas.go), and the direct track is off. Other repos are
 // unaffected.
@@ -26,8 +26,8 @@ func (f *Factory) guarded(repo string) bool {
 
 const publicCardNote = `
 This repo is public: everything that lands here is published. So:
-- No direct track: every change goes through the gates. A first pass that says it took one is scanned and stops for Zach. It lands only after the gates
-  and the factory's secret scan pass.
+- No direct track: every change goes through the gate. A first pass that says it took one is scanned and stops for Zach. It lands only after the gate
+  (which grades public safety) and the factory's secret scan pass.
 - Never commit secrets, hostnames, IP addresses, email addresses, home-directory paths, thread or
   session ids, quotes from Zach or personal facts, in code, comments, tests, docs or commit messages.
   Keep incident history and evidence in the private work item that asked for the change, not here.

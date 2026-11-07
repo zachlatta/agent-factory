@@ -280,7 +280,7 @@ func TestPreviewSimulatesOnlyFabricatedCardActions(t *testing.T) {
 	}
 	for _, tc := range []struct{ action, body string }{
 		{"approve", `{"id":"preview-zach"}`}, {"send", `{"id":"preview-building","message":"Sample answer"}`},
-		{"stage", `{"id":"preview-building","stage":"design"}`}, {"close", `{"id":"preview-design"}`},
+		{"stage", `{"id":"preview-building","stage":"gate"}`}, {"close", `{"id":"preview-gate"}`},
 	} {
 		if got := request(tc.action, tc.body, true); got != 200 {
 			t.Fatalf("%s: %d", tc.action, got)
@@ -296,7 +296,7 @@ func TestPreviewSimulatesOnlyFabricatedCardActions(t *testing.T) {
 	for _, c := range board.Cards {
 		stages[c.ID] = c.Stage
 	}
-	if stages["preview-zach"] != "building" || stages["preview-building"] != "design" || stages["preview-design"] != "landed" {
+	if stages["preview-zach"] != "building" || stages["preview-building"] != "gate" || stages["preview-gate"] != "landed" {
 		t.Fatalf("fake changes not reflected: %v", stages)
 	}
 	// the board's shared buttons resolve to the same simulated actions: Land on finished work, Drop

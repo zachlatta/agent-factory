@@ -99,7 +99,7 @@ func TestDelegateRuleKeepsDefaultWhenUnlisted(t *testing.T) {
 }
 
 func TestBuildBoardFoldsGrandchildren(t *testing.T) {
-	parent := card("c1", map[string]string{labelStage: gateDesign})
+	parent := card("c1", map[string]string{labelStage: gateCheck})
 	rev := runningReviewer("r1", "c1", time.Minute, "")
 	sub := Agent{ID: "s1", Model: "gpt-6.1-sol", Provider: "codex", Status: "running", CreatedAt: t0, LastActivityAt: t0.Add(-time.Minute),
 		Pending: "Bash: rm /tmp/x", Labels: map[string]string{"paseo.parent-agent-id": "r1"}}
@@ -141,7 +141,7 @@ func TestActiveSubagentKeepsCardFromStalling(t *testing.T) {
 }
 
 func TestStoppedCardFlagsRunningSubagent(t *testing.T) {
-	idle := card("c1", map[string]string{labelStage: gateDesign})
+	idle := card("c1", map[string]string{labelStage: gateCheck})
 	sub := Agent{ID: "s1", Status: "running", LastActivityAt: t0.Add(-time.Minute), Labels: map[string]string{"paseo.parent-agent-id": "c1"}}
 	if c := BuildBoard([]Agent{idle, sub}, nil, t0)[0]; !contains(c.Flags, subagentRunningFlag) {
 		t.Errorf("flags = %q", c.Flags)
@@ -178,7 +178,7 @@ func TestReviewerWaitingOnSubagentIsNotBlocked(t *testing.T) {
 }
 
 func TestHealthCountsGrandchildrenOnTheirCard(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateDesign})
+	c := card("c1", map[string]string{labelStage: gateCheck})
 	rev := runningReviewer("r1", "c1", time.Minute, "")
 	sub := Agent{ID: "s1", Status: "running", LastActivityAt: t0, Labels: map[string]string{"paseo.parent-agent-id": "r1"}}
 	f, _ := newTestFactory(t, c, rev, sub)
@@ -194,7 +194,7 @@ func TestPromptsOfferSubagents(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, _ := f.card("c1")
-	if _, err := f.StartReview(c, gateRequest); err != nil {
+	if _, err := f.StartReview(c, gateCheck); err != nil {
 		t.Fatal(err)
 	}
 	var runs []string

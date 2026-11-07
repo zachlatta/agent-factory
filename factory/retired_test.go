@@ -11,7 +11,7 @@ import (
 // retiredRunning is a reviewer retired (applied, verdict superseded) 20 minutes ago while its run
 // record still says running, with no activity for half an hour.
 func retiredRunning(id, of string) Agent {
-	r := reviewer(id, of, gateDesign)
+	r := reviewer(id, of, gateCheck)
 	r.Labels[labelPrefix+labelApplied] = "1"
 	r.Labels[labelPrefix+labelVerdict] = "superseded"
 	r.Labels[labelPrefix+labelRetired] = iso(t0.Add(-20 * time.Minute))
@@ -60,8 +60,8 @@ func (p *fakePaseo) forced(id string) int {
 }
 
 func TestRetiredReviewerWithStaleRunIsArchived(t *testing.T) {
-	c := card("card1", map[string]string{labelStage: gateDesign})
-	r := reviewer("rev1", "card1", gateSignoff)
+	c := card("card1", map[string]string{labelStage: gateCheck})
+	r := reviewer("rev1", "card1", gateCheck)
 	r.Status = "running"
 	f, p := newTestFactory(t, c, r)
 	p.status["rev1"], p.stuck["rev1"] = "running", true // its process ended; the record still says running
@@ -95,8 +95,8 @@ func TestPlainArchiveNeverForcesActiveWork(t *testing.T) {
 }
 
 func TestRetiredReviewerRetryBacksOffThenSucceeds(t *testing.T) {
-	c := card("card1", map[string]string{labelStage: gateDesign})
-	r := reviewer("rev1", "card1", gateSignoff)
+	c := card("card1", map[string]string{labelStage: gateCheck})
+	r := reviewer("rev1", "card1", gateCheck)
 	r.Status = "running"
 	f, p := newTestFactory(t, c, r)
 	p.status["rev1"], p.stuck["rev1"], p.forceErr["rev1"] = "running", true, 1
@@ -228,18 +228,18 @@ func TestRetiredReviewerRetriesPerReapAreCapped(t *testing.T) {
 func TestReapNeverStopsCurrentReviewsOrActiveWork(t *testing.T) {
 	busy := card("card1", map[string]string{labelStage: "building"})
 	busy.Status = "running"
-	current := reviewer("rev1", "card2", gateSignoff) // its verdict still counts
+	current := reviewer("rev1", "card2", gateCheck) // its verdict still counts
 	current.Status, current.LastActivityAt = "running", t0.Add(-time.Hour)
-	applied := reviewer("rev2", "card2", gateSignoff) // applied with a real verdict: not retired
+	applied := reviewer("rev2", "card2", gateCheck) // applied with a real verdict: not retired
 	applied.Status = "running"
 	applied.Labels[labelPrefix+labelApplied] = "1"
 	applied.Labels[labelPrefix+labelVerdict] = "approve"
-	unapplied := reviewer("rev3", "card2", gateSignoff) // a verdict label alone does not retire it
+	unapplied := reviewer("rev3", "card2", gateCheck) // a verdict label alone does not retire it
 	unapplied.Status = "running"
 	unapplied.Labels[labelPrefix+labelVerdict] = "superseded"
 	land := reviewer("rev4", "card2", "land")
 	land.Status = "running"
-	f, p := newTestFactory(t, busy, card("card2", map[string]string{labelStage: gateDesign}), current, applied, unapplied, land)
+	f, p := newTestFactory(t, busy, card("card2", map[string]string{labelStage: gateCheck}), current, applied, unapplied, land)
 	for _, id := range []string{"card1", "rev1", "rev2", "rev3", "rev4"} {
 		p.status[id] = "running"
 	}
@@ -307,9 +307,9 @@ func TestBoardDoesNotCountRetiredReviews(t *testing.T) {
 	}
 
 	// control: a current reviewer that runs or stalls still counts
-	live := reviewer("rev3", "card1", gateSignoff)
+	live := reviewer("rev3", "card1", gateCheck)
 	live.Status, live.LastActivityAt = "running", t0.Add(-30*time.Minute)
-	f2, _ := newTestFactory(t, card("card1", map[string]string{labelStage: gateDesign}), live)
+	f2, _ := newTestFactory(t, card("card1", map[string]string{labelStage: gateCheck}), live)
 	c2, _ := f2.card("card1")
 	if !c2.Reviewing || !slices.ContainsFunc(c2.Flags, func(s string) bool { return strings.HasPrefix(s, "reviewer stalled") }) {
 		t.Errorf("a current stalled reviewer is reviewing and flagged: %+v", c2)

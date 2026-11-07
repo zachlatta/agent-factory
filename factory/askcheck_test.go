@@ -264,7 +264,7 @@ func everyAsk() map[string]*Ask {
 	add("stalled", c, a)
 	add("stuck: archived", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckArchived}))
 	add("stuck: agent error", Card{ID: "c1", Stage: "building"}, card("c1", map[string]string{labelStage: "building", labelStuck: stuckAgentError}))
-	add("stuck: retries ran out", Card{ID: "c1", Stage: gateDesign}, card("c1", map[string]string{labelStage: gateDesign, labelStuck: "review kept failing"}))
+	add("stuck: retries ran out", Card{ID: "c1", Stage: gateCheck}, card("c1", map[string]string{labelStage: gateCheck, labelStuck: "review kept failing"}))
 	add("history unavailable", Card{}, zach(map[string]string{labelNote: "history unavailable: x"}))
 	add("repo", Card{}, zach(map[string]string{labelAwaiting: "repo", labelCandidates: "a/one b/two"}))
 	add("plan", Card{}, zach(map[string]string{labelNote: readyNote(1), labelReviewed: reviewedSHA}))
