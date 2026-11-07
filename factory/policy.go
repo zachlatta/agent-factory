@@ -429,7 +429,7 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	case verdict == "close":
 		err = set(labelStage, "zach", labelNote, "reviewer suggests closing")
 	case verdict == "escalate" && len(failed) > 0,
-		verdict != "close" && len(failed) > 0 && head != "" && head == t.L(labelGateFailedHead):
+		len(failed) > 0 && head != "" && head == t.L(labelGateFailedHead):
 		// blocked on Zach: the gate says only he can unblock it, or the builder changed nothing since the
 		// gate last sent this commit back. Another round would get the same answer.
 		err = set(labelStage, "zach", labelSince, iso(f.Now()), labelNote, gateBlockedNote, labelAutoReview, "")

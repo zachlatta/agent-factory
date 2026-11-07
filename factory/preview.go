@@ -372,7 +372,7 @@ const previewRequest = "Make the board easy to read on a phone: one column, and 
 
 const previewDirectAskRequest = "Fill in the booth form for the sample fair."
 
-// previewDirectAskReply is a one-pass result that stops on a question with a deadline.
+// previewGateBlockedReply is a gate report that stops the card for Zach with a question (VERDICT: escalate).
 const previewGateBlockedReply = `DECISION: How should the factory log in to read the real limits?
 OVERVIEW: The reader is built, but the service only answers a web login, which the host does not have.
 NEEDS FROM ZACH: Pick how the factory logs in.
@@ -389,6 +389,7 @@ PUBLIC SAFETY: n/a
 SIGN OFF: green - he asked for it
 VERDICT: escalate`
 
+// previewDirectAskReply is a one-pass result that stops on a question with a deadline.
 const previewDirectAskReply = `DECISION: Send the booth form with the larger table?
 OVERVIEW: The form is filled in and ready to send. The larger table costs a little more.
 NEEDS FROM ZACH: Answer yes, or name another size.
