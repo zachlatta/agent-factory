@@ -461,11 +461,13 @@ async function act(a, extra={}){ const r = await post(a, {id: meta.agent.id, ...
 
 // ------------------------------------------------------------- composer
 function grow(){ const t = $('msg'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, innerHeight * .4) + 'px'; }
+// addFiles keeps the server's batch limits: at most 10 attachments totaling 25 MB.
 function addFiles(list){
-  for (const f of list) {
-    if (f.size > 25*1024*1024) { toast(f.name + ' is over 25 MB'); continue; }
+  const batch = [...list];
+  if (atts.length + batch.length > 10 || atts.reduce((n, a) => n + a.size, 0) + batch.reduce((n, f) => n + f.size, 0) > 25*1024*1024) { toast('Attach at most 10 files totaling 25 MB'); return; }
+  for (const f of batch) {
     const rd = new FileReader();
-    rd.onload = () => { atts.push({name: f.name || ('pasted.' + (f.type.split('/')[1]||'png')), type: f.type, url: rd.result, data_base64: String(rd.result).split(',')[1]}); chips(); };
+    rd.onload = () => { atts.push({name: f.name || ('pasted.' + (f.type.split('/')[1]||'png')), type: f.type, size: f.size, url: rd.result, data_base64: String(rd.result).split(',')[1]}); chips(); };
     rd.readAsDataURL(f);
   }
 }
