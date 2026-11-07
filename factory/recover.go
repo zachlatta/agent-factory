@@ -160,6 +160,13 @@ func stuckAsk(a Agent) *Ask {
 		return &Ask{Label: "Card stuck", Title: stuckTitlePrefix + "the agent keeps failing", From: "builder", Why: text, BoardOnly: true,
 			Actions: []Action{primary("resume", "Resume"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
 	}
+	if why == stuckGate {
+		return &Ask{Label: "Card stuck", Title: stuckTitlePrefix + why, From: "reviewer", BoardOnly: true,
+			Why: "The gate sent this work back on every round and it still is not done. Its last report is below. Reply to " +
+				"tell the builder what to do (it gets the report too). Try again gives the builder one more round with the " +
+				"report, or re-runs the gate if the work changed since that pass.",
+			Actions: []Action{{ID: "reply", Label: "Reply", Primary: true, Hint: "What the builder should do"}, act("rerun", "Try again"), act("close", "Drop it")}}
+	}
 	return &Ask{Label: "Card stuck", Title: stuckTitlePrefix + why, From: "builder", BoardOnly: true,
 		Why: "The factory's automatic retries for this step ran out, so the card stays in its column. Re-run the " +
 			"step, send the agent a message, or drop it.",

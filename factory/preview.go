@@ -162,6 +162,26 @@ func PreviewHandler(root string) (http.Handler, error) {
 	asked.Labels[labelPrefix+labelNote] = directAskNote("Send the booth form with the larger table?")
 	asked.Labels[labelPrefix+labelDue] = iso(now.Add(10 * time.Hour))
 	agents = append(agents, asked)
+	// The gate stopped for Zach: work only he can unblock, with the gate's report and question.
+	blocked := ready
+	blocked.ID, blocked.SessionID, blocked.Title = "preview-gate-blocked", "preview-gate-blocked", "Show real usage limits"
+	blocked.Labels = maps.Clone(ready.Labels)
+	blocked.Labels[labelPrefix+labelNote] = gateBlockedNote
+	blocked.Labels[labelPrefix+labelRoundsGate] = "2"
+	blocked.Labels[labelPrefix+labelGrades] = "request:red works:yellow design:green public:n/a signoff:green"
+	if err := writePreviewSession(home, blocked.Cwd, blocked.ID, previewRequest, "[Assistant] Built the reader.\nRESULT: code"); err != nil {
+		return nil, err
+	}
+	agents = append(agents, blocked)
+	gate := blocked
+	gate.ID, gate.SessionID, gate.Title = "preview-gate-blocked-gate", "preview-gate-blocked-gate", "Gate: Show real usage limits"
+	gate.Status, gate.ArchivedAt = "closed", now
+	gate.Labels = map[string]string{labelPrefix + labelRole: "reviewer", labelPrefix + labelReviewOf: blocked.ID,
+		labelPrefix + labelReviewKind: gateCheck, labelPrefix + labelVerdict: "escalate"}
+	if err := writePreviewSession(home, gate.Cwd, gate.ID, previewRequest, previewGateBlockedReply); err != nil {
+		return nil, err
+	}
+	agents = append(agents, gate)
 	f.hostMetrics.read = func(string) hostReading {
 		return hostReading{Metrics: hostMetrics{CPUCount: 4, Errors: map[string]string{}}}
 	}
@@ -353,6 +373,22 @@ const previewRequest = "Make the board easy to read on a phone: one column, and 
 const previewDirectAskRequest = "Fill in the booth form for the sample fair."
 
 // previewDirectAskReply is a one-pass result that stops on a question with a deadline.
+const previewGateBlockedReply = `DECISION: How should the factory log in to read the real limits?
+OVERVIEW: The reader is built, but the service only answers a web login, which the host does not have.
+NEEDS FROM ZACH: Pick how the factory logs in.
+
+QUESTION: How should the factory log in?
+- Save a web login and renew it automatically (recommended)
+- Paste a fresh login when it expires
+- Find another source first
+
+MEETS REQUEST: red - no login, so the board still shows unknown
+WORKS: yellow - never run end to end
+DESIGN: green - small reader with tests
+PUBLIC SAFETY: n/a
+SIGN OFF: green - he asked for it
+VERDICT: escalate`
+
 const previewDirectAskReply = `DECISION: Send the booth form with the larger table?
 OVERVIEW: The form is filled in and ready to send. The larger table costs a little more.
 NEEDS FROM ZACH: Answer yes, or name another size.

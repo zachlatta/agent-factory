@@ -250,6 +250,12 @@ In the worktree do whatever the work needs, including starting dev servers bound
 tailnet IP. Make no external change: no prod writes, deploys, restarts, package installs on hosts, settings,
 messages or spending. Those wait for the landing step, as a runbook. ` + noLiveChangesRule
 
+// blockedRule sends a builder that cannot finish without Zach to him, instead of round after round of the gate.
+const blockedRule = `Blocked: if the work cannot be finished without something only Zach can give (a login or credential, ` +
+	`access, a choice between approaches, spending), do not guess, narrow the request or try again the same way. Commit ` +
+	`what is done, write NEEDS FROM ZACH: <what> with a QUESTION: block of options (recommended first), and end without ` +
+	`a RESULT line: the card waits for his answer.`
+
 // proposedSolutionRule is what step 3 produces.
 const proposedSolutionRule = `Build the proposed solution now, all of it, in this pass. Do not write a plan and stop. Keep it to the
 smallest thing that fully does what was asked (settings count, not only code). It is one or both of:
@@ -263,6 +269,7 @@ smallest thing that fully does what was asked (settings count, not only code). I
   and see what needs updating" is not a runbook. In a public repo, keep private details out of anything committed.
 ` + readOnlyProdRule + `
 Name any deploy steps in your summary: the landing step runs them.
+` + blockedRule + `
 End your final message with one line, RESULT: code, RESULT: runbook or RESULT: both, then stop. Do NOT land.
 One gate checks it next: does it meet the request and work, is it well designed, is it safe to publish in a public
 repo, and does Zach need to sign off.`
@@ -317,6 +324,10 @@ Read the request and follow-ups below, the builder's final message, and the diff
    - Submitted by Zach, but it includes or proposes larger architectural changes beyond what he asked for: red.
    - Submitted by the system: red, always, except a scheduled run of a job he already approved: green.
    Unsure: yellow. After yellow or red, say in plain words why he must sign off.
+5. BLOCKED: if checks 1 to 3 cannot turn green without something only Zach can give (a login or credential,
+   access, a choice between approaches, spending, or a dispute with the builder about what was asked), more
+   building will not fix it. Use VERDICT: escalate, write NEEDS FROM ZACH: <what>, and add a QUESTION: block with
+   2 to 4 options, recommended first. His answer goes to the builder and you run again.
 If you changed anything, grade the code as it is after your change and commit it; the factory checks your
 final commit again.
 
@@ -326,8 +337,8 @@ WORKS: <green|yellow|red> - <what you ran>
 DESIGN: <green|yellow|red> - <why>
 PUBLIC SAFETY: <green|yellow|red|n/a> - <why>
 SIGN OFF: <green|yellow|red> - <why>
-Use VERDICT: approve when checks 1 to 3 are green, VERDICT: changes otherwise, or VERDICT: close for a
-duplicate or something no longer needed.`,
+Use VERDICT: approve when checks 1 to 3 are green, VERDICT: escalate when blocked (check 5), VERDICT: changes
+otherwise, or VERDICT: close for a duplicate or something no longer needed.`,
 }
 
 // gateTitle names a gate's reviewer agent.
@@ -343,7 +354,7 @@ func reworkGateMsg(failed []string, round, limit int, notes string) string {
 	}
 	return fmt.Sprintf("The gate (a different agent) sent this back (round %d of %d): %s. Address each finding, or explain why "+
 		"it is wrong. Commit on your branch, leave the worktree clean, and stop with a short summary (including the deploy steps as built, if any) ending in the RESULT: line; "+
-		"restate any runbook whole. The gate runs again. %s Do not land. %s\n\n%s\n\n%s", round, limit, what, overviewReminder, noLiveChangesRule, worktreeRule, notes)
+		"restate any runbook whole. The gate runs again. %s Do not land. %s %s\n\n%s\n\n%s", round, limit, what, overviewReminder, noLiveChangesRule, blockedRule, worktreeRule, notes)
 }
 
 // landRunbookRule tells the lander how to run a runbook. Big drift goes back to the builder.

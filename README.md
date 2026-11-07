@@ -112,6 +112,9 @@ his sign-off when the gate asks for it (`factory/gates.go`).
      for (including deletes, spending and messages he asked for); red when he submitted it but it includes larger
      architectural changes than he asked for, and when the system submitted it, except a scheduled run of a job he
      already approved (green); yellow when unsure. Sign-off never sends work back.
+   - Blocked: when checks cannot turn green without something only Zach can give (a login or credential, access, a
+     choice between approaches, spending, or a dispute with the builder about what was asked), the gate ends
+     `VERDICT: escalate` with `NEEDS FROM ZACH:` and a `QUESTION:` block of options.
 
    The card panel shows gate checks by pass: a colored grade and text label for each check, plus an
    expandable gate report. Completed passes keep their grades and reports across restarts. Older passes
@@ -120,19 +123,26 @@ his sign-off when the gate asks for it (`factory/gates.go`).
    The factory reads the grades (`ParseGrades`) and keeps the last ones on the card (`factory.grades`, shown in the
    card panel). Any of meets request, works, design and (in a public repo) public safety that is not green, including
    a missing line, sends the work back to the builder with the gate's findings, and the gate runs again when the builder
-   stops (`factory.auto-review`), until they are green. So does `VERDICT: changes`. When they are green, sign-off
+   stops (`factory.auto-review`), until they are green. So does `VERDICT: changes`. The card goes to Zach instead
+   (`gateBlockedNote`, "The gate needs you") when the gate escalates with a check not green, or when it fails the same
+   commit it last sent back (`factory.gate-failed-head`): the builder changed nothing, so another round would get the
+   same answer. That ask shows the gate's report and questions and is emailed in his thread, if any; his answer goes to
+   the builder with the gate's report, and the gate rounds start afresh. When they are green, sign-off
    decides: green goes to landing; yellow, red, a missing line or `VERDICT: escalate` comes to Zach at Ready for you
    (below). Approve & land is offered, and accepted, only on a card waiting on Zach or landing: a card still building
    or at the gate has nothing to approve. If the gate committed a fix, its approval covers a commit that is no longer
    HEAD, so the gate runs again on the final commit before anything lands. Its approval of the exact HEAD is the code
    review that `bin/land` and the pre-push hook reuse.
-7. **Land.** Opus 5.5 at medium lands it on `main` in a fresh agent, whatever built it. For a runbook it first checks that
+5. **Land.** Opus 5.5 at medium lands it on `main` in a fresh agent, whatever built it. For a runbook it first checks that
    it still matches the live system: it corrects minor changes itself, and for huge ones ends with
    `RETURN TO BUILD: <what changed>`, which sends the card to step 3 and then the gate. A runbook-only card
    has no commits to verify, so the lander's report ends it. In a public repo the factory's own scan runs before landing.
 
-The gate has at most 3 rounds (`factory.gate-rounds`; Zach's follow-up resets them). At the cap the card stays at the gate
-marked stuck, on the board only. A failed landing returns to the builder and goes through the gate again.
+The gate has at most 3 rounds (`factory.gate-rounds`; Zach's follow-up resets them): the first two that fail send the
+work back, and a third that fails marks the card stuck at the gate, on the board only. That stuck card shows the gate's
+last report, with Reply (to the builder, which gets the report too), Try again and Drop. Try again on the commit the
+gate last failed gives the builder one more round with that report instead of grading the same commit again; on
+changed work it re-runs the gate. A failed landing returns to the builder and goes through the gate again.
 
 A new card's branch starts from `origin/main`, fetched just before the card starts (`--base origin/main`), never from
 the checkout's own `main`, which may be behind or carry commits that never reached `origin`.
@@ -143,6 +153,8 @@ covers none of the new checks. One marked stuck there stays stuck, in the gate c
 the old gate names.
 
 A builder that stops on a question with no `RESULT:` line waits in Needs Zach with that question, and his answer goes back to it.
+Builders are told to stop that way (`blockedRule`, also in the gate's rework message) when the work cannot be finished
+without something only Zach can give, instead of narrowing the request or trying again the same way.
 
 **Errands.** A request that changes nothing (a question, research, a report, a PDW mutation he approves himself)
 takes the direct track: the builder does it in one pass, lands its work item and ends `TRACK: direct`; the gate does not run. An email or voice card with no `RESULT:` line counts as an errand only when it has no unpublished commits: commits always go through the gates. A

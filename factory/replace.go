@@ -16,7 +16,7 @@ const maxReplaceHops = 16
 // (chainCarriedFactoryLabels) and any explicit empty value on a newer agent are read through the chain.
 var carriedFactoryLabels = []string{
 	labelReady, labelReadyHead, labelReadyFeedback, labelFeedbackHold, labelFeedbackTold, labelAskWhy, labelZachThread, labelTold, labelAnswered, labelSource, labelOrigin, labelTitled,
-	labelTrack, labelBase, labelRoundsGate, labelRoundsRequest, labelRoundsDesign, labelRoundsSignoff, labelSubmittedBy, labelBuilderAgent, labelResult, labelFollowedUp,
+	labelTrack, labelBase, labelRoundsGate, labelGateFailedHead, labelRoundsRequest, labelRoundsDesign, labelRoundsSignoff, labelSubmittedBy, labelBuilderAgent, labelResult, labelFollowedUp,
 	labelDecided, labelReviewed, labelCodeOK, labelLandedVerified, labelWaitsOn, labelWaitsDone, labelWaitsBefore,
 	labelHeld, labelHeldApproved, labelWorkLeftRounds, labelRecovery,
 	labelReviewerRetries, labelModelHandoff, labelBehaviorApproval, labelBehaviorSummary, labelBehaviorRepair,

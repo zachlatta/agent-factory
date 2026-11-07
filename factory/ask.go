@@ -126,6 +126,9 @@ func boardOnly(c Card, a Agent, ask *Ask) bool {
 	return false
 }
 
+// gateBlockedNote is a card the gate stopped for Zach instead of sending back to the builder (decide).
+const gateBlockedNote = "gate: blocked on Zach"
+
 const finishedTitle = "Finished: read the result"
 const closeTitle = "Reviewer thinks this isn't needed"
 const handTitle = "Moved here by hand"
@@ -195,6 +198,12 @@ func baseAsk(c Card, a Agent) *Ask {
 		return &Ask{Label: "Review needed", Title: "Review needed: could not verify reviewed work", From: "builder",
 			Why:     why + " " + strings.TrimRight(strings.ReplaceAll(strings.TrimPrefix(note, unverifiedReviewNote), why, ""), ". ") + ". Re-running starts the gate on what the card has now.",
 			Actions: []Action{primary("rerun", "Re-run the review"), reply("Reply", "Message to the agent"), act("close", "Drop it")}}
+	case note == gateBlockedNote:
+		return &Ask{Label: "The gate needs you", Kind: askQuestion, Title: "Blocked: the work can't finish without you", From: "reviewer",
+			Why: "The gate found something only you can give (a login, access, a choice, or what the request means), or the " +
+				"builder changed nothing since the gate last sent this work back, so another round would get the same answer. " +
+				"Its report is below. Your answer goes to the builder with that report, and the gate runs again.",
+			Actions: []Action{{ID: "reply", Label: "Answer", Primary: true, Hint: "Your answer"}, act("close", "Drop it")}}
 	case a.L(labelVerdict) == "close":
 		return &Ask{Label: "Close this card?", Title: closeTitle, From: "reviewer",
 			Why:     "It says the work is a duplicate, already done, or not worth doing. Its reasons are below.",

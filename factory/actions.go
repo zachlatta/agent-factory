@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -186,6 +187,11 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 		}
 		if landingReply(f.agent(c.ID)) {
 			msg += remainingRule
+		}
+		if a := f.agent(c.ID); !sub && gateStop(a) {
+			if report := f.lastGateReport(c.ID); report != "" {
+				msg += "\n\nThis answers the gate's last report, which stopped the card for Zach:\n\n" + trunc(report, 6000)
+			}
 		}
 		if directAskStop(f.agent(c.ID)) {
 			msg += "\n\n" + directAnswerRule
@@ -470,7 +476,7 @@ func errandPass(a Agent) bool {
 // newCodeGeneration is the labels that start card a's new gate generation after Zach's follow-up: every
 // gate's rounds and reviewer replacements start afresh; finished-work authorization is invalidated.
 func newCodeGeneration(Agent) map[string]string {
-	return map[string]string{labelRoundsGate: "", labelRoundsRequest: "", labelRoundsDesign: "", labelRoundsSignoff: "", labelReviewerRetries: "",
+	return map[string]string{labelRoundsGate: "", labelGateFailedHead: "", labelRoundsRequest: "", labelRoundsDesign: "", labelRoundsSignoff: "", labelReviewerRetries: "",
 		labelBehaviorApproval: "", labelBehaviorSummary: "", labelBehaviorRepair: ""}
 }
 
@@ -562,6 +568,17 @@ func (f *Factory) rerunStep(c Card, from string) error {
 		kind := gateCheck
 		if err := f.supersedeReviewers(c.ID); err != nil {
 			return err
+		}
+		if a := f.agent(c.ID); c.Status != "running" && f.unchangedSinceGateFailed(a) {
+			// the gate already failed this exact commit: re-grading it gets the same answer, so the builder
+			// gets one more round with the gate's report instead
+			report := f.lastGateReport(c.ID)
+			labels := map[string]string{labelStage: "building", labelSince: iso(f.Now()), labelAutoReview: kind}
+			if err := f.setLabels(c.ID, labels); err != nil {
+				return err
+			}
+			failed := gateFailures(ParseGrades(report), f.guarded(c.Repo))
+			return f.advance(labeled(a, labels), "gate fixes", reworkGateMsg(failed, atoi(a.L(labelRoundsGate)), f.cfg.ReworkCap, report))
 		}
 		if c.Status == "running" {
 			return f.setLabels(c.ID, map[string]string{labelStage: from, labelAutoReview: kind, labelSince: iso(f.Now())})
@@ -756,4 +773,35 @@ func (f *Factory) saveAttachments(id string, atts []Attachment) (files, images [
 		}
 	}
 	return files, images, nil
+}
+
+// gateStop reports whether card a waits on Zach because of the gate: blocked on him, or stuck at the gate's round cap.
+func gateStop(a Agent) bool {
+	return (a.L(labelStage) == "zach" && a.L(labelNote) == gateBlockedNote) || a.L(labelStuck) == stuckGate
+}
+
+// unchangedSinceGateFailed reports whether card a's HEAD is the commit the gate last sent back. A failed read says no.
+func (f *Factory) unchangedSinceGateFailed(a Agent) bool {
+	failed := strings.TrimSpace(a.L(labelGateFailedHead))
+	if failed == "" || a.Cwd == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	head, err := f.GitOut(ctx, a.Cwd, "rev-parse", "HEAD")
+	return err == nil && strings.TrimSpace(head) == failed
+}
+
+// lastGateReport is the report of card id's latest gate round, or "" when none is recorded.
+func (f *Factory) lastGateReport(id string) string {
+	t, ok := f.timings.get(id)
+	if !ok {
+		return ""
+	}
+	for i := len(t.Rounds) - 1; i >= 0; i-- {
+		if isGateSpan(t.Rounds[i].Kind) && strings.TrimSpace(t.Rounds[i].Report) != "" {
+			return t.Rounds[i].Report
+		}
+	}
+	return ""
 }

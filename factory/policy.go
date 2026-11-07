@@ -423,21 +423,28 @@ func (f *Factory) decide(t Agent, r reviewOutcome, consume func() error) error {
 	grades := ParseGrades(notes)
 	labels[labelGrades] = gradesLabel(grades)
 	failed := gateFailures(grades, f.guarded(t.Repo))
+	head := strings.TrimSpace(t.L(labelReviewed))
 	var err error
 	switch {
 	case verdict == "close":
 		err = set(labelStage, "zach", labelNote, "reviewer suggests closing")
+	case verdict == "escalate" && len(failed) > 0,
+		verdict != "close" && len(failed) > 0 && head != "" && head == t.L(labelGateFailedHead):
+		// blocked on Zach: the gate says only he can unblock it, or the builder changed nothing since the
+		// gate last sent this commit back. Another round would get the same answer.
+		err = set(labelStage, "zach", labelSince, iso(f.Now()), labelNote, gateBlockedNote, labelAutoReview, "")
 	case verdict == "escalate" && len(failed) == 0:
 		// no one to escalate to but Zach: it never lands on its own
 		err = f.passSignoff(t, labels, kind+" "+verdict, notes+"\nSIGN OFF: red - the gate could not decide this itself")
 	case (verdict == "approve" || verdict == "nits") && len(failed) == 0:
 		err = f.passSignoff(t, labels, kind+" "+verdict, notes)
 	case rounds < f.cfg.ReworkCap:
-		if err = set(labelStage, "building", labelSince, iso(f.Now()), labelAutoReview, kind); err == nil {
+		if err = set(labelStage, "building", labelSince, iso(f.Now()), labelAutoReview, kind, labelGateFailedHead, head); err == nil {
 			err = f.advance(labeled(t, labels), "gate fixes", reworkGateMsg(failed, rounds, f.cfg.ReworkCap, notes))
 		}
 	default:
 		// the round cap: the card stays in the gate, marked stuck, on the board only
+		labels[labelGateFailedHead] = head
 		if err = f.setLabels(target, labels); err == nil {
 			err = f.markStuck(labeled(t, labels), stuckGate)
 		}

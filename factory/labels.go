@@ -93,6 +93,10 @@ const (
 	labelRoundsSignoff = oldGateSignoff + "-rounds"
 )
 
+// labelGateFailedHead is the commit the gate last sent back. A gate that fails that same commit again
+// finds nothing a builder changed, so the card goes to Zach (gateBlockedNote) instead of round after round.
+const labelGateFailedHead = "gate-failed-head"
+
 // labelGrades is the gate's last grades (gradesLabel): "request:green works:yellow design:green public:n/a signoff:green".
 const labelGrades = "grades"
 
