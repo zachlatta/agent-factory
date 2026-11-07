@@ -653,9 +653,7 @@ function gatePassesHtml(c){
     ${r.grades ? Object.entries(gradeNames).map(([key,name])=>{
       const value = Object.fromEntries(r.grades.split(' ').map(p=>p.split(':')))[key] || '-';
       const color = ['green','yellow','red'].includes(value)?value:'unknown';
-      const label = {request:'MEETS REQUEST',works:'WORKS',design:'DESIGN',public:'PUBLIC SAFETY',signoff:'SIGN OFF'}[key];
-      const lines = [...(r.report||'').matchAll(new RegExp('^[ \t>*_#-]*'+label+'[*_]*\\s*:[ \t*_\x60]*(?:green|yellow|red|n/a|none)\\b[ \t*_\x60]*[-–—:]?[ \t]*(.*)$','gim'))];
-      const reason = lines.length ? lines[lines.length-1][1].trim() : '';
+      const reason = r.reasons?.[key] || '';
       return `<div class="gatecheck"><span class="grade ${color}">${esc(value==='-'?'not graded':value==='n/a'?'not applicable':value)}</span><span>${esc(name)}${reason? `<div class="sub">${esc(reason)}</div>` : '<div class="sub">No explanation recorded.</div>'}</span></div>`;
     }).join('') : '<p class="sub">Checks unavailable for this older pass.</p>'}
     ${r.report?`<details><summary>Gate report</summary><pre class="gatereport">${esc(r.report)}</pre></details>`:''}</section>`).join('');

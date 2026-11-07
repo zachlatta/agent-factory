@@ -97,16 +97,14 @@ func providerAgents(t *testing.T, home string) []Agent {
 	return []Agent{cl, cx, ag, mu}
 }
 
-// The board's summary of an archived agent comes from its session file, for every provider.
-func TestLogsEndpointReadsSessionFiles(t *testing.T) {
+// Card details return the request without returning transcript history, for every provider.
+func TestLogsEndpointReturnsRequestOnly(t *testing.T) {
 	f, p := newStuckLogsFactory(t)
 	agents := providerAgents(t, f.cfg.Home)
 	f.SetAgents(agents)
-	want := map[string]string{"cl": "[User] go\n[Thought] hmm\nclaude reply\nTIER: low", "cx": "[User] go\ncodex reply",
-		"ag": "[User] go\nantigravity reply", "mu": "[User] go\nmuse reply"}
 	for _, a := range agents {
 		code, j := getJSON(t, f, "/api/logs/"+a.ID)
-		if code != 200 || j["text"] != want[a.ID] {
+		if code != 200 || j["text"] != nil || j["request"] == nil {
 			t.Errorf("%s (%s): %d %v", a.ID, a.Provider, code, j)
 		}
 		reply, err := f.storedReply(a)
@@ -117,7 +115,7 @@ func TestLogsEndpointReadsSessionFiles(t *testing.T) {
 	noLogsCalls(t, p)
 }
 
-// With no readable session file, the summary and the transcript say why at once, and never ask Paseo.
+// Missing history does not block card details; the transcript explains the missing history.
 func TestMissingHistoryIsExplicitAndImmediate(t *testing.T) {
 	f, p := newStuckLogsFactory(t)
 	home := f.cfg.Home
@@ -143,7 +141,7 @@ func TestMissingHistoryIsExplicitAndImmediate(t *testing.T) {
 		start := time.Now()
 		code, j := getJSON(t, f, "/api/logs/"+id)
 		msg, _ := j["error"].(string)
-		if code != 404 || !strings.HasPrefix(msg, "history unavailable: ") || !strings.Contains(msg, reason) {
+		if code != 200 || j["request"] == nil || j["text"] != nil {
 			t.Errorf("logs %s: %d %v", id, code, j)
 		}
 		code, j = getJSON(t, f, "/api/transcript/"+id)
@@ -161,7 +159,7 @@ func TestMissingHistoryIsExplicitAndImmediate(t *testing.T) {
 	noLogsCalls(t, p)
 }
 
-// Switching cards fast: concurrent summary reads each get their own agent's text.
+// Concurrent card detail reads return requests without transcript history.
 func TestLogsEndpointConcurrentCardSwitches(t *testing.T) {
 	f, p := newStuckLogsFactory(t)
 	agents := providerAgents(t, f.cfg.Home)
@@ -174,7 +172,7 @@ func TestLogsEndpointConcurrentCardSwitches(t *testing.T) {
 			defer wg.Done()
 			rec := httptest.NewRecorder()
 			f.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/logs/"+a.ID, nil))
-			if !strings.Contains(rec.Body.String(), a.Provider+" reply") {
+			if !strings.Contains(rec.Body.String(), `"request"`) || strings.Contains(rec.Body.String(), `"text"`) {
 				t.Errorf("%s got %s", a.ID, rec.Body)
 			}
 		}()

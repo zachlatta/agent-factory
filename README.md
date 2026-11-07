@@ -59,7 +59,8 @@ and name changes, messages and archives, and the `paseo` CLI for the rest (label
 Opening a card shows the live transcript and chat inline in the sidebar, starting at the latest
 activity. It uses the same chat as the full transcript page: polling, tool calls, thinking,
 older history, search and replies. Scrolling up keeps your place; Latest returns to new activity.
-Closing the panel stops its transcript polling. Gate checks and card details remain below the chat.
+Closing the panel stops its transcript polling. The card details endpoint returns only the request
+and idea record; transcript history is loaded only by the chat. Gate checks and card details remain below the chat.
 
 **Unread** on a card: its agent finished a turn you have not opened. Opening the card or loading its
 transcript page marks it seen (`factory.seen`) until the agent is sent another message and finishes

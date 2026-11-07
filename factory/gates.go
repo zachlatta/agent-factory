@@ -179,6 +179,21 @@ func ParseGrades(text string) map[string]string {
 	return out
 }
 
+// ParseGradeReasons reads explanations using the same accepted grade lines as ParseGrades.
+func ParseGradeReasons(text string) map[string]string {
+	out := map[string]string{}
+	for _, g := range gradeLines {
+		matches := gradeRes[g.check].FindAllStringIndex(text, -1)
+		if len(matches) == 0 {
+			continue
+		}
+		end := matches[len(matches)-1][1]
+		reason := strings.SplitN(text[end:], "\n", 2)[0]
+		out[g.check] = strings.TrimSpace(strings.TrimLeft(reason, " \t*_`-–—:"))
+	}
+	return out
+}
+
 // gateFailures names the checks that send the work back: any that is not green. Public safety counts only in a
 // public repo; sign-off never does, since it only decides whether the work goes to Zach.
 func gateFailures(grades map[string]string, public bool) []string {

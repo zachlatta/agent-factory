@@ -43,13 +43,14 @@ type TimingEvent struct {
 
 // TimingRound is one review round: started with the reviewer, ended when its verdict was applied.
 type TimingRound struct {
-	Grades  string    `json:"grades,omitempty"`
-	Report  string    `json:"report,omitempty"`
-	Kind    string    `json:"kind"`
-	N       int       `json:"n"`
-	Start   time.Time `json:"start"`
-	End     time.Time `json:"end"`
-	Verdict string    `json:"verdict"`
+	Grades  string            `json:"grades,omitempty"`
+	Reasons map[string]string `json:"reasons,omitempty"`
+	Report  string            `json:"report,omitempty"`
+	Kind    string            `json:"kind"`
+	N       int               `json:"n"`
+	Start   time.Time         `json:"start"`
+	End     time.Time         `json:"end"`
+	Verdict string            `json:"verdict"`
 }
 
 // FactoryMail is an email the factory itself sent for a card (a Needs Zach note or an answer's
@@ -476,12 +477,13 @@ type StageSpan struct {
 }
 
 type RoundView struct {
-	Grades  string `json:"grades,omitempty"`
-	Report  string `json:"report,omitempty"`
-	Kind    string `json:"kind"`
-	N       int    `json:"n"`
-	Secs    int    `json:"secs"`
-	Verdict string `json:"verdict"`
+	Grades  string            `json:"grades,omitempty"`
+	Reasons map[string]string `json:"reasons,omitempty"`
+	Report  string            `json:"report,omitempty"`
+	Kind    string            `json:"kind"`
+	N       int               `json:"n"`
+	Secs    int               `json:"secs"`
+	Verdict string            `json:"verdict"`
 }
 
 func secs(d time.Duration) int { return int(d.Round(time.Second) / time.Second) }
@@ -502,7 +504,7 @@ func (t CardTiming) view(now time.Time) *TimingView {
 		v.Stages = append(v.Stages, sp)
 	}
 	for _, r := range t.Rounds {
-		v.Rounds = append(v.Rounds, RoundView{Kind: r.Kind, N: r.N, Secs: max(0, secs(r.End.Sub(r.Start))), Verdict: r.Verdict, Grades: r.Grades, Report: r.Report})
+		v.Rounds = append(v.Rounds, RoundView{Kind: r.Kind, N: r.N, Secs: max(0, secs(r.End.Sub(r.Start))), Verdict: r.Verdict, Grades: r.Grades, Report: r.Report, Reasons: roundReasons(r)})
 	}
 	if !t.RequestedAt.IsZero() {
 		end := t.end()
@@ -528,6 +530,13 @@ func (s *TimingStore) fillTiming(cards []Card, now time.Time) {
 	}
 }
 
+func roundReasons(r TimingRound) map[string]string {
+	if r.Reasons != nil {
+		return r.Reasons
+	}
+	return ParseGradeReasons(r.Report)
+}
+
 // recordRound records a review round of card id.
 func (f *Factory) recordRound(id, kind string, n int, start time.Time, verdict, notes string) {
 	var grades string
@@ -536,7 +545,7 @@ func (f *Factory) recordRound(id, kind string, n int, start time.Time, verdict, 
 	}
 	end := f.Now()
 	f.timings.update(id, func(t *CardTiming) {
-		t.Rounds = append(t.Rounds, TimingRound{Kind: kind, N: n, Start: start, End: end, Verdict: verdict, Grades: grades, Report: notes})
+		t.Rounds = append(t.Rounds, TimingRound{Kind: kind, N: n, Start: start, End: end, Verdict: verdict, Grades: grades, Report: notes, Reasons: ParseGradeReasons(notes)})
 	})
 }
 

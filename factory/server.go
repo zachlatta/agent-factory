@@ -294,13 +294,7 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(id, "idea-") {
 		for _, i := range f.ideas.List() {
 			if i.ID == id {
-				why := i.Why
-				if why == "" {
-					why = "(not given)"
-				}
-				// idea: the whole record, for the board's idea panel (its request is not on /api/board)
-				writeJSON(w, 200, map[string]any{"text": i.Request + "\n\nWhy: " + why + "\n\nSuggested by " + i.By +
-					" " + iso(i.CreatedAt), "idea": i})
+				writeJSON(w, 200, map[string]any{"request": i.Request, "idea": i})
 				return
 			}
 		}
@@ -318,42 +312,7 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": "agent not on the board (open, or archived in the last 12 h)"})
 		return
 	}
-	// the session file only: `paseo logs` would load the agent (resuming it even when archived)
-	if a.L(labelRole) == "" {
-		if lin := cardLineage(byID, a.ID); len(lin) > 1 {
-			var parts []string
-			var lastErr error
-			for i, x := range lin {
-				if i > 0 {
-					parts = append(parts, fmt.Sprintf("--- Switched from %s (%s) to %s (%s) ---",
-						short(lin[i-1].ID), orNone(lin[i-1].Model, lin[i-1].Provider), short(x.ID), orNone(x.Model, x.Provider)))
-				}
-				t, err := storedText(f.cfg.Home, x, 30)
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				if strings.TrimSpace(t) != "" {
-					parts = append(parts, t)
-				}
-			}
-			if len(parts) > 0 {
-				writeJSON(w, 200, map[string]any{"text": strings.Join(parts, "\n"), "request": f.cardRequest(a)})
-				return
-			}
-			if lastErr != nil {
-				writeJSON(w, 404, map[string]string{"error": lastErr.Error()})
-				return
-			}
-		}
-	}
-	text, err := storedText(f.cfg.Home, a, 30)
-	if err != nil {
-		writeJSON(w, 404, map[string]string{"error": err.Error()})
-		return
-	}
-	// the card's own request, so its detail opens with Zach's words (opening a card only, never the list)
-	writeJSON(w, 200, map[string]any{"text": text, "request": f.cardRequest(a)})
+	writeJSON(w, 200, map[string]any{"request": f.cardRequest(a)})
 }
 
 var actions = map[string]bool{"new": true, "idea": true, "scout": true, "stage": true, "review": true, "send": true,

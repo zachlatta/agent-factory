@@ -340,7 +340,7 @@ func TestGatePassHistorySurvivesRestart(t *testing.T) {
 	cards := []Card{{ID: "c1"}}
 	s.fillTiming(cards, t0)
 	rounds := cards[0].Timing.Rounds
-	if len(rounds) != 2 || !strings.Contains(rounds[0].Grades, "works:yellow") || !strings.Contains(rounds[1].Grades, "works:green") || rounds[1].Report != greenGate {
+	if len(rounds) != 2 || !strings.Contains(rounds[0].Grades, "works:yellow") || !strings.Contains(rounds[1].Grades, "works:green") || rounds[1].Report != greenGate || rounds[1].Reasons[checkWorks] != ParseGradeReasons(greenGate)[checkWorks] {
 		t.Fatalf("history lost: %+v", rounds)
 	}
 }
@@ -350,6 +350,15 @@ func TestGateRequiresEvidenceForEachGrade(t *testing.T) {
 	for _, want := range []string{"what you inspected or changed", "evidence supports the grade", "on its grade line"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing evidence instruction %q", want)
+		}
+	}
+}
+
+func TestGradeReasonsShareAcceptedLabels(t *testing.T) {
+	for _, label := range []string{"SIGN OFF", "SIGN-OFF", "SIGNOFF"} {
+		text := label + ": yellow - approval required\n" + label + ": green - scoped change"
+		if got := ParseGradeReasons(text)[checkSignoff]; got != "scoped change" {
+			t.Fatalf("%s: %q", label, got)
 		}
 	}
 }
