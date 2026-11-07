@@ -727,8 +727,11 @@ func (f *Factory) saveAttachments(id string, atts []Attachment) (files, images [
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid attachment: %w", err)
 		}
+		if len(b) == 0 {
+			return nil, nil, fmt.Errorf("%s is empty", a.Name)
+		}
 		total += len(b)
-		if len(b) == 0 || total > 25<<20 {
+		if total > 25<<20 {
 			return nil, nil, errors.New("attachments must total 25 MB or less")
 		}
 		data = append(data, b)

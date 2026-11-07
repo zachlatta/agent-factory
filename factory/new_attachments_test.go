@@ -72,6 +72,10 @@ func TestAttachmentStorageSharedByReplies(t *testing.T) {
 			t.Fatalf("private file permissions: %v, %v", info, err)
 		}
 	}
+	_, _, err = f.saveAttachments("sample", []Attachment{{Name: "blank.png", Type: "image/png"}})
+	if err == nil || !strings.Contains(err.Error(), "blank.png is empty") {
+		t.Fatalf("empty attachment error: %v", err)
+	}
 	_, _, err = f.saveAttachments("sample", make([]Attachment, 11))
 	if err == nil {
 		t.Fatal("accepted more than ten attachments")
