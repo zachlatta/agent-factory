@@ -221,7 +221,7 @@ func TestWorkLeftGoesBackToTheCard(t *testing.T) {
 	const reply = "DECISION: None. It is landed and live.\nNEEDS FROM ZACH: Nothing.\n\nLanded abc1234.\nREMAINING:\n- agent: the phone-width check was not run"
 	for _, commits := range []string{"", "def5678\n"} {
 		t.Run(fmt.Sprintf("commits %q", commits), func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelTier: "architecture",
+			c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute),
 				labelRoundsRequest: "1", labelRoundsDesign: "1"})
 			c.Cwd = t.TempDir()
 			f, p := newTestFactory(t, c)

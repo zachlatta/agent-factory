@@ -21,7 +21,6 @@ func farCard(t *testing.T) (Agent, *Factory, *fakePaseo) {
 	a.SessionID = testSession(a.ID)
 	a.WorkspaceID = "ws-1"
 	a.Labels[labelPrefix+labelAgent] = "opus"
-	a.Labels[labelPrefix+labelTier] = "architecture"
 	a.Labels[labelPrefix+labelRoundsRequest] = "2"
 	a.Labels[labelPrefix+labelWaitsOn] = "abc1234"
 	a.Labels[gmailThreadLabel] = "thread-1"
@@ -360,7 +359,7 @@ func TestHandoffFarResetStartsOpusAlternativeInSameWorkspace(t *testing.T) {
 	}
 	for _, want := range []string{
 		labelPrefix + labelReplaces + "=old-card", labelPrefix + labelStage + "=building",
-		labelPrefix + labelAgent + "=codex-sol", labelPrefix + labelTier + "=architecture",
+		labelPrefix + labelAgent + "=codex-sol",
 		labelPrefix + labelRoundsRequest + "=2", labelPrefix + labelWaitsOn + "=abc1234",
 		labelPrefix + labelAutoReview + "=code", gmailThreadLabel + "=thread-1",
 	} {

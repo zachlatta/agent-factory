@@ -35,7 +35,7 @@ This repo is public: everything that lands here is published. So:
 `
 
 const publicReviewRule = `
-This repo is public. Blocking, whatever the tier: any secret, hostname, IP address, email address,
+This repo is public. Always blocking: any secret, hostname, IP address, email address,
 home-directory path, thread or session id, quote from Zach or personal fact in the diff, the commit
 messages or the commit authors; and any change to the secret scan (factory/scan/, .gitleaks.toml,
 .githooks/, bin/) that weakens it.`

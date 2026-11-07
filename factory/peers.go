@@ -44,7 +44,6 @@ type Peer struct {
 	Title     string   `json:"title"`
 	Repo      string   `json:"repo"`
 	Stage     string   `json:"stage"`
-	Tier      string   `json:"tier,omitempty"`
 	Status    string   `json:"status"`
 	Source    string   `json:"source"`
 	StageMin  int      `json:"inStageMinutes"`    // since its last move (factory.since), else since it started
@@ -60,7 +59,6 @@ type Peer struct {
 type PeerIdea struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	Tier  string `json:"tier,omitempty"`
 	Repo  string `json:"repo"`
 }
 
@@ -133,7 +131,7 @@ func (f *Factory) Peers(forID, repo string) Peers {
 		case c.Source == "scout": // a running Scout sits in the Ideas column but is not an idea
 		case c.Stage == "idea":
 			if len(out.Ideas) < peerIdeaCap {
-				out.Ideas = append(out.Ideas, PeerIdea{ID: c.ID, Title: c.Title, Tier: c.Tier, Repo: c.Repo})
+				out.Ideas = append(out.Ideas, PeerIdea{ID: c.ID, Title: c.Title, Repo: c.Repo})
 			}
 		case c.Source == "schedule":
 			if c.Status == "running" && c.ArchivedAt == "" {
@@ -207,7 +205,7 @@ func (f *Factory) Peers(forID, repo string) Peers {
 
 // peer describes one card; withFiles reads its changed files from git.
 func (f *Factory) peer(c Card, a Agent, now time.Time, withFiles bool) Peer {
-	p := Peer{ID: c.ID, Short: c.Short, Title: c.Title, Repo: c.Repo, Stage: c.Stage, Tier: c.Tier, Status: c.Status,
+	p := Peer{ID: c.ID, Short: c.Short, Title: c.Title, Repo: c.Repo, Stage: c.Stage, Status: c.Status,
 		Source: c.Source, Files: []string{}}
 	p.Request, p.FollowUps = f.cardRequest(a).brief()
 	moved := parseTime(a.L(labelSince))
@@ -682,11 +680,7 @@ func (p Peers) Text(loc *time.Location) string {
 		tailAdd("")
 		tailAdd("Next ideas waiting to start (%d):", len(p.Ideas))
 		for _, i := range p.Ideas {
-			tier := i.Tier
-			if tier == "" {
-				tier = "no tier"
-			}
-			tailAdd("- %s [%s] %s: %q", i.ID, tier, i.Repo, i.Title)
+			tailAdd("- %s %s: %q", i.ID, i.Repo, i.Title)
 		}
 	}
 	if len(p.Schedules) > 0 {
@@ -695,8 +689,8 @@ func (p Peers) Text(loc *time.Location) string {
 	}
 	room := peerLineCap - len(b) - len(tail)
 	for n, x := range p.InFlight {
-		lines := []string{fmt.Sprintf("- %s [%s for %d min, %s, %s, %s] %s: %q", x.Short, x.Stage, x.StageMin,
-			orNone(x.Tier, "no tier"), x.Status, x.Source, x.Repo, x.Title)}
+		lines := []string{fmt.Sprintf("- %s [%s for %d min, %s, %s] %s: %q", x.Short, x.Stage, x.StageMin,
+			x.Status, x.Source, x.Repo, x.Title)}
 		if x.Request != "" {
 			lines = append(lines, "  Request: "+x.Request)
 		}

@@ -91,7 +91,7 @@ func (f *Factory) completeArchivedDirect(a Agent) (bool, error) {
 	c, ok := f.card(a.ID)
 	if !ok {
 		c = Card{ID: a.ID, Short: short(a.ID), Title: a.Title, Host: a.Host, Cwd: a.Cwd, Repo: a.Repo,
-			WorkspaceID: a.WorkspaceID, Tier: a.L(labelTier)}
+			WorkspaceID: a.WorkspaceID}
 	}
 	if reply, err := f.storedReply(a); err == nil {
 		f.nameCard(a, reply)

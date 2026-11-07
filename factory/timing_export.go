@@ -162,7 +162,6 @@ type TimingExportCard struct {
 	ID            string          `json:"id"`
 	Repo          string          `json:"repo,omitempty"`
 	Source        string          `json:"source"`
-	Tier          string          `json:"tier,omitempty"`
 	Partial       bool            `json:"partial,omitempty"`
 	RequestedAt   time.Time       `json:"requestedAt,omitzero"`
 	RequestedFrom string          `json:"requestedFrom,omitempty"`
@@ -181,7 +180,7 @@ func (s *TimingStore) export() TimingExport {
 	all := s.all()
 	out := TimingExport{Cards: make([]TimingExportCard, 0, len(all))}
 	for id, t := range all {
-		out.Cards = append(out.Cards, TimingExportCard{ID: id, Repo: t.Repo, Source: t.Source, Tier: t.Tier,
+		out.Cards = append(out.Cards, TimingExportCard{ID: id, Repo: t.Repo, Source: t.Source,
 			Partial: t.Partial, RequestedAt: t.RequestedAt, RequestedFrom: t.RequestedFrom,
 			LandedAt: t.LandedAt, RepliedAt: t.RepliedAt, NoReply: t.NoReply, Asks: t.asks(), ClosedAt: t.ClosedAt, DoneAt: t.doneAt(),
 			Events: t.Events, Rounds: t.Rounds, Sessions: t.Sessions})

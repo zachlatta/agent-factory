@@ -272,7 +272,7 @@ func TestBlockedReviewerIsReplaced(t *testing.T) {
 
 func recoveryLandingCard(repo string) Agent {
 	c := card("c1", map[string]string{labelStage: "landing", labelSince: ago(10 * time.Minute), labelReviewed: "h1",
-		labelBase: "b0", labelTier: "low", labelRoundsRequest: "1"})
+		labelBase: "b0", labelRoundsRequest: "1"})
 	c.Repo = repo
 	return c
 }
@@ -394,7 +394,7 @@ func TestLandedDiffRecoveryReviewsPublishedHead(t *testing.T) {
 }
 
 func TestReLandAfterRecoveryStillScans(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelRoundsDesign: "1",
+	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelRoundsDesign: "1",
 		labelReviewed: reviewedSHA})
 	c.Repo = publicRepo
 	b, _ := json.Marshal(recovery{Lands: 1})

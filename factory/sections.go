@@ -100,7 +100,7 @@ func BuildSections(cards []Card, now time.Time, loc *time.Location) Sections {
 			line.At = cmp.Or(c.Idea.ErrorAt, c.CreatedAt)
 			s.Stuck = append(s.Stuck, line)
 		case c.Stage == "idea" || c.Source == "scout":
-		case c.Tier == "routine" || c.Source == "schedule":
+		case c.Source == "schedule":
 			if sameDay(parseTime(c.CreatedAt), now, loc) {
 				line.At = c.CreatedAt
 				line.State = workingState[c.Stage]
@@ -197,7 +197,7 @@ func finishedLine(c Card, done time.Time) (SectionLine, bool) {
 func Finished(cards []Card) []SectionLine {
 	var shipped []SectionLine
 	for _, c := range cards {
-		if c.Stage != "landed" || c.Source == "scout" || c.Tier == "routine" || c.Source == "schedule" {
+		if c.Stage != "landed" || c.Source == "scout" || c.Source == "schedule" {
 			continue
 		}
 		done := doneAt(c)

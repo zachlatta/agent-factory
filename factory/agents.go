@@ -124,10 +124,10 @@ func (f *Factory) resolveAgent(id string) (AgentChoice, error) {
 }
 
 type planScore struct {
-	tier int     // 3 = healthy known, 2 = 5h window in red (<=20%), 1 = usage unknown, 0 = window exhausted (<=0%)
-	pace float64 // % remaining minus % of 7d window remaining until reset
-	w7   int
-	w5   int
+	health int     // 3 = healthy known, 2 = 5h window in red (<=20%), 1 = usage unknown, 0 = window exhausted (<=0%)
+	pace   float64 // % remaining minus % of 7d window remaining until reset
+	w7     int
+	w5     int
 }
 
 // planCapacityWeight is how much of a provider's real remaining capacity the balancer counts: Opus keeps
@@ -144,14 +144,14 @@ func capacityWeight(provider string) float64 {
 func usageScore(u AgentUsage, now time.Time, weight float64) planScore {
 	windows := decisionUsageWindows(u, now)
 	if len(windows) == 0 {
-		return planScore{tier: 1}
+		return planScore{health: 1}
 	}
 	var w7 UsageWindow
 	w5Pct := 0
 	hasWeek, has5h := false, false
 	for _, w := range windows {
 		if w.RemainingPct <= 0 {
-			return planScore{tier: 0}
+			return planScore{health: 0}
 		}
 		if w.Label == "7d" {
 			w7 = w
@@ -164,7 +164,7 @@ func usageScore(u AgentUsage, now time.Time, weight float64) planScore {
 	}
 	// A short window cannot establish the weekly pace.
 	if !hasWeek {
-		return planScore{tier: 1, w5: w5Pct}
+		return planScore{health: 1, w5: w5Pct}
 	}
 	if !has5h {
 		w5Pct = w7.RemainingPct
@@ -179,17 +179,17 @@ func usageScore(u AgentUsage, now time.Time, weight float64) planScore {
 			}
 		}
 	}
-	tier := 3
+	health := 3
 	eff := float64(w7.RemainingPct) * weight
 	if has5h && w5Pct <= 20 {
-		tier = 2
+		health = 2
 		eff = min(eff, float64(w5Pct)*weight)
 	}
 	return planScore{
-		tier: tier,
-		pace: eff - weekLeftPct,
-		w7:   w7.RemainingPct,
-		w5:   w5Pct,
+		health: health,
+		pace:   eff - weekLeftPct,
+		w7:     w7.RemainingPct,
+		w5:     w5Pct,
 	}
 }
 
@@ -220,8 +220,8 @@ func rankAgentChoices(statuses map[string]string, usages map[string]AgentUsage, 
 		if !a.avail {
 			return a.idx < b.idx
 		}
-		if a.score.tier != b.score.tier {
-			return a.score.tier > b.score.tier
+		if a.score.health != b.score.health {
+			return a.score.health > b.score.health
 		}
 		if math.Abs(a.score.pace-b.score.pace) > 1e-9 {
 			return a.score.pace > b.score.pace
@@ -303,7 +303,7 @@ func pickIdeaAgent(statuses map[string]string, usages map[string]AgentUsage, now
 			low = append(low, fmt.Sprintf("%s %d%%", c.Label, left))
 			continue
 		}
-		if usageScore(u, now, capacityWeight(c.providerID())).tier > 0 {
+		if usageScore(u, now, capacityWeight(c.providerID())).health > 0 {
 			return c, ""
 		}
 		if above == nil {

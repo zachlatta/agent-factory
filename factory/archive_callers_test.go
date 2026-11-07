@@ -56,7 +56,7 @@ func TestAutomaticArchiveCallersPreserveProtections(t *testing.T) {
 		for _, failure := range []string{"fresh-running", "unverified"} {
 			t.Run(caller+"/"+failure, func(t *testing.T) {
 				a := idleFor(card("subject", map[string]string{labelStage: "landed"}), time.Hour)
-				target := card("target", map[string]string{labelStage: gateRequest, labelTier: "low"})
+				target := card("target", map[string]string{labelStage: gateRequest})
 				switch caller {
 				case "reap-reviewer":
 					a = reviewer("subject", "target", gateSignoff)

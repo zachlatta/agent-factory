@@ -105,6 +105,7 @@ type Factory struct {
 	p          Paseo
 	ideas      *IdeaStore
 	routes     *RouteStore
+	procRoot   string // /proc, where a request's calling agent is traced (caller.go)
 	replies    *replyStore
 	ReplyCheck func(context.Context, ReplyContext) (string, error)
 	steers     *SteerStore   // closed duplicates' requests on their way to the kept card (steer.go)
@@ -189,7 +190,7 @@ const archiveMarkTTL = 10 * time.Minute
 func New(cfg Config, p Paseo) *Factory {
 	cfg.defaults()
 	f := &Factory{cfg: cfg, p: p, ideas: &IdeaStore{path: filepath.Join(cfg.StateDir, "ideas.json")},
-		routes: &RouteStore{path: filepath.Join(cfg.StateDir, "routes.json")}, routing: map[string]bool{},
+		routes: &RouteStore{path: filepath.Join(cfg.StateDir, "routes.json")}, procRoot: "/proc", routing: map[string]bool{},
 		replies:  &replyStore{path: filepath.Join(cfg.StateDir, "reply-clarifications.json")},
 		steers:   &SteerStore{path: filepath.Join(cfg.StateDir, "steers.json")},
 		previews: &PreviewStore{path: filepath.Join(cfg.StateDir, "previews.json")},

@@ -172,7 +172,7 @@ func TestDecisionHistoryReplySupersedesPausedReview(t *testing.T) {
 		{"archived history stays missing", false, true}, {"archived history appears", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelTier: "low", labelRoundsRequest: "1", labelVerdict: "plan approve"})
+			c := card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelRoundsRequest: "1", labelVerdict: "plan approve"})
 			r := reviewer("r1", c.ID, gateDesign)
 			if tc.archived {
 				r = archived(r)

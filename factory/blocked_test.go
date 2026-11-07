@@ -259,7 +259,7 @@ func TestDryRunNeverAnswersPrompts(t *testing.T) {
 
 func TestPromptsCarryRmRule(t *testing.T) {
 	want := "no cd earlier in the same command"
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r"}
 	for _, kind := range []string{gateRequest, gateDesign, "land"} {
 		if !strings.Contains(ReviewPrompt(c, kind, 7478, "unknown"), want) {
 			t.Errorf("%s review prompt lacks the rm rule", kind)

@@ -17,12 +17,12 @@ import (
 
 func TestIdeasAddDedupeDismiss(t *testing.T) {
 	f, _ := newTestFactory(t)
-	i, err := f.Act("idea", Body{Request: "Make tests faster", By: "scout", Tier: "low"})
+	i, err := f.Act("idea", Body{Request: "Make tests faster", By: "scout"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	idea := i.(Idea)
-	if idea.Status != "waiting" || idea.Title != "Make tests faster" || idea.Tier != "low" {
+	if idea.Status != "waiting" || idea.Title != "Make tests faster" {
 		t.Errorf("idea = %+v", idea)
 	}
 	if _, err := f.Act("idea", Body{Request: "Make tests faster"}); err == nil {

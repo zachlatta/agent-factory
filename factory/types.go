@@ -82,8 +82,8 @@ type Card struct {
 	Rounds          Rounds    `json:"rounds"`
 	Verdict         string    `json:"verdict"`
 	Note            string    `json:"note"`
-	Tier            string    `json:"tier"`
 	SubmittedBy     string    `json:"submittedBy"` // zach or system (gates.go)
+	CanLand         bool      `json:"canLand"`     // Approve & land applies (landable)
 	Awaiting        string    `json:"awaiting"`
 	Origin          string    `json:"origin"`
 	Agent           string    `json:"agent"`              // AgentChoice id (factory.agent label)
@@ -144,7 +144,6 @@ type Idea struct {
 	DoneWhen  string    `json:"doneWhen"` // how to tell it worked
 	Repo      string    `json:"repo"`
 	By        string    `json:"by"`
-	Tier      string    `json:"tier"`
 	Priority  string    `json:"priority,omitempty"` // high, normal or low ("" = normal); ideas start by priority, then age
 	Schedule  string    `json:"schedule,omitempty"` // the Paseo schedule that filed it, by name ("" = not a schedule)
 	CreatedAt time.Time `json:"createdAt"`
@@ -177,6 +176,7 @@ type IdeaView struct {
 // Body is the JSON body of every POST /api/<action>.
 type Body struct {
 	SubmittedBy string            `json:"submittedBy"` // new: "system" tags an automatic submission
+	schedule    string            // new: the scheduled run that filed it, traced by the server (caller.go)
 	ID          string            `json:"id"`
 	Stage       string            `json:"stage"`
 	Kind        string            `json:"kind"`
@@ -189,7 +189,6 @@ type Body struct {
 	Summary     string            `json:"summary"`
 	DoneWhen    string            `json:"doneWhen"`
 	By          string            `json:"by"`
-	Tier        string            `json:"tier"`
 	Priority    string            `json:"priority"` // idea: high, normal or low ("" = normal)
 	Schedule    string            `json:"schedule"` // idea: the name of the Paseo schedule filing it
 	Origin      string            `json:"origin"`

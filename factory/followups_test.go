@@ -312,7 +312,7 @@ func TestAppCardRequestFromFirstUserPrompt(t *testing.T) {
 }
 
 func TestReviewPromptShowsRequestAndFollowUps(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Cwd: "/w", Repo: "r", Tier: "low", Request: &CardRequest{
+	c := Card{ID: "c1", Title: "x", Cwd: "/w", Repo: "r", Request: &CardRequest{
 		Base: "Paint the shed blue.",
 		FollowUps: []FollowUp{{Date: "Sun, 25 Oct 2026 20:01:00 -0400", Text: "Make it green."},
 			{Date: "Sun, 25 Oct 2026 20:30:00 -0400", Text: "Two coats."}},

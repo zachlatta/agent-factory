@@ -226,6 +226,9 @@ func (f *Factory) act(action string, b Body, recoveryMessage bool) (any, error) 
 		if a := f.agent(c.ID); a.L(labelRouting) != "" {
 			return ok, f.pickRepo(a, b.Repo)
 		}
+		if !landable(f.agent(c.ID)) {
+			return nil, errors.New("this card is still going through the gates: it can be landed once they pass")
+		}
 		answers := ""
 		if m := strings.TrimSpace(b.Message); m != "" {
 			// Zach approved and answered the card's questions in one step
@@ -612,10 +615,7 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 		if source != "board" {
 			return nil, errors.New("an email or voice card names its repo")
 		}
-		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Schedule: b.Schedule, Agent: agent.ID, Thinking: agent.Thinking}
-		if tierRank(b.Tier) >= 0 {
-			r.Tier = b.Tier
-		}
+		r := Route{Request: req, Title: title, Titled: b.Title != "", Thread: strings.TrimSpace(b.Thread), Origin: b.Origin, By: b.SubmittedBy, Schedule: b.schedule, Agent: agent.ID, Thinking: agent.Thinking}
 		return f.startPicker(r)
 	}
 	by := submissionTag(b)
@@ -629,12 +629,9 @@ func (f *Factory) newCard(b Body) (map[string]string, error) {
 	}
 	if b.Origin == "idea" {
 		args = append(args, "--label", labelArg(labelOrigin, "idea"))
-	} else if strings.TrimSpace(b.Schedule) != "" {
-		// a scheduled run of an approved job: the sign-off gate reads this source
+	} else if b.schedule != "" {
+		// a scheduled run of an approved job, traced to its agent: the sign-off gate reads this source
 		args = append(args, "--label", labelArg(labelOrigin, "schedule"))
-	}
-	if tierRank(b.Tier) >= 0 {
-		args = append(args, "--label", labelArg(labelTier, b.Tier))
 	}
 	if b.Title != "" {
 		// the caller named the card (an idea, the email dispatcher): the builder does not rename it

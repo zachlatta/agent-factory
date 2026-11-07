@@ -6,7 +6,7 @@ the proposed solution, three gates check it, and it lands. You are asked only wh
 One Go binary. It reads Paseo's agent files every 15 seconds and whenever one changes, applies the
 rules below, and makes every move through Paseo: the Paseo helper below for agent checks, label
 and name changes, messages and archives, and the `paseo` CLI for the rest (labels on agents are the state:
-`factory.stage`, `factory.tier` and so on, see `factory/labels.go`). It serves the board on
+`factory.stage`, `factory.submitted-by` and so on, see `factory/labels.go`). It serves the board on
 `127.0.0.1:7478`; the deployer puts it on the tailnet with `tailscale serve`.
 
 ### Hand-offs and Paseo calls
@@ -76,8 +76,10 @@ that waits on a person (`factory/gates.go`).
 1. **Submit.** The prompt is tagged `factory.submitted-by`: `zach`, or `system` for ideas, Scouts, scheduled
    runs and anything else automatic. `POST /api/new` from the board sends `"submittedBy":"zach"` and email and voice
    origins count as Zach; anything untagged is `system`, so an agent's own request never counts as his. An untagged older board card counts as `system`, since an agent may have filed it. Reviewers see
-   the tag and the card's source. A scheduled job names itself with `"schedule":"<name>"` on `POST /api/new`, which is how
-   the gate tells its run apart.
+   the tag and the card's source. A scheduled run is recognised without its word: for a request over
+   loopback the factory finds the calling process in `/proc`, walks up to the nearest `PASEO_AGENT_ID`, and marks
+   the card `origin=schedule` only when that agent is a running scheduled run (`paseo.schedule-id`; `factory/caller.go`).
+   A `"schedule"` field on `POST /api/new` is ignored; it still names the job that filed an idea.
 2. **Pick the repo.** With Repo on Auto, Opus 5.5 at medium thinking names the repo (`factory/route.go`).
 3. **Build the proposed solution.** Most of the work happens here, on any Frontier model (see Repo and agent per
    card). There is no plan stop. The output is one or both of:
@@ -100,7 +102,8 @@ that waits on a person (`factory/gates.go`).
    - submitted by Zach with larger architectural changes than he asked for: sign-off;
    - submitted by the system: sign-off, except a scheduled run of a job he already approved.
 
-   A missing line, or a verdict of `escalate`, counts as a sign-off. A sign-off stops at Ready for you (below).
+   A missing line, or a verdict of `escalate`, counts as a sign-off. Approve & land is offered, and accepted, only on a
+   card waiting on Zach or landing: a card still building or in a gate has nothing to approve. A sign-off stops at Ready for you (below).
 7. **Land.** Opus 5.5 at medium lands it on `main` in a fresh agent, whatever built it. For a runbook it first checks that
    it still matches the live system: it corrects minor changes itself, and for huge ones ends with
    `RETURN TO BUILD: <what changed>`, which sends the card to step 3 and then its gates. A runbook-only card
@@ -121,7 +124,7 @@ when it passes. A bad value is logged and ignored. Public repos have no direct t
 Cards left in the old flow's columns (plan, plan review, code review) move on their next stopped pass
 (`migrateFlow`): built work goes to the gates, and the rest is told to build.
 
-Tiers are a hint from ideas and older cards. They decide nothing. A card's title comes from the builder's
+A card's title comes from the builder's
 first `TITLE:` line; titles given by an idea or the email dispatcher are kept. A card's worktree starts on a branch
 slugged from its initial title and renames with it.
 
@@ -587,7 +590,7 @@ comparisons. See [Usage product contracts](docs/usage.md) for acceptance criteri
 ### Ideas
 
 Any agent can suggest work with `POST /api/idea` (header `X-Factory: 1`; `repo`, `title`,
-`summary`, `why`, `doneWhen`, `request`, optional `tier`, `priority` and `schedule`). A person can
+`summary`, `why`, `doneWhen`, `request`, optional `priority` and `schedule`). A person can
 Start or Dismiss any idea; otherwise the factory starts them on its own:
 
 - **Priority.** `priority` is `high`, `normal` (the default) or `low`; anything else is rejected.
@@ -1008,7 +1011,7 @@ do not run it.
 The card panel shows it as one Timeline line. `GET /api/metrics?days=7` (1 to 30) gives the
 count, arithmetic mean (`average`), `median` and `p90`, in seconds, for:
 
-- **Card turnaround** (`turnaround`, `bySource`, `byTier`, `bySourceTier`, `byRepo`,
+- **Card turnaround** (`turnaround`, `bySource`, `byRepo`,
   `bySourceRepo`, `byAgent`): `endToEnd` (asked to replied, else to landed), `toLanded` (asked to
   landed), `toDone` (asked to Done), and `zachWait` (time in Needs Zach up to Done).
 - **Per-step durations** (`steps`, `stepsByRepo`): `cards`, `visits`, `repeatedVisits`,
@@ -1026,7 +1029,7 @@ metrics even when they commit nothing. Only cards with a landing after Asked con
 overall card count `n`. With no landing samples, `landedN` is zero and `toLanded` has zero-valued
 quantiles. Unanswered inbox cards are counted in `excluded.noReply`, including cards still awaiting
 their reply check. Dropped or closed cards and partial ones are only counted in `excluded`.
-Query parameters (`repo`, `source`, `tier`, `role`,
+Query parameters (`repo`, `source`, `role`,
 `provider`, `model`, `step`) filter the results (`?source=email`, `?repo=owner/name`,
 `?role=reviewer&step=review`).
 
@@ -1044,7 +1047,7 @@ parent, device, provider, native transcript session id, model, role, review kind
 Session ids use the same decoding as the transcript reader, including plugin providers.
 
 `GET /api/timings` is a read-only snapshot of the timing store. It returns `{"cards":[...]}`,
-sorted by card id, with `id`, `repo`, `source`, `tier`, `partial`, `requestedAt`, `requestedFrom`,
+sorted by card id, with `id`, `repo`, `source`, `partial`, `requestedAt`, `requestedFrom`,
 `landedAt`, `repliedAt`, `noReply`, `asks`, `closedAt`, `doneAt`, `events`, `rounds` and `sessions` when available. It excludes
 titles, folders, transcript bodies, mailbox thread and message ids, and reply-check bookkeeping.
 Like the other board APIs, it uses the server's existing access boundary; it must not be published

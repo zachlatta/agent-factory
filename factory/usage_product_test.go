@@ -144,7 +144,7 @@ func TestUsageRepeatedBuildAndReasons(t *testing.T) {
 
 func TestExpiredExhaustionCanBePickedForHandoff(t *testing.T) {
 	u := AgentUsage{Windows: []UsageWindow{{Label: "5h", RemainingPct: 0, ResetsAt: iso(t0.Add(-time.Minute))}}}
-	if score := usageScore(u, t0, 1); score.tier != 1 {
+	if score := usageScore(u, t0, 1); score.health != 1 {
 		t.Fatalf("expired exhaustion must be unknown: %+v", score)
 	}
 	choice, ok := pickHandoff("claude", map[string]string{"codex": "available"}, map[string]AgentUsage{"codex": u}, t0)
@@ -168,7 +168,7 @@ func TestUnknownAccountRetainsLastReading(t *testing.T) {
 	f.usage.refreshing = done
 	f.refreshUsage(done, t0)
 	u := f.providerUsages()["claude"]
-	if len(u.Accounts[0].Windows) != 1 || u.Accounts[0].Windows[0].RemainingPct != 40 || u.Accounts[0].RefreshError == "" || u.Accounts[0].UpdatedAt != previous.UpdatedAt || u.RefreshError != "" || usageScore(u, t0, 1).tier != 1 {
+	if len(u.Accounts[0].Windows) != 1 || u.Accounts[0].Windows[0].RemainingPct != 40 || u.Accounts[0].RefreshError == "" || u.Accounts[0].UpdatedAt != previous.UpdatedAt || u.RefreshError != "" || usageScore(u, t0, 1).health != 1 {
 		t.Fatalf("lost last known account reading: %+v", u)
 	}
 }
@@ -304,7 +304,7 @@ func TestCurrentLowWeekStillHoldsAfterShortWindowReset(t *testing.T) {
 	if hold := f.ideaHold(); hold == "" {
 		t.Fatal("current weekly floor bypassed by short-window reset")
 	}
-	if score := usageScore(u, t0, 1); score.tier == 1 || score.w7 != 5 {
+	if score := usageScore(u, t0, 1); score.health == 1 || score.w7 != 5 {
 		t.Fatalf("lost current weekly reading: %+v", score)
 	}
 	if _, err := f.addIdea(Body{Request: "Synthetic idea"}); err != nil {

@@ -155,11 +155,11 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 		c := Card{ID: a.ID, Short: short(a.ID), Host: a.Host, Title: a.Title, Repo: a.Repo, Project: a.Project,
 			Branch: a.Branch, Cwd: a.Cwd, Model: a.Model, Status: a.Status, Source: source(a), Stage: Derive(a),
 			Labelled: a.L(labelStage) != "", Flags: []string{}, Verdict: a.L(labelVerdict), Note: a.L(labelNote),
-			Tier: a.L(labelTier), Awaiting: a.L(labelAwaiting), Origin: a.L(labelOrigin), Agent: a.L(labelAgent),
+			Awaiting: a.L(labelAwaiting), Origin: a.L(labelOrigin), Agent: a.L(labelAgent),
 			Replaces:    lineagePredecessorIDs(agentByID, a.ID),
 			Rounds:      Rounds{Request: atoi(a.L(roundsLabel(gateRequest))), Design: atoi(a.L(roundsLabel(gateDesign))), Signoff: atoi(a.L(roundsLabel(gateSignoff)))},
-			SubmittedBy: submittedBy(a),
-			CreatedAt:   iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
+			SubmittedBy: submittedBy(a), CanLand: landable(a),
+			CreatedAt: iso(a.CreatedAt), LastActivityAt: iso(a.LastActivityAt), ArchivedAt: iso(a.ArchivedAt),
 			Children: []Child{}, WorkspaceID: a.WorkspaceID, Decided: a.L(labelDecided) != ""}
 		if a.parked() {
 			c.ArchivedAt, c.Parked = "", iso(a.ArchivedAt)
@@ -179,9 +179,6 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 		}
 		if c.Source == "scout" && !a.archived() {
 			c.Stage, c.Note = "idea", "looking for ideas" // beside the ideas it submits; Done once archived
-		}
-		if c.Source == "schedule" && c.Tier == "" {
-			c.Tier = "routine"
 		}
 		idle := now.Sub(a.LastActivityAt)
 		if a.Status == "running" && a.Pending != "" && !a.archived() {
@@ -281,7 +278,7 @@ func BuildBoard(agents []Agent, ideas []Idea, now time.Time) []Card {
 			flags = append(flags, "start failed")
 		}
 		out = append(out, Card{ID: i.ID, Short: i.ID, Host: "", Title: i.Title, Repo: i.Repo, Status: "waiting",
-			Source: "idea", Stage: "idea", Labelled: true, Flags: flags, Note: "from " + i.By, Tier: i.Tier,
+			Source: "idea", Stage: "idea", Labelled: true, Flags: flags, Note: "from " + i.By,
 			Origin: "idea", CreatedAt: iso(i.CreatedAt), LastActivityAt: iso(i.CreatedAt), Children: []Child{},
 			Idea: ideaView(i, q)})
 	}

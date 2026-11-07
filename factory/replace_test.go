@@ -76,9 +76,9 @@ func TestExactIDWriteSafety(t *testing.T) {
 
 func TestReplacementResolutionConsumers(t *testing.T) {
 	oldID, newID := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
-	old := card(oldID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelRoundsRequest: "1", labelReplacedBy: newID})
+	old := card(oldID, map[string]string{labelStage: "building", labelOrigin: "idea", labelRoundsRequest: "1", labelReplacedBy: newID})
 	old.ArchivedAt = t0.Add(-24 * time.Hour)
-	repl := card(newID, map[string]string{labelStage: "building", labelOrigin: "idea", labelTier: "low", labelReplaces: oldID, labelReviewed: reviewedSHA})
+	repl := card(newID, map[string]string{labelStage: "building", labelOrigin: "idea", labelReplaces: oldID, labelReviewed: reviewedSHA})
 	repl.Provider, repl.Model = "codex", "gpt-6.1-sol"
 	sub := Agent{
 		ID: "sub-old-1", Host: "host1", Title: "helper sub-agent", Status: "running", Provider: "claude", Model: "claude-opus-5-5",
@@ -260,7 +260,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 	old := card("11111111-1111-1111-1111-111111111111", map[string]string{
 		labelStage: "zach", labelNote: "architecture: approve the plan to build", labelAwaiting: "plan", labelTold: "architecture: approve the plan to build",
 		labelZachThread: "th-zach-1", labelAnswered: "msg-1 msg-2", labelSource: "email", labelOrigin: "idea", labelTitled: "1",
-		labelTier: "architecture", labelTrack: "build", labelBase: "base-commit-1", labelRoundsRequest: "2", labelRoundsDesign: "1",
+		labelTrack: "build", labelBase: "base-commit-1", labelRoundsRequest: "2", labelRoundsDesign: "1",
 		labelReady: "1", labelReadyHead: reviewedSHA, labelReadyFeedback: "reply-1", labelFeedbackHold: "it is an architecture change", labelFeedbackTold: "reply-1", labelAskWhy: "requested",
 		labelDecided: "1", labelReviewed: "rev-commit-1", labelCodeOK: "rev-commit-1",
 		labelLandedVerified: "1", labelBehaviorApproval: reviewedSHA, labelBehaviorSummary: "c3VtbWFyeQ", labelBehaviorRepair: "1",
@@ -333,7 +333,7 @@ func TestCarriedLabelsAndEmailChain(t *testing.T) {
 	if !ok || f.mailZach(f.agent(repl.ID), c) != nil || len(mailer.calls) != 0 {
 		t.Fatalf("card=%v calls=%d, want 0 (already told on predecessor)", ok, len(mailer.calls))
 	}
-	if c.Tier != "architecture" || c.Rounds.Request != 2 || c.Rounds.Design != 1 {
+	if c.Rounds.Request != 2 || c.Rounds.Design != 1 {
 		t.Errorf("Card carried gates = %+v", c)
 	}
 	ra := f.agent(repl.ID)

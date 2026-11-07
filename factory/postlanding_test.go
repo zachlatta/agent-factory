@@ -97,7 +97,7 @@ func postLandingAnswer(text string) []byte {
 func TestNewLandingPromptsResetClarification(t *testing.T) {
 	for _, route := range []string{"approve", "rerun", "code review", "dependency"} {
 		t.Run(route, func(t *testing.T) {
-			c := idea("c1", map[string]string{labelStage: "zach", labelRoundsRequest: "1", labelTier: "low", labelStuckFrom: "landing", labelRemainingAsk: "1",
+			c := idea("c1", map[string]string{labelStage: "zach", labelRoundsRequest: "1", labelStuckFrom: "landing", labelRemainingAsk: "1",
 				labelReviewed: reviewedSHA})
 			agents := []Agent{c, reviewer("r1", c.ID, gateSignoff)}
 			if route == "dependency" {

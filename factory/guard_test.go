@@ -47,7 +47,7 @@ func TestGuardedCardIsScannedBeforeItLandsOrReachesZach(t *testing.T) {
 		{"Zach's, no sign-off", "none", "", "landing"},
 		{"the gate says sign off", "the system submitted it", "idea", "zach"},
 	} {
-		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: tc.tier, labelSource: "board",
+		f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board",
 			labelOrigin: tc.origin, labelRoundsRequest: "1", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff))
 		ranges := fakeScan(f, nil, nil)
 		headIs(f, reviewedSHA, nil)
@@ -72,7 +72,7 @@ func TestGuardedCardIsScannedBeforeItLandsOrReachesZach(t *testing.T) {
 }
 
 func TestGuardedInboxCardComesToZachThenLandsAndReports(t *testing.T) {
-	c := publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "email", labelRoundsRequest: "1",
+	c := publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "email", labelRoundsRequest: "1",
 		labelReviewed: reviewedSHA})
 	c.Labels[gmailThreadLabel] = "t1"
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
@@ -99,15 +99,15 @@ func TestGuardedInboxCardComesToZachThenLandsAndReports(t *testing.T) {
 // scan, with nothing on the always-ask list: ideas, Scouts and scheduled runs. Cards with no source
 // label count as Zach's and come to him.
 func TestGuardedFactoryCardLandsAfterCleanScan(t *testing.T) {
-	sched := publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board", labelRoundsRequest: "1"})
+	sched := publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelRoundsRequest: "1"})
 	sched.Labels["paseo.schedule-id"] = "s1"
 	for name, c := range map[string]Agent{
-		"idea": publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board",
+		"idea": publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board",
 			labelOrigin: "idea", labelRoundsRequest: "1"}),
-		"scout": publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board",
+		"scout": publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board",
 			labelRole: "scout", labelRoundsRequest: "1"}),
 		"schedule": sched,
-		"app":      publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1"}),
+		"app":      publicCard("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1"}),
 	} {
 		c.Labels[labelPrefix+labelReviewed] = reviewedSHA
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
@@ -132,9 +132,9 @@ func TestGuardedFactoryCardLandsAfterCleanScan(t *testing.T) {
 // a clean scan, as in any repo.
 func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 	for name, c := range map[string]Agent{
-		"architecture": publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "architecture",
+		"architecture": publicCard("c1", map[string]string{labelStage: gateDesign,
 			labelSource: "board", labelRoundsRequest: "1"}),
-		"no plan review": publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board"}),
+		"no plan review": publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board"}),
 	} {
 		c.Labels[labelPrefix+labelReviewed] = reviewedSHA
 		f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
@@ -157,7 +157,7 @@ func TestGuardedArchitectureAndUnplannedWaitForZach(t *testing.T) {
 }
 
 func TestGuardedScanHitStopsLanding(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board", labelRoundsRequest: "1",
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelRoundsRequest: "1",
 		labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff))
 	fakeScan(f, []scan.Hit{{Rule: "tailnet-hostname", File: "a.go", Line: 3}}, nil)
 	headIs(f, reviewedSHA, nil)
@@ -173,7 +173,7 @@ func TestGuardedScanHitStopsLanding(t *testing.T) {
 }
 
 func TestGuardedScanErrorFailsClosed(t *testing.T) {
-	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board", labelRoundsRequest: "1",
+	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelRoundsRequest: "1",
 		labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff))
 	fakeScan(f, nil, errors.New("gitleaks not found"))
 	headIs(f, reviewedSHA, nil)
@@ -248,7 +248,7 @@ func TestGuardedPromptsCarryPublicRules(t *testing.T) {
 }
 
 func TestUnguardedRepoUnchanged(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", gateSignoff))
 	headIs(f, reviewedSHA, nil)
 	f.Scan = func(context.Context, string, string) ([]scan.Hit, error) {

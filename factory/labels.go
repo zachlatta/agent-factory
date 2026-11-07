@@ -17,7 +17,6 @@ const (
 	labelResult       = "result"        // the proposed solution's RESULT line: code, runbook or both
 	labelSince        = "since"
 	labelAutoReview   = "auto-review"
-	labelTier         = "tier"
 	labelAwaiting     = "awaiting"
 	labelVerdict      = "verdict"
 	labelNote         = "note"

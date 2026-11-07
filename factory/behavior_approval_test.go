@@ -19,7 +19,7 @@ func TestApprovalOnlyFinishedWork(t *testing.T) {
 
 func TestFinishedApprovalRecoveryAndFreshReview(t *testing.T) {
 	for _, held := range []bool{false, true} {
-		labels := map[string]string{labelStage: "zach", labelNote: readyPrefix, labelReadyHead: reviewedSHA, labelReviewed: reviewedSHA, labelTier: "architecture", labelRoundsRequest: "1"}
+		labels := map[string]string{labelStage: "zach", labelNote: readyPrefix, labelReadyHead: reviewedSHA, labelReviewed: reviewedSHA, labelRoundsRequest: "1"}
 		if held {
 			labels[labelWaitsOn] = "d0e0001"
 		}

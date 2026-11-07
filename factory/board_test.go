@@ -62,7 +62,7 @@ func TestBuildBoardFoldsChildren(t *testing.T) {
 	if k := p.Children[i]; k.CreatedAt != iso(now.Add(-time.Hour)) || k.LastActivityAt != iso(now.Add(-time.Minute)) {
 		t.Errorf("sub-agent child = %+v", k)
 	}
-	if cards[1].Source != "schedule" || cards[1].Tier != "routine" {
+	if cards[1].Source != "schedule" {
 		t.Errorf("schedule card = %+v", cards[1])
 	}
 }

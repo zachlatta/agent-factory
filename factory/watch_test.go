@@ -25,7 +25,7 @@ func threeReviews(t *testing.T) (*Factory, *fakePaseo) {
 	t.Helper()
 	var agents []Agent
 	for _, n := range []string{"1", "2", "3"} {
-		agents = append(agents, card("c"+n, map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+		agents = append(agents, card("c"+n, map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
 			labelRoundsDesign: "1"}), reviewer("r"+n, "c"+n, gateDesign))
 	}
 	f, p := newTestFactory(t, agents...)

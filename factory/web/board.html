@@ -56,15 +56,9 @@ main{padding:12px 16px calc(80px + env(safe-area-inset-bottom));overflow-x:auto}
 .flag.note{background:#ddf4ff;color:var(--blue)}
 .flag.agent{background:#f3e8ff;color:#6f42c1}
 .flag.due{font-weight:600}
-.tier{display:inline-block;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;margin:3px 3px 0 0;text-transform:uppercase;letter-spacing:.02em}
-.tier.low{background:#dafbe1;color:var(--green)}
-.tier.risky{background:#fff1e5;color:#bc4c00}
-.tier.architecture{background:#fbefff;color:var(--purple)}
-.tier.routine{background:#eef1f4;color:var(--mute)}
 .prio{display:inline-block;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;margin:3px 3px 0 0;letter-spacing:.02em}
 .prio.high{background:#ffebe9;color:#cf222e}
 .prio.low{background:#eef1f4;color:var(--mute)}
-.tiers{font-size:12px;margin:6px 0 10px;display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:baseline}
 .ausage{margin:4px 0 8px;border:1px solid var(--line);border-radius:6px;background:#f6f8fa;font-size:12px}
 .ausage .arow{display:grid;grid-template-columns:minmax(110px,1.1fr) 1fr auto;gap:8px;align-items:center;padding:4px 8px;border-top:1px solid #eaeef2;cursor:pointer}
 .ausage .arow:first-child{border-top:0}
@@ -718,7 +712,7 @@ function cardHtml(c){
     ${c.stage==='idea'&&c.idea?(c.idea.summary?`<div class="sum">${esc(c.idea.summary)}</div>`:`<div class="sum none">${esc(c.idea.why||'No summary')}</div>`):''}
     ${c.stage==='idea'&&c.idea&&c.idea.error?`<div class="err">${esc(c.idea.error)}</div>`:''}
     <div class="m">${c.unread&&!c.archivedAt?'<b style="color:var(--blue)">● unread</b> · ':''}${[repoTag(c), esc(c.host), esc(c.source), ago(c.lastActivityAt)].filter(Boolean).join(' · ')}${ks?` · ${esc(ks)}`:''}</div>
-    <div>${c.tier==='routine'?`<span class="tier routine">routine</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Builds this card">${esc(agentLabel(c.agent))}</span>`:''}${decisionWaitHtml(c)}${c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
+    <div>${c.source==='schedule'?`<span class="flag">routine</span>`:''}${prioChip(c)}${c.agent?`<span class="flag agent" title="Builds this card">${esc(agentLabel(c.agent))}</span>`:''}${decisionWaitHtml(c)}${c.flags.filter(f=>!c.decisionBlocker || !f.startsWith('waits on ')).map(f=>`<span class="flag">${esc(f)}</span>`).join('')}${v}${note}</div>
     ${kh?`<div class="kids">${kh}</div>`:''}
     ${c.ask?`<div class="ask" onclick="event.stopPropagation()">${askKind(c.ask)}<div class="q">${esc(askQuestion(c.ask))}</div>${c.ask.kind!=='problem'?askTodo(c.ask)+evidenceHtml(c)+questionsHtml(c,'g')+choicesHtml(c,'g'):''}</div>`:''}
   </div>`;
@@ -919,7 +913,7 @@ function fillPanel(c, fresh){
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   else $('pActs').innerHTML = `
     <button onclick="act('review',{kind:'request'})" title="Run the gates from the start: request, design, then sign-off">${busy?'Run gates when idle':'Run gates'}</button>
-    <button class="primary" onclick="act('approve')" title="Opus lands it">Approve &amp; land</button>
+    ${canLand(c)?`<button class="primary" onclick="act('approve')" title="Opus lands it">Approve &amp; land</button>`:''}
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${c.archivedAt?'disabled':''}>Archive</button>`;
   const mv=$('pMove'); mv.innerHTML = B.stages.map(s=>`<option value="${s[0]}" ${s[0]===c.stage?'selected':''}>${s[1]}</option>`).join('');
@@ -987,6 +981,9 @@ function ideaRetryText(errorAt){
     ? `Automatic retry after ${clock(new Date(due).toISOString())} (1 h after the failure).`
     : 'Eligible for automatic retry after other waiting ideas.';
 }
+// canLand: Approve & land only where the server accepts it (Card.canLand from the stored stage).
+function canLand(c){ return !!c.canLand; }
+
 function ideaHtml(c, isIdea){
   const i = c.idea;
   const brief = briefs[i.id];

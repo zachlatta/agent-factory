@@ -66,7 +66,6 @@ type CardTiming struct {
 	RequestedAt       time.Time       `json:"requestedAt,omitzero"`
 	RequestedFrom     string          `json:"requestedFrom,omitempty"` // email-date, voice-recorded or created
 	Source            string          `json:"source"`
-	Tier              string          `json:"tier,omitempty"`
 	Title             string          `json:"title,omitempty"`  // for the digest; never exported
 	Thread            string          `json:"thread,omitempty"` // email and voice cards: where the reply goes
 	Partial           bool            `json:"partial,omitempty"`
@@ -336,9 +335,6 @@ func (s *TimingStore) observe(cards []Card, agents []Agent, seq uint64, now time
 		normalizeTiming(t)
 		if c.Title != "" && c.Title != t.Title {
 			t.Title, changed = c.Title, true
-		}
-		if c.Tier != "" && c.Tier != t.Tier {
-			t.Tier, changed = c.Tier, true
 		}
 		if a.Repo != "" && a.Repo != t.Repo {
 			t.Repo, changed = a.Repo, true

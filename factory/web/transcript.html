@@ -368,6 +368,9 @@ function renderSide(outline){
   $('side').innerHTML = h;
 }
 
+// canLand: Approve & land only where the server accepts it (Card.canLand from the stored stage).
+function canLand(c){ return !!c.canLand; }
+
 function renderHeader(){
   const a = meta.agent, c = meta.card;
   document.title = (a.title || a.id.slice(0,7)) + ' · Transcript';
@@ -377,7 +380,7 @@ function renderHeader(){
   const busy = a.status === 'running';
   $('hacts').innerHTML = (c ? `
     <button onclick="act('review',{kind:'request'})" title="Run the gates from the start: request, design, then sign-off">${busy?'Run gates when idle':'Run gates'}</button>
-    <button class="primary" onclick="act('approve')" title="Opus lands it">Approve &amp; land</button>` : '') + `
+    ${canLand(c)?`<button class="primary" onclick="act('approve')" title="Opus lands it">Approve &amp; land</button>`:''}` : '') + `
     <button onclick="act('stop')" ${busy?'':'disabled'}>Stop</button>
     <button class="danger" onclick="if(confirm('Archive this agent in Paseo?')) act('archive')" ${a.archivedAt?'disabled':''}>Archive</button>`;
   $('working').style.display = busy ? 'block' : 'none';

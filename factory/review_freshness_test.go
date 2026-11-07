@@ -42,7 +42,7 @@ func freshCard(public bool, labels map[string]string) Agent {
 // reviewLabels is a card the factory started (an idea), so an approving review lands it on its own
 // when its HEAD is fresh; a requested card would stop finished for Zach first.
 func reviewLabels(extra map[string]string) map[string]string {
-	l := map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board", labelOrigin: "idea",
+	l := map[string]string{labelStage: gateDesign, labelSource: "board", labelOrigin: "idea",
 		labelRoundsRequest: "1", labelReviewed: reviewedSHA}
 	for k, v := range extra {
 		l[k] = v
@@ -179,7 +179,7 @@ func TestVerdictGitFailureFailsClosed(t *testing.T) {
 }
 
 func approvedLabels(extra map[string]string) map[string]string {
-	l := map[string]string{labelStage: "zach", labelVerdict: "code approve", labelRoundsDesign: "1", labelTier: "architecture",
+	l := map[string]string{labelStage: "zach", labelVerdict: "code approve", labelRoundsDesign: "1",
 		labelRoundsRequest: "1", labelNote: "review passed: approve to land", labelReviewed: reviewedSHA}
 	for k, v := range extra {
 		l[k] = v
@@ -315,7 +315,7 @@ func TestRerunLandingChecksReviewFreshness(t *testing.T) {
 // a fresh code review that records the commit it reads.
 func TestUnverifiedReviewRerunStartsAFreshReview(t *testing.T) {
 	f, p := newTestFactory(t, publicCard("c1", map[string]string{labelStage: "zach", labelStuckFrom: gateDesign,
-		labelNote: noReviewedNote, labelTier: "low", labelRoundsRequest: "1"}))
+		labelNote: noReviewedNote, labelRoundsRequest: "1"}))
 	f.GitOut = gitStub(map[string]string{"status --porcelain": "", "rev-parse HEAD": movedSHA + "\n"})
 	if _, err := f.Act("rerun", Body{ID: "c1"}); err != nil {
 		t.Fatal(err)

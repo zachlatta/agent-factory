@@ -68,7 +68,7 @@ func dep(stage string, archived bool) Agent {
 }
 
 func heldCard(extra map[string]string) Agent {
-	l := map[string]string{labelStage: "landing", labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
+	l := map[string]string{labelStage: "landing", labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
 		labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)}
 	for k, v := range extra {
 		l[k] = v
@@ -77,7 +77,7 @@ func heldCard(extra map[string]string) Agent {
 }
 
 func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
 		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff), dep("building", false))
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
@@ -95,7 +95,7 @@ func TestCodeApprovalHoldsWhileDependencyIsInFlight(t *testing.T) {
 
 func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 	for name, d := range map[string]Agent{"landed": dep("landed", true), "marked": {}} {
-		labels := map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
+		labels := map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelWaitsOn: "d0e0001",
 			labelReviewed: reviewedSHA}
 		agents := []Agent{reviewer("r1", "c1", gateSignoff)}
 		if name == "marked" {
@@ -117,7 +117,7 @@ func TestCodeApprovalLandsWhenDependencyLanded(t *testing.T) {
 }
 
 func TestHeldCardWithUIFeedbackIsToldToWait(t *testing.T) {
-	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+	f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
 		labelWaitsOn: "d0e0001", labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff), dep(gateDesign, false))
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "Fine.\n\nUI feedback:\n- the button is small\n\nALWAYS ASK: none\nTIER: low\nSIGN OFF: none\nVERDICT: approve")
@@ -491,7 +491,7 @@ func TestBuildingStopWithWaitsBeforeBuildHoldsAndSkipsAskToCommit(t *testing.T) 
 	t.Run("holds while blocker is in flight even with no commits and dirty worktree", func(t *testing.T) {
 		c := card("c1", map[string]string{
 			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
-			labelTier: "low", labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
+			labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
 		})
 		f, p := newTestFactory(t, c, dep("building", false))
 		f.GitOut = func(_ context.Context, _ string, args ...string) (string, error) {
@@ -524,7 +524,7 @@ func TestBuildingStopWithWaitsBeforeBuildHoldsAndSkipsAskToCommit(t *testing.T) 
 	t.Run("releases immediately when blocker already landed", func(t *testing.T) {
 		c := card("c1", map[string]string{
 			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
-			labelTier: "low", labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
+			labelRoundsRequest: "1", labelDirtyAsks: "1", labelSince: ago(5 * time.Minute),
 		})
 		f, p := newTestFactory(t, c, dep("landed", true))
 		storeLog(t, f, p, "c1", "[User] Build it now.\nPaused before editing.\nWaits on: d0e0001 before build")
@@ -564,7 +564,7 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := card("c1", map[string]string{
 				labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
-				labelTier: "low", labelRoundsRequest: "1", labelSince: ago(5 * time.Minute),
+				labelRoundsRequest: "1", labelSince: ago(5 * time.Minute),
 			})
 			oldDep := card("d0e0001aaaa", map[string]string{
 				labelStage: "building", labelReplacedBy: "d0e0002bbbb",
@@ -616,7 +616,7 @@ func TestBuildingStopWaitsBeforeBuildResolvesReplacedBlocker(t *testing.T) {
 func TestBuildingStopUnreadableSessionWaitsForHistory(t *testing.T) {
 	c := card("c1", map[string]string{
 		labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
-		labelTier: "low", labelRoundsRequest: "1",
+		labelRoundsRequest: "1",
 	})
 	f, p := newTestFactory(t, c, dep("building", false))
 	// No session file stored yet: first tick waits for history and neither holds nor starts review.
@@ -659,7 +659,7 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 		otherDep := card("e0f0002aaaa", map[string]string{labelStage: "building"})
 		c := card("c1", map[string]string{
 			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
-			labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
+			labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
 		})
 		f, p := newTestFactory(t, c, dep("building", false), otherDep)
 		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
@@ -681,7 +681,7 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 		landedOther.ArchivedAt = t0.Add(-time.Minute)
 		c := card("c1", map[string]string{
 			labelStage: "building", labelAutoReview: gateRequest, labelSource: "board",
-			labelTier: "low", labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
+			labelRoundsRequest: "1", labelWaitsOn: "e0f0002",
 		})
 		f, p := newTestFactory(t, c, dep("building", false), landedOther)
 		storeLog(t, f, p, "c1", "[User] Build it now.\nWaits on: d0e0001 before build")
@@ -695,7 +695,7 @@ func TestBuildingStopConflictingWaitStopsForZach(t *testing.T) {
 }
 
 func TestBeforeBuildHandMovedToLandingUsesPostBuildDroppedWording(t *testing.T) {
-	c := card("c1", map[string]string{labelStage: "landing", labelTier: "low", labelRoundsRequest: "1",
+	c := card("c1", map[string]string{labelStage: "landing", labelRoundsRequest: "1",
 		labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
 	f, p := newTestFactory(t, c, dep("building", true))
 	f.Tick()
@@ -712,7 +712,7 @@ func TestFailedSendOnBeforeBuildReleaseAndDropRetriesAndMissingWorktreeStops(t *
 		"drop":    dep("building", true),
 	} {
 		t.Run(name+" retries after failed send", func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelRoundsRequest: "1",
+			c := card("c1", map[string]string{labelStage: "building", labelRoundsRequest: "1",
 				labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
 			f, p := newTestFactory(t, c, blocker)
 			if err := f.saveHeldBuild("c1", "Build it. MARKER-NOTES"); err != nil {
@@ -741,7 +741,7 @@ func TestFailedSendOnBeforeBuildReleaseAndDropRetriesAndMissingWorktreeStops(t *
 			}
 		})
 		t.Run(name+" stops for Zach on missing worktree", func(t *testing.T) {
-			c := card("c1", map[string]string{labelStage: "building", labelTier: "low", labelRoundsRequest: "1",
+			c := card("c1", map[string]string{labelStage: "building", labelRoundsRequest: "1",
 				labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelHeld: "d0e0001", labelSince: ago(10 * time.Minute)})
 			f, p := newTestFactory(t, c, blocker)
 			if err := f.saveHeldBuild("c1", "Build it. MARKER-NOTES"); err != nil {

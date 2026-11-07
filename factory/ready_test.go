@@ -637,7 +637,7 @@ func TestReadyMsgAsksForANamedDecision(t *testing.T) {
 
 func TestReadyForYouRoundsGetOneEmailEach(t *testing.T) {
 	// a change request after the first Ready for you: the next code review pass is a new stop and a new email
-	c := card("c1", map[string]string{labelStage: gateDesign, labelTier: "architecture", labelRoundsRequest: "1",
+	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
 		labelRoundsDesign: "1", labelReady: "1", labelTold: readyNote(1), labelReviewed: reviewedSHA})
 	f, p := newTestFactory(t, c, reviewer("r2", "c1", gateSignoff))
 	headIs(f, reviewedSHA, nil)

@@ -2,6 +2,7 @@ package factory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -707,7 +708,7 @@ func TestScanHitOnPublishedWorkAtSignOffWaitsForZach(t *testing.T) {
 
 func TestScheduledRunCarriesItsSource(t *testing.T) {
 	f, p := newTestFactory(t)
-	if _, err := f.Act("new", Body{Request: "Run the job", Schedule: "nightly"}); err != nil {
+	if _, err := f.Act("new", Body{Request: "Run the job", schedule: "nightly"}); err != nil {
 		t.Fatal(err)
 	}
 	if runs := p.runsWithLabel(labelArg(labelOrigin, "schedule")); len(runs) != 1 {
@@ -753,7 +754,7 @@ func TestSameChoiceReadsTheLabelThenTheModel(t *testing.T) {
 func TestRepoPickerCarriesTheSchedule(t *testing.T) {
 	f, p := newTestFactory(t)
 	writeFile(t, filepath.Join(f.cfg.Home, "dev", "acme", "ops", "README.md"), "ops")
-	res, err := f.Act("new", Body{Request: "Run the job", Repo: autoRepo, Schedule: "nightly", SubmittedBy: submittedBySystem})
+	res, err := f.Act("new", Body{Request: "Run the job", Repo: autoRepo, schedule: "nightly", SubmittedBy: submittedBySystem})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,5 +770,72 @@ func TestRepoPickerCarriesTheSchedule(t *testing.T) {
 	}
 	if runs := p.runsWithLabel(labelArg(labelOrigin, "schedule")); len(runs) != 1 {
 		t.Fatalf("the card lost its schedule through repo picking: %v", p.calls)
+	}
+}
+
+func TestApproveRefusedWhileTheGatesRun(t *testing.T) {
+	for _, stage := range []string{"building", gateRequest, gateDesign, gateSignoff} {
+		f, p := newTestFactory(t, card("c1", map[string]string{labelStage: stage, labelSource: "board", labelReviewed: reviewedSHA}))
+		headIs(f, reviewedSHA, nil)
+		dirtyIs(f, "", nil)
+		if _, err := f.Act("approve", Body{ID: "c1"}); err == nil {
+			t.Errorf("%s: approve went around the gates", stage)
+		}
+		if l := p.labels("c1"); l[labelStage] == "landing" || len(p.sent("c1")) != 0 {
+			t.Errorf("%s: labels %v", stage, l)
+		}
+	}
+}
+
+func TestPagesOfferLandOnlyWhereItApplies(t *testing.T) {
+	for _, name := range []string{"web/board.html", "web/transcript.html"} {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "canLand(") || !strings.Contains(string(b), "c.canLand") {
+			t.Errorf("%s shows Approve & land on every card", name)
+		}
+	}
+}
+
+func TestTiersAreGone(t *testing.T) {
+	for _, name := range []string{"web/board.html", "web/transcript.html"} {
+		b, _ := os.ReadFile(name)
+		if strings.Contains(string(b), "c.tier") || strings.Contains(string(b), "B.tiers") {
+			t.Errorf("%s still shows tiers", name)
+		}
+	}
+	f, _ := newTestFactory(t, card("c1", map[string]string{labelStage: "building", labelSource: "board"}))
+	c, _ := f.card("c1")
+	raw, _ := json.Marshal(c)
+	if strings.Contains(string(raw), `"tier"`) {
+		t.Errorf("a card still carries a tier: %s", raw)
+	}
+	var b Body
+	if err := json.Unmarshal([]byte(`{"repo":"example/desk","title":"Do a thing","summary":"s","why":"w","doneWhen":"d","request":"r","tier":"risky"}`), &b); err != nil {
+		t.Fatalf("a caller still sending a tier must not break: %v", err)
+	}
+	if _, err := f.Act("idea", b); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(f.ideas.List())
+	if strings.Contains(string(raw), `"tier"`) {
+		t.Errorf("an idea still keeps a tier: %s", raw)
+	}
+}
+
+func TestCanLandMatchesWhatTheServerAccepts(t *testing.T) {
+	stalled := card("s1", map[string]string{labelStage: "building", labelSource: "board"})
+	stalled.Status, stalled.LastActivityAt = "running", t0.Add(-time.Hour) // the board shows it in Needs Zach
+	adhoc := card("a1", nil)                                               // no factory stage at all
+	adhoc.RequiresAttention, adhoc.AttentionReason = true, "finished"
+	waiting := card("w1", map[string]string{labelStage: "zach", labelSource: "board"})
+	f, _ := newTestFactory(t, stalled, adhoc, waiting)
+	for id, want := range map[string]bool{"s1": false, "a1": true, "w1": true} {
+		c, ok := f.card(id)
+		if !ok || c.CanLand != want || landable(f.agent(id)) != want {
+			t.Errorf("%s: stage %q canLand %v, want %v", id, c.Stage, c.CanLand, want)
+		}
 	}
 }

@@ -137,7 +137,7 @@ func TestSectionsBeforeBuildWaitState(t *testing.T) {
 	blocker := card("d0e0001aaaa", map[string]string{labelStage: "landed"})
 	blocker.Title = "Blocker title"
 	blocker.ArchivedAt = t0.Add(-time.Minute)
-	released := card("c1", map[string]string{labelStage: "building", labelSource: "board", labelTier: "low",
+	released := card("c1", map[string]string{labelStage: "building", labelSource: "board",
 		labelRoundsRequest: "1", labelWaitsOn: "d0e0001", labelWaitsBefore: "build", labelWaitsDone: "1",
 		labelAutoReview: gateRequest, labelNote: "building: d0e0001 landed", labelSince: ago(10 * time.Minute)})
 	released.Status = "running"
@@ -176,8 +176,8 @@ func TestBuildSections(t *testing.T) {
 			Timing: &TimingView{RepliedAt: at(11, 0), Stages: []StageSpan{{Stage: "landed", Start: at(11, 0)}}}},
 		{ID: "e2", Title: "Unanswered errand", Stage: "landed", Source: "email",
 			Timing: &TimingView{NoReply: true, RequestedAt: at(8, 0), Stages: []StageSpan{{Stage: "landed", Start: at(12, 0)}}}},
-		{ID: "r1", Title: "Hourly feed", Stage: "landed", Source: "schedule", Tier: "routine", CreatedAt: at(12, 0)},
-		{ID: "r2", Title: "Hourly feed", Stage: "building", Source: "schedule", Tier: "routine", CreatedAt: at(17, 0)},
+		{ID: "r1", Title: "Hourly feed", Stage: "landed", Source: "schedule", CreatedAt: at(12, 0)},
+		{ID: "r2", Title: "Hourly feed", Stage: "building", Source: "schedule", CreatedAt: at(17, 0)},
 		{ID: "i1", Title: "An idea", Stage: "idea", Source: "idea"},
 	}
 	s := BuildSections(cards, now, loc)

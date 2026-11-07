@@ -181,7 +181,7 @@ func storedEvents(home string, a Agent) ([]Event, error) {
 
 // storedText is the last n user, thinking and assistant entries of agent a's session file, in the
 // shape of `paseo logs --filter text` (`[User] …`, `[Thought] …`, plain replies), for the board's
-// summary and for line parsers (VERDICT, TIER, DUPLICATE OF). It never asks Paseo.
+// summary and for line parsers (VERDICT, SIGN OFF, DUPLICATE OF). It never asks Paseo.
 func storedText(home string, a Agent, n int) (string, error) {
 	evs, err := storedEvents(home, a)
 	if err != nil {

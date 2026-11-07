@@ -120,7 +120,7 @@ func pickHandoff(failing string, statuses map[string]string, usages map[string]A
 	ordered, _ := rankAgentChoices(statuses, usages, now)
 	ok := func(c AgentChoice) bool {
 		p := c.providerID()
-		return c.Frontier && p != failing && statuses[p] == "available" && usageScore(usages[p], now, capacityWeight(p)).tier > 0
+		return c.Frontier && p != failing && statuses[p] == "available" && usageScore(usages[p], now, capacityWeight(p)).health > 0
 	}
 	if opus, found := agentByID(defaultAgent); found && ok(opus) {
 		return opus, true

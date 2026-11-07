@@ -12,17 +12,6 @@ import (
 	"time"
 )
 
-// Tiers are an optional hint on ideas and old cards. They decide nothing: "routine" marks scheduled runs.
-var Tiers = []string{"low", "risky", "architecture"}
-
-// TierHelp describes each tier hint.
-var TierHelp = map[string]string{
-	"routine":      "Scheduled run of an approved job.",
-	"low":          "Hint from the idea or an older card. It decides nothing.",
-	"risky":        "Hint from the idea or an older card. It decides nothing.",
-	"architecture": "Hint from the idea or an older card. It decides nothing.",
-}
-
 // questionRule teaches agents the QUESTION: block the board shows as multiple choice (ParseQuestions).
 const questionRule = `When Zach must decide something, ask it as a block he can answer by tapping, one per question
 (at most 4), recommended option first; he can always write his own answer instead:
@@ -94,26 +83,6 @@ func ParseVerdict(text string) string { return lastMatch(verdictRe, text) }
 func ParseTrack(text string) string {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	return lastMatch(trackRe, lines[len(lines)-1])
-}
-
-func tierRank(t string) int {
-	for i, x := range Tiers {
-		if x == t {
-			return i
-		}
-	}
-	return -1
-}
-
-// MaxTier is the highest valid tier among ts, or "".
-func MaxTier(ts ...string) string {
-	best := ""
-	for _, t := range ts {
-		if tierRank(t) > tierRank(best) {
-			best = t
-		}
-	}
-	return best
 }
 
 // landRubric is a landing review's job: an agent outside the card flow asks before it lands.
@@ -1167,7 +1136,7 @@ func (f *Factory) rerunReviewLocked(g *cardGate, a Agent, kind string) error {
 	c, ok := f.card(a.ID)
 	if !ok {
 		c = Card{ID: a.ID, Short: short(a.ID), Title: a.Title, Host: a.Host, Cwd: a.Cwd, Repo: a.Repo,
-			WorkspaceID: a.WorkspaceID, Tier: a.L(labelTier)}
+			WorkspaceID: a.WorkspaceID}
 	}
 	_, err := f.startReview(g, c, kind)
 	return err
@@ -1253,7 +1222,7 @@ func waitNote(a Agent) string {
 }
 
 // directReply reports whether card a's last reply ends with TRACK: direct and its recent session text has no
-// TIER line (a plan).
+// RESULT line.
 func (f *Factory) directReply(a Agent) (bool, error) {
 	reply, err := f.storedReply(a)
 	if err != nil {

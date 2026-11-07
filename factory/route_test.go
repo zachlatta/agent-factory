@@ -334,7 +334,7 @@ func TestAutoScoutStartsPicker(t *testing.T) {
 		}
 	}
 	rt, ok := f.routes.get(res.(map[string]string)["id"])
-	if !ok || !rt.Scout || rt.Request != "Find ways to make backups faster" || rt.Agent != "" || rt.Tier != "" {
+	if !ok || !rt.Scout || rt.Request != "Find ways to make backups faster" || rt.Agent != "" {
 		t.Errorf("saved route = %+v, %v", rt, ok)
 	}
 }

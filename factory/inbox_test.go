@@ -35,7 +35,7 @@ func TestInboxCardWithoutPlanFinishesDirect(t *testing.T) {
 }
 
 func TestBoardCardLandMessageHasNoEmail(t *testing.T) {
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1",
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1",
 		labelReviewed: reviewedSHA}), reviewer("r1", "c1", gateSignoff))
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")
@@ -203,7 +203,6 @@ func TestInboxIntakeCarriesIntoFreshStages(t *testing.T) {
 		}
 	}
 	a.Labels[labelPrefix+labelStage] = "plan-review"
-	a.Labels[labelPrefix+labelTier] = "low"
 	a.WorkspaceID = "ws-1"
 	user, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": first}})
 	plan, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]string{

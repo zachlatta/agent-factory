@@ -82,9 +82,6 @@ func (f *Factory) addIdea(b Body) (Idea, error) {
 	if idea.By == "" {
 		idea.By = "agent"
 	}
-	if tierRank(b.Tier) >= 0 {
-		idea.Tier = b.Tier
-	}
 	p, err := ideaPriority(b.Priority)
 	if err != nil {
 		return Idea{}, err
@@ -154,7 +151,7 @@ func (f *Factory) startIdea(id, by, repo, agent, note, thinking string) (map[str
 			if repo == "" {
 				repo = i.Repo
 			}
-			r, err := f.newCard(Body{Request: req, Repo: repo, Title: i.Title, Origin: "idea", Tier: i.Tier, Agent: agent, Thinking: thinking})
+			r, err := f.newCard(Body{Request: req, Repo: repo, Title: i.Title, Origin: "idea", Agent: agent, Thinking: thinking})
 			if err != nil {
 				i.Error, i.ErrorAt = trunc(strings.TrimSpace(err.Error()), 300), f.Now()
 				startErr = err

@@ -31,27 +31,10 @@ func TestParseVerdictAndTier(t *testing.T) {
 	}
 }
 
-func TestMaxTier(t *testing.T) {
-	cases := []struct {
-		in   []string
-		want string
-	}{
-		{[]string{"low", "risky"}, "risky"},
-		{[]string{"architecture", "low"}, "architecture"},
-		{[]string{"", "bogus"}, ""},
-		{[]string{"", "low"}, "low"},
-	}
-	for _, c := range cases {
-		if got := MaxTier(c.in...); got != c.want {
-			t.Errorf("MaxTier(%v) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestCodeApprovedAutoLandsByTier(t *testing.T) {
 	// work the factory started lands after the gates when nothing is on the always-ask list
 	for _, tier := range []string{"low", "risky"} {
-		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: tier, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
 			reviewer("r1", "c1", gateSignoff))
 		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "ALWAYS ASK: none\nTIER: "+tier+"\nSIGN OFF: none\nVERDICT: nits")
@@ -163,7 +146,7 @@ func TestTickAppliesFinishedReviewersOnce(t *testing.T) {
 	done.Labels[labelPrefix+labelApplied] = "1"
 	young := reviewer("r3", "c1", gateSignoff)
 	young.CreatedAt = t0.Add(-10 * time.Second)
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelTier: "low"}), r, done, young)
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign}), r, done, young)
 	storeLog(t, f, p, "r1", "VERDICT: approve")
 	f.Tick()
 	// r2's verdict is not read again (the idle reap archives it); r3 is too young to apply
@@ -273,7 +256,7 @@ func TestTickArchivesFinishedScout(t *testing.T) {
 }
 
 // Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
-// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+// ask is part of the change; outside it, it is architecture Zach did not ask for.
 
 func contains(xs []string, s string) bool {
 	for _, x := range xs {
@@ -585,7 +568,7 @@ func longReview(t *testing.T, f *Factory, id, of, kind, verdict string, p *fakeP
 }
 
 func TestReviewPromptTreatsZachsRulingsAsSettled(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Tier: "low"}
+	c := Card{ID: "c1", Title: "x"}
 	if strings.Contains(ReviewPrompt(c, gateDesign, 7478, "unknown"), "already ruled") {
 		t.Error("rule without a ruling")
 	}
@@ -617,10 +600,10 @@ var throwawayConditions = []string{
 }
 
 // Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
-// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+// ask is part of the change; outside it, it is architecture Zach did not ask for.
 
 func TestReviewPromptCarriesRules(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r"}
 	for _, kind := range []string{gateRequest, gateDesign} {
 		pr := ReviewPrompt(c, kind, 7478, "unknown")
 		for _, want := range []string{"DIFFERENT agent", "VERDICT:", wholeChangeRule, "is a blocking finding"} {
@@ -635,7 +618,7 @@ func TestReviewPromptCarriesRules(t *testing.T) {
 }
 
 // Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
-// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+// ask is part of the change; outside it, it is architecture Zach did not ask for.
 
 func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
 	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateRequest, labelSource: "board", labelSince: ago(10 * time.Minute)}),
@@ -650,7 +633,7 @@ func TestStoppedUnappliedReviewerGetsAppliedNotStuck(t *testing.T) {
 
 func TestReviewerNotesReachBuilderWhole(t *testing.T) {
 	f, p := newTestFactory(t)
-	c := card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelRoundsDesign: "1"})
+	c := card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelRoundsDesign: "1"})
 	f.SetAgents([]Agent{c, longReview(t, f, "r1", "c1", gateDesign, "changes", p)})
 	f.ApplyVerdict(f.agent("r1"))
 	msgs := p.sent("c1")
@@ -781,7 +764,7 @@ func TestNewCardPromptDirectTrackPDWMutation(t *testing.T) {
 }
 
 // Changes are whole: callers, tests, docs and README, no old path. Refactoring inside the area of the
-// ask does not raise the tier; outside it, it is architecture Zach did not ask for.
+// ask is part of the change; outside it, it is architecture Zach did not ask for.
 
 // Only a bare none means building has no side effects; its reason goes on the next line. Anything else on
 // the line, even a reason that sounds safe, is a side effect, so no reading of free text can skip Zach.
@@ -790,7 +773,7 @@ func TestNewCardPromptDirectTrackPDWMutation(t *testing.T) {
 // on services a plan adds or runs itself, the short note for an existing suite, and that anything else stops.
 
 func TestWorktreeNotTmpRule(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r"}
 	planPrompt := strings.ReplaceAll(fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", ""), "<errands>", "desk")
 
 	f, p := newTestFactory(t, card("c-dirty", map[string]string{labelStage: "building", labelSource: "board"}))
@@ -863,7 +846,7 @@ func TestWorktreeNotTmpRule(t *testing.T) {
 }
 
 func TestNoLiveChangesBeforeCodeReview(t *testing.T) {
-	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r", Tier: "low"}
+	c := Card{ID: "c1", Title: "x", Host: "host1", Cwd: "/w", Repo: "r"}
 	planPrompt := fmt.Sprintf(newCardPrompt, "req", "example/desk", "", "", "")
 	for name, s := range map[string]string{
 		"newCardPrompt": planPrompt,

@@ -15,7 +15,7 @@ const planLog = "[User] Fellow instructions: plan, then build. Keep the public-r
 // planCard is a card in plan review with a readable session, a model and an email thread.
 func planCard(t *testing.T, extra ...Agent) (Agent, *Factory, *fakePaseo) {
 	a := card("c1", map[string]string{labelStage: gateDesign, labelSource: "email", labelAgent: "opus",
-		labelTier: "low", labelBase: "base1", labelTitled: "given", labelZachThread: "zt-1"})
+		labelBase: "base1", labelTitled: "given", labelZachThread: "zt-1"})
 	a.Labels[gmailThreadLabel] = "thread-1"
 	a.WorkspaceID = "ws-1"
 	f, p := newTestFactory(t, append([]Agent{a}, extra...)...)
@@ -113,7 +113,7 @@ func mustChoice(t *testing.T, id string) AgentChoice {
 
 // landCard is a card in code review whose reviewed commit is recorded, with a readable session.
 func landCard(t *testing.T) (Agent, *Factory, *fakePaseo) {
-	a := idea("c1", map[string]string{labelStage: gateDesign, labelAgent: "opus", labelTier: "low", labelRoundsRequest: "1",
+	a := idea("c1", map[string]string{labelStage: gateDesign, labelAgent: "opus", labelRoundsRequest: "1",
 		labelRoundsDesign: "2", labelRoundsSignoff: "1", labelReviewed: "rev1", labelZachThread: "zt-1"})
 	a.Labels[gmailThreadLabel] = "thread-1"
 	f, p := newTestFactory(t, a, reviewer("r1", "c1", gateSignoff))

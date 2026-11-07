@@ -129,7 +129,7 @@ func (f *Factory) handleBoard(w http.ResponseWriter, r *http.Request) {
 		ideaHold = f.ideaHold()
 	}
 	writeJSON(w, 200, map[string]any{"cards": cards, "sections": f.sections(), "updated": iso(updated), "errors": errs, "stages": Stages,
-		"hosts": []string{f.cfg.Host}, "log": log, "repos": f.Repos(), "tiers": TierHelp,
+		"hosts": []string{f.cfg.Host}, "log": log, "repos": f.Repos(),
 		"caps": map[string]int{"rework": f.cfg.ReworkCap}, "ideaCaps": ideaCaps, "ideaHold": ideaHold})
 }
 
@@ -294,17 +294,13 @@ func (f *Factory) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(id, "idea-") {
 		for _, i := range f.ideas.List() {
 			if i.ID == id {
-				tier := i.Tier
-				if tier == "" {
-					tier = "none"
-				}
 				why := i.Why
 				if why == "" {
 					why = "(not given)"
 				}
 				// idea: the whole record, for the board's idea panel (its request is not on /api/board)
 				writeJSON(w, 200, map[string]any{"text": i.Request + "\n\nWhy: " + why + "\n\nSuggested by " + i.By +
-					" " + iso(i.CreatedAt) + "; tier guess: " + tier, "idea": i})
+					" " + iso(i.CreatedAt), "idea": i})
 				return
 			}
 		}
@@ -386,6 +382,9 @@ func (f *Factory) handleAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": "bad json: " + err.Error()})
 			return
 		}
+	}
+	if action == "new" {
+		b.schedule = f.requestSchedule(r) // never the caller's own word: Body.Schedule names an idea's job only
 	}
 	res, err := f.Act(action, b)
 	if err != nil {

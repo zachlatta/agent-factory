@@ -64,7 +64,7 @@ const reviewWithUI = "Clicked through it with computer use.\n\nUI feedback:\n- t
 
 func TestUIFeedbackReachesABuilderWaitingForZach(t *testing.T) {
 	// no plan review, so the card waits for Zach after its code review
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelSource: "board", labelReviewed: reviewedSHA}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelSource: "board", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", gateSignoff))
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", reviewWithUI+"approve")
@@ -160,7 +160,7 @@ func TestUIReviewRuleWhenFilesUnknown(t *testing.T) {
 
 func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 	for _, verdict := range []string{"approve", "nits"} {
-		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
+		f, p := newTestFactory(t, idea("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
 			reviewer("r1", "c1", gateSignoff))
 		headIs(f, reviewedSHA, nil)
 		storeLog(t, f, p, "r1", "SIGN OFF: none\n"+reviewWithUI+verdict)
@@ -171,7 +171,7 @@ func TestUIFeedbackGoesWithTheLandingMessage(t *testing.T) {
 			t.Errorf("%s: sent = %v", verdict, msgs)
 		}
 	}
-	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelTier: "low", labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
+	f, p := newTestFactory(t, card("c1", map[string]string{labelStage: gateDesign, labelRoundsRequest: "1", labelReviewed: reviewedSHA}),
 		reviewer("r1", "c1", gateSignoff))
 	headIs(f, reviewedSHA, nil)
 	storeLog(t, f, p, "r1", "TIER: low\nSIGN OFF: none\nVERDICT: approve")

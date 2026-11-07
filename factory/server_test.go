@@ -21,14 +21,13 @@ func TestServer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/board", nil))
 	var b struct {
-		Cards  []Card          `json:"cards"`
-		Stages [][3]string     `json:"stages"`
-		Tiers  json.RawMessage `json:"tiers"`
+		Cards  []Card      `json:"cards"`
+		Stages [][3]string `json:"stages"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil || rec.Code != 200 {
 		t.Fatalf("board: %d %s", rec.Code, rec.Body)
 	}
-	if len(b.Cards) != 1 || b.Stages[0][0] != "idea" || len(b.Tiers) == 0 {
+	if len(b.Cards) != 1 || b.Stages[0][0] != "idea" {
 		t.Errorf("board = %+v", b)
 	}
 

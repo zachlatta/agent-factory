@@ -16,7 +16,7 @@ import (
 // per-turn agent durations from local transcripts joined to CardTiming.Sessions. It counts cards
 // that reached Done in the window and landed or are inbox cards with a confirmed reply.
 // Unanswered cards, cards that did not land and partial ones are counted
-// in excluded. Optional query parameters (repo, source, tier, role, provider, model, step) filter
+// in excluded. Optional query parameters (repo, source, role, provider, model, step) filter
 // the results.
 
 const (
@@ -34,8 +34,6 @@ type Metrics struct {
 	Coverage          MetricsCoverage   `json:"coverage"`
 	Turnaround        MetricGroup       `json:"turnaround"`
 	BySource          []MetricGroup     `json:"bySource"`
-	ByTier            []MetricGroup     `json:"byTier"`
-	BySourceTier      []MetricGroup     `json:"bySourceTier"`
 	ByRepo            []MetricGroup     `json:"byRepo"`
 	BySourceRepo      []MetricGroup     `json:"bySourceRepo"`
 	ByAgent           []MetricGroup     `json:"byAgent"`
@@ -51,7 +49,6 @@ type Metrics struct {
 type MetricsFilter struct {
 	Repo     string `json:"repo,omitempty"`
 	Source   string `json:"source,omitempty"`
-	Tier     string `json:"tier,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
@@ -79,7 +76,6 @@ type MetricsCoverage struct {
 type MetricGroup struct {
 	Repo     string   `json:"repo,omitempty"`
 	Source   string   `json:"source,omitempty"`
-	Tier     string   `json:"tier,omitempty"`
 	Provider string   `json:"provider,omitempty"`
 	Model    string   `json:"model,omitempty"`
 	N        int      `json:"n"`
@@ -122,9 +118,9 @@ type Quantile struct {
 }
 
 type metricRow struct {
-	id, repo, source, tier, provider, model string
-	e2e, toLanded, toDone, zach             int
-	hasLanding                              bool
+	id, repo, source, provider, model string
+	e2e, toLanded, toDone, zach       int
+	hasLanding                        bool
 }
 
 type stepVisitRow struct {
@@ -246,8 +242,6 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 		To:                iso(now),
 		Filters:           filter,
 		BySource:          []MetricGroup{},
-		ByTier:            []MetricGroup{},
-		BySourceTier:      []MetricGroup{},
 		ByRepo:            []MetricGroup{},
 		BySourceRepo:      []MetricGroup{},
 		ByAgent:           []MetricGroup{},
@@ -286,13 +280,8 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 		if repo == "" {
 			repo = "unknown"
 		}
-		tier := t.Tier
-		if tier == "" {
-			tier = "none"
-		}
 		if (filter.Repo != "" && repo != filter.Repo) ||
-			(filter.Source != "" && t.Source != filter.Source) ||
-			(filter.Tier != "" && tier != filter.Tier) {
+			(filter.Source != "" && t.Source != filter.Source) {
 			continue
 		}
 		hasLanding := t.LandedAt.After(t.RequestedAt)
@@ -445,7 +434,6 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 			id:         id,
 			repo:       repo,
 			source:     t.Source,
-			tier:       tier,
 			provider:   fellowProv,
 			model:      fellowModel,
 			e2e:        max(0, secs(t.end().Sub(t.RequestedAt))),
@@ -463,8 +451,6 @@ func computeMetrics(all map[string]CardTiming, home string, cache *transcriptTur
 		m.Turnaround = allGroups[0]
 	}
 	m.BySource = groupRows(rows, func(r metricRow) MetricGroup { return MetricGroup{Source: r.source} })
-	m.ByTier = groupRows(rows, func(r metricRow) MetricGroup { return MetricGroup{Tier: r.tier} })
-	m.BySourceTier = groupRows(rows, func(r metricRow) MetricGroup { return MetricGroup{Source: r.source, Tier: r.tier} })
 	m.ByRepo = groupRows(rows, func(r metricRow) MetricGroup { return MetricGroup{Repo: r.repo} })
 	m.BySourceRepo = groupRows(rows, func(r metricRow) MetricGroup { return MetricGroup{Repo: r.repo, Source: r.source} })
 	m.ByAgent = groupRows(rows, func(r metricRow) MetricGroup { return MetricGroup{Provider: r.provider, Model: r.model} })
@@ -617,8 +603,6 @@ func groupRows(rows []metricRow, key func(metricRow) MetricGroup) []MetricGroup 
 			return a.Repo < b.Repo
 		case a.Source != b.Source:
 			return a.Source < b.Source
-		case a.Tier != b.Tier:
-			return a.Tier < b.Tier
 		case a.Provider != b.Provider:
 			return a.Provider < b.Provider
 		default:
@@ -747,7 +731,6 @@ func (f *Factory) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	filter := MetricsFilter{
 		Repo:     strings.TrimSpace(q.Get("repo")),
 		Source:   strings.TrimSpace(q.Get("source")),
-		Tier:     strings.TrimSpace(q.Get("tier")),
 		Role:     strings.TrimSpace(q.Get("role")),
 		Provider: strings.TrimSpace(q.Get("provider")),
 		Model:    strings.TrimSpace(q.Get("model")),

@@ -62,6 +62,14 @@ func submissionTag(b Body) string {
 	return submittedBySystem
 }
 
+// landable reports whether Zach's Approve & land applies to agent a: not while its stored stage says it is
+// still building, picking a repo or in a gate, whatever column the board shows it in. The board reads the
+// same answer (Card.CanLand), so it never offers a button the server refuses.
+func landable(a Agent) bool {
+	st := a.L(labelStage)
+	return st != "building" && st != stageRoute && !isGate(st)
+}
+
 // landingChoice is the model every landing runs on.
 func landingChoice() AgentChoice {
 	c, _ := agentByID(defaultAgent)

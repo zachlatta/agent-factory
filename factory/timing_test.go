@@ -388,7 +388,7 @@ func TestMetrics(t *testing.T) {
 			ev = append(ev, TimingEvent{Stage: "zach", At: start.Add(time.Minute)}, TimingEvent{Stage: "building", At: start.Add(time.Minute + zach)})
 		}
 		ev = append(ev, done(at))
-		ct := CardTiming{Source: source, Tier: tier, RequestedAt: start, LandedAt: end, Events: ev}
+		ct := CardTiming{Source: source, RequestedAt: start, LandedAt: end, Events: ev}
 		if ct.inbox() {
 			ct.RepliedAt = end
 		}
@@ -427,12 +427,6 @@ func TestMetrics(t *testing.T) {
 	}
 	if g := byKey["voice"]; g.EndToEnd.Average != 70*60 || g.EndToEnd.Median != 70*60 || g.ToLanded.Average != 60*60 || g.ToDone.Average != 60*60 {
 		t.Errorf("voice (to the reply) = %+v", g)
-	}
-	if len(m.ByTier) != 3 || m.ByTier[0].Tier != "low" || m.ByTier[1].Tier != "none" {
-		t.Errorf("by tier = %+v", m.ByTier)
-	}
-	if len(m.BySourceTier) != 3 {
-		t.Errorf("by source and tier = %+v", m.BySourceTier)
 	}
 	if len(m.ByRepo) != 1 || m.ByRepo[0].Repo != "unknown" || m.ByRepo[0].N != 12 {
 		t.Errorf("by repo = %+v", m.ByRepo)
@@ -505,7 +499,6 @@ func TestMetricsStepsTurnsFiltersAndCoverage(t *testing.T) {
 	f.timings.cards["c1"] = &CardTiming{
 		Repo:        "owner/alpha",
 		Source:      "email",
-		Tier:        "architecture",
 		RequestedAt: base,
 		LandedAt:    base.Add(51 * time.Minute),
 		RepliedAt:   base.Add(52 * time.Minute),
@@ -533,7 +526,6 @@ func TestMetricsStepsTurnsFiltersAndCoverage(t *testing.T) {
 	f.timings.cards["c2"] = &CardTiming{
 		Repo:        "owner/beta",
 		Source:      "board",
-		Tier:        "low",
 		RequestedAt: base,
 		LandedAt:    base.Add(10 * time.Minute),
 		Events: []TimingEvent{
@@ -620,7 +612,7 @@ func TestMetricsStepsTurnsFiltersAndCoverage(t *testing.T) {
 
 func TestMetricsEndpoint(t *testing.T) {
 	f, _ := newTestFactory(t)
-	f.timings.cards["c1"] = &CardTiming{Source: "board", Tier: "low", RequestedAt: t0.Add(-10 * 24 * time.Hour),
+	f.timings.cards["c1"] = &CardTiming{Source: "board", RequestedAt: t0.Add(-10 * 24 * time.Hour),
 		LandedAt: t0.Add(-9 * 24 * time.Hour), Events: []TimingEvent{{Stage: "landed", At: t0.Add(-9 * 24 * time.Hour)}}}
 	h := f.Handler()
 	for _, tc := range []struct {
@@ -681,7 +673,6 @@ func TestTimingSurvivesRestart(t *testing.T) {
 
 func TestTimingRecordsReviewRounds(t *testing.T) {
 	c := moved(fresh("c1"), gateDesign, ago(5*time.Minute))
-	c.Labels[labelPrefix+labelTier] = "low"
 	c.Labels[labelPrefix+labelRoundsRequest] = "1"
 	f, p := newTestFactory(t, c, reviewer("r1", "c1", gateSignoff))
 	storeLog(t, f, p, "r1", "VERDICT: approve")
